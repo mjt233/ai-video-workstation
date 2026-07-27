@@ -82,6 +82,11 @@ async function runTask(taskId: string): Promise<void> {
       ...projectConfig,
       ...(paramsObj.vars ?? {}),
     },
+    projectConfig: {
+      width: projectConfig.width ? Number(projectConfig.width) : 0,
+      height: projectConfig.height ? Number(projectConfig.height) : 0,
+      aspectRatio: projectConfig.aspectRatio,
+    },
     async readFile(relPath: string): Promise<string> {
       const full = path.resolve(DESIGN_DIR, task.project, relPath);
       const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;
