@@ -19,10 +19,7 @@ skill/
 │   └── src/
 │       ├── index.js            # 入口 + 静态文件 serve
 │       └── routes/
-│           ├── projects.js     # /api/projects 路由
-│           ├── characters.js   # /api/characters 路由
-│           ├── stages.js       # /api/stages 路由
-│           └── scenes.js       # /api/scenes 路由
+│           └── fs.js           # /api/projects + /api/fs 路由
 ├── frontend/
 │   ├── package.json
 │   ├── vite.config.js          # dev 时 proxy /api → server
@@ -46,84 +43,42 @@ skill/
 
 ## API 设计
 
-所有接口以 `/api` 为前缀。
+简化为 3 个通用端点，前后端通过路径约定交互。
 
 ### GET /api/projects
-返回 `design/` 下的项目列表。
 
-**Response:** `[{ name: string, overviewMd: string (raw markdown) }]`
+列出 `design/` 下的项目。
 
-### GET /api/projects/:project/tree
-返回指定项目的资产树结构。
+**Response:** `[{ name: string }]`
 
-**Response:**
-```json
-{
-  "characters": ["陈书文", "现代女孩"],
-  "stages": ["现代商场"],
-  "episodes": [{ "episode": 1, "shots": [1, 2, 3] }]
-}
-```
+### GET /api/fs/:project/:path*
 
-### GET /api/projects/:project/character/:name
-读取角色的 overview.md、appearance.md、voice.md，以及对应的图片/音频 URL。
+读取 `design/{project}/` 下的文件或目录。返回 md/json 内容或目录列表。二进制文件直接返回流。
 
-**Response:**
-```json
-{
-  "overview": "# 陈书文\n\n...",
-  "appearance": "## 外观描述\n\n...",
-  "voice": "## 声音描述\n\n...",
-  "appearanceImageUrl": "/api/asset/古人在现代/character/陈书文/appearance.jpg",
-  "voiceAudioUrl": "/api/asset/古人在现代/character/陈书文/voice.flac"
-}
-```
+**路径约定（前端按 init.md 规则拼接）：**
 
-### POST /api/projects/:project/character/:name
-更新角色的 md 文件。
+| 用途 | 路径 |
+|------|------|
+| 列出角色 | `prompt/character/` |
+| 角色 md | `prompt/character/小美/overview.md` |
+| 角色图片 | `assert/character/小美/appearance.jpg` |
+| 列出场景 | `prompt/stage/` |
+| 场景子场景 | `prompt/stage/现代商场/` |
+| 场景子场景 md | `prompt/stage/现代商场/现代商场-白天-平视-晴-正门入口.md` |
+| 列出集数 | `prompt/scene/` |
+| 列出分镜 | `prompt/scene/1/` |
+| 分镜文件 | `prompt/scene/1/1/overview.md` |
+| 分镜脚本 | `prompt/scene/1/1/script.json` |
 
-**Body:** `{ overview?: string, appearance?: string, voice?: string }`
+**Response（文件）:** 文件原始内容（text 或 binary stream）
+**Response（目录）:** `{ entries: [{ name: string, type: "file" | "dir" }] }`
+
+### POST /api/fs/:project/:path*
+
+写入文件到 `design/{project}/` 下。
+
+**Body:** `{ content: string }` — 写入的文本内容
 **Response:** `{ success: true }` 或 `{ error: string }`
-
-### GET /api/projects/:project/stage/:name
-读取场景的子场景列表及其内容。
-
-**Response:**
-```json
-{
-  "name": "现代商场",
-  "subScenes": [
-    { "label": "现代商场-白天-平视-晴-正门入口", "promptMd": "...", "imageUrl": "..." }
-  ]
-}
-```
-
-### POST /api/projects/:project/stage/:name
-更新指定子场景的 prompt 内容。
-
-**Body:** `{ subSceneLabel: string, promptMd: string }`
-**Response:** `{ success: true }`
-
-### GET /api/projects/:project/scene/:episode/:shot
-读取分镜的 overview.md、script.json、stage.json。
-
-**Response:**
-```json
-{
-  "overview": "...",
-  "script": { /* parsed JSON */ },
-  "stageImages": [{ "name": "场景0", "imageUrl": "/api/asset/..." }]
-}
-```
-
-### POST /api/projects/:project/scene/:episode/:shot
-更新分镜文件。
-
-**Body:** `{ overview?: string, script?: object }`
-**Response:** `{ success: true }`
-
-### GET /api/asset/:project/*
-静态文件代理到 `design/{project}/assert/` 下的文件。文件不存在时返回 404。
 
 ## 前端路由
 
@@ -142,31 +97,42 @@ skill/
 ### AssetTree.vue
 - 使用 `v-treeview` 渲染三层结构：角色 / 场景 / 集数分镜
 - 点击节点更新 router query 参数
-- 数据来源：`GET /api/projects/:project/tree`
+- 数据来源：通过 `/api/fs/:project/` 递归读取目录构造树
+  - `GET /api/fs/:project/prompt/character/` → 角色列表
+  - `GET /api/fs/:project/prompt/stage/` → 场景列表
+  - `GET /api/fs/:project/prompt/scene/` → 集数列表
+  - `GET /api/fs/:project/prompt/scene/1/` → 分镜列表
 
 ### CharacterPanel.vue
 - 三个 `v-expansion-panel`：总览 / 外观设计 / 声音
-- 外观面板：左侧 `appearance.md` 文本，右侧图片（若有）
-- 声音面板：左侧 `voice.md` 文本，右侧音频播放器（若有）
-- 每个面板头部有编辑按钮，点击弹出编辑对话框
+- 面板内容通过 `/api/fs/` 按路径读取
+  - `prompt/character/小美/overview.md`
+  - `prompt/character/小美/appearance.md`
+  - `prompt/character/小美/voice.md`
+  - `assert/character/小美/appearance.jpg`（若存在）
+  - `assert/character/小美/voice.flac`（若存在）
+- 每个面板头部有编辑按钮，点击弹出编辑对话框，保存时 POST 到对应路径
 
 ### StagePanel.vue
-- 左侧 `v-list` 展示子场景列表
+- 左侧 `v-list` 展示子场景列表（`GET /api/fs/:project/prompt/stage/现代商场/`）
 - 右侧两个 `v-expansion-panel`：prompt / 图片
+  - prompt：读取对应子场景 `.md` 文件
+  - 图片：`assert/stage/现代商场/{子场景}.jpg`（若存在）
 - 点击左侧列表项切换右侧内容
 
 ### ScenePanel.vue
 - 顶部 `v-tabs`：总览 / 台词 / 场景图片
-- 总览页签显示 overview.md
-- 台词页签显示 script.json（可编辑）
-- 场景图片页签按顺序展示场景0、场景1...
+- 总览：`GET /api/fs/:project/prompt/scene/1/1/overview.md`
+- 台词：`GET /api/fs/:project/prompt/scene/1/1/script.json`
+- 场景图片：读取 `stage.json` 确定场景数量，然后按序加载 `assert/scene/1/1/stage/0.jpg`
+- 编辑后 POST 到对应路径保存
 
 ## 编辑机制
 
 - 每个可编辑区域（md/json）旁有编辑图标按钮
 - 点击后弹出 `v-dialog`，内嵌 `v-textarea` 编辑原始文本
 - 支持 Markdown 预览（简单渲染）
-- 保存时调用对应 POST API
+- 保存时 `POST /api/fs/:project/{path}`，body: `{ content: string }`
 - 保存成功后自动关闭对话框并刷新对应内容区域
 
 ## 错误处理
@@ -174,7 +140,7 @@ skill/
 - API 错误统一返回 `{ error: string }` 格式
 - 前端 axios 拦截器统一处理，展示 `v-alert`
 - 图片/音频加载失败显示灰色占位符 + "暂无图片/音频" 文字
-- JSON 写入前服务端做语法校验，校验失败返回具体错误信息
+- 写入前服务端验证文件路径合法性（仅允许 prompt/ 和 assert/ 下的文件），防止路径穿越
 
 ## 开发流程
 
