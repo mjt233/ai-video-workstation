@@ -13,6 +13,9 @@
       <v-tab value="images">
         场景图片
       </v-tab>
+      <v-tab value="prompt">
+        prompt
+      </v-tab>
     </v-tabs>
 
     <v-tabs-window v-model="tab">
@@ -41,7 +44,39 @@
             <v-icon>mdi-pencil</v-icon>
           </v-btn>
         </div>
-        <pre>{{ JSON.stringify(data.script, null, 2) }}</pre>
+        <v-list
+          v-if="data.script.length"
+          lines="two"
+        >
+          <v-list-item
+            v-for="(entry, i) in data.script"
+            :key="i"
+          >
+            <template #prepend>
+              <v-avatar
+                color="primary"
+                size="32"
+              >
+                <span class="text-caption">{{ i + 1 }}</span>
+              </v-avatar>
+            </template>
+            <v-list-item-title>
+              <strong>{{ entry.角色名 }}</strong>
+              <v-chip
+                class="ml-2 mb-1"
+                size="x-small"
+                color="grey"
+                variant="outlined"
+              >
+                {{ entry.情绪 }}
+              </v-chip>
+            </v-list-item-title>
+            <v-list-item-subtitle>{{ entry.台词 }}</v-list-item-subtitle>
+          </v-list-item>
+        </v-list>
+        <div v-else>
+          <p>该分镜没有台词</p>
+        </div>
       </v-tabs-window-item>
 
       <v-tabs-window-item value="images">
@@ -71,6 +106,9 @@
             </div>
           </v-col>
         </v-row>
+      </v-tabs-window-item>
+      <v-tabs-window-item value="prompt">
+        <MarkdownView :content="data.prompt" />
       </v-tabs-window-item>
     </v-tabs-window>
 
@@ -112,6 +150,12 @@ import { ref, watch, computed } from 'vue'
 import { readFs, writeFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
 
+interface ScriptEntry {
+  角色名: string
+  台词: string
+  情绪: string
+}
+
 interface DialogState {
   show: boolean
   field: string
@@ -120,7 +164,8 @@ interface DialogState {
 
 interface SceneData {
   overview: string
-  script: Record<string, unknown>[]
+  script: ScriptEntry[],
+  prompt: string
 }
 
 const props = defineProps<{ project: string; episode: string; shot: string }>()
@@ -138,13 +183,14 @@ async function load() {
     const results = await Promise.all([
       readFs(props.project, `${bp}/overview.md`).catch(() => ''),
       readFs(props.project, `${bp}/script.json`).catch(() => '[]'),
+      readFs(props.project, `${bp}/prompt.md`).catch(() => ''),
     ])
     const overview = results[0] as string
-    const scriptRaw = results[1] as string
-    let script: Record<string, unknown>[] = []
-    try { script = JSON.parse(scriptRaw) } catch {}
-    data.value = { overview, script }
-  } catch {}
+    const script = results[1] as any as ScriptEntry[]
+    data.value = { overview, script, prompt: results[2] as string }
+  } catch(err) {
+    console.log(err)
+  }
 
   try {
     const stageRaw = await readFs(props.project, `${bp}/stage.json`) as string
