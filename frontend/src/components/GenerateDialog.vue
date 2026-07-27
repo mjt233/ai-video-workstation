@@ -164,6 +164,11 @@ const logRef = ref<HTMLElement | null>(null)
 // Load implementations when dialog opens
 watch(show, async (val) => {
   if (val) {
+    // Reset polling state for fresh start
+    polling.status = 'idle'
+    polling.logs = []
+    polling.error = null
+    submitError.value = null
     try {
       const workflows = await getWorkflows()
       const wf = workflows.find(w => w.id === props.workflowId)
@@ -186,6 +191,16 @@ watch(() => polling.logs.length, async () => {
   await nextTick()
   if (logRef.value) {
     logRef.value.scrollTop = logRef.value.scrollHeight
+  }
+})
+
+// Auto-refresh parent and close when task completes
+watch(() => polling.status, (newStatus) => {
+  if (newStatus === 'completed') {
+    emit('refresh')
+    setTimeout(() => {
+      show.value = false
+    }, 1200)
   }
 })
 

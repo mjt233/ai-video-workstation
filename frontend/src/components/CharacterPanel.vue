@@ -40,6 +40,17 @@
             <MarkdownView :content="data.appearance" />
           </v-col>
           <v-col cols="6">
+            <div class="d-flex justify-center mb-4">
+              <v-btn
+                size="small"
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-auto-fix"
+                @click="genDialog = { show: true, type: 'appearance' }"
+              >
+                生成图片
+              </v-btn>
+            </div>
             <v-img
               v-if="appearanceImg"
               :src="appearanceImg"
@@ -54,17 +65,6 @@
             </div>
           </v-col>
         </v-row>
-        <div class="d-flex justify-center mt-2">
-          <v-btn
-            size="small"
-            color="primary"
-            variant="tonal"
-            prepend-icon="mdi-auto-fix"
-            @click="genDialog = { show: true, type: 'appearance' }"
-          >
-            生成
-          </v-btn>
-        </div>
       </v-tabs-window-item>
 
       <v-tabs-window-item value="voice">
@@ -155,7 +155,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { readFs, writeFs } from '../api/client'
+import { readFs, writeFs, existsFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 
@@ -175,8 +175,8 @@ const props = defineProps<{ project: string; name: string }>()
 
 const tab = ref<string | null>(null)
 const data = ref<CharData | null>(null)
-const appearanceImg = computed(() => `/api/fs/${props.project}/assert/character/${props.name}/appearance.jpg`)
-const voiceAudio = computed(() => `/api/fs/${props.project}/assert/character/${props.name}/voice.flac`)
+const appearanceImg = ref('')
+const voiceAudio = ref('')
 
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
 
@@ -204,11 +204,15 @@ async function load() {
     readFs(props.project, `prompt/character/${props.name}/overview.md`).catch(() => ''),
     readFs(props.project, `prompt/character/${props.name}/appearance.md`).catch(() => ''),
     readFs(props.project, `prompt/character/${props.name}/voice.md`).catch(() => ''),
+    existsFs(props.project, `assert/character/${props.name}/appearance.jpg`),
+    existsFs(props.project, `assert/character/${props.name}/voice.flac`),
   ])
   const overview = results[0] as string
   const appearance = results[1] as string
   const voice = results[2] as string
   data.value = { overview, appearance, voice }
+  appearanceImg.value = results[3] ? `/api/fs/${props.project}/assert/character/${props.name}/appearance.jpg?t=${Date.now()}` : ''
+  voiceAudio.value = results[4] ? `/api/fs/${props.project}/assert/character/${props.name}/voice.flac?t=${Date.now()}` : ''
 }
 
 function edit(field: string) {

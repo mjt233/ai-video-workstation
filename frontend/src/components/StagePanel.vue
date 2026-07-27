@@ -14,64 +14,64 @@
       return-object
     />
 
-    <div v-show="selected">
-      <v-tabs
-        v-model="tab"
-        class="flex-shrink-0"
+    <div
+      ref="contentRef"
+      :style="{ maxHeight: targetHeight + 'px' }"
+      style="overflow: auto;"
+    >
+      <v-row
+        v-show="selected"
+        
+        class="ma-0"
+        no-gutters
       >
-        <v-tab value="prompt">
-          Prompt
-        </v-tab>
-        <v-tab value="image">
-          图片
-        </v-tab>
-      </v-tabs>
-
-      <div
-        ref="contentRef"
-        :style="{ maxHeight: targetHeight + 'px', overflowY: 'auto' }"
-      >
-        <v-tabs-window
-          v-if="selected"
-          v-model="tab"
+        <v-col
+          cols="6"
+          class="d-flex flex-column"
+          style="overflow-y: auto;"
         >
-          <v-tabs-window-item value="prompt">
-            <div class="d-flex mt-2 mb-2 ml-2">
-              <v-btn
-                @click="editPrompt"
-              >
-                编辑
-              </v-btn>
-            </div>
-            <MarkdownView :content="selected.promptMd" />
-          </v-tabs-window-item>
-
-          <v-tabs-window-item value="image">
-            <v-img
-              v-if="selected.imageUrl"
-              :src="selected.imageUrl"
-              contain
-            />
-            <div
-              v-else
-              class="text-grey"
+          <div class="d-flex mt-2 mb-2">
+            <v-btn
+              size="small"
+              @click="editPrompt"
             >
-              暂无图片
-            </div>
-            <div class="d-flex justify-center mt-2">
-              <v-btn
-                size="small"
-                color="primary"
-                variant="tonal"
-                prepend-icon="mdi-auto-fix"
-                @click="genDialog = true"
-              >
-                生成
-              </v-btn>
-            </div>
-          </v-tabs-window-item>
-        </v-tabs-window>
-      </div>
+              编辑
+            </v-btn>
+          </div>
+          <MarkdownView :content="selected && selected.promptMd || ''" />
+        </v-col>
+
+        <v-col
+          cols="6"
+          class="d-flex flex-column align-center"
+          style="overflow-y: auto;"
+        >
+          <div class="d-flex justify-center mb-4 mt-2">
+            <v-btn
+              size="small"
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-auto-fix"
+              @click="genDialog = true"
+            >
+              生成图片
+            </v-btn>
+          </div>
+          <v-img
+            v-if="selected && selected.imageUrl"
+            :src="selected.imageUrl"
+            contain
+            width="100%"
+            max-height="65vh"
+          />
+          <div
+            v-else
+            class="text-grey"
+          >
+            暂无图片
+          </div>
+        </v-col>
+      </v-row>
     </div>
 
     <v-dialog
@@ -121,7 +121,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { readFs, writeFs, type DirResponse } from '../api/client'
+import { readFs, writeFs, existsFs, type DirResponse } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
 import { useAutoComputeHeight } from '../composables/useAutoComputeHeight'
 import GenerateDialog from './GenerateDialog.vue'
@@ -138,7 +138,6 @@ interface DialogState {
 }
 
 const props = defineProps<{ project: string; name: string }>()
-const tab = ref<string | null>(null)
 const subScenes = ref<SubScene[]>([])
 const selected = ref<SubScene | null>(null)
 const dialog = ref<DialogState>({ show: false, content: '' })
@@ -161,8 +160,11 @@ async function load() {
     for (const entry of result.entries) {
       if (entry.type === 'file' && entry.name.endsWith('.md')) {
         const label = entry.name.replace(/\.md$/, '')
-        const promptMd = await readFs(props.project, `prompt/stage/${props.name}/${entry.name}`) as string
-        const imageUrl = `/api/fs/${props.project}/assert/stage/${props.name}/${label}.jpg`
+        const [promptMd, hasImage] = await Promise.all([
+          readFs(props.project, `prompt/stage/${props.name}/${entry.name}`) as Promise<string>,
+          existsFs(props.project, `assert/stage/${props.name}/${label}.jpg`),
+        ])
+        const imageUrl = hasImage ? `/api/fs/${props.project}/assert/stage/${props.name}/${label}.jpg?t=${Date.now()}` : ''
         items.push({ label, promptMd, imageUrl })
       }
     }

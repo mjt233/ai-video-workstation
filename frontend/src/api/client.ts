@@ -30,4 +30,13 @@ export async function writeFs(project: string, path: string, content: string): P
   return data
 }
 
+export async function existsFs(project: string, path: string): Promise<boolean> {
+  try {
+    await client.head(`/fs/${project}/${path}`)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export default client

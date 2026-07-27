@@ -67,14 +67,23 @@
             </v-list-item-title>
             <v-list-item-subtitle>{{ entry.台词 }}</v-list-item-subtitle>
             <template #append>
-              <v-btn
-                size="x-small"
-                variant="tonal"
-                prepend-icon="mdi-account-voice"
-                @click="genDialog = { show: true, type: 'voice', index: i }"
-              >
-                生成语音
-              </v-btn>
+              <div class="d-flex align-center ga-1">
+                <v-icon
+                  v-if="voiceAssets[i]"
+                  color="success"
+                  size="small"
+                >
+                  mdi-check-circle
+                </v-icon>
+                <v-btn
+                  size="x-small"
+                  variant="tonal"
+                  prepend-icon="mdi-account-voice"
+                  @click="genDialog = { show: true, type: 'voice', index: i }"
+                >
+                  生成语音
+                </v-btn>
+              </div>
             </template>
           </v-list-item>
         </v-list>
@@ -95,10 +104,18 @@
                 场景{{ i }}
               </v-card-text>
               <v-img
+                v-if="img"
                 :src="img"
                 max-height="400"
                 contain
               />
+              <div
+                v-else
+                class="text-grey d-flex align-center justify-center"
+                style="height: 200px;"
+              >
+                暂无图片
+              </div>
               <div class="d-flex justify-center mt-1">
                 <v-btn
                   size="x-small"
@@ -184,6 +201,7 @@
       workflow-name="分镜场景图生成"
       :vars="{ episode: props.episode, shot: props.shot, index: String(genDialog.index) }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/stage/${genDialog.index}.jpg`"
+      :existing-asset="stageImages[genDialog.index] ? '已有图片' : undefined"
       @refresh="load"
     />
     <GenerateDialog
@@ -193,6 +211,7 @@
       workflow-name="分镜台词语音生成"
       :vars="{ episode: props.episode, shot: props.shot, character: data?.script[genDialog.index]?.角色名 ?? '' }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/voice/${data?.script[genDialog.index]?.角色名}.flac`"
+      :existing-asset="voiceAssets[genDialog.index] ? '已有音频' : undefined"
       @refresh="load"
     />
     <GenerateDialog
@@ -202,6 +221,7 @@
       workflow-name="视频生成"
       :vars="{ episode: props.episode, shot: props.shot, index: '0' }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/video/0.mp4`"
+      :existing-asset="hasVideo ? '已有视频' : undefined"
       @refresh="load"
     />
   </div>
@@ -209,7 +229,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { readFs, writeFs } from '../api/client'
+import { readFs, writeFs, existsFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 
@@ -235,6 +255,8 @@ const props = defineProps<{ project: string; episode: string; shot: string }>()
 const tab = ref<string | null>(null)
 const data = ref<SceneData | null>(null)
 const stageImages = ref<string[]>([])
+const voiceAssets = ref<boolean[]>([])
+const hasVideo = ref(false)
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
 const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index: number }>({ show: false, type: 'image', index: 0 })
 
@@ -256,6 +278,10 @@ const assertBase = computed(() => `/api/fs/${props.project}/assert/scene/${props
 
 async function load() {
   const bp = basePath.value
+  const ep = props.episode
+  const shot = props.shot
+  let scriptEntries: ScriptEntry[] = []
+
   try {
     const results = await Promise.all([
       readFs(props.project, `${bp}/overview.md`).catch(() => ''),
@@ -263,23 +289,42 @@ async function load() {
       readFs(props.project, `${bp}/prompt.md`).catch(() => ''),
     ])
     const overview = results[0] as string
-    const script = results[1] as any as ScriptEntry[]
-    data.value = { overview, script, prompt: results[2] as string }
+    scriptEntries = results[1] as any as ScriptEntry[]
+    data.value = { overview, script: scriptEntries, prompt: results[2] as string }
   } catch(err) {
     console.log(err)
   }
 
+  // Load stage images with existence check
   try {
     const stageRaw = await readFs(props.project, `${bp}/stage.json`) as string
     const stage = JSON.parse(stageRaw)
     if (Array.isArray(stage)) {
-      stageImages.value = stage.map((_, i) => `${assertBase.value}/${i}.jpg`)
+      const checks = await Promise.all(
+        stage.map((_, i) => existsFs(props.project, `assert/scene/${ep}/${shot}/stage/${i}.jpg`))
+      )
+      stageImages.value = stage.map((_, i) =>
+        checks[i] ? `${assertBase.value}/${i}.jpg?t=${Date.now()}` : ''
+      )
     } else {
       stageImages.value = []
     }
   } catch {
     stageImages.value = []
   }
+
+  // Check voice assets for each script entry
+  if (scriptEntries.length) {
+    const voiceChecks = await Promise.all(
+      scriptEntries.map(entry => existsFs(props.project, `assert/scene/${ep}/${shot}/voice/${entry.角色名}.flac`))
+    )
+    voiceAssets.value = voiceChecks
+  } else {
+    voiceAssets.value = []
+  }
+
+  // Check video asset
+  hasVideo.value = await existsFs(props.project, `assert/scene/${ep}/${shot}/video/0.mp4`)
 }
 
 function edit(field: string) {

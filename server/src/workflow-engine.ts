@@ -124,7 +124,7 @@ async function runTask(taskId: string): Promise<void> {
         const result = await wf.poll(remoteTaskId);
         pollResponse = result;
 
-        db.addLog(taskId, 'debug', `Poll result: status=${result.status}, done=${result.done}`);
+        db.addLog(taskId, 'debug', `Poll result: ${Object.keys(result).map(k => k + '=' + result[k]).join(',')}`);
 
         if (result.done) {
           db.addLog(taskId, 'info', `Task completed with status: ${result.status}`);
