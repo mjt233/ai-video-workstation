@@ -66,6 +66,16 @@
               </v-chip>
             </v-list-item-title>
             <v-list-item-subtitle>{{ entry.台词 }}</v-list-item-subtitle>
+            <template #append>
+              <v-btn
+                size="x-small"
+                variant="tonal"
+                prepend-icon="mdi-account-voice"
+                @click="genDialog = { show: true, type: 'voice', index: i }"
+              >
+                生成语音
+              </v-btn>
+            </template>
           </v-list-item>
         </v-list>
         <div v-else>
@@ -89,6 +99,17 @@
                 max-height="400"
                 contain
               />
+              <div class="d-flex justify-center mt-1">
+                <v-btn
+                  size="x-small"
+                  color="primary"
+                  variant="tonal"
+                  prepend-icon="mdi-auto-fix"
+                  @click="genDialog = { show: true, type: 'image', index: i }"
+                >
+                  生成
+                </v-btn>
+              </div>
             </v-card>
           </v-col>
           <v-col
@@ -112,6 +133,16 @@
           </v-btn>
         </div>
         <MarkdownView :content="data.prompt" />
+        <div class="d-flex justify-center mt-2">
+          <v-btn
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-video"
+            @click="genDialog = { show: true, type: 'video', index: 0 }"
+          >
+            生成视频
+          </v-btn>
+        </div>
       </v-tabs-window-item>
     </v-tabs-window>
 
@@ -145,6 +176,34 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <GenerateDialog
+      v-model="genImageDialog"
+      :project="props.project"
+      workflow-id="scene-stage-image"
+      workflow-name="分镜场景图生成"
+      :vars="{ episode: props.episode, shot: props.shot, index: String(genDialog.index) }"
+      :output-path="`assert/scene/${props.episode}/${props.shot}/stage/${genDialog.index}.jpg`"
+      @refresh="load"
+    />
+    <GenerateDialog
+      v-model="genVoiceDialog"
+      :project="props.project"
+      workflow-id="scene-tts"
+      workflow-name="分镜台词语音生成"
+      :vars="{ episode: props.episode, shot: props.shot, character: data?.script[genDialog.index]?.角色名 ?? '' }"
+      :output-path="`assert/scene/${props.episode}/${props.shot}/voice/${data?.script[genDialog.index]?.角色名}.flac`"
+      @refresh="load"
+    />
+    <GenerateDialog
+      v-model="genVideoDialog"
+      :project="props.project"
+      workflow-id="video-generate"
+      workflow-name="视频生成"
+      :vars="{ episode: props.episode, shot: props.shot, index: '0' }"
+      :output-path="`assert/scene/${props.episode}/${props.shot}/video/0.mp4`"
+      @refresh="load"
+    />
   </div>
 </template>
 
@@ -152,6 +211,7 @@
 import { ref, watch, computed } from 'vue'
 import { readFs, writeFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
+import GenerateDialog from './GenerateDialog.vue'
 
 interface ScriptEntry {
   角色名: string
@@ -176,6 +236,20 @@ const tab = ref<string | null>(null)
 const data = ref<SceneData | null>(null)
 const stageImages = ref<string[]>([])
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
+const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index: number }>({ show: false, type: 'image', index: 0 })
+
+const genImageDialog = computed({
+  get: () => genDialog.value.show && genDialog.value.type === 'image',
+  set: (v) => { if (!v) genDialog.value.show = false; else genDialog.value = { show: true, type: 'image', index: genDialog.value.index } }
+})
+const genVoiceDialog = computed({
+  get: () => genDialog.value.show && genDialog.value.type === 'voice',
+  set: (v) => { if (!v) genDialog.value.show = false; else genDialog.value = { show: true, type: 'voice', index: genDialog.value.index } }
+})
+const genVideoDialog = computed({
+  get: () => genDialog.value.show && genDialog.value.type === 'video',
+  set: (v) => { if (!v) genDialog.value.show = false; else genDialog.value = { show: true, type: 'video', index: 0 } }
+})
 
 const basePath = computed(() => `prompt/scene/${props.episode}/${props.shot}`)
 const assertBase = computed(() => `/api/fs/${props.project}/assert/scene/${props.episode}/${props.shot}/stage`)
