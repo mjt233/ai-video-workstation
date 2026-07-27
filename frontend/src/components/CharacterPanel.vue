@@ -60,42 +60,57 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { readFs, writeFs } from '../api/client.js'
+import { readFs, writeFs } from '../api/client'
 import { marked } from 'marked'
 
-const props = defineProps({ project: String, name: String })
+interface DialogState {
+  show: boolean
+  field: string
+  content: string
+}
+
+interface CharData {
+  overview: string
+  appearance: string
+  voice: string
+}
+
+const props = defineProps<{ project: string; name: string }>()
 
 const panel = ref(0)
-const data = ref(null)
+const data = ref<CharData | null>(null)
 const appearanceImg = computed(() => `/api/fs/${props.project}/assert/character/${props.name}/appearance.jpg`)
 const voiceAudio = computed(() => `/api/fs/${props.project}/assert/character/${props.name}/voice.flac`)
 
-const dialog = ref({ show: false, field: '', content: '' })
+const dialog = ref<DialogState>({ show: false, field: '', content: '' })
 
 async function load() {
-  const [overview, appearance, voice] = await Promise.all([
+  const results = await Promise.all([
     readFs(props.project, `prompt/character/${props.name}/overview.md`).catch(() => ''),
     readFs(props.project, `prompt/character/${props.name}/appearance.md`).catch(() => ''),
     readFs(props.project, `prompt/character/${props.name}/voice.md`).catch(() => ''),
   ])
+  const overview = results[0] as string
+  const appearance = results[1] as string
+  const voice = results[2] as string
   data.value = { overview, appearance, voice }
 }
 
-function edit(field) {
-  dialog.value = { show: true, field, content: data.value[field] }
+function edit(field: string) {
+  dialog.value = { show: true, field, content: data.value![field as keyof CharData] }
 }
 
 async function save() {
-  const field = dialog.value.field
+  const field = dialog.value.field as keyof CharData
   const file = `${field}.md`
   await writeFs(props.project, `prompt/character/${props.name}/${file}`, dialog.value.content)
-  data.value[field] = dialog.value.content
+  if (data.value) data.value[field] = dialog.value.content
   dialog.value.show = false
 }
 
-function renderMd(text) {
+function renderMd(text: string) {
   return marked.parse(text || '')
 }
 

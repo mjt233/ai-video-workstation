@@ -26,11 +26,11 @@
   </v-container>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { getProjects } from '../api/client.js'
+import { getProjects, type ProjectEntry } from '../api/client'
 
-const projects = ref([])
+const projects = ref<ProjectEntry[]>([])
 onMounted(async () => {
   projects.value = await getProjects()
 })

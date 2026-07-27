@@ -52,16 +52,27 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { readFs, writeFs } from '../api/client.js'
+import { readFs, writeFs } from '../api/client'
 import { marked } from 'marked'
 
-const props = defineProps({ project: String, episode: String, shot: String })
-const tab = ref(null)
-const data = ref(null)
-const stageImages = ref([])
-const dialog = ref({ show: false, field: '', content: '' })
+interface DialogState {
+  show: boolean
+  field: string
+  content: string
+}
+
+interface SceneData {
+  overview: string
+  script: Record<string, unknown>[]
+}
+
+const props = defineProps<{ project: string; episode: string; shot: string }>()
+const tab = ref<string | null>(null)
+const data = ref<SceneData | null>(null)
+const stageImages = ref<string[]>([])
+const dialog = ref<DialogState>({ show: false, field: '', content: '' })
 
 const basePath = computed(() => `prompt/scene/${props.episode}/${props.shot}`)
 const assertBase = computed(() => `/api/fs/${props.project}/assert/scene/${props.episode}/${props.shot}/stage`)
@@ -69,17 +80,19 @@ const assertBase = computed(() => `/api/fs/${props.project}/assert/scene/${props
 async function load() {
   const bp = basePath.value
   try {
-    const [overview, scriptRaw] = await Promise.all([
+    const results = await Promise.all([
       readFs(props.project, `${bp}/overview.md`).catch(() => ''),
       readFs(props.project, `${bp}/script.json`).catch(() => '[]'),
     ])
-    let script = []
+    const overview = results[0] as string
+    const scriptRaw = results[1] as string
+    let script: Record<string, unknown>[] = []
     try { script = JSON.parse(scriptRaw) } catch {}
     data.value = { overview, script }
   } catch {}
 
   try {
-    const stageRaw = await readFs(props.project, `${bp}/stage.json`)
+    const stageRaw = await readFs(props.project, `${bp}/stage.json`) as string
     const stage = JSON.parse(stageRaw)
     if (Array.isArray(stage)) {
       stageImages.value = stage.map((_, i) => `${assertBase.value}/${i}.jpg`)
@@ -91,28 +104,28 @@ async function load() {
   }
 }
 
-function edit(field) {
-  dialog.value = { show: true, field, content: data.value[field] }
+function edit(field: string) {
+  dialog.value = { show: true, field, content: data.value![field as keyof SceneData] as string }
 }
 
-function editJson(field) {
-  dialog.value = { show: true, field, content: JSON.stringify(data.value[field], null, 2) }
+function editJson(field: string) {
+  dialog.value = { show: true, field, content: JSON.stringify(data.value![field as keyof SceneData], null, 2) }
 }
 
 async function save() {
   const field = dialog.value.field
   const file = field === 'script' ? 'script.json' : `${field}.md`
-  let content = dialog.value.content
+  const content = dialog.value.content
   if (field === 'script') {
-    try { JSON.parse(content) } catch (e) { alert('JSON 格式错误: ' + e.message); return }
+    try { JSON.parse(content) } catch (e: unknown) { alert('JSON 格式错误: ' + (e as Error).message); return }
   }
   await writeFs(props.project, `${basePath.value}/${file}`, content)
-  if (field === 'script') data.value[field] = JSON.parse(content)
-  else data.value[field] = content
+  if (field === 'script' && data.value) data.value.script = JSON.parse(content)
+  else if (data.value && field === 'overview') data.value.overview = content
   dialog.value.show = false
 }
 
-function renderMd(text) {
+function renderMd(text: string) {
   return marked.parse(text || '')
 }
 

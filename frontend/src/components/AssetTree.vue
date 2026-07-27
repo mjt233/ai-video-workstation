@@ -14,37 +14,47 @@
   </v-treeview>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch } from 'vue'
-import { readFs } from '../api/client.js'
+import { readFs, type DirResponse } from '../api/client'
 import { useRouter } from 'vue-router'
 
-const props = defineProps({ project: String })
+interface TreeItem {
+  name: string
+  path: string
+  icon: string
+  type?: string
+  episode?: string
+  shot?: string
+  children?: TreeItem[]
+}
+
+const props = defineProps<{ project: string }>()
 const router = useRouter()
-const treeItems = ref([])
+const treeItems = ref<TreeItem[]>([])
 
 async function buildTree() {
-  const characters = await readFs(props.project, 'prompt/character/')
-  const stages = await readFs(props.project, 'prompt/stage/')
-  const episodes = await readFs(props.project, 'prompt/scene/')
+  const characters = await readFs(props.project, 'prompt/character/') as DirResponse
+  const stages = await readFs(props.project, 'prompt/stage/') as DirResponse
+  const episodes = await readFs(props.project, 'prompt/scene/') as DirResponse
 
-  const charItems = characters.entries.map(c => ({
+  const charItems: TreeItem[] = characters.entries.map(c => ({
     name: c.name,
     path: `character-${c.name}`,
     icon: 'mdi-account',
     type: 'character'
   }))
 
-  const stageItems = stages.entries.map(s => ({
+  const stageItems: TreeItem[] = stages.entries.map(s => ({
     name: s.name,
     path: `stage-${s.name}`,
     icon: 'mdi-city',
     type: 'stage'
   }))
 
-  const episodeItems = []
+  const episodeItems: TreeItem[] = []
   for (const ep of episodes.entries) {
-    const shots = await readFs(props.project, `prompt/scene/${ep.name}/`)
+    const shots = await readFs(props.project, `prompt/scene/${ep.name}/`) as DirResponse
     episodeItems.push({
       name: `第${ep.name}集`,
       path: `episode-${ep.name}`,
@@ -67,9 +77,10 @@ async function buildTree() {
   ]
 }
 
-function onSelect(items) {
-  if (!items.length) return
-  const item = items[0]
+function onSelect(items: unknown) {
+  const selected = items as TreeItem[]
+  if (!selected.length) return
+  const item = selected[0]
   if (!item.type) return
   router.push({
     query: { ...router.currentRoute.value.query, type: item.type, name: item.name, episode: item.episode, shot: item.shot }

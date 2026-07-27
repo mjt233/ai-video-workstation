@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -9,11 +9,23 @@ const WRITABLE_PREFIXES = ['prompt', 'assert'];
 
 export const fsRouter = Router();
 
-// GET /api/projects — list projects
-fsRouter.get('/projects', async (req, res) => {
+interface ProjectEntry {
+  name: string;
+}
+
+interface DirEntry {
+  name: string;
+  type: 'file' | 'dir';
+}
+
+interface ErrorWithCode extends Error {
+  code?: string;
+}
+
+fsRouter.get('/projects', async (_req: Request, res: Response) => {
   try {
     const entries = await fs.readdir(DESIGN_DIR, { withFileTypes: true });
-    const projects = entries
+    const projects: ProjectEntry[] = entries
       .filter(e => e.isDirectory())
       .map(e => ({ name: e.name }));
     res.json(projects);
@@ -23,30 +35,30 @@ fsRouter.get('/projects', async (req, res) => {
   }
 });
 
-// GET /api/fs/:project/:path(*) — read file or directory listing
-fsRouter.get('/fs/:project/*', async (req, res) => {
+fsRouter.get('/fs/:project/*', async (req: Request, res: Response) => {
   try {
-    const project = req.params.project;
+    const project = req.params.project as string;
     const relPath = req.params[0] || '';
     const fullPath = path.resolve(DESIGN_DIR, project, relPath);
     const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
 
     if (fullPath !== path.resolve(DESIGN_DIR, project) && !fullPath.startsWith(projectRoot)) {
-      return res.status(403).json({ error: 'Path traversal denied' });
+      res.status(403).json({ error: 'Path traversal denied' });
+      return;
     }
 
     const stat = await fs.stat(fullPath);
     if (stat.isDirectory()) {
       const entries = await fs.readdir(fullPath, { withFileTypes: true });
-      res.json({
-        entries: entries.map(e => ({
-          name: e.name,
-          type: e.isDirectory() ? 'dir' : 'file'
-        }))
-      });
+      const result: DirEntry[] = entries.map(e => ({
+        name: e.name,
+        type: e.isDirectory() ? 'dir' : 'file'
+      }));
+      res.json({ entries: result });
     } else {
       const ext = path.extname(fullPath).toLowerCase();
-      if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.flac', '.mp3', '.wav'].includes(ext)) {
+      const binaryExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.flac', '.mp3', '.wav'];
+      if (binaryExts.includes(ext)) {
         res.sendFile(fullPath);
       } else {
         const content = await fs.readFile(fullPath, 'utf-8');
@@ -54,7 +66,8 @@ fsRouter.get('/fs/:project/*', async (req, res) => {
       }
     }
   } catch (err) {
-    if (err.code === 'ENOENT') {
+    const e = err as ErrorWithCode;
+    if (e.code === 'ENOENT') {
       res.status(404).json({ error: 'Not found' });
     } else {
       console.error('Failed to read fs:', err);
@@ -63,26 +76,28 @@ fsRouter.get('/fs/:project/*', async (req, res) => {
   }
 });
 
-// POST /api/fs/:project/:path(*) — write file
-fsRouter.post('/fs/:project/*', async (req, res) => {
+fsRouter.post('/fs/:project/*', async (req: Request, res: Response) => {
   try {
-    const project = req.params.project;
+    const project = req.params.project as string;
     const relPath = req.params[0] || '';
     const fullPath = path.resolve(DESIGN_DIR, project, relPath);
     const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
 
     if (fullPath !== path.resolve(DESIGN_DIR, project) && !fullPath.startsWith(projectRoot)) {
-      return res.status(403).json({ error: 'Path traversal denied' });
+      res.status(403).json({ error: 'Path traversal denied' });
+      return;
     }
 
     const prefix = relPath.split('/')[0];
     if (!WRITABLE_PREFIXES.includes(prefix)) {
-      return res.status(403).json({ error: 'Only prompt/ and assert/ paths are writable' });
+      res.status(403).json({ error: 'Only prompt/ and assert/ paths are writable' });
+      return;
     }
 
-    const { content } = req.body;
+    const { content } = req.body as { content: string };
     if (typeof content !== 'string') {
-      return res.status(400).json({ error: 'content must be a string' });
+      res.status(400).json({ error: 'content must be a string' });
+      return;
     }
 
     await fs.mkdir(path.dirname(fullPath), { recursive: true });

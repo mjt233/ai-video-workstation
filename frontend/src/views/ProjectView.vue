@@ -22,7 +22,7 @@
   </v-row>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AssetTree from '../components/AssetTree.vue'
@@ -31,9 +31,9 @@ import StagePanel from '../components/StagePanel.vue'
 import ScenePanel from '../components/ScenePanel.vue'
 
 const route = useRoute()
-const project = computed(() => route.query.project)
-const type = computed(() => route.query.type)
-const name = computed(() => route.query.name)
-const episode = computed(() => route.query.episode)
-const shot = computed(() => route.query.shot)
+const project = computed(() => route.query.project as string)
+const type = computed(() => route.query.type as string)
+const name = computed(() => route.query.name as string)
+const episode = computed(() => route.query.episode as string)
+const shot = computed(() => route.query.shot as string)
 </script>

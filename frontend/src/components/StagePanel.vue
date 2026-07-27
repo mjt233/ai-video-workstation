@@ -52,24 +52,35 @@
   </v-row>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch } from 'vue'
-import { readFs, writeFs } from '../api/client.js'
+import { readFs, writeFs, type DirResponse } from '../api/client'
 import { marked } from 'marked'
 
-const props = defineProps({ project: String, name: String })
-const subScenes = ref([])
-const selected = ref(null)
-const dialog = ref({ show: false, content: '' })
+interface SubScene {
+  label: string
+  promptMd: string
+  imageUrl: string
+}
+
+interface DialogState {
+  show: boolean
+  content: string
+}
+
+const props = defineProps<{ project: string; name: string }>()
+const subScenes = ref<SubScene[]>([])
+const selected = ref<SubScene | null>(null)
+const dialog = ref<DialogState>({ show: false, content: '' })
 
 async function load() {
   try {
-    const result = await readFs(props.project, `prompt/stage/${props.name}/`)
-    const items = []
+    const result = await readFs(props.project, `prompt/stage/${props.name}/`) as DirResponse
+    const items: SubScene[] = []
     for (const entry of result.entries) {
       if (entry.type === 'file' && entry.name.endsWith('.md')) {
         const label = entry.name.replace(/\.md$/, '')
-        const promptMd = await readFs(props.project, `prompt/stage/${props.name}/${entry.name}`)
+        const promptMd = await readFs(props.project, `prompt/stage/${props.name}/${entry.name}`) as string
         const imageUrl = `/api/fs/${props.project}/assert/stage/${props.name}/${label}.jpg`
         items.push({ label, promptMd, imageUrl })
       }
@@ -80,17 +91,17 @@ async function load() {
 }
 
 function editPrompt() {
-  dialog.value = { show: true, content: selected.value.promptMd }
+  dialog.value = { show: true, content: selected.value!.promptMd }
 }
 
 async function savePrompt() {
-  const fileName = selected.value.label + '.md'
+  const fileName = selected.value!.label + '.md'
   await writeFs(props.project, `prompt/stage/${props.name}/${fileName}`, dialog.value.content)
-  selected.value.promptMd = dialog.value.content
+  selected.value!.promptMd = dialog.value.content
   dialog.value.show = false
 }
 
-function renderMd(text) {
+function renderMd(text: string) {
   return marked.parse(text || '')
 }
 
