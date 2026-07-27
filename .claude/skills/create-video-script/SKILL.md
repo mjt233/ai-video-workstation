@@ -215,17 +215,6 @@ design
 #### overview.md 模板（项目总览）
 
 ```markdown
----
-type: project-overview
-project_name: {项目名称}
-aspect_ratio: {16:9 / 9:16 / 1:1}
-resolution: {1920x1080 / 1080x1920 / ...}
-characters:
-  - {role-name}
-stages:
-  - {stage-name}
----
-
 # {项目名称} - 视频总览
 
 ## 前置设定
@@ -292,11 +281,6 @@ design
 #### overview.md 模板（角色）
 
 ```markdown
----
-type: character-overview
-name: {角色名}
----
-
 # {角色名} - 角色总览
 
 ## 基本信息
@@ -377,17 +361,6 @@ name: {角色名}
 #### 分镜内容总览（overview.md）
 
 ```markdown
----
-type: storyboard-overview
-episode: {集数}
-scene_id: {分镜编号}
-shot_count: {该分镜包含的镜头数}
-stage_ref: {场景名}/{完整场景标签}
-characters:
-  - {角色名1}
-  - {角色名2}  # 可选，最多2个
----
-
 # 第{集数}集 分镜 {分镜编号} - {分镜标题}
 
 ## 叙事节拍
