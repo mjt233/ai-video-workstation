@@ -13,6 +13,26 @@ const WORKFLOWS_DIR = path.resolve(__dirname, 'workflows');
 export { getAllWorkflows };
 
 /**
+ * 读取项目级配置（project.json）并返回可注入 vars 的键值对。
+ * 文件不存在或解析失败时返回空对象。
+ */
+async function loadProjectConfig(project: string): Promise<Record<string, string>> {
+  const configPath = path.resolve(DESIGN_DIR, project, 'project.json');
+  try {
+    const content = await fs.readFile(configPath, 'utf-8');
+    const config = JSON.parse(content);
+    const result: Record<string, string> = {};
+    if (config.width != null) result.width = String(config.width);
+    if (config.height != null) result.height = String(config.height);
+    if (config.aspectRatio != null) result.aspectRatio = String(config.aspectRatio);
+    return result;
+  } catch {
+    // 文件不存在或解析失败，静默忽略以保持向后兼容
+    return {};
+  }
+}
+
+/**
  * Auto-discover and register all workflow scripts
  */
 export async function discoverWorkflows(): Promise<void> {
@@ -54,10 +74,14 @@ async function runTask(taskId: string): Promise<void> {
   }
 
   const paramsObj = JSON.parse(task.params);
+  const projectConfig = await loadProjectConfig(task.project);
 
   const workflowParams: WorkflowParams = {
     project: task.project,
-    vars: paramsObj.vars ?? {},
+    vars: {
+      ...projectConfig,
+      ...(paramsObj.vars ?? {}),
+    },
     async readFile(relPath: string): Promise<string> {
       const full = path.resolve(DESIGN_DIR, task.project, relPath);
       const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;
