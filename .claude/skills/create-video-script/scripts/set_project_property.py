@@ -12,7 +12,8 @@
     --project-root    - 可选，项目根目录（默认当前目录）
 
 示例:
-    python scripts/set_project_property.py --project "AI的第一天" resolution "1080x1920"
+    python scripts/set_project_property.py --project "AI的第一天" width 1080
+    python scripts/set_project_property.py --project "AI的第一天" height 1920
     python scripts/set_project_property.py --project "AI的第一天" aspectRatio "9:16"
 """
 
@@ -62,8 +63,13 @@ def main():
         sys.exit(1)
 
     # 读取现有配置，设置新值
+    # 自动将纯数字字符串转为整数，其他保持字符串
+    try:
+        parsed = int(value)
+    except ValueError:
+        parsed = value
     config = read_project_config(project_name, project_root)
-    config[key] = value
+    config[key] = parsed
     write_project_config(project_name, config, project_root)
 
     print(f"📝 project.json 已更新: {key} = {value}")
