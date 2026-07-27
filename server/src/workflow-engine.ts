@@ -1,9 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import * as db from './db.js';
 import { register, getImpl, getAllWorkflows } from './workflows/registry.js';
-import type { WorkflowDefinition, WorkflowParams, WorkflowOutput } from './workflows/types.js';
+import type { WorkflowDefinition, WorkflowParams } from './workflows/types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../design');
@@ -23,7 +23,7 @@ export async function discoverWorkflows(): Promise<void> {
     const files = await fs.readdir(categoryDir);
     for (const file of files) {
       if (!file.endsWith('.ts') && !file.endsWith('.js')) continue;
-      const mod = await import(path.join(categoryDir, file));
+      const mod = await import(pathToFileURL(path.join(categoryDir, file)).href);
       // Each module calls register() on import
       if (mod.default) {
         if (Array.isArray(mod.default)) {
