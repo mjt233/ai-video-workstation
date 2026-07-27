@@ -19,9 +19,11 @@ export function useWorkflowTask(taskId: Ref<string | null>) {
       if (t.status === 'completed' || t.status === 'failed') {
         status.value = t.status
         if (t.status === 'failed') error.value = t.errorMsg ?? 'Task failed'
+        // Fetch logs immediately for terminal states
+        getTaskLogs(id).then(l => { logs.value = l }).catch(() => {})
         return
       }
-    })
+    }).catch(() => {})
 
     // Poll every 2 seconds
     timer = setInterval(async () => {

@@ -240,15 +240,15 @@ const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index:
 
 const genImageDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'image',
-  set: (v) => { if (!v) genDialog.value.show = false; else genDialog.value = { show: true, type: 'image', index: genDialog.value.index } }
+  set: (v) => { if (!v) genDialog.value.show = false }
 })
 const genVoiceDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'voice',
-  set: (v) => { if (!v) genDialog.value.show = false; else genDialog.value = { show: true, type: 'voice', index: genDialog.value.index } }
+  set: (v) => { if (!v) genDialog.value.show = false }
 })
 const genVideoDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'video',
-  set: (v) => { if (!v) genDialog.value.show = false; else genDialog.value = { show: true, type: 'video', index: 0 } }
+  set: (v) => { if (!v) genDialog.value.show = false }
 })
 
 const basePath = computed(() => `prompt/scene/${props.episode}/${props.shot}`)

@@ -189,6 +189,16 @@ export function startEngine(): void {
     }
   }
 
+  // Reset tasks stuck in 'running' state (from a previous crash) to 'pending'
+  const staleRunning = db.getPendingTasks().filter(t => t.status === 'running');
+  for (const task of staleRunning) {
+    db.updateTaskStatus(task.id, 'pending');
+    db.addLog(task.id, 'warn', 'Task reset from running to pending after server restart');
+  }
+  if (staleRunning.length > 0) {
+    console.log(`Reset ${staleRunning.length} stale running tasks to pending`);
+  }
+
   // Run immediately, then every 2 seconds
   tick();
   setInterval(tick, 2000);

@@ -84,6 +84,16 @@
           </template>
         </v-alert>
 
+        <!-- Submit Error -->
+        <v-alert
+          v-if="submitError"
+          type="error"
+          variant="tonal"
+          class="mb-2"
+        >
+          {{ submitError }}
+        </v-alert>
+
         <!-- Failed -->
         <v-alert
           v-if="polling.status === 'failed'"
@@ -146,6 +156,7 @@ const show = computed({
 const selectedImpl = ref(props.defaultImpl ?? 'default')
 const implementations = ref<{ impl: string; name: string; description?: string }[]>([])
 const submitting = ref(false)
+const submitError = ref<string | null>(null)
 const taskId = ref<string | null>(null)
 const polling = reactive(useWorkflowTask(taskId))
 const logRef = ref<HTMLElement | null>(null)
@@ -180,6 +191,8 @@ watch(() => polling.logs.length, async () => {
 
 async function submit() {
   submitting.value = true
+  submitError.value = null
+  polling.error = null
   try {
     const result = await runWorkflow({
       project: props.project,
@@ -193,7 +206,7 @@ async function submit() {
     })
     taskId.value = result.taskId
   } catch (err: any) {
-    console.error('Failed to submit workflow:', err)
+    submitError.value = err?.response?.data?.error || err.message || '提交失败，请重试'
   } finally {
     submitting.value = false
   }
