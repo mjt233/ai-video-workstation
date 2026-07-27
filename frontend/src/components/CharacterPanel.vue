@@ -1,93 +1,99 @@
 <template>
-  <div v-if="data">
-    <v-expansion-panels v-model="panel">
-      <v-expansion-panel value="overview">
-        <v-expansion-panel-title>角色总览</v-expansion-panel-title>
-        <v-expansion-panel-text>
-          <div class="d-flex justify-end mb-2">
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-              @click="edit('overview')"
-            >
-              <v-icon>mdi-pencil</v-icon>
-            </v-btn>
-          </div>
-          <MarkdownView :content="data.overview" />
-        </v-expansion-panel-text>
-      </v-expansion-panel>
+  <div
+    v-if="data"
+    style="flex: 1; min-height: 0; overflow-y: auto;"
+  >
+    <v-tabs v-model="tab">
+      <v-tab value="overview">
+        角色总览
+      </v-tab>
+      <v-tab value="appearance">
+        外观设计
+      </v-tab>
+      <v-tab value="voice">
+        声音
+      </v-tab>
+    </v-tabs>
 
-      <v-expansion-panel value="appearance">
-        <v-expansion-panel-title>外观设计</v-expansion-panel-title>
-        <v-expansion-panel-text>
-          <div class="d-flex justify-end mb-2">
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-              @click="edit('appearance')"
-            >
-              <v-icon>mdi-pencil</v-icon>
-            </v-btn>
-          </div>
-          <v-row>
-            <v-col cols="6">
-              <MarkdownView :content="data.appearance" />
-            </v-col>
-            <v-col cols="6">
-              <v-img
-                v-if="appearanceImg"
-                :src="appearanceImg"
-                max-height="400"
-                contain
-              />
-              <div
-                v-else
-                class="text-grey"
-              >
-                暂无图片
-              </div>
-            </v-col>
-          </v-row>
-        </v-expansion-panel-text>
-      </v-expansion-panel>
+    <v-tabs-window v-model="tab">
+      <v-tabs-window-item value="overview">
+        <div class="d-flex justify-end mt-2 mb-2">
+          <v-btn
+            icon
+            variant="text"
+            size="small"
+            @click="edit('overview')"
+          >
+            <v-icon>mdi-pencil</v-icon>
+          </v-btn>
+        </div>
+        <MarkdownView :content="data.overview" />
+      </v-tabs-window-item>
 
-      <v-expansion-panel value="voice">
-        <v-expansion-panel-title>声音</v-expansion-panel-title>
-        <v-expansion-panel-text>
-          <div class="d-flex justify-end mb-2">
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-              @click="edit('voice')"
+      <v-tabs-window-item value="appearance">
+        <div class="d-flex justify-end mt-2 mb-2">
+          <v-btn
+            icon
+            variant="text"
+            size="small"
+            @click="edit('appearance')"
+          >
+            <v-icon>mdi-pencil</v-icon>
+          </v-btn>
+        </div>
+        <v-row>
+          <v-col cols="6">
+            <MarkdownView :content="data.appearance" />
+          </v-col>
+          <v-col cols="6">
+            <v-img
+              v-if="appearanceImg"
+              :src="appearanceImg"
+              max-height="400"
+              contain
+            />
+            <div
+              v-else
+              class="text-grey"
             >
-              <v-icon>mdi-pencil</v-icon>
-            </v-btn>
-          </div>
-          <v-row>
-            <v-col cols="6">
-              <MarkdownView :content="data.voice" />
-            </v-col>
-            <v-col cols="6">
-              <audio
-                v-if="voiceAudio"
-                :src="voiceAudio"
-                controls
-                style="width: 100%"
-              />
-              <div
-                v-else
-                class="text-grey"
-              >
-                暂无音频
-              </div>
-            </v-col>
-          </v-row>
-        </v-expansion-panel-text>
-      </v-expansion-panel>
-    </v-expansion-panels>
+              暂无图片
+            </div>
+          </v-col>
+        </v-row>
+      </v-tabs-window-item>
+
+      <v-tabs-window-item value="voice">
+        <div class="d-flex justify-end mt-2 mb-2">
+          <v-btn
+            icon
+            variant="text"
+            size="small"
+            @click="edit('voice')"
+          >
+            <v-icon>mdi-pencil</v-icon>
+          </v-btn>
+        </div>
+        <v-row>
+          <v-col cols="6">
+            <MarkdownView :content="data.voice" />
+          </v-col>
+          <v-col cols="6">
+            <audio
+              v-if="voiceAudio"
+              :src="voiceAudio"
+              controls
+              style="width: 100%"
+            />
+            <div
+              v-else
+              class="text-grey"
+            >
+              暂无音频
+            </div>
+          </v-col>
+        </v-row>
+      </v-tabs-window-item>
+    </v-tabs-window>
 
     <v-dialog
       v-model="dialog.show"
@@ -141,7 +147,7 @@ interface CharData {
 
 const props = defineProps<{ project: string; name: string }>()
 
-const panel = ref(0)
+const tab = ref<string | null>(null)
 const data = ref<CharData | null>(null)
 const appearanceImg = computed(() => `/api/fs/${props.project}/assert/character/${props.name}/appearance.jpg`)
 const voiceAudio = computed(() => `/api/fs/${props.project}/assert/character/${props.name}/voice.flac`)

@@ -1,5 +1,8 @@
 <template>
-  <div v-if="data">
+  <div
+    v-if="data"
+    style="flex: 1; min-height: 0; overflow-y: auto;"
+  >
     <v-tabs v-model="tab">
       <v-tab value="overview">
         总览

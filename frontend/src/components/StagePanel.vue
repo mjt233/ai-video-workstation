@@ -1,57 +1,70 @@
 <template>
-  <v-row v-if="subScenes.length">
-    <v-col cols="4">
-      <v-list>
-        <v-list-item
-          v-for="s in subScenes"
-          :key="s.label"
-          :active="selected?.label === s.label"
-          @click="selected = s"
-        >
-          <v-list-item-title>{{ s.label }}</v-list-item-title>
-        </v-list-item>
-      </v-list>
-    </v-col>
-    <v-col cols="8">
-      <template v-if="selected">
-        <v-expansion-panels>
-          <v-expansion-panel value="prompt">
-            <v-expansion-panel-title>Prompt</v-expansion-panel-title>
-            <v-expansion-panel-text>
-              <div class="d-flex justify-end mb-2">
-                <v-btn
-                  icon
-                  variant="text"
-                  size="small"
-                  @click="editPrompt"
-                >
-                  <v-icon>mdi-pencil</v-icon>
-                </v-btn>
-              </div>
-              <MarkdownView :content="selected.promptMd" />
-            </v-expansion-panel-text>
-          </v-expansion-panel>
+  <div
+    ref="panelRef"
+  >
+    <v-select
+      v-model="selected"
+      :items="subScenes"
+      item-title="label"
+      item-value="label"
+      placeholder="选择子场景"
+      variant="outlined"
+      hide-details
+      class="flex-shrink-0"
+      return-object
+    />
 
-          <v-expansion-panel value="image">
-            <v-expansion-panel-title>图片</v-expansion-panel-title>
-            <v-expansion-panel-text>
-              <v-img
-                v-if="selected.imageUrl"
-                :src="selected.imageUrl"
-                max-height="500"
-                contain
-              />
-              <div
-                v-else
-                class="text-grey"
+    <div v-show="selected">
+      <v-tabs
+        v-model="tab"
+        class="flex-shrink-0"
+      >
+        <v-tab value="prompt">
+          Prompt
+        </v-tab>
+        <v-tab value="image">
+          图片
+        </v-tab>
+      </v-tabs>
+
+      <div
+        ref="contentRef"
+        :style="{ maxHeight: targetHeight + 'px', overflowY: 'auto' }"
+      >
+        <v-tabs-window
+          v-if="selected"
+          v-model="tab"
+        >
+          <v-tabs-window-item value="prompt">
+            <div class="d-flex justify-end mb-2">
+              <v-btn
+                icon
+                variant="text"
+                size="small"
+                @click="editPrompt"
               >
-                暂无图片
-              </div>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-        </v-expansion-panels>
-      </template>
-    </v-col>
+                <v-icon>mdi-pencil</v-icon>
+              </v-btn>
+            </div>
+            <MarkdownView :content="selected.promptMd" />
+          </v-tabs-window-item>
+
+          <v-tabs-window-item value="image">
+            <v-img
+              v-if="selected.imageUrl"
+              :src="selected.imageUrl"
+              contain
+            />
+            <div
+              v-else
+              class="text-grey"
+            >
+              暂无图片
+            </div>
+          </v-tabs-window-item>
+        </v-tabs-window>
+      </div>
+    </div>
 
     <v-dialog
       v-model="dialog.show"
@@ -83,13 +96,14 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-  </v-row>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { readFs, writeFs, type DirResponse } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
+import { useAutoComputeHeight } from '../composables/useAutoComputeHeight'
 
 interface SubScene {
   label: string
@@ -103,9 +117,20 @@ interface DialogState {
 }
 
 const props = defineProps<{ project: string; name: string }>()
+const tab = ref<string | null>(null)
 const subScenes = ref<SubScene[]>([])
 const selected = ref<SubScene | null>(null)
 const dialog = ref<DialogState>({ show: false, content: '' })
+
+const panelRef = ref<HTMLElement | null>(null)
+const contentRef = ref<HTMLElement | null>(null)
+
+const { targetHeight } = useAutoComputeHeight({
+  autoComputeHeight: true,
+  computeTarget: () => contentRef.value,
+  observeTarget: () => panelRef.value!,
+  offset: 0,
+})
 
 async function load() {
   try {

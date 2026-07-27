@@ -22,8 +22,8 @@
     </v-col>
     <v-col
       cols="9"
-      class="pa-4"
-      style="overflow-y: auto; height: 100%;"
+      class="pa-4 d-flex flex-column"
+      style="overflow: hidden; height: 100%;"
     >
       <CharacterPanel
         v-if="type === 'character'"
