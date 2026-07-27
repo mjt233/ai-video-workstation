@@ -47,7 +47,8 @@ disable-model-invocation: true
 > 用户选定画面比例与分辨率后，依次运行以下命令写入 `project.json`：
 > ```bash
 > python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" aspectRatio "{用户选择的比例}"
-> python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" resolution "{用户选择的分辨率}"
+> python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" width {画面宽度}
+> python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" height {画面高度}
 > ```
 
 6. **剧情方向** — 在确定以上基调后，准备 2-3 个不同的剧情概念方向供用户选择

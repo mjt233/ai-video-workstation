@@ -84,12 +84,11 @@ def validate_project_config(project_name: str, project_root: str | None) -> list
         errors.append(f"project.json 文件存在但内容为空或解析失败，请检查文件格式")
         return errors
 
-    if "resolution" not in config:
-        errors.append(f"project.json: 缺少 'resolution' 字段")
-    else:
-        res = config["resolution"]
-        if not re.match(r'^\d+x\d+$', res):
-            errors.append(f"project.json: resolution 格式无效 '{res}'，应为 宽x高 格式（如 1080x1920）")
+    for field in ("width", "height"):
+        if field not in config:
+            errors.append(f"project.json: 缺少 '{field}' 字段")
+        elif not isinstance(config[field], int) or config[field] <= 0:
+            errors.append(f"project.json: '{field}' 应为正整数，当前值: {config[field]}")
 
     if "aspectRatio" not in config:
         errors.append(f"project.json: 缺少 'aspectRatio' 字段")
