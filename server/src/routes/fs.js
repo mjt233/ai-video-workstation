@@ -28,8 +28,9 @@ fsRouter.get('/fs/:project/*', async (req, res) => {
     const project = req.params.project;
     const relPath = req.params[0] || '';
     const fullPath = path.resolve(DESIGN_DIR, project, relPath);
+    const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
 
-    if (!fullPath.startsWith(path.resolve(DESIGN_DIR, project))) {
+    if (fullPath !== path.resolve(DESIGN_DIR, project) && !fullPath.startsWith(projectRoot)) {
       return res.status(403).json({ error: 'Path traversal denied' });
     }
 
@@ -66,8 +67,9 @@ fsRouter.post('/fs/:project/*', async (req, res) => {
     const project = req.params.project;
     const relPath = req.params[0] || '';
     const fullPath = path.resolve(DESIGN_DIR, project, relPath);
+    const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
 
-    if (!fullPath.startsWith(path.resolve(DESIGN_DIR, project))) {
+    if (fullPath !== path.resolve(DESIGN_DIR, project) && !fullPath.startsWith(projectRoot)) {
       return res.status(403).json({ error: 'Path traversal denied' });
     }
 
