@@ -1,3 +1,4 @@
 design/
 *.pyc
 node_modules/
+dist/
