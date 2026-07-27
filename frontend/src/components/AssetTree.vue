@@ -5,9 +5,11 @@
     item-key="path"
     @update:selected="onSelect"
     return-object
+    color="primary"
+    hoverable
   >
     <template v-slot:prepend="{ item }">
-      <v-icon>{{ item.icon }}</v-icon>
+      <v-icon :color="item.type === 'character' ? 'amber-darken-1' : item.type === 'stage' ? 'green-darken-1' : 'primary'">{{ item.icon }}</v-icon>
     </template>
   </v-treeview>
 </template>

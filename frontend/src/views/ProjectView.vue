@@ -1,14 +1,22 @@
 <template>
   <v-row class="ma-0" style="height: calc(100vh - 64px)">
-    <v-col cols="3" class="pa-2 border-e">
+    <v-col cols="3" class="pa-2 border-e bg-surface">
+      <div class="d-flex align-center mb-2 text-primary font-weight-bold">
+        <v-icon icon="mdi-file-tree" class="mr-1" color="primary" size="small" />
+        资产浏览器
+      </div>
+      <v-divider class="mb-2" />
       <AssetTree :project="project" />
     </v-col>
     <v-col cols="9" class="pa-4">
       <CharacterPanel v-if="type === 'character'" :project :name />
       <StagePanel v-else-if="type === 'stage'" :project :name />
       <ScenePanel v-else-if="type === 'scene'" :project :episode :shot />
-      <div v-else class="d-flex align-center justify-center text-grey" style="height: 100%">
-        从左侧选择一个资产查看
+      <div v-else class="d-flex align-center justify-center" style="height: 100%">
+        <div class="text-center">
+          <v-icon icon="mdi-hand-pointing-left" size="48" color="grey-lighten-1" />
+          <div class="text-grey mt-2">从左侧选择一个资产查看</div>
+        </div>
       </div>
     </v-col>
   </v-row>
