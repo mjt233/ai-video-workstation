@@ -58,6 +58,17 @@
             >
               暂无图片
             </div>
+            <div class="d-flex justify-center mt-2">
+              <v-btn
+                size="small"
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-auto-fix"
+                @click="genDialog = true"
+              >
+                生成
+              </v-btn>
+            </div>
           </v-tabs-window-item>
         </v-tabs-window>
       </div>
@@ -93,6 +104,18 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <GenerateDialog
+      v-model="genDialog"
+      :project="props.project"
+      workflow-id="stage-image"
+      workflow-name="场景图片生成"
+      :vars="{ name: props.name, label: selected?.label ?? '' }"
+      :output-path="`assert/stage/${props.name}/${selected?.label}.jpg`"
+      :prompt-paths="[`prompt/stage/${props.name}/${selected?.label}.md`]"
+      :existing-asset="selected?.imageUrl ? '已有图片' : undefined"
+      @refresh="load"
+    />
   </div>
 </template>
 
@@ -101,6 +124,7 @@ import { ref, watch } from 'vue'
 import { readFs, writeFs, type DirResponse } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
 import { useAutoComputeHeight } from '../composables/useAutoComputeHeight'
+import GenerateDialog from './GenerateDialog.vue'
 
 interface SubScene {
   label: string
@@ -118,6 +142,7 @@ const tab = ref<string | null>(null)
 const subScenes = ref<SubScene[]>([])
 const selected = ref<SubScene | null>(null)
 const dialog = ref<DialogState>({ show: false, content: '' })
+const genDialog = ref(false)
 
 const panelRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
