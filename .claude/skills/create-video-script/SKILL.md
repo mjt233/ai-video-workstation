@@ -44,6 +44,12 @@ disable-model-invocation: true
      - 方形 1:1（1080×1080）— 适合社交平台信息流
    - 不限于上述常见选择，可根据发布平台发散
 
+> 用户选定画面比例与分辨率后，依次运行以下命令写入 `project.json`：
+> ```bash
+> python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" aspectRatio "{用户选择的比例}"
+> python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" resolution "{用户选择的分辨率}"
+> ```
+
 6. **剧情方向** — 在确定以上基调后，准备 2-3 个不同的剧情概念方向供用户选择
    - 每个方向需包含一句话梗概和核心看点说明
    - 方向之间应有明显差异，覆盖不同切入点
@@ -257,6 +263,7 @@ design
 ```
 design
   └── {项目名称}                     # 剧本项目目录，如"古人在现代"
+      ├── project.json              # 项目结构化配置（分辨率、画面比例等）
       ├── overview.md                # 总览（含前置设定、角色总览、场景总览）
       └── prompt
           ├── character
