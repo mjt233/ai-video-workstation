@@ -413,7 +413,7 @@ LTX-2.3 模型的提示词，纯文本格式（无 Markdown 标题），仅需�
 
 ### 分镜脚本工具
 
-项目 `scripts/` 目录下提供了一套 Python 脚本，用于以命令行方式管理分镜 JSON 资产，避免直接编辑 JSON 字符串。所有脚本均支持 `--help` 查看详细用法。
+项目 `.claude/skills/create-video-script/scripts/` 目录下提供了一套 Python 脚本，用于以命令行方式管理分镜 JSON 资产，避免直接编辑 JSON 字符串。所有脚本均支持 `--help` 查看详细用法。
 
 #### 环境要求
 
@@ -425,9 +425,9 @@ LTX-2.3 模型的提示词，纯文本格式（无 Markdown 标题），仅需�
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python scripts/add_stage.py` | 添加一条场景定义 | `python scripts/add_stage.py 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
-| `python scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python scripts/remove_stage.py 1 0` |
-| `python scripts/update_stage.py` | 更新场景定义的字段 | `python scripts/update_stage.py 1 0 --prompt "新提示词"` |
+| `python .claude/skills/create-video-script/scripts/add_stage.py` | 添加一条场景定义 | `python .claude/skills/create-video-script/scripts/add_stage.py 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
+| `python .claude/skills/create-video-script/scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python .claude/skills/create-video-script/scripts/remove_stage.py 1 0` |
+| `python .claude/skills/create-video-script/scripts/update_stage.py` | 更新场景定义的字段 | `python .claude/skills/create-video-script/scripts/update_stage.py 1 0 --prompt "新提示词"` |
 
 **`add_stage.py` 参数说明：**
 
@@ -445,8 +445,8 @@ LTX-2.3 模型的提示词，纯文本格式（无 Markdown 标题），仅需�
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python scripts/add_script.py` | 添加一条台词 | `python scripts/add_script.py 1 "陈书文" "你好，请问这里有人吗？" "期待"` |
-| `python scripts/remove_script.py` | 移除一条台词（按索引） | `python scripts/remove_script.py 1 0` |
+| `python .claude/skills/create-video-script/scripts/add_script.py` | 添加一条台词 | `python .claude/skills/create-video-script/scripts/add_script.py 1 "陈书文" "你好，请问这里有人吗？" "期待"` |
+| `python .claude/skills/create-video-script/scripts/remove_script.py` | 移除一条台词（按索引） | `python .claude/skills/create-video-script/scripts/remove_script.py 1 0` |
 
 **`add_script.py` 参数说明：**
 
@@ -458,9 +458,9 @@ LTX-2.3 模型的提示词，纯文本格式（无 Markdown 标题），仅需�
 #### 完整性校验
 
 ```bash
-python scripts/validate.py              # 校验所有分镜
-python scripts/validate.py 1 2 3        # 校验指定分镜
-python scripts/validate.py --fix        # 尝试自动修复
+python .claude/skills/create-video-script/scripts/validate.py              # 校验所有分镜
+python .claude/skills/create-video-script/scripts/validate.py 1 2 3        # 校验指定分镜
+python .claude/skills/create-video-script/scripts/validate.py --fix        # 尝试自动修复
 ```
 
 校验内容包括：
