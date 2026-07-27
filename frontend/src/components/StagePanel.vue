@@ -28,7 +28,7 @@
                   <v-icon>mdi-pencil</v-icon>
                 </v-btn>
               </div>
-              <div v-html="renderMd(selected.promptMd)" />
+              <MarkdownView :content="selected.promptMd" />
             </v-expansion-panel-text>
           </v-expansion-panel>
 
@@ -89,7 +89,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { readFs, writeFs, type DirResponse } from '../api/client'
-import { marked } from 'marked'
+import MarkdownView from './MarkdownView.vue'
 
 interface SubScene {
   label: string
@@ -133,10 +133,6 @@ async function savePrompt() {
   await writeFs(props.project, `prompt/stage/${props.name}/${fileName}`, dialog.value.content)
   selected.value!.promptMd = dialog.value.content
   dialog.value.show = false
-}
-
-function renderMd(text: string) {
-  return marked.parse(text || '')
 }
 
 watch(() => [props.project, props.name], load, { immediate: true })

@@ -14,7 +14,7 @@
               <v-icon>mdi-pencil</v-icon>
             </v-btn>
           </div>
-          <div v-html="renderMd(data.overview)" />
+          <MarkdownView :content="data.overview" />
         </v-expansion-panel-text>
       </v-expansion-panel>
 
@@ -33,7 +33,7 @@
           </div>
           <v-row>
             <v-col cols="6">
-              <div v-html="renderMd(data.appearance)" />
+              <MarkdownView :content="data.appearance" />
             </v-col>
             <v-col cols="6">
               <v-img
@@ -68,7 +68,7 @@
           </div>
           <v-row>
             <v-col cols="6">
-              <div v-html="renderMd(data.voice)" />
+              <MarkdownView :content="data.voice" />
             </v-col>
             <v-col cols="6">
               <audio
@@ -125,7 +125,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { readFs, writeFs } from '../api/client'
-import { marked } from 'marked'
+import MarkdownView from './MarkdownView.vue'
 
 interface DialogState {
   show: boolean
@@ -170,10 +170,6 @@ async function save() {
   await writeFs(props.project, `prompt/character/${props.name}/${file}`, dialog.value.content)
   if (data.value) data.value[field] = dialog.value.content
   dialog.value.show = false
-}
-
-function renderMd(text: string) {
-  return marked.parse(text || '')
 }
 
 watch(() => [props.project, props.name], load, { immediate: true })

@@ -24,7 +24,7 @@
             <v-icon>mdi-pencil</v-icon>
           </v-btn>
         </div>
-        <div v-html="renderMd(data.overview)" />
+        <MarkdownView :content="data.overview" />
       </v-tabs-window-item>
 
       <v-tabs-window-item value="script">
@@ -107,7 +107,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { readFs, writeFs } from '../api/client'
-import { marked } from 'marked'
+import MarkdownView from './MarkdownView.vue'
 
 interface DialogState {
   show: boolean
@@ -175,10 +175,6 @@ async function save() {
   if (field === 'script' && data.value) data.value.script = JSON.parse(content)
   else if (data.value && field === 'overview') data.value.overview = content
   dialog.value.show = false
-}
-
-function renderMd(text: string) {
-  return marked.parse(text || '')
 }
 
 watch(() => [props.project, props.episode, props.shot], load, { immediate: true })
