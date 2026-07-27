@@ -6,7 +6,7 @@ export interface WorkflowParams {
   vars: Record<string, string>;
 }
 
-export interface WorkflowDefinition<TPollResult = any> {
+export interface WorkflowDefinition<TPollResult = Record<string, unknown>> {
   id: string;
   name: string;
   impl: string;
