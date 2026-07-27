@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-校验所有分镜资产的引用完整性。
+校验所有分镜资产的引用完整性及项目配置。
 
 检查内容:
+  - project.json 的存在性、resolution 和 aspectRatio 字段格式
   - 每个分镜的 stage.json 引用的场景资产文件是否存在
   - 每个分镜的 stage.json 引用的角色资产目录是否存在
   - 登场角色数量是否不超过 2
@@ -21,6 +22,7 @@
 """
 
 import argparse
+import re
 import sys
 from _common import (
     DEFAULT_PROJECT,
@@ -32,6 +34,8 @@ from _common import (
     get_script_json_path,
     get_stage_asset_path,
     get_character_dir,
+    get_project_config_path,
+    read_project_config,
     list_projects,
     list_episodes,
 )
@@ -62,6 +66,39 @@ def get_all_shot_numbers(project_name: str, episode: int,
         if d.is_dir() and d.name.isdigit():
             numbers.append(int(d.name))
     return sorted(numbers)
+
+
+def validate_project_config(project_name: str, project_root: str | None) -> list[str]:
+    """校验 project.json 的存在性和格式，返回错误信息列表。"""
+    errors: list[str] = []
+    config_path = get_project_config_path(project_name, project_root)
+
+    if not config_path.exists():
+        errors.append(f"⚠️ 项目 '{project_name}' 缺少 project.json")
+        return errors
+
+    config = read_project_config(project_name, project_root)
+
+    # 文件存在但配置为空，可能是解析错误（read_project_config 已输出警告到 stderr）
+    if not config:
+        errors.append(f"project.json 文件存在但内容为空或解析失败，请检查文件格式")
+        return errors
+
+    if "resolution" not in config:
+        errors.append(f"project.json: 缺少 'resolution' 字段")
+    else:
+        res = config["resolution"]
+        if not re.match(r'^\d+x\d+$', res):
+            errors.append(f"project.json: resolution 格式无效 '{res}'，应为 宽x高 格式（如 1080x1920）")
+
+    if "aspectRatio" not in config:
+        errors.append(f"project.json: 缺少 'aspectRatio' 字段")
+    else:
+        ratio = config["aspectRatio"]
+        if not re.match(r'^\d+:\d+$', ratio):
+            errors.append(f"project.json: aspectRatio 格式无效 '{ratio}'，应为 宽:高 格式（如 9:16）")
+
+    return errors
 
 
 def validate_shot(shot: int, episode: int, project_name: str,
@@ -164,7 +201,13 @@ def main():
         else:
             print("📂 可用项目:")
             for p in projects:
-                print(f"   - {p}")
+                config_errors = validate_project_config(p, project_root)
+                if config_errors:
+                    print(f"   - {p}  ⚠️  project.json 配置问题")
+                    for err in config_errors:
+                        print(f"       {err}")
+                else:
+                    print(f"   - {p}  ✅")
         sys.exit(0)
 
     # 确定项目名称
@@ -197,6 +240,14 @@ def main():
             print(f"⚠️  项目 '{project_name}' 第 {episode} 集下未找到任何分镜资产（prompt/scene/{episode}/ 下无分镜目录）。")
             sys.exit(0)
 
+    # 项目配置校验
+    all_passed = True
+    config_errors = validate_project_config(project_name, project_root)
+    for err in config_errors:
+        print(f"  {err}")
+    if config_errors:
+        all_passed = False
+
     # 检查编号连续性
     if shot_numbers:
         expected = list(range(shot_numbers[0], shot_numbers[-1] + 1))
@@ -225,9 +276,11 @@ def main():
     # 统计
     total_shots = len(shot_numbers)
     failed_shots = len(all_errors)
+    if failed_shots > 0:
+        all_passed = False
     print(f"📊 总计: {total_shots} 个分镜, {failed_shots} 个存在问题")
 
-    if failed_shots > 0:
+    if not all_passed:
         sys.exit(1)
 
 
