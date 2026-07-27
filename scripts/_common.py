@@ -1,0 +1,87 @@
+"""
+视频分镜脚本工具 - 公共模块
+提供路径解析、JSON 读写等共享功能。
+"""
+
+import json
+import sys
+from pathlib import Path
+from typing import Any, Optional
+
+
+def resolve_project_dir(project_dir: Optional[str] = None) -> Path:
+    """解析项目根目录路径。默认使用当前工作目录。"""
+    if project_dir:
+        return Path(project_dir).resolve()
+    return Path.cwd().resolve()
+
+
+def get_design_dir(project_dir: Optional[str] = None) -> Path:
+    """获取 design 目录路径。"""
+    return resolve_project_dir(project_dir) / "design"
+
+
+def get_scene_dir(shot_number: int, project_dir: Optional[str] = None) -> Path:
+    """获取指定分镜的目录路径。"""
+    return get_design_dir(project_dir) / "prompt" / "scene" / str(shot_number)
+
+
+def get_stage_json_path(shot_number: int, project_dir: Optional[str] = None) -> Path:
+    """获取指定分镜的 stage.json 路径。"""
+    return get_scene_dir(shot_number, project_dir) / "stage.json"
+
+
+def get_script_json_path(shot_number: int, project_dir: Optional[str] = None) -> Path:
+    """获取指定分镜的 script.json 路径。"""
+    return get_scene_dir(shot_number, project_dir) / "script.json"
+
+
+def read_json(path: Path) -> Any:
+    """读取 JSON 文件，文件不存在时返回空数组。"""
+    if not path.exists():
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON 解析错误: {path}\n   {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def write_json(path: Path, data: Any) -> None:
+    """写入 JSON 文件（自动创建目录）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"✅ 已写入: {path}")
+
+
+def get_stage_asset_path(stage_ref: str, project_dir: Optional[str] = None) -> Path:
+    """
+    根据 stage_ref（如 "现代商场/现代商场-白天-平视-晴-中央扶梯"）
+    解析对应的场景资产 .md 文件路径。
+    """
+    return get_design_dir(project_dir) / "prompt" / "stage" / f"{stage_ref}.md"
+
+
+def get_character_dir(character_name: str, project_dir: Optional[str] = None) -> Path:
+    """获取指定角色资产目录路径。"""
+    return get_design_dir(project_dir) / "prompt" / "character" / character_name
+
+
+def validate_stage_ref(stage_ref: str, project_dir: Optional[str] = None) -> bool:
+    """检查场景引用是否存在对应的资产文件。"""
+    path = get_stage_asset_path(stage_ref, project_dir)
+    exists = path.exists()
+    if not exists:
+        print(f"⚠️  场景资产不存在: {path}", file=sys.stderr)
+    return exists
+
+
+def validate_character_ref(character_name: str, project_dir: Optional[str] = None) -> bool:
+    """检查角色引用是否存在对应的资产目录。"""
+    path = get_character_dir(character_name, project_dir)
+    exists = path.exists()
+    if not exists:
+        print(f"⚠️  角色资产不存在: {path}", file=sys.stderr)
+    return exists
