@@ -93,6 +93,7 @@ export function updateTaskStatus(
   extra?: { result?: object; error_msg?: string }
 ): void {
   const sets = ["status = ?", "updated_at = datetime('now')"];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const values: any[] = [status];
   if (extra?.result) { sets.push('result = ?'); values.push(JSON.stringify(extra.result)); }
   if (extra?.error_msg) { sets.push('error_msg = ?'); values.push(extra.error_msg); }
@@ -105,6 +106,7 @@ export function updateTaskStatus(
 
 export function listTasks(project?: string, status?: string): TaskRecord[] {
   const conditions: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const values: any[] = [];
   if (project) { conditions.push('project = ?'); values.push(project); }
   if (status) { conditions.push('status = ?'); values.push(status); }

@@ -10,7 +10,7 @@ register({
   async submit(params) {
     const scriptJson = await params.readFile(`prompt/scene/${params.vars.episode}/${params.vars.shot}/script.json`);
     const script = JSON.parse(scriptJson);
-    const charLine = script.find((l: any) => l.角色名 === params.vars.character);
+    const charLine = script.find((l: { 角色名: string }) => l.角色名 === params.vars.character);
     return { taskId: 'tts-mock-' + Date.now() };
   },
 

@@ -43,7 +43,7 @@ export function useWorkflowTask(taskId: Ref<string | null>) {
           error.value = t.errorMsg ?? 'Task failed'
           stopPolling()
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Polling error:', err)
       }
     }, 2000)

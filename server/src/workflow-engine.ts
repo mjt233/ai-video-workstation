@@ -77,7 +77,7 @@ async function runTask(taskId: string): Promise<void> {
     const { taskId: remoteTaskId } = await wf.submit(workflowParams);
     db.addLog(taskId, 'info', `Submitted, remote task ID: ${remoteTaskId}`);
 
-    let pollResponse: any = undefined;
+    let pollResponse: Record<string, unknown> | undefined;
 
     // Step 2: Poll if defined
     if (wf.poll) {
@@ -153,8 +153,9 @@ async function runTask(taskId: string): Promise<void> {
     db.addLog(taskId, 'info', `Output written to: ${outputPath}`);
     db.updateTaskStatus(taskId, 'completed', { result: { path: outputPath } });
 
-  } catch (err: any) {
-    db.addLog(taskId, 'error', `Task failed: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    db.addLog(taskId, 'error', `Task failed: ${msg}`);
 
     // Retry logic
     if (task.retry_count < task.max_retries) {
@@ -162,7 +163,7 @@ async function runTask(taskId: string): Promise<void> {
       db.updateTaskStatus(taskId, 'pending');
       db.addLog(taskId, 'info', `Scheduled for retry (${task.retry_count + 1}/${task.max_retries})`);
     } else {
-      db.updateTaskStatus(taskId, 'failed', { error_msg: err.message });
+      db.updateTaskStatus(taskId, 'failed', { error_msg: msg });
     }
   }
 }
