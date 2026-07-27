@@ -20,7 +20,14 @@
 
 import argparse
 import sys
-from _common import read_json, write_json, get_stage_json_path, validate_stage_ref, validate_character_ref
+from _common import (
+    DEFAULT_PROJECT,
+    read_json,
+    write_json,
+    get_stage_json_path,
+    validate_stage_ref,
+    validate_character_ref,
+)
 
 
 def parse_args():
@@ -33,14 +40,16 @@ def parse_args():
     parser.add_argument("--stage-ref", type=str, default=None, help="新的基础场景完整标签")
     parser.add_argument("--characters", type=str, default=None, help="新的登场角色名（逗号分隔，最多2个）")
     parser.add_argument("--prompt", type=str, default=None, help="新的组合提示词")
-    parser.add_argument("--project-dir", type=str, default=None, help="项目根目录（默认当前目录）")
+    parser.add_argument("--project", "-p", type=str, default=DEFAULT_PROJECT, help=f"剧本项目名称（默认: {DEFAULT_PROJECT}）")
+    parser.add_argument("--project-root", type=str, default=None, help="项目根目录（默认当前目录）")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    project_dir = args.project_dir
-    stage_path = get_stage_json_path(args.shot, project_dir)
+    project_name = args.project
+    project_root = args.project_root
+    stage_path = get_stage_json_path(args.shot, project_name, project_root)
     data = read_json(stage_path)
 
     if not data:
@@ -55,7 +64,7 @@ def main():
     changed = []
 
     if args.stage_ref is not None:
-        if not validate_stage_ref(args.stage_ref, project_dir):
+        if not validate_stage_ref(args.stage_ref, project_name, project_root):
             print(f"❌ 场景资产不存在: {args.stage_ref}", file=sys.stderr)
             sys.exit(1)
         entry["基础场景"] = args.stage_ref
@@ -70,7 +79,7 @@ def main():
             print(f"❌ 角色数量不得超过 2 个（当前: {len(characters)}）。", file=sys.stderr)
             sys.exit(1)
         for ch in characters:
-            if not validate_character_ref(ch, project_dir):
+            if not validate_character_ref(ch, project_name, project_root):
                 print(f"❌ 角色资产不存在: {ch}", file=sys.stderr)
                 sys.exit(1)
         entry["登场角色"] = characters

@@ -18,7 +18,14 @@
 
 import argparse
 import sys
-from _common import read_json, write_json, get_stage_json_path, validate_stage_ref, validate_character_ref
+from _common import (
+    DEFAULT_PROJECT,
+    read_json,
+    write_json,
+    get_stage_json_path,
+    validate_stage_ref,
+    validate_character_ref,
+)
 
 
 def parse_args():
@@ -35,13 +42,15 @@ def parse_args():
     parser.add_argument("stage_ref", type=str, help="基础场景完整标签，如 现代商场/现代商场-白天-平视-晴-中央扶梯")
     parser.add_argument("characters", type=str, help="登场角色名，多个用逗号分隔（最多2个）")
     parser.add_argument("prompt", type=str, help="组合提示词（使用 图像1/图像2/图像3 标识场景与角色）")
-    parser.add_argument("--project-dir", type=str, default=None, help="项目根目录（默认当前目录）")
+    parser.add_argument("--project", "-p", type=str, default=DEFAULT_PROJECT, help=f"剧本项目名称（默认: {DEFAULT_PROJECT}）")
+    parser.add_argument("--project-root", type=str, default=None, help="项目根目录（默认当前目录）")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    project_dir = args.project_dir
+    project_name = args.project
+    project_root = args.project_root
 
     # 校验角色数量
     characters = [c.strip() for c in args.characters.split(",") if c.strip()]
@@ -53,13 +62,13 @@ def main():
         sys.exit(1)
 
     # 校验场景资产是否存在
-    if not validate_stage_ref(args.stage_ref, project_dir):
+    if not validate_stage_ref(args.stage_ref, project_name, project_root):
         print("❌ 场景资产不存在，请先创建场景资产文件。", file=sys.stderr)
         sys.exit(1)
 
     # 校验角色资产是否存在
     for ch in characters:
-        if not validate_character_ref(ch, project_dir):
+        if not validate_character_ref(ch, project_name, project_root):
             print("❌ 角色资产不存在，请先创建角色资产: {}".format(ch), file=sys.stderr)
             sys.exit(1)
 
@@ -71,7 +80,7 @@ def main():
     }
 
     # 读取现有 stage.json，追加新条目
-    stage_path = get_stage_json_path(args.shot, project_dir)
+    stage_path = get_stage_json_path(args.shot, project_name, project_root)
     data = read_json(stage_path)
     data.append(entry)
     write_json(stage_path, data)

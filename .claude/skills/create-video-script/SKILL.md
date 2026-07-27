@@ -166,6 +166,26 @@ LTX-2.3 是基于图像条件的视频生成模型，提示词需要特别关注
 
 ## 资产原型输出
 
+### 多项目支持
+
+`design/` 目录支持同时维护多个剧本项目，每个项目是一个独立的目录：
+
+```
+design
+  ├── {项目名称}/          # 如 "古人在现代"
+  │   ├── overview.md
+  │   └── prompt/
+  │       ├── character/...
+  │       ├── stage/...
+  │       └── scene/...
+  └── {另一个项目}/
+      └── ...
+```
+
+- 每个项目目录下必须有 `overview.md` 文件（脚本工具通过此文件识别项目）
+- 脚本工具通过 `--project`（或 `-p`）参数指定操作哪个项目，默认使用第一个检测到的项目
+- 使用 `python .../validate.py --list-projects` 列出所有可用项目
+
 ### 约定
 
 角色名和场景名文件夹名称均使用中文命名（外国人 或 外国地名 除外）
@@ -180,6 +200,7 @@ LTX-2.3 是基于图像条件的视频生成模型，提示词需要特别关注
 ```markdown
 ---
 type: project-overview
+project_name: {项目名称}
 aspect_ratio: {16:9 / 9:16 / 1:1}
 resolution: {1920x1080 / 1080x1920 / ...}
 characters:
@@ -225,26 +246,27 @@ stages:
 
 ### 输出目录结构
 
-所有资产均输出到用户当前工作目录的 `design` 下：
+所有资产均输出到用户当前工作目录的 `design` 下，每个项目独立一个子目录：
 
 ```
 design
-  ├── overview.md                    # 总览（含前置设定、角色总览、场景总览）
-  └── prompt
-      ├── character
-      │   └── {角色名}
-      │       ├── overview.md        # 角色总览（姓名、性格、背景）
-      │       ├── appearance.md      # 外貌图像描述（结构化，适配 qwen-image）
-      │       └── voice.md           # 声线描述（结构化，适配 qwen-3-tts）
-      ├── stage
-      │   └── {场景名}
-      │       └── {完整场景标签}.md   # 含场景画面描述、主色调
-      └── scene
-          └── {分镜编号}             # 从1开始编号
-              ├── overview.md        # 分镜内容总览
-              ├── stage.json         # 场景原型JSON（引用stage + 角色 + 组合prompt）
-              ├── script.json        # 台词原型JSON
-              └── prompt.md          # 图生视频模型提示词（LTX-2.3）
+  └── {项目名称}                     # 剧本项目目录，如"古人在现代"
+      ├── overview.md                # 总览（含前置设定、角色总览、场景总览）
+      └── prompt
+          ├── character
+          │   └── {角色名}
+          │       ├── overview.md    # 角色总览（姓名、性格、背景）
+          │       ├── appearance.md  # 外貌图像描述（结构化，适配 qwen-image）
+          │       └── voice.md       # 声线描述（结构化，适配 qwen-3-tts）
+          ├── stage
+          │   └── {场景名}
+          │       └── {完整场景标签}.md  # 含场景画面描述、主色调
+          └── scene
+              └── {分镜编号}         # 从1开始编号
+                  ├── overview.md    # 分镜内容总览
+                  ├── stage.json     # 场景原型JSON（引用stage + 角色 + 组合prompt）
+                  ├── script.json    # 台词原型JSON
+                  └── prompt.md      # 图生视频模型提示词（LTX-2.3）
 ```
 
 ### 原型描述内容规范
@@ -418,16 +440,23 @@ LTX-2.3 模型的提示词，纯文本格式（无 Markdown 标题），仅需�
 #### 环境要求
 
 - Python 3.8+
-- 在项目根目录下运行脚本（或通过 `--project-dir` 指定项目路径）
-- 脚本会自动将 `design` 作为资产根目录
+- 在项目根目录下运行脚本（或通过 `--project-root` 指定项目路径）
+- 脚本会自动将 `design/{项目名称}` 作为资产根目录
+- 使用 `--project`（或 `-p`）参数指定剧本项目名称，默认自动检测第一个可用项目
+
+#### 列出项目
+
+```bash
+python .claude/skills/create-video-script/scripts/validate.py --list-projects
+```
 
 #### 场景管理（stage.json）
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python .claude/skills/create-video-script/scripts/add_stage.py` | 添加一条场景定义 | `python .claude/skills/create-video-script/scripts/add_stage.py 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
-| `python .claude/skills/create-video-script/scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python .claude/skills/create-video-script/scripts/remove_stage.py 1 0` |
-| `python .claude/skills/create-video-script/scripts/update_stage.py` | 更新场景定义的字段 | `python .claude/skills/create-video-script/scripts/update_stage.py 1 0 --prompt "新提示词"` |
+| `python .claude/skills/create-video-script/scripts/add_stage.py` | 添加一条场景定义 | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
+| `python .claude/skills/create-video-script/scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python .claude/skills/create-video-script/scripts/remove_stage.py -p 古人在现代 1 0` |
+| `python .claude/skills/create-video-script/scripts/update_stage.py` | 更新场景定义的字段 | `python .claude/skills/create-video-script/scripts/update_stage.py -p 古人在现代 1 0 --prompt "新提示词"` |
 
 **`add_stage.py` 参数说明：**
 
@@ -435,6 +464,7 @@ LTX-2.3 模型的提示词，纯文本格式（无 Markdown 标题），仅需�
 2. `基础场景标签` — 场景完整标签，如 `现代商场/现代商场-白天-平视-晴-中央扶梯`（需与 `stage/` 下的资产文件路径一致）
 3. `角色名` — 逗号分隔，最多 2 个，如 `陈书文` 或 `陈书文,现代女孩`
 4. `prompt` — 组合提示词，使用 `图像1` 代表场景、`图像2/3` 代表角色
+5. `-p` 或 `--project` — 剧本项目名称（默认自动检测）
 
 脚本会自动校验：
 - 场景资产文件（`design/prompt/stage/{场景}/{完整场景标签}.md`）是否存在
@@ -445,8 +475,8 @@ LTX-2.3 模型的提示词，纯文本格式（无 Markdown 标题），仅需�
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python .claude/skills/create-video-script/scripts/add_script.py` | 添加一条台词 | `python .claude/skills/create-video-script/scripts/add_script.py 1 "陈书文" "你好，请问这里有人吗？" "期待"` |
-| `python .claude/skills/create-video-script/scripts/remove_script.py` | 移除一条台词（按索引） | `python .claude/skills/create-video-script/scripts/remove_script.py 1 0` |
+| `python .claude/skills/create-video-script/scripts/add_script.py` | 添加一条台词 | `python .claude/skills/create-video-script/scripts/add_script.py -p 古人在现代 1 "陈书文" "你好，请问这里有人吗？" "期待"` |
+| `python .claude/skills/create-video-script/scripts/remove_script.py` | 移除一条台词（按索引） | `python .claude/skills/create-video-script/scripts/remove_script.py -p 古人在现代 1 0` |
 
 **`add_script.py` 参数说明：**
 
@@ -454,13 +484,17 @@ LTX-2.3 模型的提示词，纯文本格式（无 Markdown 标题），仅需�
 2. `角色名` — 台词所属角色（自动校验是否在 stage.json 登场角色中声明）
 3. `台词内容` — 角色说的文本
 4. `情绪` — 可选，默认 `平静`
+5. `-p` 或 `--project` — 剧本项目名称（默认自动检测）
 
 #### 完整性校验
 
 ```bash
-python .claude/skills/create-video-script/scripts/validate.py              # 校验所有分镜
-python .claude/skills/create-video-script/scripts/validate.py 1 2 3        # 校验指定分镜
-python .claude/skills/create-video-script/scripts/validate.py --fix        # 尝试自动修复
+python .claude/skills/create-video-script/scripts/validate.py                      # 自动检测项目并校验所有分镜
+python .claude/skills/create-video-script/scripts/validate.py -p 古人在现代         # 指定项目校验
+python .claude/skills/create-video-script/scripts/validate.py 1 2 3                # 校验指定分镜
+python .claude/skills/create-video-script/scripts/validate.py --fix                # 尝试自动修复
+python .claude/skills/create-video-script/scripts/validate.py --list-projects      # 列出所有可用项目
+```
 ```
 
 校验内容包括：
@@ -521,8 +555,9 @@ python .claude/skills/create-video-script/scripts/validate.py --fix        # 尝
 
 - 非外国角色或地名的资产文件夹名称是否为中文
 - 场景或角色提示词原型中是否包含对 AI 绘图模型不必要的描述（如人名、文件头元数据）
-- 分镜 `stage.json` 中引用的 `基础场景` 是否在 `design/prompt/stage/` 下有对应的 `.md` 资产文件
-- 分镜 `stage.json` 中引用的 `登场角色` 是否在 `design/prompt/character/` 下有对应的资产文件夹
+- 项目 `design/` 下每个项目目录是否包含 `overview.md`（用于脚本自动检测）
+- 分镜 `stage.json` 中引用的 `基础场景` 是否在对应项目的 `design/{项目}/prompt/stage/` 下有对应的 `.md` 资产文件
+- 分镜 `stage.json` 中引用的 `登场角色` 是否在对应项目的 `design/{项目}/prompt/character/` 下有对应的资产文件夹
 - 分镜 `stage.json` 中 `登场角色` 数组长度是否不超过 2
 - 分镜 `stage.json` 中 `prompt` 字段是否正确使用"图像1"代表基础场景、"图像2"代表第一个角色、"图像3"代表第二个角色
 - 分镜 `script.json` 中出现的 `角色名` 是否在对应分镜的 `stage.json` 的 `登场角色` 中已声明

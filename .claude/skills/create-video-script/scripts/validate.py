@@ -24,13 +24,15 @@ import re
 import sys
 from pathlib import Path
 from _common import (
+    DEFAULT_PROJECT,
     read_json,
-    get_design_dir,
+    get_project_dir,
     get_scene_dir,
     get_stage_json_path,
     get_script_json_path,
     get_stage_asset_path,
     get_character_dir,
+    list_projects,
 )
 
 
@@ -40,14 +42,16 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("shots", type=int, nargs="*", default=None, help="要校验的分镜序号（默认校验所有）")
-    parser.add_argument("--project-dir", type=str, default=None, help="项目根目录（默认当前目录）")
+    parser.add_argument("--project", "-p", type=str, default=None, help="剧本项目名称（默认自动检测或使用首个项目）")
+    parser.add_argument("--project-root", type=str, default=None, help="项目根目录（默认当前目录）")
+    parser.add_argument("--list-projects", action="store_true", help="列出所有可用项目")
     parser.add_argument("--fix", action="store_true", help="尝试自动修复可修复的问题（实验性）")
     return parser.parse_args()
 
 
-def get_all_shot_numbers(project_dir: str | None) -> list[int]:
-    """扫描 design/prompt/scene/ 下的所有分镜编号。"""
-    scene_root = get_design_dir(project_dir) / "prompt" / "scene"
+def get_all_shot_numbers(project_name: str, project_root: str | None) -> list[int]:
+    """扫描指定项目的所有分镜编号。"""
+    scene_root = get_project_dir(project_name, project_root) / "prompt" / "scene"
     if not scene_root.exists():
         return []
     numbers = []
@@ -57,17 +61,17 @@ def get_all_shot_numbers(project_dir: str | None) -> list[int]:
     return sorted(numbers)
 
 
-def validate_shot(shot: int, project_dir: str | None, fix: bool = False) -> list[str]:
+def validate_shot(shot: int, project_name: str, project_root: str | None, fix: bool = False) -> list[str]:
     """校验单个分镜，返回错误信息列表。"""
     errors: list[str] = []
-    scene_dir = get_scene_dir(shot, project_dir)
+    scene_dir = get_scene_dir(shot, project_name, project_root)
 
     if not scene_dir.exists():
         errors.append(f"分镜 {shot}: 目录不存在 ({scene_dir})")
         return errors
 
-    stage_path = get_stage_json_path(shot, project_dir)
-    script_path = get_script_json_path(shot, project_dir)
+    stage_path = get_stage_json_path(shot, project_name, project_root)
+    script_path = get_script_json_path(shot, project_name, project_root)
 
     # ── 检查 stage.json ──
     if not stage_path.exists():
@@ -83,7 +87,7 @@ def validate_shot(shot: int, project_dir: str | None, fix: bool = False) -> list
                 if not stage_ref:
                     errors.append(f"分镜 {shot}.stage[{i}]: 缺少 '基础场景' 字段")
                 else:
-                    asset_path = get_stage_asset_path(stage_ref, project_dir)
+                    asset_path = get_stage_asset_path(stage_ref, project_name, project_root)
                     if not asset_path.exists():
                         errors.append(f"分镜 {shot}.stage[{i}]: 场景资产不存在 ({asset_path})")
 
@@ -97,7 +101,7 @@ def validate_shot(shot: int, project_dir: str | None, fix: bool = False) -> list
                     errors.append(f"分镜 {shot}.stage[{i}]: 登场角色超过2个 ({len(chars)})")
                 else:
                     for ch in chars:
-                        ch_dir = get_character_dir(ch, project_dir)
+                        ch_dir = get_character_dir(ch, project_name, project_root)
                         if not ch_dir.exists():
                             errors.append(f"分镜 {shot}.stage[{i}]: 角色资产不存在 ({ch_dir})")
 
@@ -146,15 +150,36 @@ def validate_shot(shot: int, project_dir: str | None, fix: bool = False) -> list
 
 def main():
     args = parse_args()
-    project_dir = args.project_dir
+    project_root = args.project_root
+
+    # 列出项目模式
+    if args.list_projects:
+        projects = list_projects(project_root)
+        if not projects:
+            print("⚠️  未找到任何项目（design/ 下没有包含 overview.md 的目录）。")
+        else:
+            print("📂 可用项目:")
+            for p in projects:
+                print(f"   - {p}")
+        sys.exit(0)
+
+    # 确定项目名称
+    project_name = args.project
+    if project_name is None:
+        projects = list_projects(project_root)
+        if not projects:
+            print("⚠️  未找到任何项目。请使用 --project 指定项目名称。")
+            sys.exit(1)
+        project_name = projects[0]
+        print(f"📌 自动检测到项目: {project_name}")
 
     # 确定要校验的分镜列表
     if args.shots:
         shot_numbers = args.shots
     else:
-        shot_numbers = get_all_shot_numbers(project_dir)
+        shot_numbers = get_all_shot_numbers(project_name, project_root)
         if not shot_numbers:
-            print("⚠️  未找到任何分镜资产（design/prompt/scene/ 下无分镜目录）。")
+            print(f"⚠️  项目 '{project_name}' 下未找到任何分镜资产（prompt/scene/ 下无分镜目录）。")
             sys.exit(0)
 
     # 检查编号连续性
@@ -167,15 +192,15 @@ def main():
     # 逐分镜校验
     all_errors: dict[int, list[str]] = {}
     for shot in shot_numbers:
-        errors = validate_shot(shot, project_dir, fix=args.fix)
+        errors = validate_shot(shot, project_name, project_root, fix=args.fix)
         if errors:
             all_errors[shot] = errors
 
     # 输出结果
     if not all_errors:
-        print(f"✅ 校验通过！共检查 {len(shot_numbers)} 个分镜，无异常。")
+        print(f"✅ 项目 '{project_name}' 校验通过！共检查 {len(shot_numbers)} 个分镜，无异常。")
     else:
-        print(f"\n❌ 发现 {sum(len(v) for v in all_errors.values())} 个问题:\n")
+        print(f"\n❌ 项目 '{project_name}' 发现 {sum(len(v) for v in all_errors.values())} 个问题:\n")
         for shot, errors in sorted(all_errors.items()):
             print(f"═══ 分镜 {shot} ═══")
             for err in errors:

@@ -9,31 +9,34 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-def resolve_project_dir(project_dir: Optional[str] = None) -> Path:
+DEFAULT_PROJECT = "古人在现代"
+
+
+def resolve_project_root(project_root: Optional[str] = None) -> Path:
     """解析项目根目录路径。默认使用当前工作目录。"""
-    if project_dir:
-        return Path(project_dir).resolve()
+    if project_root:
+        return Path(project_root).resolve()
     return Path.cwd().resolve()
 
 
-def get_design_dir(project_dir: Optional[str] = None) -> Path:
-    """获取 design 目录路径。"""
-    return resolve_project_dir(project_dir) / "design"
+def get_project_dir(project_name: str, project_root: Optional[str] = None) -> Path:
+    """获取指定剧本项目的目录路径：design/{project_name}"""
+    return resolve_project_root(project_root) / "design" / project_name
 
 
-def get_scene_dir(shot_number: int, project_dir: Optional[str] = None) -> Path:
+def get_scene_dir(shot_number: int, project_name: str, project_root: Optional[str] = None) -> Path:
     """获取指定分镜的目录路径。"""
-    return get_design_dir(project_dir) / "prompt" / "scene" / str(shot_number)
+    return get_project_dir(project_name, project_root) / "prompt" / "scene" / str(shot_number)
 
 
-def get_stage_json_path(shot_number: int, project_dir: Optional[str] = None) -> Path:
+def get_stage_json_path(shot_number: int, project_name: str, project_root: Optional[str] = None) -> Path:
     """获取指定分镜的 stage.json 路径。"""
-    return get_scene_dir(shot_number, project_dir) / "stage.json"
+    return get_scene_dir(shot_number, project_name, project_root) / "stage.json"
 
 
-def get_script_json_path(shot_number: int, project_dir: Optional[str] = None) -> Path:
+def get_script_json_path(shot_number: int, project_name: str, project_root: Optional[str] = None) -> Path:
     """获取指定分镜的 script.json 路径。"""
-    return get_scene_dir(shot_number, project_dir) / "script.json"
+    return get_scene_dir(shot_number, project_name, project_root) / "script.json"
 
 
 def read_json(path: Path) -> Any:
@@ -56,31 +59,44 @@ def write_json(path: Path, data: Any) -> None:
     print(f"✅ 已写入: {path}")
 
 
-def get_stage_asset_path(stage_ref: str, project_dir: Optional[str] = None) -> Path:
+def get_stage_asset_path(stage_ref: str, project_name: str, project_root: Optional[str] = None) -> Path:
     """
     根据 stage_ref（如 "现代商场/现代商场-白天-平视-晴-中央扶梯"）
     解析对应的场景资产 .md 文件路径。
+    路径规则：design/{project_name}/prompt/stage/{stage_ref}.md
     """
-    return get_design_dir(project_dir) / "prompt" / "stage" / f"{stage_ref}.md"
+    return get_project_dir(project_name, project_root) / "prompt" / "stage" / f"{stage_ref}.md"
 
 
-def get_character_dir(character_name: str, project_dir: Optional[str] = None) -> Path:
+def get_character_dir(character_name: str, project_name: str, project_root: Optional[str] = None) -> Path:
     """获取指定角色资产目录路径。"""
-    return get_design_dir(project_dir) / "prompt" / "character" / character_name
+    return get_project_dir(project_name, project_root) / "prompt" / "character" / character_name
 
 
-def validate_stage_ref(stage_ref: str, project_dir: Optional[str] = None) -> bool:
+def list_projects(project_root: Optional[str] = None) -> list[str]:
+    """列出 design 下所有项目（有 overview.md 的目录即为一个项目）。"""
+    design = resolve_project_root(project_root) / "design"
+    if not design.exists():
+        return []
+    projects = []
+    for d in design.iterdir():
+        if d.is_dir() and (d / "overview.md").exists():
+            projects.append(d.name)
+    return sorted(projects)
+
+
+def validate_stage_ref(stage_ref: str, project_name: str, project_root: Optional[str] = None) -> bool:
     """检查场景引用是否存在对应的资产文件。"""
-    path = get_stage_asset_path(stage_ref, project_dir)
+    path = get_stage_asset_path(stage_ref, project_name, project_root)
     exists = path.exists()
     if not exists:
         print(f"⚠️  场景资产不存在: {path}", file=sys.stderr)
     return exists
 
 
-def validate_character_ref(character_name: str, project_dir: Optional[str] = None) -> bool:
+def validate_character_ref(character_name: str, project_name: str, project_root: Optional[str] = None) -> bool:
     """检查角色引用是否存在对应的资产目录。"""
-    path = get_character_dir(character_name, project_dir)
+    path = get_character_dir(character_name, project_name, project_root)
     exists = path.exists()
     if not exists:
         print(f"⚠️  角色资产不存在: {path}", file=sys.stderr)

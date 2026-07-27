@@ -19,7 +19,7 @@
 
 import argparse
 import sys
-from _common import read_json, write_json, get_stage_json_path, get_script_json_path
+from _common import DEFAULT_PROJECT, read_json, write_json, get_stage_json_path, get_script_json_path
 
 
 def parse_args():
@@ -31,18 +31,20 @@ def parse_args():
     parser.add_argument("character", type=str, help="台词所属角色名")
     parser.add_argument("line", type=str, help="台词内容")
     parser.add_argument("emotion", type=str, nargs="?", default="平静", help="情绪状态（默认: 平静）")
-    parser.add_argument("--project-dir", type=str, default=None, help="项目根目录（默认当前目录）")
+    parser.add_argument("--project", "-p", type=str, default=DEFAULT_PROJECT, help=f"剧本项目名称（默认: {DEFAULT_PROJECT}）")
+    parser.add_argument("--project-root", type=str, default=None, help="项目根目录（默认当前目录）")
     parser.add_argument("--skip-verify", action="store_true", help="跳过角色存在性校验")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    project_dir = args.project_dir
+    project_name = args.project
+    project_root = args.project_root
 
     # 校验角色是否在 stage.json 的登场角色中声明
     if not args.skip_verify:
-        stage_path = get_stage_json_path(args.shot, project_dir)
+        stage_path = get_stage_json_path(args.shot, project_name, project_root)
         stage_data = read_json(stage_path)
         registered_chars = set()
         for entry in stage_data:
@@ -64,7 +66,7 @@ def main():
     }
 
     # 读取现有 script.json，追加新条目
-    script_path = get_script_json_path(args.shot, project_dir)
+    script_path = get_script_json_path(args.shot, project_name, project_root)
     data = read_json(script_path)
     data.append(entry)
     write_json(script_path, data)
