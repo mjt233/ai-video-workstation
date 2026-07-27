@@ -125,3 +125,33 @@ def validate_character_ref(character_name: str, project_name: str, project_root:
     if not exists:
         print(f"⚠️  角色资产不存在: {path}", file=sys.stderr)
     return exists
+
+
+def get_project_config_path(project_name: str, project_root: Optional[str] = None) -> Path:
+    """获取 project.json 路径：design/{project_name}/project.json"""
+    return get_project_dir(project_name, project_root) / "project.json"
+
+
+def read_project_config(project_name: str, project_root: Optional[str] = None) -> dict:
+    """读取 project.json，文件不存在或解析失败时返回空 dict。"""
+    path = get_project_config_path(project_name, project_root)
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"⚠️  project.json 解析错误: {path}\n   {e}", file=sys.stderr)
+        return {}
+    except OSError as e:
+        print(f"⚠️  读取 project.json 失败: {path}\n   {e}", file=sys.stderr)
+        return {}
+
+
+def write_project_config(project_name: str, config: dict, project_root: Optional[str] = None) -> None:
+    """写入 project.json（自动创建目录）。"""
+    path = get_project_config_path(project_name, project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+    print(f"✅ 已写入: {path}")
