@@ -1,6 +1,6 @@
 <template>
-  <v-row class="ma-0" style="height: calc(100vh - 64px)">
-    <v-col cols="3" class="pa-2 border-e bg-surface">
+  <v-row class="ma-0" style="height: calc(100vh - 64px); overflow: hidden;">
+    <v-col cols="3" class="pa-2 border-e bg-surface" style="overflow-y: auto; height: 100%;">
       <div class="d-flex align-center mb-2 text-primary font-weight-bold">
         <v-icon icon="mdi-file-tree" class="mr-1" color="primary" size="small" />
         资产浏览器
@@ -8,7 +8,7 @@
       <v-divider class="mb-2" />
       <AssetTree :project="project" />
     </v-col>
-    <v-col cols="9" class="pa-4">
+    <v-col cols="9" class="pa-4" style="overflow-y: auto; height: 100%;">
       <CharacterPanel v-if="type === 'character'" :project :name />
       <StagePanel v-else-if="type === 'stage'" :project :name />
       <ScenePanel v-else-if="type === 'scene'" :project :episode :shot />
