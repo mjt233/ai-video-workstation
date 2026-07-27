@@ -20,28 +20,22 @@
 
     <v-tabs-window v-model="tab">
       <v-tabs-window-item value="overview">
-        <div class="d-flex justify-end mt-2 mb-2">
+        <div class="d-flex mt-2 mb-2 ml-2">
           <v-btn
-            icon
-            variant="text"
-            size="small"
             @click="edit('overview')"
           >
-            <v-icon>mdi-pencil</v-icon>
+            编辑
           </v-btn>
         </div>
         <MarkdownView :content="data.overview" />
       </v-tabs-window-item>
 
       <v-tabs-window-item value="script">
-        <div class="d-flex justify-end mt-2 mb-2">
+        <div class="d-flex mt-2 mb-2 ml-2">
           <v-btn
-            icon
-            variant="text"
-            size="small"
             @click="editJson('script')"
           >
-            <v-icon>mdi-pencil</v-icon>
+            编辑
           </v-btn>
         </div>
         <v-list
@@ -108,6 +102,15 @@
         </v-row>
       </v-tabs-window-item>
       <v-tabs-window-item value="prompt">
+        <div class="d-flex mt-2 mb-2 ml-2">
+          <v-btn
+            variant="text"
+            size="small"
+            @click="edit('prompt')"
+          >
+            编辑
+          </v-btn>
+        </div>
         <MarkdownView :content="data.prompt" />
       </v-tabs-window-item>
     </v-tabs-window>

@@ -17,28 +17,22 @@
 
     <v-tabs-window v-model="tab">
       <v-tabs-window-item value="overview">
-        <div class="d-flex justify-end mt-2 mb-2">
+        <div class="d-flex mt-2 mb-2 ml-2">
           <v-btn
-            icon
-            variant="text"
-            size="small"
             @click="edit('overview')"
           >
-            <v-icon>mdi-pencil</v-icon>
+            编辑
           </v-btn>
         </div>
         <MarkdownView :content="data.overview" />
       </v-tabs-window-item>
 
       <v-tabs-window-item value="appearance">
-        <div class="d-flex justify-end mt-2 mb-2">
+        <div class="d-flex mt-2 mb-2 ml-2">
           <v-btn
-            icon
-            variant="text"
-            size="small"
             @click="edit('appearance')"
           >
-            <v-icon>mdi-pencil</v-icon>
+            编辑
           </v-btn>
         </div>
         <v-row>
@@ -63,14 +57,11 @@
       </v-tabs-window-item>
 
       <v-tabs-window-item value="voice">
-        <div class="d-flex justify-end mt-2 mb-2">
+        <div class="d-flex mt-2 mb-2 ml-2">
           <v-btn
-            icon
-            variant="text"
-            size="small"
             @click="edit('voice')"
           >
-            <v-icon>mdi-pencil</v-icon>
+            编辑
           </v-btn>
         </div>
         <v-row>
