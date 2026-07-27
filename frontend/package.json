@@ -1,0 +1,26 @@
+{
+  "name": "video-project-manager-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck"
+  },
+  "dependencies": {
+    "@mdi/font": "^7.4.0",
+    "axios": "^1.7.0",
+    "marked": "^14.0.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0",
+    "vuetify": "^3.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@vitejs/plugin-vue": "^5.2.0",
+    "typescript": "5.7",
+    "vite": "^6.0.0",
+    "vue-tsc": "^3.3.8"
+  }
+}

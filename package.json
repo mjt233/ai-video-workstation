@@ -1,0 +1,22 @@
+{
+  "name": "video-project-manager",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"cd server && npm run dev\" \"cd frontend && npm run dev\"",
+    "build": "cd frontend && npm run build",
+    "start": "cd server && npm start",
+    "typecheck": "npm run typecheck:server && npm run typecheck:frontend",
+    "typecheck:server": "cd server && npx tsc --noEmit",
+    "typecheck:frontend": "cd frontend && npx vue-tsc --noEmit --skipLibCheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "eslint": "^10.8.0",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.8.0",
+    "typescript": "5.7",
+    "typescript-eslint": "^8.65.0"
+  }
+}

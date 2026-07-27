@@ -1,0 +1,24 @@
+{
+  "name": "video-project-manager-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "cd ../frontend && npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "express": "^4.21.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.1",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "5.7"
+  }
+}
