@@ -1,51 +1,103 @@
 <template>
   <div v-if="data">
     <v-tabs v-model="tab">
-      <v-tab value="overview">总览</v-tab>
-      <v-tab value="script">台词</v-tab>
-      <v-tab value="images">场景图片</v-tab>
+      <v-tab value="overview">
+        总览
+      </v-tab>
+      <v-tab value="script">
+        台词
+      </v-tab>
+      <v-tab value="images">
+        场景图片
+      </v-tab>
     </v-tabs>
 
     <v-tabs-window v-model="tab">
       <v-tabs-window-item value="overview">
         <div class="d-flex justify-end mt-2 mb-2">
-          <v-btn icon variant="text" size="small" @click="edit('overview')"><v-icon>mdi-pencil</v-icon></v-btn>
+          <v-btn
+            icon
+            variant="text"
+            size="small"
+            @click="edit('overview')"
+          >
+            <v-icon>mdi-pencil</v-icon>
+          </v-btn>
         </div>
-        <div v-html="renderMd(data.overview)"></div>
+        <div v-html="renderMd(data.overview)" />
       </v-tabs-window-item>
 
       <v-tabs-window-item value="script">
         <div class="d-flex justify-end mt-2 mb-2">
-          <v-btn icon variant="text" size="small" @click="editJson('script')"><v-icon>mdi-pencil</v-icon></v-btn>
+          <v-btn
+            icon
+            variant="text"
+            size="small"
+            @click="editJson('script')"
+          >
+            <v-icon>mdi-pencil</v-icon>
+          </v-btn>
         </div>
         <pre>{{ JSON.stringify(data.script, null, 2) }}</pre>
       </v-tabs-window-item>
 
       <v-tabs-window-item value="images">
         <v-row>
-          <v-col v-for="(img, i) in stageImages" :key="i" cols="6">
+          <v-col
+            v-for="(img, i) in stageImages"
+            :key="i"
+            cols="6"
+          >
             <v-card>
-              <v-card-text class="text-center">场景{{ i }}</v-card-text>
-              <v-img :src="img" max-height="400" contain />
+              <v-card-text class="text-center">
+                场景{{ i }}
+              </v-card-text>
+              <v-img
+                :src="img"
+                max-height="400"
+                contain
+              />
             </v-card>
           </v-col>
-          <v-col v-if="!stageImages.length" cols="12">
-            <div class="text-grey">暂无场景图片</div>
+          <v-col
+            v-if="!stageImages.length"
+            cols="12"
+          >
+            <div class="text-grey">
+              暂无场景图片
+            </div>
           </v-col>
         </v-row>
       </v-tabs-window-item>
     </v-tabs-window>
 
-    <v-dialog v-model="dialog.show" max-width="800">
+    <v-dialog
+      v-model="dialog.show"
+      max-width="800"
+    >
       <v-card>
         <v-card-title>编辑 {{ dialog.field }}</v-card-title>
         <v-card-text>
-          <v-textarea v-model="dialog.content" rows="15" variant="outlined" />
+          <v-textarea
+            v-model="dialog.content"
+            rows="15"
+            variant="outlined"
+          />
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" @click="dialog.show = false">取消</v-btn>
-          <v-btn color="primary" @click="save">保存</v-btn>
+          <v-btn
+            variant="text"
+            @click="dialog.show = false"
+          >
+            取消
+          </v-btn>
+          <v-btn
+            color="primary"
+            @click="save"
+          >
+            保存
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

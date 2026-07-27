@@ -3,12 +3,16 @@
     :items="treeItems"
     item-title="name"
     item-key="path"
-    @update:selected="onSelect"
     return-object
     color="primary"
-    hoverable    open-on-click  >
-    <template v-slot:prepend="{ item }">
-      <v-icon :color="item.type === 'character' ? 'amber-darken-1' : item.type === 'stage' ? 'green-darken-1' : 'primary'">{{ item.icon }}</v-icon>
+    hoverable
+    open-on-click
+    @update:selected="onSelect"
+  >
+    <template #prepend="{ item }">
+      <v-icon :color="item.type === 'character' ? 'amber-darken-1' : item.type === 'stage' ? 'green-darken-1' : 'primary'">
+        {{ item.icon }}
+      </v-icon>
     </template>
   </v-treeview>
 </template>

@@ -5,8 +5,8 @@
         <v-list-item
           v-for="s in subScenes"
           :key="s.label"
-          @click="selected = s"
           :active="selected?.label === s.label"
+          @click="selected = s"
         >
           <v-list-item-title>{{ s.label }}</v-list-item-title>
         </v-list-item>
@@ -19,33 +19,67 @@
             <v-expansion-panel-title>Prompt</v-expansion-panel-title>
             <v-expansion-panel-text>
               <div class="d-flex justify-end mb-2">
-                <v-btn icon variant="text" size="small" @click="editPrompt"><v-icon>mdi-pencil</v-icon></v-btn>
+                <v-btn
+                  icon
+                  variant="text"
+                  size="small"
+                  @click="editPrompt"
+                >
+                  <v-icon>mdi-pencil</v-icon>
+                </v-btn>
               </div>
-              <div v-html="renderMd(selected.promptMd)"></div>
+              <div v-html="renderMd(selected.promptMd)" />
             </v-expansion-panel-text>
           </v-expansion-panel>
 
           <v-expansion-panel value="image">
             <v-expansion-panel-title>图片</v-expansion-panel-title>
             <v-expansion-panel-text>
-              <v-img v-if="selected.imageUrl" :src="selected.imageUrl" max-height="500" contain />
-              <div v-else class="text-grey">暂无图片</div>
+              <v-img
+                v-if="selected.imageUrl"
+                :src="selected.imageUrl"
+                max-height="500"
+                contain
+              />
+              <div
+                v-else
+                class="text-grey"
+              >
+                暂无图片
+              </div>
             </v-expansion-panel-text>
           </v-expansion-panel>
         </v-expansion-panels>
       </template>
     </v-col>
 
-    <v-dialog v-model="dialog.show" max-width="800">
+    <v-dialog
+      v-model="dialog.show"
+      max-width="800"
+    >
       <v-card>
         <v-card-title>编辑 Prompt</v-card-title>
         <v-card-text>
-          <v-textarea v-model="dialog.content" rows="15" variant="outlined" />
+          <v-textarea
+            v-model="dialog.content"
+            rows="15"
+            variant="outlined"
+          />
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" @click="dialog.show = false">取消</v-btn>
-          <v-btn color="primary" @click="savePrompt">保存</v-btn>
+          <v-btn
+            variant="text"
+            @click="dialog.show = false"
+          >
+            取消
+          </v-btn>
+          <v-btn
+            color="primary"
+            @click="savePrompt"
+          >
+            保存
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

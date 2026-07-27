@@ -1,8 +1,19 @@
 <template>
-  <v-container class="d-flex align-center justify-center" style="height: 80vh">
-    <v-card min-width="420" class="pa-2" style="overflow: hidden">
+  <v-container
+    class="d-flex align-center justify-center"
+    style="height: 80vh"
+  >
+    <v-card
+      min-width="420"
+      class="pa-2"
+      style="overflow: hidden"
+    >
       <v-card-title class="text-primary text-h5 font-weight-bold">
-        <v-icon icon="mdi-folder-open" class="mr-2" color="primary" />
+        <v-icon
+          icon="mdi-folder-open"
+          class="mr-2"
+          color="primary"
+        />
         选择项目
       </v-card-title>
       <v-divider class="mb-2" />
@@ -11,16 +22,24 @@
           <v-list-item
             v-for="p in projects"
             :key="p.name"
-            @click="$router.push('/project?project=' + p.name)"
             class="rounded mb-1"
+            @click="$router.push('/project?project=' + p.name)"
           >
-            <template v-slot:prepend>
-              <v-icon color="primary">mdi-folder</v-icon>
+            <template #prepend>
+              <v-icon color="primary">
+                mdi-folder
+              </v-icon>
             </template>
-            <v-list-item-title class="font-weight-medium">{{ p.name }}</v-list-item-title>
+            <v-list-item-title class="font-weight-medium">
+              {{ p.name }}
+            </v-list-item-title>
           </v-list-item>
         </v-list>
-        <v-progress-circular v-else indeterminate color="primary" />
+        <v-progress-circular
+          v-else
+          indeterminate
+          color="primary"
+        />
       </v-card-text>
     </v-card>
   </v-container>

@@ -5,9 +5,16 @@
         <v-expansion-panel-title>角色总览</v-expansion-panel-title>
         <v-expansion-panel-text>
           <div class="d-flex justify-end mb-2">
-            <v-btn icon variant="text" size="small" @click="edit('overview')"><v-icon>mdi-pencil</v-icon></v-btn>
+            <v-btn
+              icon
+              variant="text"
+              size="small"
+              @click="edit('overview')"
+            >
+              <v-icon>mdi-pencil</v-icon>
+            </v-btn>
           </div>
-          <div v-html="renderMd(data.overview)"></div>
+          <div v-html="renderMd(data.overview)" />
         </v-expansion-panel-text>
       </v-expansion-panel>
 
@@ -15,13 +22,32 @@
         <v-expansion-panel-title>外观设计</v-expansion-panel-title>
         <v-expansion-panel-text>
           <div class="d-flex justify-end mb-2">
-            <v-btn icon variant="text" size="small" @click="edit('appearance')"><v-icon>mdi-pencil</v-icon></v-btn>
+            <v-btn
+              icon
+              variant="text"
+              size="small"
+              @click="edit('appearance')"
+            >
+              <v-icon>mdi-pencil</v-icon>
+            </v-btn>
           </div>
           <v-row>
-            <v-col cols="6"><div v-html="renderMd(data.appearance)"></div></v-col>
             <v-col cols="6">
-              <v-img v-if="appearanceImg" :src="appearanceImg" max-height="400" contain />
-              <div v-else class="text-grey">暂无图片</div>
+              <div v-html="renderMd(data.appearance)" />
+            </v-col>
+            <v-col cols="6">
+              <v-img
+                v-if="appearanceImg"
+                :src="appearanceImg"
+                max-height="400"
+                contain
+              />
+              <div
+                v-else
+                class="text-grey"
+              >
+                暂无图片
+              </div>
             </v-col>
           </v-row>
         </v-expansion-panel-text>
@@ -31,29 +57,65 @@
         <v-expansion-panel-title>声音</v-expansion-panel-title>
         <v-expansion-panel-text>
           <div class="d-flex justify-end mb-2">
-            <v-btn icon variant="text" size="small" @click="edit('voice')"><v-icon>mdi-pencil</v-icon></v-btn>
+            <v-btn
+              icon
+              variant="text"
+              size="small"
+              @click="edit('voice')"
+            >
+              <v-icon>mdi-pencil</v-icon>
+            </v-btn>
           </div>
           <v-row>
-            <v-col cols="6"><div v-html="renderMd(data.voice)"></div></v-col>
             <v-col cols="6">
-              <audio v-if="voiceAudio" :src="voiceAudio" controls style="width: 100%" />
-              <div v-else class="text-grey">暂无音频</div>
+              <div v-html="renderMd(data.voice)" />
+            </v-col>
+            <v-col cols="6">
+              <audio
+                v-if="voiceAudio"
+                :src="voiceAudio"
+                controls
+                style="width: 100%"
+              />
+              <div
+                v-else
+                class="text-grey"
+              >
+                暂无音频
+              </div>
             </v-col>
           </v-row>
         </v-expansion-panel-text>
       </v-expansion-panel>
     </v-expansion-panels>
 
-    <v-dialog v-model="dialog.show" max-width="800">
+    <v-dialog
+      v-model="dialog.show"
+      max-width="800"
+    >
       <v-card>
         <v-card-title>编辑 {{ dialog.field }}</v-card-title>
         <v-card-text>
-          <v-textarea v-model="dialog.content" rows="15" variant="outlined" />
+          <v-textarea
+            v-model="dialog.content"
+            rows="15"
+            variant="outlined"
+          />
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" @click="dialog.show = false">取消</v-btn>
-          <v-btn color="primary" @click="save">保存</v-btn>
+          <v-btn
+            variant="text"
+            @click="dialog.show = false"
+          >
+            取消
+          </v-btn>
+          <v-btn
+            color="primary"
+            @click="save"
+          >
+            保存
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
