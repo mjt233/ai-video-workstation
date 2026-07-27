@@ -6,7 +6,7 @@ export interface WorkflowParams {
   vars: Record<string, string>;
 }
 
-export interface WorkflowDefinition {
+export interface WorkflowDefinition<TPollResult = any> {
   id: string;
   name: string;
   impl: string;
@@ -16,10 +16,10 @@ export interface WorkflowDefinition {
   submit(params: WorkflowParams): Promise<{ taskId: string }>;
 
   /** Optional: poll task status. Not implementing = synchronous task */
-  poll?(taskId: string): Promise<{ status: string; done: boolean }>;
+  poll?(taskId: string): Promise<{ status: string; done: boolean } & TPollResult>;
 
-  /** Extract output spec from completed task */
-  parseOutput(taskId: string, response?: any): Promise<WorkflowOutput>;
+  /** Extract output spec from completed task. response is the extra fields from poll's return (excluding status/done) */
+  parseOutput(taskId: string, response?: TPollResult): Promise<WorkflowOutput>;
 }
 
 export type WorkflowOutput =
