@@ -54,6 +54,17 @@
             </div>
           </v-col>
         </v-row>
+        <div class="d-flex justify-center mt-2">
+          <v-btn
+            size="small"
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-auto-fix"
+            @click="genDialog = { show: true, type: 'appearance' }"
+          >
+            生成
+          </v-btn>
+        </div>
       </v-tabs-window-item>
 
       <v-tabs-window-item value="voice">
@@ -83,8 +94,31 @@
             </div>
           </v-col>
         </v-row>
+        <div class="d-flex justify-center mt-2">
+          <v-btn
+            size="small"
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-auto-fix"
+            @click="genDialog = { show: true, type: 'voice' }"
+          >
+            生成
+          </v-btn>
+        </div>
       </v-tabs-window-item>
     </v-tabs-window>
+
+    <GenerateDialog
+      v-model="genDialog.show"
+      :project="props.project"
+      :workflow-id="genConfig.workflowId"
+      :workflow-name="genConfig.workflowName"
+      :vars="genConfig.vars"
+      :output-path="genConfig.outputPath"
+      :prompt-paths="genConfig.promptPaths"
+      :existing-asset="genConfig.existingAsset"
+      @refresh="load"
+    />
 
     <v-dialog
       v-model="dialog.show"
@@ -123,6 +157,7 @@
 import { ref, watch, computed } from 'vue'
 import { readFs, writeFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
+import GenerateDialog from './GenerateDialog.vue'
 
 interface DialogState {
   show: boolean
@@ -144,6 +179,25 @@ const appearanceImg = computed(() => `/api/fs/${props.project}/assert/character/
 const voiceAudio = computed(() => `/api/fs/${props.project}/assert/character/${props.name}/voice.flac`)
 
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
+
+const genDialog = ref<{ show: boolean; type: 'appearance' | 'voice' }>({ show: false, type: 'appearance' })
+const genConfig = computed(() => {
+  const type = genDialog.value.type
+  return {
+    workflowId: type === 'appearance' ? 'character-appearance' : 'character-voice',
+    workflowName: type === 'appearance' ? '角色外观生成' : '角色声音生成',
+    outputPath: type === 'appearance'
+      ? `assert/character/${props.name}/appearance.jpg`
+      : `assert/character/${props.name}/voice.flac`,
+    vars: { name: props.name },
+    promptPaths: type === 'appearance'
+      ? [`prompt/character/${props.name}/appearance.md`]
+      : [`prompt/character/${props.name}/voice.md`],
+    existingAsset: type === 'appearance'
+      ? (appearanceImg.value ? '已有图片' : undefined)
+      : (voiceAudio.value ? '已有音频' : undefined),
+  }
+})
 
 async function load() {
   const results = await Promise.all([
