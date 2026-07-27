@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 
 DEFAULT_PROJECT = "古人在现代"
+DEFAULT_EPISODE = 1
 
 
 def resolve_project_root(project_root: Optional[str] = None) -> Path:
@@ -24,19 +25,28 @@ def get_project_dir(project_name: str, project_root: Optional[str] = None) -> Pa
     return resolve_project_root(project_root) / "design" / project_name
 
 
-def get_scene_dir(shot_number: int, project_name: str, project_root: Optional[str] = None) -> Path:
-    """获取指定分镜的目录路径。"""
-    return get_project_dir(project_name, project_root) / "prompt" / "scene" / str(shot_number)
+def get_scene_dir(shot_number: int, project_name: str,
+                  episode: int = DEFAULT_EPISODE,
+                  project_root: Optional[str] = None) -> Path:
+    """获取指定分镜的目录路径。
+    路径规则：design/{project_name}/prompt/scene/{episode}/{shot_number}
+    """
+    return (get_project_dir(project_name, project_root)
+            / "prompt" / "scene" / str(episode) / str(shot_number))
 
 
-def get_stage_json_path(shot_number: int, project_name: str, project_root: Optional[str] = None) -> Path:
+def get_stage_json_path(shot_number: int, project_name: str,
+                        episode: int = DEFAULT_EPISODE,
+                        project_root: Optional[str] = None) -> Path:
     """获取指定分镜的 stage.json 路径。"""
-    return get_scene_dir(shot_number, project_name, project_root) / "stage.json"
+    return get_scene_dir(shot_number, project_name, episode, project_root) / "stage.json"
 
 
-def get_script_json_path(shot_number: int, project_name: str, project_root: Optional[str] = None) -> Path:
+def get_script_json_path(shot_number: int, project_name: str,
+                         episode: int = DEFAULT_EPISODE,
+                         project_root: Optional[str] = None) -> Path:
     """获取指定分镜的 script.json 路径。"""
-    return get_scene_dir(shot_number, project_name, project_root) / "script.json"
+    return get_scene_dir(shot_number, project_name, episode, project_root) / "script.json"
 
 
 def read_json(path: Path) -> Any:
@@ -83,6 +93,20 @@ def list_projects(project_root: Optional[str] = None) -> list[str]:
         if d.is_dir() and (d / "overview.md").exists():
             projects.append(d.name)
     return sorted(projects)
+
+
+def list_episodes(project_name: str, project_root: Optional[str] = None) -> list[int]:
+    """列出指定项目下所有集数。
+    扫描 prompt/scene/ 下的数字目录，即为集数。
+    """
+    scene_root = get_project_dir(project_name, project_root) / "prompt" / "scene"
+    if not scene_root.exists():
+        return []
+    episodes = []
+    for d in scene_root.iterdir():
+        if d.is_dir() and d.name.isdigit():
+            episodes.append(int(d.name))
+    return sorted(episodes)
 
 
 def validate_stage_ref(stage_ref: str, project_name: str, project_root: Optional[str] = None) -> bool:

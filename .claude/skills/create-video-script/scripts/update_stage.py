@@ -12,16 +12,18 @@
     --stage-ref     - 可选，新的基础场景完整标签
     --characters    - 可选，新的登场角色名（逗号分隔，最多2个）
     --prompt        - 可选，新的组合提示词
+    -e, --episode   - 集数（默认: 1）
 
 示例:
-    python scripts/update_stage.py 1 0 --prompt "图像1为背景：...；图像2为陈书文：..."
-    python scripts/update_stage.py 1 0 --characters "陈书文" --stage-ref "现代商场/现代商场-白天-平视-晴-中央扶梯"
+    python scripts/update_stage.py -e 1 1 0 --prompt "图像1为背景：...；图像2为陈书文：..."
+    python scripts/update_stage.py -e 1 1 0 --characters "陈书文" --stage-ref "现代商场/现代商场-白天-平视-晴-中央扶梯"
 """
 
 import argparse
 import sys
 from _common import (
     DEFAULT_PROJECT,
+    DEFAULT_EPISODE,
     read_json,
     write_json,
     get_stage_json_path,
@@ -41,6 +43,7 @@ def parse_args():
     parser.add_argument("--characters", type=str, default=None, help="新的登场角色名（逗号分隔，最多2个）")
     parser.add_argument("--prompt", type=str, default=None, help="新的组合提示词")
     parser.add_argument("--project", "-p", type=str, default=DEFAULT_PROJECT, help=f"剧本项目名称（默认: {DEFAULT_PROJECT}）")
+    parser.add_argument("--episode", "-e", type=int, default=DEFAULT_EPISODE, help=f"集数（默认: {DEFAULT_EPISODE}）")
     parser.add_argument("--project-root", type=str, default=None, help="项目根目录（默认当前目录）")
     return parser.parse_args()
 
@@ -48,12 +51,13 @@ def parse_args():
 def main():
     args = parse_args()
     project_name = args.project
+    episode = args.episode
     project_root = args.project_root
-    stage_path = get_stage_json_path(args.shot, project_name, project_root)
+    stage_path = get_stage_json_path(args.shot, project_name, episode, project_root)
     data = read_json(stage_path)
 
     if not data:
-        print(f"⚠️  分镜 {args.shot} 的 stage.json 为空，无法更新。", file=sys.stderr)
+        print(f"⚠️  第{episode}集 分镜 {args.shot} 的 stage.json 为空，无法更新。", file=sys.stderr)
         sys.exit(1)
 
     if args.index < 0 or args.index >= len(data):
@@ -96,7 +100,7 @@ def main():
     data[args.index] = entry
     write_json(stage_path, data)
 
-    print(f"✅ 已更新分镜 {args.shot} 的第 {args.index} 条场景定义:")
+    print(f"✅ 已更新第{episode}集 分镜 {args.shot} 的第 {args.index} 条场景定义:")
     print(f"   更新的字段: {', '.join(changed)}")
 
 

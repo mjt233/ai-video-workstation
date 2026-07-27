@@ -166,6 +166,17 @@ LTX-2.3 是基于图像条件的视频生成模型，提示词需要特别关注
 
 ## 资产原型输出
 
+### 集数（Episode）概念
+
+项目支持多集（多集动画/系列视频）设计。每集拥有独立的分镜序列。
+
+- 集数从 1 开始编号
+- 每集的分镜独立编号，均从 1 开始
+- 分镜资产存放在 `prompt/scene/{集数}/{分镜编号}/` 目录下
+- 所有脚本工具通过 `--episode`（或 `-e`）参数指定操作哪一集的分镜，默认值为 `1`
+- 同一集的场景、角色资产可在各集之间复用，无需重复创建
+
+
 ### 多项目支持
 
 `design/` 目录支持同时维护多个剧本项目，每个项目是一个独立的目录：
@@ -177,7 +188,13 @@ design
   │   └── prompt/
   │       ├── character/...
   │       ├── stage/...
-  │       └── scene/...
+  │       └── scene/
+  │           └── {集数}/
+  │               └── {分镜编号}/
+  │                   ├── overview.md
+  │                   ├── stage.json
+  │                   ├── script.json
+  │                   └── prompt.md
   └── {另一个项目}/
       └── ...
 ```
@@ -262,11 +279,12 @@ design
           │   └── {场景名}
           │       └── {完整场景标签}.md  # 含场景画面描述、主色调
           └── scene
-              └── {分镜编号}         # 从1开始编号
-                  ├── overview.md    # 分镜内容总览
-                  ├── stage.json     # 场景原型JSON（引用stage + 角色 + 组合prompt）
-                  ├── script.json    # 台词原型JSON
-                  └── prompt.md      # 图生视频模型提示词（LTX-2.3）
+              └── {集数}             # 从1开始编号
+                  └── {分镜编号}     # 从1开始编号
+                      ├── overview.md    # 分镜内容总览
+                      ├── stage.json     # 场景原型JSON（引用stage + 角色 + 组合prompt）
+                      ├── script.json    # 台词原型JSON
+                      └── prompt.md      # 图生视频模型提示词（LTX-2.3）
 ```
 
 ### 原型描述内容规范
@@ -350,16 +368,18 @@ name: {角色名}
 
 **分镜生成流程：**
 
-1. 根据剧情拆解出连续的叙事节拍，确定分镜总数
-2. 为每个分镜分配：引用的场景、登场的角色、发生的动作/对白
-3. 确保每个分镜引用的场景 asset 已存在、角色 asset 已存在
-4. 生成分镜内容总览、场景组合 JSON、台词 JSON、视频模型提示词
+1. 确定当前操作的集数（集数从 1 开始编号，每集分镜独立编号）
+2. 根据剧情拆解出连续的叙事节拍，确定该集分镜总数
+3. 为每个分镜分配：引用的场景、登场的角色、发生的动作/对白
+4. 确保每个分镜引用的场景 asset 已存在、角色 asset 已存在
+5. 生成分镜内容总览、场景组合 JSON、台词 JSON、视频模型提示词
 
 #### 分镜内容总览（overview.md）
 
 ```markdown
 ---
 type: storyboard-overview
+episode: {集数}
 scene_id: {分镜编号}
 shot_count: {该分镜包含的镜头数}
 stage_ref: {场景名}/{完整场景标签}
@@ -368,7 +388,7 @@ characters:
   - {角色名2}  # 可选，最多2个
 ---
 
-# 分镜 {分镜编号} - {分镜标题}
+# 第{集数}集 分镜 {分镜编号} - {分镜标题}
 
 ## 叙事节拍
 {该分镜在剧情中承担的作用和要传达的信息}
@@ -454,9 +474,11 @@ python .claude/skills/create-video-script/scripts/validate.py --list-projects
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python .claude/skills/create-video-script/scripts/add_stage.py` | 添加一条场景定义 | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
-| `python .claude/skills/create-video-script/scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python .claude/skills/create-video-script/scripts/remove_stage.py -p 古人在现代 1 0` |
-| `python .claude/skills/create-video-script/scripts/update_stage.py` | 更新场景定义的字段 | `python .claude/skills/create-video-script/scripts/update_stage.py -p 古人在现代 1 0 --prompt "新提示词"` |
+| 命令 | 功能 | 示例 |
+|------|------|------|
+| `python .claude/skills/create-video-script/scripts/add_stage.py` | 添加一条场景定义 | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
+| `python .claude/skills/create-video-script/scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python .claude/skills/create-video-script/scripts/remove_stage.py -p 古人在现代 -e 1 1 0` |
+| `python .claude/skills/create-video-script/scripts/update_stage.py` | 更新场景定义的字段 | `python .claude/skills/create-video-script/scripts/update_stage.py -p 古人在现代 -e 1 1 0 --prompt "新提示词"` |
 
 **`add_stage.py` 参数说明：**
 
@@ -465,6 +487,7 @@ python .claude/skills/create-video-script/scripts/validate.py --list-projects
 3. `角色名` — 逗号分隔，最多 2 个，如 `陈书文` 或 `陈书文,现代女孩`
 4. `prompt` — 组合提示词，使用 `图像1` 代表场景、`图像2/3` 代表角色
 5. `-p` 或 `--project` — 剧本项目名称（默认自动检测）
+6. `-e` 或 `--episode` — 集数（默认: 1）
 
 脚本会自动校验：
 - 场景资产文件（`design/prompt/stage/{场景}/{完整场景标签}.md`）是否存在
@@ -475,8 +498,10 @@ python .claude/skills/create-video-script/scripts/validate.py --list-projects
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python .claude/skills/create-video-script/scripts/add_script.py` | 添加一条台词 | `python .claude/skills/create-video-script/scripts/add_script.py -p 古人在现代 1 "陈书文" "你好，请问这里有人吗？" "期待"` |
-| `python .claude/skills/create-video-script/scripts/remove_script.py` | 移除一条台词（按索引） | `python .claude/skills/create-video-script/scripts/remove_script.py -p 古人在现代 1 0` |
+| 命令 | 功能 | 示例 |
+|------|------|------|
+| `python .claude/skills/create-video-script/scripts/add_script.py` | 添加一条台词 | `python .claude/skills/create-video-script/scripts/add_script.py -p 古人在现代 -e 1 1 "陈书文" "你好，请问这里有人吗？" "期待"` |
+| `python .claude/skills/create-video-script/scripts/remove_script.py` | 移除一条台词（按索引） | `python .claude/skills/create-video-script/scripts/remove_script.py -p 古人在现代 -e 1 1 0` |
 
 **`add_script.py` 参数说明：**
 
@@ -485,16 +510,27 @@ python .claude/skills/create-video-script/scripts/validate.py --list-projects
 3. `台词内容` — 角色说的文本
 4. `情绪` — 可选，默认 `平静`
 5. `-p` 或 `--project` — 剧本项目名称（默认自动检测）
+6. `-e` 或 `--episode` — 集数（默认: 1）
 
 #### 完整性校验
 
 ```bash
-python .claude/skills/create-video-script/scripts/validate.py                      # 自动检测项目并校验所有分镜
-python .claude/skills/create-video-script/scripts/validate.py -p 古人在现代         # 指定项目校验
-python .claude/skills/create-video-script/scripts/validate.py 1 2 3                # 校验指定分镜
-python .claude/skills/create-video-script/scripts/validate.py --fix                # 尝试自动修复
-python .claude/skills/create-video-script/scripts/validate.py --list-projects      # 列出所有可用项目
+python .claude/skills/create-video-script/scripts/validate.py                                        # 自动检测项目并校验所有分镜
+python .claude/skills/create-video-script/scripts/validate.py -p 古人在现代                           # 指定项目校验
+python .claude/skills/create-video-script/scripts/validate.py -p 古人在现代 -e 1                     # 校验第1集所有分镜
+python .claude/skills/create-video-script/scripts/validate.py -e 1 1 2 3                             # 校验第1集的指定分镜
+python .claude/skills/create-video-script/scripts/validate.py --fix                                  # 尝试自动修复
+python .claude/skills/create-video-script/scripts/validate.py --list-projects                        # 列出所有可用项目
 ```
+
+**`validate.py` 参数说明：**
+
+- `分镜序号...` — 可选，要校验的分镜序号（默认校验该集所有分镜）
+- `-p` 或 `--project` — 剧本项目名称（默认自动检测）
+- `-e` 或 `--episode` — 集数（默认: 1）
+- `--fix` — 尝试自动修复
+- `--list-projects` — 列出所有可用项目
+- `--project-root` — 项目根目录（默认当前目录）
 ```
 
 校验内容包括：
@@ -503,7 +539,7 @@ python .claude/skills/create-video-script/scripts/validate.py --list-projects   
 - 登场角色数量是否 ≤ 2
 - prompt 中是否正确使用 `图像1/图像2/图像3` 标识
 - `script.json` 中的角色是否在 `stage.json` 的登场角色中声明
-- 分镜编号是否连续无跳号
+- 分镜编号是否连续无跳号（按集分别校验）
 
 ### 分镜生成优化指南
 
@@ -561,4 +597,4 @@ python .claude/skills/create-video-script/scripts/validate.py --list-projects   
 - 分镜 `stage.json` 中 `登场角色` 数组长度是否不超过 2
 - 分镜 `stage.json` 中 `prompt` 字段是否正确使用"图像1"代表基础场景、"图像2"代表第一个角色、"图像3"代表第二个角色
 - 分镜 `script.json` 中出现的 `角色名` 是否在对应分镜的 `stage.json` 的 `登场角色` 中已声明
-- 分镜编号是否从 1 开始且连续无跳号
+- 分镜编号是否从 1 开始且连续无跳号（按集分别校验）

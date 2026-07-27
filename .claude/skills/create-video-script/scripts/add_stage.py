@@ -10,16 +10,18 @@
     基础场景标签    - 场景完整标签，如 "现代商场/现代商场-白天-平视-晴-中央扶梯"
     角色名          - 逗号分隔的角色名，最多2个，如 "陈书文" 或 "陈书文,现代女孩"
     prompt          - 组合提示词，使用 "图像1" 代表场景、"图像2/3" 代表角色
+    -e, --episode   - 集数（默认: 1）
 
 示例:
-    python scripts/add_stage.py 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：现代商场中央扶梯；图像2为陈书文：年轻女性...；陈书文在扶梯前驻足张望。镜头固定"
-    python scripts/add_stage.py 2 "现代商场/现代商场-白天-平视-晴-奶茶店前" "陈书文,现代女孩" "图像1...；图像2为陈书文...；图像3为现代女孩..."
+    python scripts/add_stage.py -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：现代商场中央扶梯；图像2为陈书文：年轻女性...；陈书文在扶梯前驻足张望。镜头固定"
+    python scripts/add_stage.py -e 1 2 "现代商场/现代商场-白天-平视-晴-奶茶店前" "陈书文,现代女孩" "图像1...；图像2为陈书文...；图像3为现代女孩..."
 """
 
 import argparse
 import sys
 from _common import (
     DEFAULT_PROJECT,
+    DEFAULT_EPISODE,
     read_json,
     write_json,
     get_stage_json_path,
@@ -34,8 +36,8 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  %(prog)s 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景..."
-  %(prog)s 2 "现代商场/现代商场-白天-平视-晴-奶茶店前" "陈书文,现代女孩" "图像1..."
+  %(prog)s -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景..."
+  %(prog)s -e 1 2 "现代商场/现代商场-白天-平视-晴-奶茶店前" "陈书文,现代女孩" "图像1..."
         """,
     )
     parser.add_argument("shot", type=int, help="分镜序号（从 1 开始）")
@@ -43,6 +45,7 @@ def parse_args():
     parser.add_argument("characters", type=str, help="登场角色名，多个用逗号分隔（最多2个）")
     parser.add_argument("prompt", type=str, help="组合提示词（使用 图像1/图像2/图像3 标识场景与角色）")
     parser.add_argument("--project", "-p", type=str, default=DEFAULT_PROJECT, help=f"剧本项目名称（默认: {DEFAULT_PROJECT}）")
+    parser.add_argument("--episode", "-e", type=int, default=DEFAULT_EPISODE, help=f"集数（默认: {DEFAULT_EPISODE}）")
     parser.add_argument("--project-root", type=str, default=None, help="项目根目录（默认当前目录）")
     return parser.parse_args()
 
@@ -50,6 +53,7 @@ def parse_args():
 def main():
     args = parse_args()
     project_name = args.project
+    episode = args.episode
     project_root = args.project_root
 
     # 校验角色数量
@@ -80,12 +84,12 @@ def main():
     }
 
     # 读取现有 stage.json，追加新条目
-    stage_path = get_stage_json_path(args.shot, project_name, project_root)
+    stage_path = get_stage_json_path(args.shot, project_name, episode, project_root)
     data = read_json(stage_path)
     data.append(entry)
     write_json(stage_path, data)
 
-    print(f"📋 分镜 {args.shot} 已添加场景定义（共 {len(data)} 条）")
+    print(f"📋 第{episode}集 分镜 {args.shot} 已添加场景定义（共 {len(data)} 条）")
     print(f"   🎬 基础场景: {args.stage_ref}")
     print(f"   👤 登场角色: {', '.join(characters)}")
 
