@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../../design');
-const ALLOWED_PREFIXES = ['prompt', 'assert'];
+const WRITABLE_PREFIXES = ['prompt', 'assert'];
 
 export const fsRouter = Router();
 
@@ -18,7 +18,8 @@ fsRouter.get('/projects', async (req, res) => {
       .map(e => ({ name: e.name }));
     res.json(projects);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Failed to list projects:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -49,14 +50,15 @@ fsRouter.get('/fs/:project/*', async (req, res) => {
         res.sendFile(fullPath);
       } else {
         const content = await fs.readFile(fullPath, 'utf-8');
-        res.send(content);
+        res.type('text/plain').send(content);
       }
     }
   } catch (err) {
     if (err.code === 'ENOENT') {
       res.status(404).json({ error: 'Not found' });
     } else {
-      res.status(500).json({ error: err.message });
+      console.error('Failed to read fs:', err);
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 });
@@ -74,7 +76,7 @@ fsRouter.post('/fs/:project/*', async (req, res) => {
     }
 
     const prefix = relPath.split('/')[0];
-    if (!ALLOWED_PREFIXES.includes(prefix)) {
+    if (!WRITABLE_PREFIXES.includes(prefix)) {
       return res.status(403).json({ error: 'Only prompt/ and assert/ paths are writable' });
     }
 
@@ -87,6 +89,7 @@ fsRouter.post('/fs/:project/*', async (req, res) => {
     await fs.writeFile(fullPath, content, 'utf-8');
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Failed to write fs:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
