@@ -105,8 +105,23 @@
           class="mb-4"
         >
           <v-card variant="outlined">
-            <v-card-title class="text-subtitle-1">
-              场景{{ i }}
+            <v-card-title class="text-subtitle-1 d-flex align-center">
+              <span>场景{{ i }}</span>
+              <v-spacer />
+              <v-btn
+                icon="mdi-arrow-up"
+                size="x-small"
+                variant="text"
+                :disabled="i === 0 || reordering"
+                @click="moveStage(i, i - 1)"
+              />
+              <v-btn
+                icon="mdi-arrow-down"
+                size="x-small"
+                variant="text"
+                :disabled="i === stageDefs.length - 1 || reordering"
+                @click="moveStage(i, i + 1)"
+              />
             </v-card-title>
             <v-card-text>
               <v-row>
@@ -402,6 +417,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { readFs, writeFs, existsFs } from '../api/client'
+import { reorderSceneStage, AssetApiError } from '../api/assets'
 import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 
@@ -440,6 +456,7 @@ const hasVideo = ref(false)
 const stageAssetUrls = ref<Record<string, string>>({})
 const characterAssetUrls = ref<Record<string, string>>({})
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
+const reordering = ref(false)
 const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index: number }>({ show: false, type: 'image', index: 0 })
 const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: string; label: string }>({
   show: false,
@@ -447,6 +464,19 @@ const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: str
   name: '',
   label: '',
 })
+
+async function moveStage(from: number, to: number) {
+  if (reordering.value) return
+  reordering.value = true
+  try {
+    await reorderSceneStage(props.project, props.episode, props.shot, from, to)
+    await load()
+  } catch (e) {
+    alert(e instanceof AssetApiError ? e.message : '调整顺序失败')
+  } finally {
+    reordering.value = false
+  }
+}
 
 const genImageDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'image',
