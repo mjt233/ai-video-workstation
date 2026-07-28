@@ -57,8 +57,9 @@ export async function discoverTasks(
     if (overwrite) return false;
     const fullPath = path.resolve(projectDir, outputRelPath);
     // Prevent path traversal
-    if (!fullPath.startsWith(path.resolve(projectDir) + path.sep)) return true;
-    return fileExists(fullPath);
+    const rel = path.relative(projectDir, fullPath);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return true;
+    return await fileExists(fullPath);
   }
 
   for (const assetType of assetTypes) {
