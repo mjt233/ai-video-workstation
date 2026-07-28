@@ -79,24 +79,24 @@ ${opts.description || '待补充场景画面描述。'}
 `;
 }
 
-export function shotOverviewMd(episode: string, shot: string): string {
-  return `# 第${episode}集 分镜 ${shot} - 待定标题
+export interface ShotOverview {
+  title: string;
+  beat: string;
+  visual: string;
+  camera: string;
+  duration: number;
+  mood: string;
+}
 
-## 叙事节拍
-待补充该分镜在剧情中的作用。
-
-## 画面描述
-待补充角色位置、朝向、动作与镜头角度。
-
-## 镜头运动
-待补充（固定/推近/拉远/平移等）。
-
-## 时长参考
-待补充
-
-## 情绪基调
-待补充
-`;
+export function shotOverviewJson(title = '待定标题'): ShotOverview {
+  return {
+    title,
+    beat: '',
+    visual: '',
+    camera: '',
+    duration: 5,
+    mood: '',
+  };
 }
 
 export function shotPromptMd(): string {

@@ -4,6 +4,8 @@
 
 检查内容:
   - project.json 的存在性、resolution 和 aspectRatio 字段格式
+  - 每个分镜 overview.json 必须存在，字段齐全，duration 为 >0 的整数
+  - 分镜目录不得残留 overview.md（应已迁移为 overview.json）
   - 每个分镜的 stage.json 基础场景必须非空，且引用的场景资产文件存在
   - 登场角色与 prompt 同时为空时视为直接引用基础场景（合法）
   - 有登场角色时 prompt 不得为空，角色资产目录须存在，数量不超过 2
@@ -27,17 +29,22 @@ import sys
 from _common import (
     DEFAULT_PROJECT,
     DEFAULT_EPISODE,
+    OVERVIEW_REQUIRED_FIELDS,
+    OVERVIEW_STRING_FIELDS,
     read_json,
+    write_json,
     get_project_dir,
     get_scene_dir,
     get_stage_json_path,
     get_script_json_path,
+    get_overview_json_path,
     get_stage_asset_path,
     get_character_dir,
     get_project_config_path,
     read_project_config,
     list_projects,
     list_episodes,
+    normalize_shot_overview,
 )
 
 
@@ -110,8 +117,65 @@ def validate_shot(shot: int, episode: int, project_name: str,
         errors.append(f"第{episode}集 分镜 {shot}: 目录不存在 ({scene_dir})")
         return errors
 
+    overview_path = get_overview_json_path(shot, project_name, episode, project_root)
+    overview_md_path = scene_dir / "overview.md"
     stage_path = get_stage_json_path(shot, project_name, episode, project_root)
     script_path = get_script_json_path(shot, project_name, episode, project_root)
+
+    # ── 检查 overview.json / 残留 overview.md ──
+    if overview_md_path.exists() and not overview_path.exists():
+        if fix:
+            try:
+                from migrate_shot_overview import md_to_overview
+                text = overview_md_path.read_text(encoding="utf-8")
+                data = md_to_overview(text)
+                write_json(overview_path, data)
+                overview_md_path.unlink()
+                print(f"🔧 第{episode}集 分镜 {shot}: 已从 overview.md 迁移为 overview.json")
+            except Exception as e:
+                errors.append(f"第{episode}集 分镜 {shot}: overview.md 自动迁移失败 ({e})")
+        else:
+            errors.append(
+                f"第{episode}集 分镜 {shot}: 仍使用 overview.md，请迁移为 overview.json"
+                "（python .../migrate_shot_overview.py 或 validate.py --fix）"
+            )
+    elif overview_md_path.exists() and overview_path.exists():
+        if fix:
+            overview_md_path.unlink()
+            print(f"🔧 第{episode}集 分镜 {shot}: 已删除残留 overview.md")
+        else:
+            errors.append(f"第{episode}集 分镜 {shot}: 同时存在 overview.md 与 overview.json，应删除 md")
+
+    if not overview_path.exists():
+        if fix:
+            data = normalize_shot_overview({})
+            write_json(overview_path, data)
+            print(f"🔧 第{episode}集 分镜 {shot}: 已创建默认 overview.json")
+        else:
+            errors.append(f"第{episode}集 分镜 {shot}: overview.json 不存在")
+    else:
+        overview_data = read_json(overview_path)
+        if not isinstance(overview_data, dict):
+            errors.append(f"第{episode}集 分镜 {shot}: overview.json 应为对象类型")
+        else:
+            for field in OVERVIEW_REQUIRED_FIELDS:
+                if field not in overview_data:
+                    errors.append(f"第{episode}集 分镜 {shot}: overview.json 缺少 '{field}' 字段")
+            for field in OVERVIEW_STRING_FIELDS:
+                if field in overview_data and overview_data[field] is not None and not isinstance(overview_data[field], str):
+                    errors.append(
+                        f"第{episode}集 分镜 {shot}: overview.json '{field}' 应为字符串，当前: {type(overview_data[field]).__name__}"
+                    )
+            if "duration" in overview_data:
+                duration = overview_data["duration"]
+                if not isinstance(duration, int) or isinstance(duration, bool):
+                    errors.append(
+                        f"第{episode}集 分镜 {shot}: overview.json 'duration' 应为正整数，当前: {duration!r}"
+                    )
+                elif duration <= 0:
+                    errors.append(
+                        f"第{episode}集 分镜 {shot}: overview.json 'duration' 必须 > 0，当前: {duration}"
+                    )
 
     # ── 检查 stage.json ──
     if not stage_path.exists():

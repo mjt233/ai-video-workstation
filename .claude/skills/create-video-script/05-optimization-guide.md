@@ -1,6 +1,6 @@
 # 分镜生成优化指南
 
-> 优化过程中若需增删改分镜的 `stage.json` / `script.json`，请使用 [`04-script-tools.md`](./04-script-tools.md) 中的脚本（`add_stage` / `update_stage` / `remove_stage` / `add_script` / `remove_script`），不要手写 JSON。调整完成后运行 [`validate.py`](./04-script-tools.md#完整性校验) 复核。
+> 优化过程中若需增删改分镜的 `overview.json` / `stage.json` / `script.json`，请使用 [`04-script-tools.md`](./04-script-tools.md) 中的脚本（`set_shot_overview` / `add_stage` / `update_stage` / `remove_stage` / `add_script` / `remove_script`），不要手写 JSON。调整完成后运行 [`validate.py`](./04-script-tools.md#完整性校验) 复核。
 
 ## 叙事拆分策略
 

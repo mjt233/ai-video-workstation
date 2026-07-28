@@ -84,7 +84,7 @@
 
 在场景和角色设计完成后，进入分镜设计环节。分镜是衔接"静态资产设计"与"视频生成"的关键桥梁，每个分镜对应一个独立的视频片段（shot），用于 LTX-2.3 图生视频模型生成。
 
-> 分镜原则确认后，实际落地资产时按 [`03-asset-output.md`](./03-asset-output.md) 输出；其中 `stage.json` / `script.json` 须用 [`04-script-tools.md`](./04-script-tools.md) 中的脚本写入，禁止手写 JSON。
+> 分镜原则确认后，实际落地资产时按 [`03-asset-output.md`](./03-asset-output.md) 输出；其中 `overview.json` / `stage.json` / `script.json` 须用 [`04-script-tools.md`](./04-script-tools.md) 中的脚本写入，禁止手写 JSON。
 
 **分镜设计原则：**
 

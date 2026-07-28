@@ -24,7 +24,7 @@ design
   │       └── scene/
   │           └── {集数}/
   │               └── {分镜编号}/
-  │                   ├── overview.md
+  │                   ├── overview.json
   │                   ├── stage.json
   │                   ├── script.json
   │                   └── prompt.md
@@ -104,7 +104,7 @@ design
           └── scene
               └── {集数}             # 从1开始编号
                   └── {分镜编号}     # 从1开始编号
-                      ├── overview.md    # 分镜内容总览
+                      ├── overview.json  # 分镜内容总览（title/beat/visual/camera/duration/mood）
                       ├── stage.json     # 场景原型JSON（引用stage + 角色 + 组合prompt）
                       ├── script.json    # 台词原型JSON
                       └── prompt.md      # 图生视频模型提示词（LTX-2.3）
@@ -181,7 +181,7 @@ design
 
 分镜资产在总览确认、角色和场景原型都输出完成后生成。每个分镜对应一个独立的视频片段（shot）。
 
-> **工具约束：** `stage.json` / `script.json` **禁止手写编辑**，必须通过 [`04-script-tools.md`](./04-script-tools.md) 中的 Python 脚本增删改；`overview.md` 与 `prompt.md` 可直接写入文件。
+> **工具约束：** `overview.json` / `stage.json` / `script.json` **禁止手写编辑**，必须通过 [`04-script-tools.md`](./04-script-tools.md) 中的 Python 脚本增删改；`prompt.md` 可直接写入文件。
 
 **分镜生成流程：**
 
@@ -189,32 +189,37 @@ design
 2. 根据剧情拆解出连续的叙事节拍，确定该集分镜总数
 3. 为每个分镜分配：引用的场景、登场的角色、发生的动作/对白
 4. 确保每个分镜引用的场景 asset 已存在、角色 asset 已存在
-5. 写入分镜内容总览 `overview.md`
+5. 用 [`set_shot_overview.py`](./04-script-tools.md#分镜总览overviewjson) 写入分镜总览 `overview.json`（含 `duration` 秒数）
 6. 用 [`add_stage.py`](./04-script-tools.md#场景管理stagejson) 写入场景组合 `stage.json`（有角色合成 / 直接引用基础场景两种模式）
 7. 用 [`add_script.py`](./04-script-tools.md#台词管理scriptjson) 写入台词 `script.json`（无对白则跳过，保持 `[]`）
 8. 写入图生视频提示词 `prompt.md`
 9. 该集分镜写完后，运行 [`validate.py`](./04-script-tools.md#完整性校验) 做完整性校验
 
-### 分镜内容总览（overview.md）
+### 分镜内容总览（overview.json）
 
-```markdown
-# 第{集数}集 分镜 {分镜编号} - {分镜标题}
+> **写入方式：** 使用 [`set_shot_overview.py`](./04-script-tools.md#分镜总览overviewjson) 创建或更新字段。不要直接编辑 JSON 文件。
 
-## 叙事节拍
-{该分镜在剧情中承担的作用和要传达的信息}
-
-## 画面描述
-{描述分镜的画面构成：角色在场景中的位置、朝向、动作、镜头角度等}
-
-## 镜头运动
-{描述镜头运动方式：固定/推近/拉远/平移/环绕/跟随等}
-
-## 时长参考
-{建议的视频时长或帧数，如"约3秒（72帧）"}
-
-## 情绪基调
-{该分镜段落的情感色彩}
+```json
+{
+  "title": "{分镜标题}",
+  "beat": "{该分镜在剧情中承担的作用和要传达的信息}",
+  "visual": "{角色在场景中的位置、朝向、动作、镜头角度等}",
+  "camera": "{固定/推近/拉远/平移/环绕/跟随等}",
+  "duration": 5,
+  "mood": "{该分镜段落的情感色彩}"
+}
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `title` | string | 分镜标题 |
+| `beat` | string | 叙事节拍 |
+| `visual` | string | 画面描述 |
+| `camera` | string | 镜头运动 |
+| `duration` | number | 时长（秒，**正整数**，须 `> 0`；默认 `5`） |
+| `mood` | string | 情绪基调 |
+
+> 注意：分镜总览使用 `overview.json`，**不再使用** `overview.md`。项目级 / 角色级 `overview.md` 保持不变。
 
 ### 场景组合JSON（stage.json）
 

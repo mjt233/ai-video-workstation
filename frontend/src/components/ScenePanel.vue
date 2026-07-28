@@ -21,13 +21,66 @@
     <v-tabs-window v-model="tab">
       <v-tabs-window-item value="overview">
         <div class="d-flex mt-2 mb-2 ml-2">
-          <v-btn
-            @click="edit('overview')"
-          >
+          <v-btn @click="editOverview">
             编辑
           </v-btn>
         </div>
-        <MarkdownView :content="data.overview" />
+        <v-card
+          v-if="data.overview"
+          class="ma-2"
+        >
+          <v-card-title class="text-h6">
+            {{ data.overview.title || '（无标题）' }}
+            <v-chip
+              class="ml-2"
+              size="small"
+              color="primary"
+              variant="tonal"
+            >
+              {{ data.overview.duration }} 秒
+            </v-chip>
+          </v-card-title>
+          <v-card-text>
+            <div class="mb-3">
+              <div class="text-caption text-medium-emphasis mb-1">
+                叙事节拍
+              </div>
+              <div class="text-body-2 overview-text">
+                {{ data.overview.beat || '（空）' }}
+              </div>
+            </div>
+            <div class="mb-3">
+              <div class="text-caption text-medium-emphasis mb-1">
+                画面描述
+              </div>
+              <div class="text-body-2 overview-text">
+                {{ data.overview.visual || '（空）' }}
+              </div>
+            </div>
+            <div class="mb-3">
+              <div class="text-caption text-medium-emphasis mb-1">
+                镜头运动
+              </div>
+              <div class="text-body-2 overview-text">
+                {{ data.overview.camera || '（空）' }}
+              </div>
+            </div>
+            <div>
+              <div class="text-caption text-medium-emphasis mb-1">
+                情绪基调
+              </div>
+              <div class="text-body-2 overview-text">
+                {{ data.overview.mood || '（空）' }}
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+        <div
+          v-else
+          class="text-grey ml-2"
+        >
+          暂无 overview.json
+        </div>
       </v-tabs-window-item>
 
       <v-tabs-window-item value="script">
@@ -361,6 +414,82 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog
+      v-model="overviewDialog.show"
+      max-width="720"
+    >
+      <v-card>
+        <v-card-title>编辑分镜总览</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="overviewDialog.form.title"
+            label="标题"
+            variant="outlined"
+            density="comfortable"
+            class="mb-2"
+          />
+          <v-text-field
+            v-model.number="overviewDialog.form.duration"
+            label="时长（秒）"
+            type="number"
+            min="1"
+            step="1"
+            variant="outlined"
+            density="comfortable"
+            class="mb-2"
+            :error-messages="overviewDurationError"
+          />
+          <v-textarea
+            v-model="overviewDialog.form.beat"
+            label="叙事节拍"
+            rows="3"
+            auto-grow
+            variant="outlined"
+            class="mb-2"
+          />
+          <v-textarea
+            v-model="overviewDialog.form.visual"
+            label="画面描述"
+            rows="4"
+            auto-grow
+            variant="outlined"
+            class="mb-2"
+          />
+          <v-textarea
+            v-model="overviewDialog.form.camera"
+            label="镜头运动"
+            rows="3"
+            auto-grow
+            variant="outlined"
+            class="mb-2"
+          />
+          <v-textarea
+            v-model="overviewDialog.form.mood"
+            label="情绪基调"
+            rows="2"
+            auto-grow
+            variant="outlined"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="overviewDialog.show = false"
+          >
+            取消
+          </v-btn>
+          <v-btn
+            color="primary"
+            :loading="overviewDialog.saving"
+            @click="saveOverview"
+          >
+            保存
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <GenerateDialog
       v-model="genImageDialog"
       :project="props.project"
@@ -432,6 +561,15 @@ interface ScriptEntry {
   情绪: string
 }
 
+interface ShotOverview {
+  title: string
+  beat: string
+  visual: string
+  camera: string
+  duration: number
+  mood: string
+}
+
 interface StageDefinition {
   基础场景: string
   登场角色?: string[]
@@ -445,11 +583,76 @@ interface DialogState {
   content: string
 }
 
+interface OverviewDialogState {
+  show: boolean
+  saving: boolean
+  form: ShotOverview
+}
+
 interface SceneData {
-  overview: string
+  overview: ShotOverview | null
   script: ScriptEntry[]
   prompt: string
   stage: StageDefinition[]
+}
+
+function emptyOverview(): ShotOverview {
+  return {
+    title: '',
+    beat: '',
+    visual: '',
+    camera: '',
+    duration: 5,
+    mood: '',
+  }
+}
+
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+}
+
+function cloneOverview(source?: ShotOverview | null): ShotOverview {
+  if (!source) return emptyOverview()
+  return {
+    title: source.title ?? '',
+    beat: source.beat ?? '',
+    visual: source.visual ?? '',
+    camera: source.camera ?? '',
+    duration: isPositiveInt(source.duration) ? source.duration : 5,
+    mood: source.mood ?? '',
+  }
+}
+
+function parseOverview(raw: unknown): ShotOverview | null {
+  if (!raw) return null
+  let obj: unknown = raw
+  if (typeof raw === 'string') {
+    const text = raw.trim()
+    if (!text) return null
+    try {
+      obj = JSON.parse(text)
+    } catch {
+      return null
+    }
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null
+  const data = obj as Record<string, unknown>
+  const durationRaw = data.duration
+  let duration = 5
+  if (isPositiveInt(durationRaw)) {
+    duration = durationRaw
+  } else if (typeof durationRaw === 'string' && durationRaw.trim()) {
+    const n = Number(durationRaw)
+    if (isPositiveInt(n)) duration = n
+  }
+  return {
+    title: typeof data.title === 'string' ? data.title : '',
+    beat: typeof data.beat === 'string' ? data.beat : '',
+    visual: typeof data.visual === 'string' ? data.visual : '',
+    camera: typeof data.camera === 'string' ? data.camera : '',
+    duration,
+    mood: typeof data.mood === 'string' ? data.mood : '',
+  }
 }
 
 const props = defineProps<{ project: string; episode: string; shot: string }>()
@@ -462,6 +665,11 @@ const hasVideo = ref(false)
 const stageAssetUrls = ref<Record<string, string>>({})
 const characterAssetUrls = ref<Record<string, string>>({})
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
+const overviewDialog = ref<OverviewDialogState>({
+  show: false,
+  saving: false,
+  form: emptyOverview(),
+})
 const reordering = ref(false)
 const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index: number }>({ show: false, type: 'image', index: 0 })
 const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: string; label: string }>({
@@ -469,6 +677,14 @@ const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: str
   type: 'character',
   name: '',
   label: '',
+})
+
+const overviewDurationError = computed(() => {
+  const duration = overviewDialog.value.form.duration
+  if (!isPositiveInt(duration)) {
+    return '时长必须是大于 0 的整数秒'
+  }
+  return ''
 })
 
 async function moveStage(from: number, to: number) {
@@ -575,12 +791,12 @@ async function load() {
 
   try {
     const results = await Promise.all([
-      readFs(props.project, `${bp}/overview.md`).catch(() => ''),
+      readFs(props.project, `${bp}/overview.json`).catch(() => null),
       readFs(props.project, `${bp}/script.json`).catch(() => '[]'),
       readFs(props.project, `${bp}/prompt.md`).catch(() => ''),
       readFs(props.project, `${bp}/stage.json`).catch(() => ''),
     ])
-    const overview = results[0] as string
+    const overview = parseOverview(results[0])
     const scriptRaw = results[1]
     if (typeof scriptRaw === 'string') {
       scriptEntries = JSON.parse(scriptRaw || '[]') as ScriptEntry[]
@@ -653,6 +869,14 @@ function editJson(field: string) {
   dialog.value = { show: true, field, content: JSON.stringify(data.value![field as keyof SceneData], null, 2) }
 }
 
+function editOverview() {
+  overviewDialog.value = {
+    show: true,
+    saving: false,
+    form: cloneOverview(data.value?.overview),
+  }
+}
+
 function editStageJson() {
   dialog.value = {
     show: true,
@@ -662,6 +886,39 @@ function editStageJson() {
       null,
       2,
     ),
+  }
+}
+
+async function saveOverview() {
+  if (overviewDurationError.value) {
+    alert(overviewDurationError.value)
+    return
+  }
+
+  const form = overviewDialog.value.form
+  const duration = Number(form.duration)
+  if (!isPositiveInt(duration)) {
+    alert('时长必须是大于 0 的整数秒')
+    return
+  }
+  const payload: ShotOverview = {
+    title: (form.title ?? '').trim(),
+    beat: form.beat ?? '',
+    visual: form.visual ?? '',
+    camera: form.camera ?? '',
+    duration,
+    mood: form.mood ?? '',
+  }
+
+  overviewDialog.value.saving = true
+  try {
+    await writeFs(props.project, `${basePath.value}/overview.json`, JSON.stringify(payload, null, 2))
+    if (data.value) data.value.overview = payload
+    overviewDialog.value.show = false
+  } catch (e: unknown) {
+    alert(e instanceof Error ? e.message : '保存失败')
+  } finally {
+    overviewDialog.value.saving = false
   }
 }
 
@@ -692,7 +949,6 @@ async function save() {
   }
   await writeFs(props.project, `${basePath.value}/${file}`, content)
   if (field === 'script' && data.value) data.value.script = JSON.parse(content)
-  else if (data.value && field === 'overview') data.value.overview = content
   else if (data.value && field === 'prompt') data.value.prompt = content
   dialog.value.show = false
 }
@@ -702,7 +958,8 @@ watch(() => [props.project, props.episode, props.shot], load, { immediate: true 
 
 <style scoped>
 
-.stage-prompt {
+.stage-prompt,
+.overview-text {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;

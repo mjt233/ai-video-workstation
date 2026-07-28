@@ -12,8 +12,8 @@ disable-model-invocation: true
 |---|------|------|
 | 1 | [`01-preset.md`](./01-preset.md) | 前置设定 — 通过问答引导用户确立项目顶层定位（目标受众、情感/色彩基调、美术风格、画面比例、剧情方向等） |
 | 2 | [`02-content-design.md`](./02-content-design.md) | 内容设计 — 美术风格、剧情概要、世界观、角色设计、场景设计、分镜设计原则 |
-| 3 | [`03-asset-output.md`](./03-asset-output.md) | 资产原型输出 — 集数概念、多项目支持、目录结构、模板规范（overview.md / appearance.md / voice.md）、分镜资产输出 |
-| 4 | [`04-script-tools.md`](./04-script-tools.md) | 分镜脚本工具参考 — Python 脚本用法（add_stage / add_script / validate 等） |
+| 3 | [`03-asset-output.md`](./03-asset-output.md) | 资产原型输出 — 集数概念、多项目支持、目录结构、模板规范（角色 overview.md / appearance.md / voice.md、分镜 overview.json）、分镜资产输出 |
+| 4 | [`04-script-tools.md`](./04-script-tools.md) | 分镜脚本工具参考 — Python 脚本用法（set_shot_overview / add_stage / add_script / validate 等） |
 | 5 | [`05-optimization-guide.md`](./05-optimization-guide.md) | 分镜生成优化指南 — 叙事拆分策略、LTX-2.3 优化要点、分镜数量建议 |
 | 6 | [`06-self-review.md`](./06-self-review.md) | 输出自我审查 — 产出资产的质量检查清单 |
 

@@ -44,7 +44,7 @@ prompt/
 ├── stage/{场景名}/
 │   └── {完整场景标签}.md # 子场景画面描述
 └── scene/{集数}/{分镜}/
-    ├── overview.md      # 分镜叙事总览
+    ├── overview.json    # 分镜叙事总览（title/beat/visual/camera/duration/mood）
     ├── stage.json       # 关键帧定义（引用场景/角色）
     ├── script.json      # 台词列表
     └── prompt.md        # 图生视频提示词
@@ -83,10 +83,32 @@ prompt/
 
 | 文件 | 格式 | 用途 |
 |------|------|------|
-| `overview.md` | Markdown | 叙事节拍、画面、运镜、时长、情绪 |
+| `overview.json` | JSON 对象 | 标题、叙事节拍、画面、运镜、时长（秒）、情绪 |
 | `stage.json` | JSON 数组 | 静态关键帧（首/中/尾帧） |
 | `script.json` | JSON 数组 | 台词顺序表 |
 | `prompt.md` | 纯文本 | 图生视频正向提示词（建议英文） |
+
+#### `overview.json`
+
+```json
+{
+  "title": "书生初临",
+  "beat": "建立镜头……",
+  "visual": "商场正门入口……",
+  "camera": "slow zoom in",
+  "duration": 5,
+  "mood": "困惑、陌生、好奇"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `title` | string | 分镜标题 |
+| `beat` | string | 叙事节拍 |
+| `visual` | string | 画面描述 |
+| `camera` | string | 镜头运动 |
+| `duration` | number | 时长（秒，**正整数**，须 `> 0`；默认 `5`） |
+| `mood` | string | 情绪基调 |
 
 #### `stage.json`
 
@@ -216,7 +238,7 @@ assert/scene/{ep}/{shot}/voice/{index}-{角色名}.flac
 | 角色声音 | `prompt/character/{name}/voice.md` | `assert/character/{name}/voice.flac` |
 | 角色总览 | `prompt/character/{name}/overview.md` | （无对应产物） |
 | 子场景 | `prompt/stage/{stage}/{label}.md` | `assert/stage/{stage}/{label}.jpg` |
-| 分镜总览 | `prompt/scene/{ep}/{shot}/overview.md` | （无对应产物） |
+| 分镜总览 | `prompt/scene/{ep}/{shot}/overview.json` | （无对应产物） |
 | 分镜关键帧定义 | `prompt/scene/{ep}/{shot}/stage.json` | `assert/scene/{ep}/{shot}/stage/{i}.jpg` |
 | 分镜台词 | `prompt/scene/{ep}/{shot}/script.json` | `assert/scene/{ep}/{shot}/voice/{i}-{角色}.flac` |
 | 分镜视频提示词 | `prompt/scene/{ep}/{shot}/prompt.md` | `assert/scene/{ep}/{shot}/video/{i}.mp4` |
@@ -306,7 +328,7 @@ design/AI的第一天/
 ├── prompt/
 │   ├── character/小霓/{overview,appearance,voice}.md
 │   ├── stage/便利店内部/便利店内部-夜晚-平视-冷白霓虹-收银台.md
-│   └── scene/1/1/{overview.md,stage.json,script.json,prompt.md}
+│   └── scene/1/1/{overview.json,stage.json,script.json,prompt.md}
 └── assert/
     ├── character/小霓/appearance.jpg
     ├── stage/便利店内部/便利店内部-夜晚-平视-冷白霓虹-收银台.jpg

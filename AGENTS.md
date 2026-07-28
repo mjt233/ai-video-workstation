@@ -24,7 +24,7 @@
 prompt/
   character/{name}/{overview,appearance,voice}.md
   stage/{stage}/{stage}-{subscene}.md
-  scene/{episode}/{shot}/{overview,stage,script,prompt}.{md,json}
+  scene/{episode}/{shot}/{overview,stage,script}.json + prompt.md
 assert/  (图片, 音频)
 overview.md
 ```

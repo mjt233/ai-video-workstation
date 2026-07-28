@@ -182,7 +182,7 @@ export async function discoverTasks(
                       impl: 'default',
                       vars: { episode, shot, index: String(index) } satisfies SceneStageImageVars,
                       promptPaths: [
-                        `prompt/scene/${episode}/${shot}/overview.md`,
+                        `prompt/scene/${episode}/${shot}/overview.json`,
                         `prompt/scene/${episode}/${shot}/stage.json`,
                       ],
                       outputPath,

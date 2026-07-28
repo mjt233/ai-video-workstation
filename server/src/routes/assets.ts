@@ -15,7 +15,7 @@ import {
   characterAppearanceMd,
   characterOverviewMd,
   characterVoiceMd,
-  shotOverviewMd,
+  shotOverviewJson,
   shotPromptMd,
   subsceneMd,
 } from '../assets/templates.js';
@@ -159,7 +159,11 @@ assetsRouter.post('/assets/:project/shot', async (req: Request, res: Response) =
     const shotId = String(target);
     const shotDir = path.join(epDir, shotId);
     await ensureDir(shotDir);
-    await fs.writeFile(path.join(shotDir, 'overview.md'), shotOverviewMd(String(episode), shotId), 'utf-8');
+    await fs.writeFile(
+      path.join(shotDir, 'overview.json'),
+      `${JSON.stringify(shotOverviewJson(), null, 2)}\n`,
+      'utf-8',
+    );
     await fs.writeFile(path.join(shotDir, 'stage.json'), '[]\n', 'utf-8');
     await fs.writeFile(path.join(shotDir, 'script.json'), '[]\n', 'utf-8');
     await fs.writeFile(path.join(shotDir, 'prompt.md'), shotPromptMd(), 'utf-8');

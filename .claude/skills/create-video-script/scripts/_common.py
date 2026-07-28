@@ -49,6 +49,64 @@ def get_script_json_path(shot_number: int, project_name: str,
     return get_scene_dir(shot_number, project_name, episode, project_root) / "script.json"
 
 
+def get_overview_json_path(shot_number: int, project_name: str,
+                           episode: int = DEFAULT_EPISODE,
+                           project_root: Optional[str] = None) -> Path:
+    """获取指定分镜的 overview.json 路径。"""
+    return get_scene_dir(shot_number, project_name, episode, project_root) / "overview.json"
+
+
+# 分镜 overview.json 字段与默认值
+OVERVIEW_STRING_FIELDS = ("title", "beat", "visual", "camera", "mood")
+OVERVIEW_REQUIRED_FIELDS = (*OVERVIEW_STRING_FIELDS, "duration")
+DEFAULT_SHOT_DURATION = 5
+
+
+def default_shot_overview(title: str = "待定标题") -> dict:
+    """新建分镜 overview.json 的默认内容。"""
+    return {
+        "title": title,
+        "beat": "",
+        "visual": "",
+        "camera": "",
+        "duration": DEFAULT_SHOT_DURATION,
+        "mood": "",
+    }
+
+
+def normalize_shot_overview(data: Any) -> dict:
+    """
+    将任意输入规范为完整 overview 对象。
+    缺失字段补默认值；duration 非法时回退默认 5。
+    duration 必须是正整数。
+    """
+    base = default_shot_overview()
+    if not isinstance(data, dict):
+        return base
+    result = dict(base)
+    for key in OVERVIEW_STRING_FIELDS:
+        if key in data and data[key] is not None:
+            result[key] = str(data[key])
+    if "duration" in data and data["duration"] is not None:
+        try:
+            raw = data["duration"]
+            # 仅接受整数或可无损转为整数的数值（如 4.0）
+            if isinstance(raw, bool):
+                raise TypeError("bool is not a valid duration")
+            if isinstance(raw, int):
+                duration = raw
+            else:
+                as_float = float(raw)
+                if as_float != int(as_float):
+                    raise ValueError("duration must be an integer")
+                duration = int(as_float)
+            if duration > 0:
+                result["duration"] = duration
+        except (TypeError, ValueError):
+            pass
+    return result
+
+
 def read_json(path: Path) -> Any:
     """读取 JSON 文件，文件不存在时返回空数组。"""
     if not path.exists():

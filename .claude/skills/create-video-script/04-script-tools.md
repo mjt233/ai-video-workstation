@@ -15,6 +15,32 @@
 python .claude/skills/create-video-script/scripts/validate.py --list-projects
 ```
 
+## 分镜总览（overview.json）
+
+| 命令 | 功能 | 示例 |
+|------|------|------|
+| `python .claude/skills/create-video-script/scripts/set_shot_overview.py` | 创建/更新分镜总览字段 | `python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --title "书生初临" --duration 4` |
+| `python .claude/skills/create-video-script/scripts/migrate_shot_overview.py` | 将旧 `overview.md` 迁移为 `overview.json` | `python .claude/skills/create-video-script/scripts/migrate_shot_overview.py -p 古人在现代` |
+
+### `set_shot_overview.py` 参数说明
+
+1. `分镜序号` — 整数，从 1 开始
+2. `--title` — 分镜标题
+3. `--beat` — 叙事节拍
+4. `--visual` — 画面描述
+5. `--camera` — 镜头运动
+6. `--duration` — 时长（秒，**正整数**，须 `> 0`；默认 `5`）
+7. `--mood` — 情绪基调
+8. `-p` 或 `--project` — 剧本项目名称
+9. `-e` 或 `--episode` — 集数（默认: 1）
+
+至少指定一个字段。文件不存在时会按默认值创建完整 `overview.json`，再应用本次更新。
+
+```bash
+python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --title "书生初临" --beat "建立镜头" --visual "..." --camera "slow zoom in" --duration 4 --mood "困惑"
+python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --duration 5
+```
+
 ## 场景管理（stage.json）
 
 | 命令 | 功能 | 示例 |
@@ -77,6 +103,8 @@ python .claude/skills/create-video-script/scripts/validate.py --list-projects   
 
 ### 校验内容
 
+- 每个分镜 `overview.json` 是否存在，字段齐全（`title/beat/visual/camera/duration/mood`），`duration` 为 `> 0` 的整数
+- 分镜目录不得残留 `overview.md`
 - 每个分镜 `stage.json` 的 `基础场景` 是否非空，且引用的场景资产文件是否存在
 - 每个分镜 `stage.json` 引用的角色资产目录是否存在（有角色时）
 - 登场角色数量是否 ≤ 2
