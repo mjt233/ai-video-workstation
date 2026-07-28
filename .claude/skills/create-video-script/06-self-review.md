@@ -1,5 +1,7 @@
 # 输出自我审查
 
+> **自动化校验优先：** 审查前先运行 [`validate.py`](./04-script-tools.md#完整性校验)（可加 `--fix` 尝试自动修复），再由子 Agent 对照下列清单做人工复核。脚本参数与校验范围见 [`04-script-tools.md`](./04-script-tools.md)。
+
 派出一个干净的子Agent（Sub-Agent），检查本次输出产生的prompt资产是否满足以下约束：
 
 - 非外国角色或地名的资产文件夹名称是否为中文

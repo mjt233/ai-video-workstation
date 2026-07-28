@@ -36,7 +36,7 @@
      - 方形 1:1（1080×1080）— 适合社交平台信息流
    - 不限于上述常见选择，可根据发布平台发散
 
-> 用户选定画面比例与分辨率后，依次运行以下命令写入 `project.json`：
+> 用户选定画面比例与分辨率后，依次运行以下命令写入 `project.json`（项目属性脚本，与分镜 JSON 工具同属 `scripts/`；分镜相关工具见 [`04-script-tools.md`](./04-script-tools.md)）：
 > ```bash
 > python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" aspectRatio "{用户选择的比例}"
 > python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" width {画面宽度}

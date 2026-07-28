@@ -7,7 +7,7 @@
 - 集数从 1 开始编号
 - 每集的分镜独立编号，均从 1 开始
 - 分镜资产存放在 `prompt/scene/{集数}/{分镜编号}/` 目录下
-- 所有脚本工具通过 `--episode`（或 `-e`）参数指定操作哪一集的分镜，默认值为 `1`
+- 所有脚本工具通过 `--episode`（或 `-e`）参数指定操作哪一集的分镜，默认值为 `1`（详见 [`04-script-tools.md`](./04-script-tools.md)）
 - 同一集的场景、角色资产可在各集之间复用，无需重复创建
 
 ## 多项目支持
@@ -34,7 +34,7 @@ design
 
 - 每个项目目录下必须有 `overview.md` 文件（脚本工具通过此文件识别项目）
 - 脚本工具通过 `--project`（或 `-p`）参数指定操作哪个项目，默认使用第一个检测到的项目
-- 使用 `python .../validate.py --list-projects` 列出所有可用项目
+- 使用 [`validate.py --list-projects`](./04-script-tools.md#列出项目) 列出所有可用项目
 
 ## 约定
 
@@ -181,13 +181,19 @@ design
 
 分镜资产在总览确认、角色和场景原型都输出完成后生成。每个分镜对应一个独立的视频片段（shot）。
 
+> **工具约束：** `stage.json` / `script.json` **禁止手写编辑**，必须通过 [`04-script-tools.md`](./04-script-tools.md) 中的 Python 脚本增删改；`overview.md` 与 `prompt.md` 可直接写入文件。
+
 **分镜生成流程：**
 
 1. 确定当前操作的集数（集数从 1 开始编号，每集分镜独立编号）
 2. 根据剧情拆解出连续的叙事节拍，确定该集分镜总数
 3. 为每个分镜分配：引用的场景、登场的角色、发生的动作/对白
 4. 确保每个分镜引用的场景 asset 已存在、角色 asset 已存在
-5. 生成分镜内容总览、场景组合 JSON、台词 JSON、视频模型提示词
+5. 写入分镜内容总览 `overview.md`
+6. 用 [`add_stage.py`](./04-script-tools.md#场景管理stagejson) 写入场景组合 `stage.json`（有角色合成 / 直接引用基础场景两种模式）
+7. 用 [`add_script.py`](./04-script-tools.md#台词管理scriptjson) 写入台词 `script.json`（无对白则跳过，保持 `[]`）
+8. 写入图生视频提示词 `prompt.md`
+9. 该集分镜写完后，运行 [`validate.py`](./04-script-tools.md#完整性校验) 做完整性校验
 
 ### 分镜内容总览（overview.md）
 
@@ -211,6 +217,8 @@ design
 ```
 
 ### 场景组合JSON（stage.json）
+
+> **写入方式：** 使用 [`add_stage.py`](./04-script-tools.md#场景管理stagejson) 添加条目；修改用 [`update_stage.py`](./04-script-tools.md#场景管理stagejson)，删除用 [`remove_stage.py`](./04-script-tools.md#场景管理stagejson)。不要直接编辑 JSON 文件。
 
 stage.json 描述的是**静态关键帧**，作为图生视频模型的参考帧输入。数组中的每个元素定义一帧的画面构成，按顺序对应视频的不同时间点：
 
@@ -252,6 +260,8 @@ stage.json 描述的是**静态关键帧**，作为图生视频模型的参考�
 > - 当需要首尾帧时，两个元素的 `基础场景` 和 `登场角色` 通常相同，但 `prompt` 描述的角色姿势/位置/表情不同
 
 ### 台词原型JSON（script.json）
+
+> **写入方式：** 使用 [`add_script.py`](./04-script-tools.md#台词管理scriptjson) 添加台词；删除用 [`remove_script.py`](./04-script-tools.md#台词管理scriptjson)。不要直接编辑 JSON 文件。
 
 ```json
 [

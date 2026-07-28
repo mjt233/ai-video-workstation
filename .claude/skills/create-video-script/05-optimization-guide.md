@@ -1,5 +1,7 @@
 # 分镜生成优化指南
 
+> 优化过程中若需增删改分镜的 `stage.json` / `script.json`，请使用 [`04-script-tools.md`](./04-script-tools.md) 中的脚本（`add_stage` / `update_stage` / `remove_stage` / `add_script` / `remove_script`），不要手写 JSON。调整完成后运行 [`validate.py`](./04-script-tools.md#完整性校验) 复核。
+
 ## 叙事拆分策略
 
 将剧情拆分为分镜时，遵循以下策略可提升视频生成质量：
