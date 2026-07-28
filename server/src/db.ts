@@ -52,11 +52,7 @@ try {
 } catch {
   // Column already exists, ignore
 }
-try {
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_batch ON tasks(batch_id);`);
-} catch {
-  // Index already exists, ignore
-}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_batch ON tasks(batch_id);`);
 
 export interface TaskRecord {
   id: string;
@@ -147,7 +143,7 @@ export function getPendingTasks(): TaskRecord[] {
 }
 
 export interface BatchSummary {
-  batchId: string
+  batch_id: string
   project: string
   total: number
   completed: number
@@ -159,7 +155,7 @@ export interface BatchSummary {
 export function getBatchSummary(batchId: string): BatchSummary | null {
   const rows = db.prepare(`
     SELECT
-      batch_id AS batchId,
+      batch_id,
       project,
       COUNT(*) AS total,
       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
@@ -167,13 +163,8 @@ export function getBatchSummary(batchId: string): BatchSummary | null {
       SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running,
       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending
     FROM tasks WHERE batch_id = ?
-    GROUP BY batch_id
   `).get(batchId) as BatchSummary | undefined;
   return rows ?? null;
-}
-
-export function listTasksByBatch(batchId: string): TaskRecord[] {
-  return db.prepare('SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC').all(batchId) as TaskRecord[];
 }
 
 export default db;
