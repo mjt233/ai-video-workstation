@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fsRouter } from './routes/fs.js';
+import { assetsRouter } from './routes/assets.js';
 import { workflowRouter } from './routes/workflow.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
 
@@ -12,6 +13,7 @@ const PORT = process.env.PORT || 3001;
 app.use(express.json());
 
 app.use('/api', fsRouter);
+app.use('/api', assetsRouter);
 app.use('/api', workflowRouter);
 
 const distPath = path.resolve(__dirname, '../../frontend/dist');
