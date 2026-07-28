@@ -49,8 +49,12 @@
       class="pa-4 d-flex flex-column"
       style="overflow: hidden; height: 100%;"
     >
+      <ProjectPanel
+        v-if="type === 'project'"
+        :project
+      />
       <CharacterPanel
-        v-if="type === 'character'"
+        v-else-if="type === 'character'"
         :project
         :name
       />
@@ -130,6 +134,7 @@
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AssetTree from '../components/AssetTree.vue'
+import ProjectPanel from '../components/ProjectPanel.vue'
 import CharacterPanel from '../components/CharacterPanel.vue'
 import StagePanel from '../components/StagePanel.vue'
 import ScenePanel from '../components/ScenePanel.vue'
