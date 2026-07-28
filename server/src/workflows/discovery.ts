@@ -1,0 +1,215 @@
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DESIGN_DIR = path.resolve(__dirname, '../../../design');
+
+export interface DiscoveredTask {
+  workflowId: string;
+  impl: string;
+  vars: Record<string, string>;
+  promptPaths: string[];
+  outputPath: string;
+}
+
+/**
+ * Check whether a file exists at the given path.
+ */
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Discover all generation tasks for a project based on selected asset types.
+ *
+ * @param project   – project name (subdirectory under design/)
+ * @param assetTypes – array of asset type identifiers to discover
+ * @param overwrite  – if true, include tasks even if the output file already exists
+ * @returns an array of discovered tasks
+ */
+export async function discoverTasks(
+  project: string,
+  assetTypes: string[],
+  overwrite: boolean,
+): Promise<DiscoveredTask[]> {
+  const tasks: DiscoveredTask[] = [];
+  const projectDir = path.resolve(DESIGN_DIR, project);
+  const promptDir = path.join(projectDir, 'prompt');
+
+  // Guard: ensure the project directory exists
+  try {
+    await fs.access(projectDir);
+  } catch {
+    return tasks;
+  }
+
+  /**
+   * Check whether an output file should be skipped.
+   * outputRelPath is a project-relative path like "assert/character/xxx/appearance.jpg".
+   */
+  async function shouldSkipOutput(outputRelPath: string): Promise<boolean> {
+    if (overwrite) return false;
+    const fullPath = path.resolve(projectDir, outputRelPath);
+    // Prevent path traversal
+    if (!fullPath.startsWith(path.resolve(projectDir) + path.sep)) return true;
+    return fileExists(fullPath);
+  }
+
+  for (const assetType of assetTypes) {
+    switch (assetType) {
+      // ── Character Appearance ──────────────────────────────────────
+      case 'character-appearance': {
+        const charDir = path.join(promptDir, 'character');
+        try {
+          const entries = await fs.readdir(charDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const name = entry.name;
+            const outputPath = `assert/character/${name}/appearance.jpg`;
+            if (await shouldSkipOutput(outputPath)) continue;
+            tasks.push({
+              workflowId: 'character-appearance',
+              impl: 'default',
+              vars: { name },
+              promptPaths: [`prompt/character/${name}/appearance.md`],
+              outputPath,
+            });
+          }
+        } catch {
+          // prompt/character/ doesn't exist — skip this asset type
+        }
+        break;
+      }
+
+      // ── Character Voice ───────────────────────────────────────────
+      case 'character-voice': {
+        const charDir = path.join(promptDir, 'character');
+        try {
+          const entries = await fs.readdir(charDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const name = entry.name;
+            const outputPath = `assert/character/${name}/voice.flac`;
+            if (await shouldSkipOutput(outputPath)) continue;
+            tasks.push({
+              workflowId: 'character-voice',
+              impl: 'default',
+              vars: { name },
+              promptPaths: [`prompt/character/${name}/voice.md`],
+              outputPath,
+            });
+          }
+        } catch {
+          // prompt/character/ doesn't exist
+        }
+        break;
+      }
+
+      // ── Stage Image ───────────────────────────────────────────────
+      case 'stage-image': {
+        const stageDir = path.join(promptDir, 'stage');
+        try {
+          const stageEntries = await fs.readdir(stageDir, { withFileTypes: true });
+          for (const stageEntry of stageEntries) {
+            if (!stageEntry.isDirectory()) continue;
+            const stageName = stageEntry.name;
+            const stagePath = path.join(stageDir, stageName);
+            const files = await fs.readdir(stagePath);
+            for (const file of files) {
+              if (!file.endsWith('.md')) continue;
+              const label = file.slice(0, -'.md'.length);
+              const outputPath = `assert/stage/${stageName}/${label}.jpg`;
+              if (await shouldSkipOutput(outputPath)) continue;
+              tasks.push({
+                workflowId: 'stage-image',
+                impl: 'default',
+                vars: { name: stageName, label },
+                promptPaths: [`prompt/stage/${stageName}/${label}.md`],
+                outputPath,
+              });
+            }
+          }
+        } catch {
+          // prompt/stage/ doesn't exist
+        }
+        break;
+      }
+
+      // ── Scene-level asset types (shared iteration) ────────────────
+      case 'scene-stage-image':
+      case 'scene-tts':
+      case 'video-generate': {
+        const sceneDir = path.join(promptDir, 'scene');
+        try {
+          const episodeEntries = await fs.readdir(sceneDir, { withFileTypes: true });
+          for (const episodeEntry of episodeEntries) {
+            if (!episodeEntry.isDirectory()) continue;
+            const episode = episodeEntry.name;
+            const episodePath = path.join(sceneDir, episode);
+            const shotEntries = await fs.readdir(episodePath, { withFileTypes: true });
+            for (const shotEntry of shotEntries) {
+              if (!shotEntry.isDirectory()) continue;
+              const shot = shotEntry.name;
+
+              if (assetType === 'scene-stage-image') {
+                const outputPath = `assert/scene/${episode}/${shot}/stage.jpg`;
+                if (await shouldSkipOutput(outputPath)) continue;
+                tasks.push({
+                  workflowId: 'scene-stage-image',
+                  impl: 'default',
+                  vars: { episode, shot },
+                  promptPaths: [
+                    `prompt/scene/${episode}/${shot}/overview.md`,
+                    `prompt/scene/${episode}/${shot}/stage.json`,
+                  ],
+                  outputPath,
+                });
+              } else if (assetType === 'video-generate') {
+                const outputPath = `assert/scene/${episode}/${shot}/video.mp4`;
+                if (await shouldSkipOutput(outputPath)) continue;
+                tasks.push({
+                  workflowId: 'video-generate',
+                  impl: 'default',
+                  vars: { episode, shot },
+                  promptPaths: [`prompt/scene/${episode}/${shot}/prompt.md`],
+                  outputPath,
+                });
+              } else if (assetType === 'scene-tts') {
+                const scriptPath = path.join(episodePath, shot, 'script.json');
+                try {
+                  const scriptContent = await fs.readFile(scriptPath, 'utf-8');
+                  const script = JSON.parse(scriptContent) as Array<{ 角色名: string; 台词: string; 表情?: string }>;
+                  const uniqueCharacters = [...new Set(script.map(line => line.角色名))];
+                  for (const character of uniqueCharacters) {
+                    const outputPath = `assert/scene/${episode}/${shot}/voice_${character}.flac`;
+                    if (await shouldSkipOutput(outputPath)) continue;
+                    tasks.push({
+                      workflowId: 'scene-tts',
+                      impl: 'default',
+                      vars: { episode, shot, character },
+                      promptPaths: [`prompt/scene/${episode}/${shot}/script.json`],
+                      outputPath,
+                    });
+                  }
+                } catch {
+                  // script.json missing or invalid — skip this shot
+                }
+              }
+            }
+          }
+        } catch {
+          // prompt/scene/ doesn't exist
+        }
+        break;
+      }
+    }
+  }
+
+  return tasks;
+}
