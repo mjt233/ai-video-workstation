@@ -365,6 +365,7 @@ function onSelect(items: unknown) {
     patchQuery({
       type: 'character',
       name: item.name,
+      subscene: undefined,
       episode: undefined,
       shot: undefined,
     })
@@ -372,9 +373,11 @@ function onSelect(items: unknown) {
   }
 
   if (item.kind === 'stage') {
+    // 仅选中场景父节点时不指定子场景，详情区提示从树中选择子场景
     patchQuery({
       type: 'stage',
       name: item.stageName ?? item.name,
+      subscene: undefined,
       episode: undefined,
       shot: undefined,
     })
@@ -385,6 +388,7 @@ function onSelect(items: unknown) {
     patchQuery({
       type: 'stage',
       name: item.stageName,
+      subscene: item.label,
       episode: undefined,
       shot: undefined,
     })
@@ -395,6 +399,7 @@ function onSelect(items: unknown) {
     patchQuery({
       type: 'scene',
       name: undefined,
+      subscene: undefined,
       episode: item.episode,
       shot: item.shot,
     })
@@ -452,6 +457,7 @@ async function onCreated(payload: {
     patchQuery({
       type: 'character',
       name: payload.name,
+      subscene: undefined,
       episode: undefined,
       shot: undefined,
     })
@@ -459,13 +465,15 @@ async function onCreated(payload: {
     patchQuery({
       type: 'stage',
       name: payload.name,
+      subscene: undefined,
       episode: undefined,
       shot: undefined,
     })
-  } else if (payload.type === 'subscene' && payload.stage) {
+  } else if (payload.type === 'subscene' && payload.stage && payload.label) {
     patchQuery({
       type: 'stage',
       name: payload.stage,
+      subscene: payload.label,
       episode: undefined,
       shot: undefined,
     })
@@ -474,6 +482,7 @@ async function onCreated(payload: {
     patchQuery({
       type: 'scene',
       name: undefined,
+      subscene: undefined,
       episode: payload.episode,
       shot: payload.shot,
     })
@@ -484,23 +493,28 @@ function clearSelectionIfDeleted(item: TreeItem) {
   const q = router.currentRoute.value.query
   const type = q.type as string | undefined
   const name = q.name as string | undefined
+  const subscene = q.subscene as string | undefined
   const episode = q.episode as string | undefined
   const shot = q.shot as string | undefined
 
   if (item.kind === 'character' && type === 'character' && name === item.name) {
-    patchQuery({ type: undefined, name: undefined })
+    patchQuery({ type: undefined, name: undefined, subscene: undefined })
     return
   }
   if (item.kind === 'stage' && type === 'stage' && name === (item.stageName ?? item.name)) {
-    patchQuery({ type: undefined, name: undefined })
+    patchQuery({ type: undefined, name: undefined, subscene: undefined })
+    return
+  }
+  if (item.kind === 'subscene' && type === 'stage' && name === item.stageName && subscene === item.label) {
+    patchQuery({ type: 'stage', name: item.stageName, subscene: undefined })
     return
   }
   if (item.kind === 'episode' && episode === item.episode) {
-    patchQuery({ type: undefined, name: undefined, episode: undefined, shot: undefined })
+    patchQuery({ type: undefined, name: undefined, subscene: undefined, episode: undefined, shot: undefined })
     return
   }
   if (item.kind === 'shot' && type === 'scene' && episode === item.episode && shot === item.shot) {
-    patchQuery({ type: undefined, name: undefined, episode: undefined, shot: undefined })
+    patchQuery({ type: undefined, name: undefined, subscene: undefined, episode: undefined, shot: undefined })
   }
 }
 

@@ -58,6 +58,7 @@
         v-else-if="type === 'stage'"
         :project
         :name
+        :subscene
       />
       <ScenePanel
         v-else-if="type === 'scene'"
@@ -139,6 +140,7 @@ const route = useRoute()
 const project = computed(() => route.query.project as string)
 const type = computed(() => route.query.type as string)
 const name = computed(() => route.query.name as string)
+const subscene = computed(() => route.query.subscene as string | undefined)
 const episode = computed(() => route.query.episode as string)
 const shot = computed(() => route.query.shot as string)
 
