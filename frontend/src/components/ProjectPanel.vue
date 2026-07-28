@@ -13,15 +13,6 @@
       <!-- 项目总览 -->
       <v-tabs-window-item value="overview">
         <v-alert
-          v-if="overviewError"
-          type="error"
-          variant="tonal"
-          class="ma-2"
-          density="compact"
-        >
-          {{ overviewError }}
-        </v-alert>
-        <v-alert
           v-if="overviewSuccess"
           type="success"
           variant="tonal"
@@ -141,7 +132,7 @@
               <v-btn
                 color="primary"
                 :loading="savingForm"
-                :disabled="!!configError && configError.includes('无法解析')"
+                :disabled="!configParseOk"
                 @click="saveForm"
               >
                 保存配置
@@ -166,6 +157,15 @@
       <v-card>
         <v-card-title>编辑 overview.md</v-card-title>
         <v-card-text>
+          <v-alert
+            v-if="overviewError"
+            type="error"
+            variant="tonal"
+            density="compact"
+            class="mb-2"
+          >
+            {{ overviewError }}
+          </v-alert>
           <v-textarea
             v-model="overviewDialog.content"
             rows="18"
@@ -251,8 +251,8 @@ const overviewError = ref('')
 const overviewSuccess = ref('')
 const configError = ref('')
 const configSuccess = ref('')
+const configParseOk = ref(true)
 const rawJsonText = ref('{}')
-const parsedConfig = ref<Record<string, unknown> | null>(null)
 
 const form = reactive({
   width: 1080 as number | null,
@@ -351,8 +351,17 @@ function validateForm(): boolean {
   return !fieldErrors.width && !fieldErrors.height && !fieldErrors.fps
 }
 
+function resetFormDefaults() {
+  form.width = 1080
+  form.height = 1920
+  form.fps = 24
+  preset.value = 'custom'
+  fieldErrors.width = ''
+  fieldErrors.height = ''
+  fieldErrors.fps = ''
+}
+
 function applyConfigObject(obj: Record<string, unknown>) {
-  parsedConfig.value = obj
   const w = obj.width
   const h = obj.height
   const f = obj.fps
@@ -363,6 +372,7 @@ function applyConfigObject(obj: Record<string, unknown>) {
   if (form.height == null || Number.isNaN(form.height)) form.height = 1920
   if (form.fps == null || Number.isNaN(form.fps)) form.fps = 24
   preset.value = matchPreset(form.width, form.height)
+  configParseOk.value = true
 }
 
 async function load() {
@@ -370,9 +380,10 @@ async function load() {
   overviewSuccess.value = ''
   configError.value = ''
   configSuccess.value = ''
+  configParseOk.value = true
   overviewContent.value = ''
-  parsedConfig.value = null
   rawJsonText.value = '{}'
+  resetFormDefaults()
 
   const [overviewRes, configRes] = await Promise.allSettled([
     readFs(props.project, 'overview.md'),
@@ -393,6 +404,7 @@ async function load() {
   const raw = configRes.value
   if (typeof raw !== 'string' && typeof raw !== 'object') {
     configError.value = 'project.json 读取结果异常'
+    configParseOk.value = false
     return
   }
 
@@ -410,16 +422,19 @@ async function load() {
       const parsed: unknown = JSON.parse(raw)
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
         configError.value = 'project.json 必须是 JSON 对象，请使用「编辑原始 JSON」修复'
+        configParseOk.value = false
         return
       }
       applyConfigObject(parsed as Record<string, unknown>)
     } catch {
       configError.value = '无法解析 project.json，请使用「编辑原始 JSON」修复'
+      configParseOk.value = false
     }
   }
 }
 
 function editOverview() {
+  overviewError.value = ''
   overviewDialog.content = overviewContent.value
   overviewDialog.show = true
 }
@@ -443,9 +458,7 @@ async function saveOverview() {
 
 async function saveForm() {
   configSuccess.value = ''
-  if (configError.value.includes('无法解析') || configError.value.includes('必须是 JSON 对象')) {
-    return
-  }
+  if (!configParseOk.value) return
   if (!validateForm()) return
 
   savingForm.value = true
@@ -469,15 +482,18 @@ async function saveForm() {
           const parsed: unknown = JSON.parse(latest)
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
             configError.value = '无法解析 project.json，请使用「编辑原始 JSON」修复'
+            configParseOk.value = false
             return
           }
           base = { ...(parsed as Record<string, unknown>) }
         } catch {
           configError.value = '无法解析 project.json，请使用「编辑原始 JSON」修复'
+          configParseOk.value = false
           return
         }
       } else {
         configError.value = 'project.json 读取结果异常'
+        configParseOk.value = false
         return
       }
     }
@@ -493,8 +509,8 @@ async function saveForm() {
     const text = `${JSON.stringify(base, null, 2)}\n`
     await writeFs(props.project, 'project.json', text)
     rawJsonText.value = text
-    parsedConfig.value = base
     configError.value = ''
+    configParseOk.value = true
     configSuccess.value = '配置已保存'
     preset.value = matchPreset(width, height)
   } catch (e) {
