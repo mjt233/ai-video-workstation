@@ -115,12 +115,61 @@
                     <div class="text-caption text-medium-emphasis mb-1">
                       基础场景
                     </div>
+                    <v-menu
+                      v-if="stage.基础场景"
+                      open-on-hover
+                      :close-on-content-click="false"
+                      location="top"
+                      offset="8"
+                    >
+                      <template #activator="{ props: menuProps }">
+                        <v-chip
+                          v-bind="menuProps"
+                          size="small"
+                          color="primary"
+                          variant="tonal"
+                        >
+                          {{ stage.基础场景 }}
+                        </v-chip>
+                      </template>
+                      <v-card
+                        max-width="280"
+                        class="pa-2"
+                      >
+                        <v-img
+                          v-if="stageAssetUrls[stage.基础场景]"
+                          :src="stageAssetUrls[stage.基础场景]"
+                          width="260"
+                          max-height="260"
+                          contain
+                        />
+                        <div
+                          v-else
+                          class="d-flex flex-column align-center ga-2 pa-2"
+                        >
+                          <div class="text-caption text-medium-emphasis">
+                            暂无设定图
+                          </div>
+                          <v-btn
+                            size="small"
+                            color="primary"
+                            variant="tonal"
+                            prepend-icon="mdi-auto-fix"
+                            :disabled="!parseStageRef(stage.基础场景)"
+                            @click="openStageAssetGen(stage.基础场景)"
+                          >
+                            生成场景设定图
+                          </v-btn>
+                        </div>
+                      </v-card>
+                    </v-menu>
                     <v-chip
+                      v-else
                       size="small"
                       color="primary"
                       variant="tonal"
                     >
-                      {{ stage.基础场景 || '未指定' }}
+                      未指定
                     </v-chip>
                   </div>
                   <div class="mb-2">
@@ -131,14 +180,53 @@
                       v-if="stage.登场角色?.length"
                       class="d-flex flex-wrap ga-1"
                     >
-                      <v-chip
+                      <v-menu
                         v-for="charName in stage.登场角色"
                         :key="charName"
-                        size="small"
-                        variant="outlined"
+                        open-on-hover
+                        :close-on-content-click="false"
+                        location="top"
+                        offset="8"
                       >
-                        {{ charName }}
-                      </v-chip>
+                        <template #activator="{ props: menuProps }">
+                          <v-chip
+                            v-bind="menuProps"
+                            size="small"
+                            variant="outlined"
+                          >
+                            {{ charName }}
+                          </v-chip>
+                        </template>
+                        <v-card
+                          max-width="280"
+                          class="pa-2"
+                        >
+                          <v-img
+                            v-if="characterAssetUrls[charName]"
+                            :src="characterAssetUrls[charName]"
+                            width="260"
+                            max-height="260"
+                            contain
+                          />
+                          <div
+                            v-else
+                            class="d-flex flex-column align-center ga-2 pa-2"
+                          >
+                            <div class="text-caption text-medium-emphasis">
+                              暂无设定图
+                            </div>
+                            <v-btn
+                              size="small"
+                              color="primary"
+                              variant="tonal"
+                              prepend-icon="mdi-auto-fix"
+                              @click="openCharacterAssetGen(charName)"
+                            >
+                              生成角色设定图
+                            </v-btn>
+                          </div>
+                        </v-card>
+                      </v-menu>
                     </div>
                     <div
                       v-else
@@ -286,6 +374,28 @@
       :existing-asset="hasVideo ? '已有视频' : undefined"
       @refresh="load"
     />
+    <GenerateDialog
+      v-model="genStageAssetDialog"
+      :project="props.project"
+      workflow-id="stage-image"
+      workflow-name="场景设定图生成"
+      :vars="{ name: refGenDialog.name, label: refGenDialog.label }"
+      :output-path="`assert/stage/${refGenDialog.name}/${refGenDialog.label}.jpg`"
+      :prompt-paths="[`prompt/stage/${refGenDialog.name}/${refGenDialog.label}.md`]"
+      :existing-asset="stageAssetUrls[`${refGenDialog.name}/${refGenDialog.label}`] ? '已有图片' : undefined"
+      @refresh="load"
+    />
+    <GenerateDialog
+      v-model="genCharacterAssetDialog"
+      :project="props.project"
+      workflow-id="character-appearance"
+      workflow-name="角色设定图生成"
+      :vars="{ name: refGenDialog.name }"
+      :output-path="`assert/character/${refGenDialog.name}/appearance.jpg`"
+      :prompt-paths="[`prompt/character/${refGenDialog.name}/appearance.md`]"
+      :existing-asset="characterAssetUrls[refGenDialog.name] ? '已有图片' : undefined"
+      @refresh="load"
+    />
   </div>
 </template>
 
@@ -317,7 +427,7 @@ interface DialogState {
 interface SceneData {
   overview: string
   script: ScriptEntry[]
-  prompt: string,
+  prompt: string
   stage: StageDefinition[]
 }
 
@@ -327,8 +437,16 @@ const data = ref<SceneData | null>(null)
 const stageDefs = ref<StageDefinition[]>([])
 const voiceAssets = ref<boolean[]>([])
 const hasVideo = ref(false)
+const stageAssetUrls = ref<Record<string, string>>({})
+const characterAssetUrls = ref<Record<string, string>>({})
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
 const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index: number }>({ show: false, type: 'image', index: 0 })
+const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: string; label: string }>({
+  show: false,
+  type: 'character',
+  name: '',
+  label: '',
+})
 
 const genImageDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'image',
@@ -342,6 +460,14 @@ const genVideoDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'video',
   set: (v) => { if (!v) genDialog.value.show = false },
 })
+const genStageAssetDialog = computed({
+  get: () => refGenDialog.value.show && refGenDialog.value.type === 'stage',
+  set: (v) => { if (!v) refGenDialog.value.show = false },
+})
+const genCharacterAssetDialog = computed({
+  get: () => refGenDialog.value.show && refGenDialog.value.type === 'character',
+  set: (v) => { if (!v) refGenDialog.value.show = false },
+})
 
 const basePath = computed(() => `prompt/scene/${props.episode}/${props.shot}`)
 const assertBase = computed(() => `/api/fs/${props.project}/assert/scene/${props.episode}/${props.shot}/stage`)
@@ -349,6 +475,60 @@ const assertBase = computed(() => `/api/fs/${props.project}/assert/scene/${props
 /** 登场角色与 prompt 同时为空 = 直接引用基础场景 */
 function isDirectStageRef(stage: Pick<StageDefinition, '登场角色' | 'prompt'>): boolean {
   return !(stage.登场角色?.length) && !(stage.prompt ?? '').trim()
+}
+
+/** 基础场景引用格式：场景名/子场景标签 */
+function parseStageRef(ref: string): { name: string; label: string } | null {
+  if (!ref) return null
+  const idx = ref.indexOf('/')
+  if (idx <= 0 || idx >= ref.length - 1) return null
+  return { name: ref.slice(0, idx), label: ref.slice(idx + 1) }
+}
+
+function openStageAssetGen(stageRef: string) {
+  const parsed = parseStageRef(stageRef)
+  if (!parsed) return
+  refGenDialog.value = { show: true, type: 'stage', name: parsed.name, label: parsed.label }
+}
+
+function openCharacterAssetGen(charName: string) {
+  if (!charName) return
+  refGenDialog.value = { show: true, type: 'character', name: charName, label: '' }
+}
+
+async function loadRefAssets(stages: StageDefinition[]) {
+  const stageRefs = new Set<string>()
+  const charNames = new Set<string>()
+  for (const stage of stages) {
+    if (stage.基础场景) stageRefs.add(stage.基础场景)
+    for (const name of stage.登场角色 ?? []) {
+      if (name) charNames.add(name)
+    }
+  }
+
+  const nextStageUrls: Record<string, string> = {}
+  const nextCharUrls: Record<string, string> = {}
+  const ts = Date.now()
+
+  await Promise.all([
+    ...[...stageRefs].map(async (ref) => {
+      const parsed = parseStageRef(ref)
+      if (!parsed) return
+      const path = `assert/stage/${parsed.name}/${parsed.label}.jpg`
+      if (await existsFs(props.project, path)) {
+        nextStageUrls[ref] = `/api/fs/${props.project}/${path}?t=${ts}`
+      }
+    }),
+    ...[...charNames].map(async (name) => {
+      const path = `assert/character/${name}/appearance.jpg`
+      if (await existsFs(props.project, path)) {
+        nextCharUrls[name] = `/api/fs/${props.project}/${path}?t=${ts}`
+      }
+    }),
+  ])
+
+  stageAssetUrls.value = nextStageUrls
+  characterAssetUrls.value = nextCharUrls
 }
 
 async function load() {
@@ -377,7 +557,7 @@ async function load() {
       overview,
       script: scriptEntries,
       prompt: results[2] as string,
-      stage: results[3] as any as StageDefinition[]
+      stage: results[3] as unknown as StageDefinition[],
     }
   } catch (err) {
     console.log(err)
@@ -396,11 +576,16 @@ async function load() {
         prompt: item.prompt ?? '',
         imageUrl: checks[i] ? `${assertBase.value}/${i}.jpg?t=${Date.now()}` : '',
       }))
+      await loadRefAssets(stageDefs.value)
     } else {
       stageDefs.value = []
+      stageAssetUrls.value = {}
+      characterAssetUrls.value = {}
     }
   } catch {
     stageDefs.value = []
+    stageAssetUrls.value = {}
+    characterAssetUrls.value = {}
   }
 
   // Check voice assets for each script entry
