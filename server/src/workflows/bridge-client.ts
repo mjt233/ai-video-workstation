@@ -69,7 +69,7 @@ export async function submitTextToImage(params: SubmitTextToImageParams): Promis
   const body: Record<string, unknown> = {
     imd_desc: params.imd_desc,
     width: params.width,
-    height: params.height,
+    height: params.height
   };
   if (params.seed != null) {
     body.seed = params.seed;

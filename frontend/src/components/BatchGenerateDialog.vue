@@ -17,6 +17,26 @@
         </v-card-title>
 
         <v-card-text>
+          <v-alert
+            v-if="configWarning"
+            type="warning"
+            variant="tonal"
+            class="mb-3"
+            density="compact"
+          >
+            {{ configWarning }}
+          </v-alert>
+
+          <v-alert
+            v-if="submitError"
+            type="error"
+            variant="tonal"
+            class="mb-3"
+            density="compact"
+          >
+            {{ submitError }}
+          </v-alert>
+
           <div class="text-body-2 mb-2 font-weight-medium">
             选择要生成的资产类型
           </div>
@@ -106,16 +126,6 @@
             class="mb-3"
           />
 
-          <v-alert
-            v-if="submitError"
-            type="error"
-            variant="tonal"
-            class="mb-3"
-            density="compact"
-          >
-            {{ submitError }}
-          </v-alert>
-
           <v-list
             density="compact"
             style="max-height: 320px; overflow-y: auto;"
@@ -133,7 +143,7 @@
               </template>
 
               <v-list-item-title class="text-body-2">
-                {{ getTaskDisplayName(task.workflowId) }}
+                {{ getTaskDisplayName(task) }}
               </v-list-item-title>
 
               <v-list-item-subtitle class="text-caption">
@@ -171,17 +181,26 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { runBatch, retryTask as apiRetryTask } from '../api/workflow'
-import { useBatchTask } from '../composables/useBatchTask'
+import {
+  runBatch,
+  retryTask as apiRetryTask,
+  type BatchSummary,
+  type TaskResponse,
+} from '../api/workflow'
 
 const props = defineProps<{
   modelValue: boolean
   project: string
+  batchId: string | null
+  summary: BatchSummary
+  tasks: TaskResponse[]
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void
+  (e: 'update:batchId', v: string | null): void
   (e: 'refresh'): void
+  (e: 'clear-batch'): void
 }>()
 
 const show = computed({
@@ -204,15 +223,19 @@ const concurrency = ref(1)
 const overwrite = ref(false)
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
-const batchId = ref<string | null>(null)
-const { summary, tasks, loading } = useBatchTask(batchId)
+const configWarning = ref<string | null>(null)
 
 const progressPercent = computed(() => {
-  if (summary.total === 0) return 0
-  return ((summary.completed + summary.failed) / summary.total) * 100
+  if (props.summary.total === 0) return 0
+  return ((props.summary.completed + props.summary.failed) / props.summary.total) * 100
 })
 
-const batchRunning = computed(() => summary.running > 0 || summary.pending > 0)
+const batchRunning = computed(() => props.summary.running > 0 || props.summary.pending > 0)
+
+const batchFinished = computed(() =>
+  props.summary.total > 0
+  && props.summary.completed + props.summary.failed === props.summary.total,
+)
 
 function getTaskStatusText(status: string): string {
   switch (status) {
@@ -246,27 +269,70 @@ function getStatusColor(status: string): string {
   return statusColorMap[status] ?? defaultColor
 }
 
-function getTaskDisplayName(workflowId: string): string {
-  const at = assetTypes.find(a => a.id === workflowId)
-  return at?.label ?? workflowId
+function getTaskDisplayName(task: TaskResponse): string {
+  const typeLabel = assetTypes.find(a => a.id === task.workflowId)?.label ?? task.workflowId
+  const vars = task.params?.vars ?? {}
+
+  switch (task.workflowId) {
+    case 'character-appearance':
+    case 'character-voice':
+      return vars.name ? `${typeLabel} — ${vars.name}` : typeLabel
+    case 'stage-image': {
+      if (vars.name && vars.label) return `${typeLabel} — ${vars.name}/${vars.label}`
+      if (vars.name) return `${typeLabel} — ${vars.name}`
+      return typeLabel
+    }
+    case 'scene-stage-image':
+    case 'video-generate': {
+      if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
+      return typeLabel
+    }
+    case 'scene-tts': {
+      if (vars.episode && vars.shot && vars.character) {
+        return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · ${vars.character}`
+      }
+      if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
+      return typeLabel
+    }
+    default:
+      return typeLabel
+  }
 }
 
-// Reset state when dialog opens
+function resetConfig() {
+  selectedTypes.value = assetTypes.map(at => at.id)
+  concurrency.value = 1
+  overwrite.value = false
+  submitting.value = false
+  submitError.value = null
+  configWarning.value = null
+}
+
+// When dialog opens: resume progress if batch is active, otherwise config
 watch(show, (val) => {
-  if (val) {
-    mode.value = 'config'
-    selectedTypes.value = assetTypes.map(at => at.id)
-    concurrency.value = 1
-    overwrite.value = false
-    submitting.value = false
+  if (!val) return
+  if (props.batchId) {
+    mode.value = 'progress'
     submitError.value = null
-    batchId.value = null
+    configWarning.value = null
+  } else {
+    mode.value = 'config'
+    resetConfig()
+  }
+})
+
+// If parent clears batch while dialog is open, return to config
+watch(() => props.batchId, (id) => {
+  if (!id && show.value && mode.value === 'progress' && !submitting.value) {
+    mode.value = 'config'
+    resetConfig()
   }
 })
 
 async function startGenerate() {
   submitting.value = true
   submitError.value = null
+  configWarning.value = null
   try {
     const result = await runBatch({
       project: props.project,
@@ -274,10 +340,17 @@ async function startGenerate() {
       concurrency: concurrency.value,
       overwrite: overwrite.value,
     })
-    batchId.value = result.batchId
+
+    if (!result.batchId || result.totalTasks === 0) {
+      configWarning.value = '没有需要生成的资产。所选类型均已存在，可勾选「重复生成」后重试。'
+      return
+    }
+
+    emit('update:batchId', result.batchId)
     mode.value = 'progress'
-  } catch (err: any) {
-    submitError.value = err?.response?.data?.error || err.message || '提交失败，请重试'
+  } catch (err: unknown) {
+    const e = err as { response?: { data?: { error?: string } }; message?: string }
+    submitError.value = e?.response?.data?.error || e.message || '提交失败，请重试'
   } finally {
     submitting.value = false
   }
@@ -287,14 +360,15 @@ async function retryTask(taskId: string) {
   try {
     await apiRetryTask(taskId)
   } catch {
-    // Ignore retry errors
+    // Ignore retry errors; next poll will refresh status
   }
 }
 
 function close() {
-  // If in progress mode and all tasks are done, refresh parent
-  if (mode.value === 'progress' && summary.completed + summary.failed === summary.total && summary.total > 0) {
+  // Background run: keep batchId so parent continues polling
+  if (mode.value === 'progress' && batchFinished.value) {
     emit('refresh')
+    emit('clear-batch')
   }
   show.value = false
 }

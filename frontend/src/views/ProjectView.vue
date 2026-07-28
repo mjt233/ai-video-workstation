@@ -35,7 +35,12 @@
       <BatchGenerateDialog
         v-model="showBatchDialog"
         :project="project"
+        :batch-id="activeBatchId"
+        :summary="summary"
+        :tasks="tasks"
+        @update:batch-id="activeBatchId = $event"
         @refresh="refreshTree"
+        @clear-batch="clearBatch"
       />
     </v-col>
     <v-col
@@ -76,6 +81,46 @@
         </div>
       </div>
     </v-col>
+
+    <!-- Floating batch progress card (visible when dialog closed and batch active) -->
+    <v-card
+      v-if="activeBatchId && !showBatchDialog"
+      class="batch-float-card"
+      elevation="8"
+      @click="showBatchDialog = true"
+    >
+      <div class="d-flex align-center mb-1">
+        <v-icon
+          icon="mdi-lightning-bolt"
+          color="primary"
+          size="small"
+          class="mr-1"
+        />
+        <span class="text-body-2 font-weight-medium">一键生成</span>
+        <v-spacer />
+        <span class="text-caption text-grey">
+          {{ summary.completed + summary.failed }} / {{ summary.total }}
+        </span>
+        <v-btn
+          v-if="batchFinished"
+          icon="mdi-close"
+          size="x-small"
+          variant="text"
+          class="ml-1"
+          @click.stop="dismissFloatingCard"
+        />
+      </div>
+      <v-progress-linear
+        :model-value="progressPercent"
+        :color="batchFailed ? 'error' : batchFinished ? 'success' : 'primary'"
+        height="6"
+        rounded
+        class="mb-1"
+      />
+      <div class="text-caption text-medium-emphasis">
+        {{ floatingStatusText }}
+      </div>
+    </v-card>
   </v-row>
 </template>
 
@@ -87,6 +132,7 @@ import CharacterPanel from '../components/CharacterPanel.vue'
 import StagePanel from '../components/StagePanel.vue'
 import ScenePanel from '../components/ScenePanel.vue'
 import BatchGenerateDialog from '../components/BatchGenerateDialog.vue'
+import { useBatchTask } from '../composables/useBatchTask'
 
 const route = useRoute()
 const project = computed(() => route.query.project as string)
@@ -97,8 +143,56 @@ const shot = computed(() => route.query.shot as string)
 
 const showBatchDialog = ref(false)
 const treeKey = ref(0)
+const activeBatchId = ref<string | null>(null)
+const { summary, tasks } = useBatchTask(activeBatchId)
+
+const progressPercent = computed(() => {
+  if (summary.total === 0) return 0
+  return ((summary.completed + summary.failed) / summary.total) * 100
+})
+
+const batchFinished = computed(() =>
+  summary.total > 0
+  && summary.completed + summary.failed === summary.total,
+)
+
+const batchFailed = computed(() => batchFinished.value && summary.failed > 0)
+
+const floatingStatusText = computed(() => {
+  if (batchFinished.value) {
+    if (summary.failed > 0) return `已完成，${summary.failed} 个失败`
+    return '全部完成'
+  }
+  if (summary.running > 0) return `生成中… ${summary.running} 个运行中`
+  if (summary.pending > 0) return `排队中… ${summary.pending} 个待执行`
+  return '准备中…'
+})
 
 function refreshTree() {
   treeKey.value++
 }
+
+function clearBatch() {
+  activeBatchId.value = null
+}
+
+function dismissFloatingCard() {
+  if (batchFinished.value) {
+    if (summary.completed > 0) refreshTree()
+    clearBatch()
+  }
+}
 </script>
+
+<style scoped>
+.batch-float-card {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 280px;
+  padding: 12px 14px;
+  z-index: 1000;
+  cursor: pointer;
+  border-radius: 12px;
+}
+</style>

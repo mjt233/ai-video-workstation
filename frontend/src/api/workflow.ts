@@ -6,6 +6,12 @@ export interface WorkflowInfo {
   implementations: { impl: string; name: string; description?: string }[]
 }
 
+export interface TaskParams {
+  vars: Record<string, string>
+  promptPaths: string[]
+  outputPath: string
+}
+
 export interface TaskResponse {
   taskId: string
   workflowId: string
@@ -15,6 +21,7 @@ export interface TaskResponse {
   errorMsg?: string
   createdAt: string
   updatedAt: string
+  params?: TaskParams
 }
 
 export interface LogEntry {
@@ -62,8 +69,8 @@ export async function runWorkflow(body: WorkflowRunParams): Promise<{ taskId: st
   return data
 }
 
-export async function runBatch(body: BatchRunParams): Promise<{ batchId: string; totalTasks: number }> {
-  const { data } = await client.post<{ batchId: string; totalTasks: number }>('/workflow/batch-run', body)
+export async function runBatch(body: BatchRunParams): Promise<{ batchId: string | null; totalTasks: number; project: string }> {
+  const { data } = await client.post<{ batchId: string | null; totalTasks: number; project: string }>('/workflow/batch-run', body)
   return data
 }
 

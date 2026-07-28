@@ -47,14 +47,29 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
   res.json({ taskId, status: 'pending' });
 });
 
-// GET /api/workflow/tasks/:taskId — get task status
-workflowRouter.get('/workflow/tasks/:taskId', (req: Request, res: Response) => {
-  const task = db.getTask(req.params.taskId as string);
-  if (!task) {
-    res.status(404).json({ error: 'Task not found' });
-    return;
+function parseTaskParams(paramsJson: string): {
+  vars: Record<string, string>
+  promptPaths: string[]
+  outputPath: string
+} {
+  try {
+    const parsed = JSON.parse(paramsJson) as {
+      vars?: Record<string, string>
+      promptPaths?: string[]
+      outputPath?: string
+    };
+    return {
+      vars: parsed.vars ?? {},
+      promptPaths: parsed.promptPaths ?? [],
+      outputPath: parsed.outputPath ?? '',
+    };
+  } catch {
+    return { vars: {}, promptPaths: [], outputPath: '' };
   }
-  res.json({
+}
+
+function toTaskResponse(task: db.TaskRecord) {
+  return {
     taskId: task.id,
     workflowId: task.workflow_id,
     impl: task.impl,
@@ -63,7 +78,18 @@ workflowRouter.get('/workflow/tasks/:taskId', (req: Request, res: Response) => {
     errorMsg: task.error_msg,
     createdAt: task.created_at,
     updatedAt: task.updated_at,
-  });
+    params: parseTaskParams(task.params),
+  };
+}
+
+// GET /api/workflow/tasks/:taskId — get task status
+workflowRouter.get('/workflow/tasks/:taskId', (req: Request, res: Response) => {
+  const task = db.getTask(req.params.taskId as string);
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+  res.json(toTaskResponse(task));
 });
 
 // GET /api/workflow/tasks — list tasks with optional filters
@@ -73,16 +99,7 @@ workflowRouter.get('/workflow/tasks', (req: Request, res: Response) => {
   const batchId = req.query.batchId as string | undefined;
   const tasks = db.listTasks(project, status, batchId);
   res.json({
-    tasks: tasks.map(t => ({
-      taskId: t.id,
-      workflowId: t.workflow_id,
-      impl: t.impl,
-      status: t.status,
-      result: t.result ? JSON.parse(t.result) : null,
-      errorMsg: t.error_msg,
-      createdAt: t.created_at,
-      updatedAt: t.updated_at,
-    }))
+    tasks: tasks.map(t => toTaskResponse(t)),
   });
 });
 
@@ -131,6 +148,13 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
 
   try {
     const discovered = await discoverTasks(project, assetTypes, overwrite ?? false);
+
+    // No eligible assets — do not create an empty batch
+    if (discovered.length === 0) {
+      res.json({ batchId: null, totalTasks: 0, project });
+      return;
+    }
+
     const batchId = uuidv4();
 
     for (const task of discovered) {

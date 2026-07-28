@@ -3,7 +3,7 @@ import { createTextToImageWorkflow } from '../bridge-client.js';
 
 register(createTextToImageWorkflow({
   id: 'character-appearance',
-  name: '角色外观生成',
+  name: 'Krea2',
   impl: 'default',
   description: '使用 ComfyUI 文生图工作流生成角色外观图片',
   // 角色设定图固定 16:9 720P
