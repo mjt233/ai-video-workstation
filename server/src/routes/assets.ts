@@ -19,7 +19,9 @@ import {
   shotPromptMd,
   subsceneMd,
 } from '../assets/templates.js';
-import { shiftShotsUpForInsert } from '../assets/shot-renumber.js';
+import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/refs.js';
+import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
+import { reorderStageFrames } from '../assets/stage-reorder.js';
 
 export const assetsRouter = Router();
 
@@ -169,6 +171,117 @@ assetsRouter.post('/assets/:project/shot', async (req: Request, res: Response) =
       shot: shotId,
       renames,
     });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE character
+assetsRouter.delete('/assets/:project/character/:name', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    assertSafeName(name, '角色名');
+    const dir = resolveProjectPath(project, `prompt/character/${name}`);
+    if (!(await pathExists(dir))) throw Object.assign(new Error('角色不存在'), { code: 'NOT_FOUND' });
+    const refs = await findCharacterRefs(project, name);
+    if (refs.length) throw Object.assign(new Error('资源正在被引用，无法删除'), { code: 'IN_USE', refs });
+    await removeDirIfExists(dir);
+    await removeDirIfExists(resolveProjectPath(project, `assert/character/${name}`));
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE stage
+assetsRouter.delete('/assets/:project/stage/:name', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    assertSafeName(name, '场景名');
+    const dir = resolveProjectPath(project, `prompt/stage/${name}`);
+    if (!(await pathExists(dir))) throw Object.assign(new Error('场景不存在'), { code: 'NOT_FOUND' });
+    const refs = await findStageRefs(project, name);
+    if (refs.length) throw Object.assign(new Error('资源正在被引用，无法删除'), { code: 'IN_USE', refs });
+    await removeDirIfExists(dir);
+    await removeDirIfExists(resolveProjectPath(project, `assert/stage/${name}`));
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE subscene — label 可能含中文与连字符，用 * 或 query；Express :label 单段即可（标签无 /）
+assetsRouter.delete('/assets/:project/subscene/:stage/:label', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const stage = req.params.stage as string;
+    const label = req.params.label as string;
+    assertSafeName(stage, '场景名');
+    assertSafeName(label, '子场景标签');
+    const file = resolveProjectPath(project, `prompt/stage/${stage}/${label}.md`);
+    if (!(await pathExists(file))) throw Object.assign(new Error('子场景不存在'), { code: 'NOT_FOUND' });
+    const refs = await findSubsceneRefs(project, stage, label);
+    if (refs.length) throw Object.assign(new Error('资源正在被引用，无法删除'), { code: 'IN_USE', refs });
+    await fs.unlink(file);
+    const jpg = resolveProjectPath(project, `assert/stage/${stage}/${label}.jpg`);
+    if (await pathExists(jpg)) await fs.unlink(jpg);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE episode
+assetsRouter.delete('/assets/:project/episode/:episode', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    assertPositiveIntId(episode, '集数');
+    const dir = resolveProjectPath(project, `prompt/scene/${episode}`);
+    if (!(await pathExists(dir))) throw Object.assign(new Error('集数不存在'), { code: 'NOT_FOUND' });
+    await removeDirIfExists(dir);
+    await removeDirIfExists(resolveProjectPath(project, `assert/scene/${episode}`));
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE shot + renumber
+assetsRouter.delete('/assets/:project/shot/:episode/:shot', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    const dir = resolveProjectPath(project, `prompt/scene/${episode}/${shot}`);
+    if (!(await pathExists(dir))) throw Object.assign(new Error('分镜不存在'), { code: 'NOT_FOUND' });
+    await removeDirIfExists(dir);
+    await removeDirIfExists(resolveProjectPath(project, `assert/scene/${episode}/${shot}`));
+    const renames = await shiftShotsDownAfterDelete(project, episode, shot);
+    res.json({ success: true, renames });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST reorder
+assetsRouter.post('/assets/:project/scene/:episode/:shot/stage/reorder', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    const { from, to } = req.body as { from?: number; to?: number };
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    if (typeof from !== 'number' || typeof to !== 'number') {
+      throw Object.assign(new Error('from/to 必须是数字'), { code: 'INVALID' });
+    }
+    await reorderStageFrames(project, episode, shot, from, to);
+    res.json({ success: true });
   } catch (err) {
     httpError(res, err);
   }
