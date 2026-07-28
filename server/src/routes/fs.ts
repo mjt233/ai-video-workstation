@@ -6,6 +6,16 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../../design');
 const WRITABLE_PREFIXES = ['prompt', 'assert'];
+const WRITABLE_ROOT_FILES = ['overview.md', 'project.json'];
+
+function isWritableRelPath(relPath: string): boolean {
+  if (!relPath || relPath.includes('..')) return false;
+  // 统一为正斜杠比较（Express 参数通常已是 /）
+  const normalized = relPath.replace(/\\/g, '/');
+  if (WRITABLE_ROOT_FILES.includes(normalized)) return true;
+  const prefix = normalized.split('/')[0];
+  return WRITABLE_PREFIXES.includes(prefix ?? '');
+}
 
 export const fsRouter = Router();
 
@@ -88,9 +98,10 @@ fsRouter.post('/fs/:project/*', async (req: Request, res: Response) => {
       return;
     }
 
-    const prefix = relPath.split('/')[0];
-    if (!WRITABLE_PREFIXES.includes(prefix)) {
-      res.status(403).json({ error: 'Only prompt/ and assert/ paths are writable' });
+    if (!isWritableRelPath(relPath)) {
+      res.status(403).json({
+        error: 'Only prompt/, assert/, overview.md and project.json are writable',
+      });
       return;
     }
 
