@@ -282,7 +282,13 @@ function getTaskDisplayName(task: TaskResponse): string {
       if (vars.name) return `${typeLabel} — ${vars.name}`
       return typeLabel
     }
-    case 'scene-stage-image':
+    case 'scene-stage-image': {
+      if (vars.episode && vars.shot && vars.index != null) {
+        return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · 场景${vars.index}`
+      }
+      if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
+      return typeLabel
+    }
     case 'video-generate': {
       if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
       return typeLabel

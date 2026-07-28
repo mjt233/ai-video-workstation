@@ -159,18 +159,29 @@ export async function discoverTasks(
               const shot = shotEntry.name;
 
               if (assetType === 'scene-stage-image') {
-                const outputPath = `assert/scene/${episode}/${shot}/stage.jpg`;
-                if (await shouldSkipOutput(outputPath)) continue;
-                tasks.push({
-                  workflowId: 'scene-stage-image',
-                  impl: 'default',
-                  vars: { episode, shot },
-                  promptPaths: [
-                    `prompt/scene/${episode}/${shot}/overview.md`,
-                    `prompt/scene/${episode}/${shot}/stage.json`,
-                  ],
-                  outputPath,
-                });
+                // stage.json 可能包含多个分镜场景，每个 index 单独生成一张图
+                const stageJsonPath = path.join(episodePath, shot, 'stage.json');
+                try {
+                  const stageContent = await fs.readFile(stageJsonPath, 'utf-8');
+                  const stages = JSON.parse(stageContent) as unknown;
+                  if (!Array.isArray(stages)) continue;
+                  for (let index = 0; index < stages.length; index++) {
+                    const outputPath = `assert/scene/${episode}/${shot}/stage/${index}.jpg`;
+                    if (await shouldSkipOutput(outputPath)) continue;
+                    tasks.push({
+                      workflowId: 'scene-stage-image',
+                      impl: 'default',
+                      vars: { episode, shot, index: String(index) },
+                      promptPaths: [
+                        `prompt/scene/${episode}/${shot}/overview.md`,
+                        `prompt/scene/${episode}/${shot}/stage.json`,
+                      ],
+                      outputPath,
+                    });
+                  }
+                } catch {
+                  // stage.json missing or invalid — skip this shot
+                }
               } else if (assetType === 'video-generate') {
                 const outputPath = `assert/scene/${episode}/${shot}/video.mp4`;
                 if (await shouldSkipOutput(outputPath)) continue;

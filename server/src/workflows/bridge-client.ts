@@ -2,7 +2,7 @@
  * ComfyUI Bridge Client
  *
  * 封装对 comfyui-easy-bridge 的 HTTP 调用，提供：
- * - 文生图任务提交 (POST /api/workflows/text_to_image/execute)
+ * - 通用工作流执行 (POST /api/workflows/:id/execute)，支持 JSON 与 multipart/form-data
  * - 任务状态轮询 (GET /api/tasks/:taskId)
  * - 输出文件列表获取 (GET /api/tasks/:taskId/output-files)
  * - createTextToImageWorkflow — 文生图工作流快捷工厂
@@ -81,15 +81,34 @@ export interface ComfyuiBridgeExecuteParams {
 }
 
 /**
- * 提交文生图任务到 ComfyUI Bridge
+ * 提交工作流执行到 ComfyUI Bridge。
+ * - 无文件：JSON body（方式 A）
+ * - 有文件：multipart/form-data，params 为 JSON 字符串，文件按 alias 字段上传（方式 B）
  */
 export async function submitComfyuiBridge(executeParams: ComfyuiBridgeExecuteParams): Promise<BridgeSubmitResult> {
+  const url = `${BRIDGE_URL}/api/workflows/${executeParams.workflowId}/execute`;
+  const fileEntries = Object.entries(executeParams.files ?? {});
+  const hasFiles = fileEntries.length > 0;
 
-  const res = await fetch(`${BRIDGE_URL}/api/workflows/text_to_image/execute`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(executeParams.params),
-  });
+  let res: Response;
+  if (hasFiles) {
+    const form = new FormData();
+    form.append('params', JSON.stringify(executeParams.params || {}));
+    for (const [alias, file] of fileEntries) {
+      form.append(alias, file);
+    }
+    // 不手动设置 Content-Type，由 fetch 自动带 multipart boundary
+    res = await fetch(url, {
+      method: 'POST',
+      body: form,
+    });
+  } else {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(executeParams.params ?? {}),
+    });
+  }
 
   if (!res.ok) {
     const text = await res.text();
@@ -115,17 +134,19 @@ interface SubmitImageEditParams {
 }
 
 export async function submitImageEdit(params: SubmitImageEditParams): Promise<BridgeSubmitResult> {
-  const imgField = {} as Record<string, File>
+  const files: Record<string, File> = {};
   params.imgs.forEach((f, idx) => {
-    imgField[`img${idx+1}`] = f
-  })
+    files[`img${idx + 1}`] = f;
+  });
+  const textParams: Record<string, unknown> = { desc: params.desc };
+  if (params.seed != null) {
+    textParams.seed = params.seed;
+  }
   return submitComfyuiBridge({
     workflowId: `image_edit_${params.imgs.length}`,
-    params: {
-      params: JSON.stringify({ desc: params.desc, seed: params.seed }),
-      ...imgField
-    }
-  })
+    params: textParams,
+    files,
+  });
 }
 
 /**
@@ -322,4 +343,46 @@ export function createTextToImageWorkflow(
       return { taskId: result.taskId };
     },
   })
+}
+
+// ── 图片编辑工作流快捷工厂 ───────────────────────────────────────────
+
+export interface ImageEditWorkflowConfig {
+  id: string;
+  name: string;
+  impl: string;
+  description?: string;
+  getParams(params: WorkflowParams): Promise<{
+    desc: string,
+    imgs: File[],
+    seed?: string | number
+  }>
+}
+
+/**
+ * 创建图片编辑工作流的快捷工厂。
+ *
+ * 封装了 submit → poll → parseOutput 的完整生命周期，
+ * 调用方只需提供 getParams（返回 desc / imgs / seed）即可，
+ * 内部通过 multipart 提交到 image_edit_N 工作流。
+ */
+export function createImageEditWorkflow(
+  config: ImageEditWorkflowConfig,
+): WorkflowDefinition {
+  return createComfyuiBridgeWorkflow({
+    baseDefinition: {
+      id: config.id,
+      name: config.name,
+      impl: config.impl,
+      description: config.description,
+    },
+    async submit(params) {
+      const { desc, imgs, seed } = await config.getParams(params)
+      if (!imgs.length) {
+        throw new Error('Image edit workflow requires at least one input image');
+      }
+      const result = await submitImageEdit({ imgs, desc, seed });
+      return { taskId: result.taskId };
+    },
+  });
 }
