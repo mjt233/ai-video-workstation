@@ -18,11 +18,14 @@ export interface WorkflowParams {
   projectConfig: ProjectConfig;
 }
 
-export interface WorkflowDefinition<TPollResult = Record<string, unknown>> {
+export interface WorkflowBaseDefinition {
   id: string;
   name: string;
   impl: string;
   description?: string;
+}
+
+export interface WorkflowDefinition<TPollResult = Record<string, unknown>> extends WorkflowBaseDefinition {
 
   /** Submit task to AI API, return remote task ID */
   submit(params: WorkflowParams): Promise<{ taskId: string }>;

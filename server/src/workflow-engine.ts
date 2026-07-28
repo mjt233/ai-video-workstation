@@ -82,6 +82,7 @@ async function runTask(taskId: string): Promise<void> {
     vars: {
       ...projectConfig,
       ...(paramsObj.vars ?? {}),
+      seed: new Date().getTime()
     },
     projectConfig: {
       width: projectConfig.width ? Number(projectConfig.width) : 0,

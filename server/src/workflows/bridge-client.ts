@@ -11,7 +11,7 @@
  * 首次调用 status/output-files 时自动登录获取 token 并缓存。
  */
 
-import type { WorkflowDefinition, WorkflowParams } from './types.js';
+import type { WorkflowDefinition, WorkflowParams, WorkflowBaseDefinition } from './types.js';
 
 const BRIDGE_URL = (process.env.COMFYUI_BRIDGE_URL || 'http://localhost:10721').replace(/\/+$/, '');
 const BRIDGE_PASSWORD = process.env.COMFYUI_BRIDGE_PASSWORD || '0d000721';
@@ -61,24 +61,34 @@ export interface BridgeSubmitResult {
   comfyuiResponse: unknown;
 }
 
+export interface ComfyuiBridgeExecuteParams {
+  /**
+   * 工作流id
+   */
+  workflowId: string
+
+  /**
+   * 工作流参数，key为工作流参数字段别名，value为字段值
+   */
+  params?: Record<string, unknown>
+
+  /**
+   * 需要上传的文件。
+   * key为工作流参数中需要加载文件的字段别名
+   * value为本地文件
+   */
+  files?: Record<string, File>
+}
+
 /**
  * 提交文生图任务到 ComfyUI Bridge
- * POST /api/workflows/text_to_image/execute
  */
-export async function submitTextToImage(params: SubmitTextToImageParams): Promise<BridgeSubmitResult> {
-  const body: Record<string, unknown> = {
-    imd_desc: params.imd_desc,
-    width: params.width,
-    height: params.height
-  };
-  if (params.seed != null) {
-    body.seed = params.seed;
-  }
+export async function submitComfyuiBridge(executeParams: ComfyuiBridgeExecuteParams): Promise<BridgeSubmitResult> {
 
   const res = await fetch(`${BRIDGE_URL}/api/workflows/text_to_image/execute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(executeParams.params),
   });
 
   if (!res.ok) {
@@ -96,6 +106,45 @@ export async function submitTextToImage(params: SubmitTextToImageParams): Promis
     taskId: data.task_id,
     comfyuiResponse: data.comfyui_response,
   };
+}
+
+interface SubmitImageEditParams {
+  imgs: File[],
+  desc: string,
+  seed?: string | number
+}
+
+export async function submitImageEdit(params: SubmitImageEditParams): Promise<BridgeSubmitResult> {
+  const imgField = {} as Record<string, File>
+  params.imgs.forEach((f, idx) => {
+    imgField[`img${idx+1}`] = f
+  })
+  return submitComfyuiBridge({
+    workflowId: `image_edit_${params.imgs.length}`,
+    params: {
+      params: JSON.stringify({ desc: params.desc, seed: params.seed }),
+      ...imgField
+    }
+  })
+}
+
+/**
+ * 提交文生图任务到 ComfyUI Bridge
+ * POST /api/workflows/text_to_image/execute
+ */
+export async function submitTextToImage(params: SubmitTextToImageParams): Promise<BridgeSubmitResult> {
+  const body: Record<string, unknown> = {
+    imd_desc: params.imd_desc,
+    width: params.width,
+    height: params.height
+  };
+  if (params.seed != null) {
+    body.seed = params.seed;
+  }
+  return submitComfyuiBridge({
+    workflowId: 'text_to_image',
+    params: body
+  })
 }
 
 export interface BridgeTaskStatus {
@@ -216,35 +265,13 @@ export interface TextToImageWorkflowConfig {
   getHeight?(params: WorkflowParams): number;
 }
 
-/**
- * 创建文生图工作流的快捷工厂。
- *
- * 封装了 submit → poll → parseOutput 的完整生命周期，
- * 调用方只需提供 getPrompt / getWidth / getHeight 即可，
- * 无需重复编写轮询和输出处理的样板代码。
- */
-export function createTextToImageWorkflow(
-  config: TextToImageWorkflowConfig,
-): WorkflowDefinition {
-  const WIDTH_DEFAULT = 1080;
-  const HEIGHT_DEFAULT = 1920;
-
+export function createComfyuiBridgeWorkflow({ baseDefinition, submit }: {
+  baseDefinition: WorkflowBaseDefinition,
+  submit: (params: WorkflowParams) => Promise<{ taskId: string }>
+}): WorkflowDefinition {
   return {
-    id: config.id,
-    name: config.name,
-    impl: config.impl,
-    description: config.description,
-
-    async submit(params) {
-      const prompt = await config.getPrompt(params);
-      const width = config.getWidth ? config.getWidth(params) : WIDTH_DEFAULT;
-      const height = config.getHeight ? config.getHeight(params) : HEIGHT_DEFAULT;
-      const seed = params.vars.seed ? Number(params.vars.seed) : undefined;
-
-      const result = await submitTextToImage({ imd_desc: prompt, width, height, seed });
-      return { taskId: result.taskId };
-    },
-
+    ...baseDefinition,
+    submit,
     async poll(taskId) {
       const result = await pollTask(taskId);
       const done = result.status === 'completed' || result.status === 'failed';
@@ -263,5 +290,36 @@ export function createTextToImageWorkflow(
         filename,
       };
     },
-  };
+  }
+}
+
+/**
+ * 创建文生图工作流的快捷工厂。
+ *
+ * 封装了 submit → poll → parseOutput 的完整生命周期，
+ * 调用方只需提供 getPrompt / getWidth / getHeight 即可，
+ * 无需重复编写轮询和输出处理的样板代码。
+ */
+export function createTextToImageWorkflow(
+  config: TextToImageWorkflowConfig,
+): WorkflowDefinition {
+  const WIDTH_DEFAULT = 1080;
+  const HEIGHT_DEFAULT = 1920;
+
+  return createComfyuiBridgeWorkflow({
+    baseDefinition: {
+      id: config.id,
+      name: config.name,
+      impl: config.impl,
+      description: config.description,
+    },
+    async submit(params) {
+      const prompt = await config.getPrompt(params);
+      const width = config.getWidth ? config.getWidth(params) : WIDTH_DEFAULT;
+      const height = config.getHeight ? config.getHeight(params) : HEIGHT_DEFAULT;
+      const seed = params.vars.seed ? Number(params.vars.seed) : undefined;
+      const result = await submitTextToImage({ imd_desc: prompt, width, height, seed });
+      return { taskId: result.taskId };
+    },
+  })
 }
