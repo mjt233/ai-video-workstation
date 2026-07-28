@@ -90,6 +90,106 @@ function parseBaseStageImagePath(baseStage: string): string {
   return `assert/stage/${stageName}/${stageLabel}.jpg`;
 }
 
+interface ScriptLine {
+  角色名?: string;
+  台词?: string;
+  情绪?: string;
+}
+
+/**
+ * scene-tts：由引擎统一读取 script.json / voice.md，
+ * 注入 character / text / voiceDesc / emotion，并规范输出路径为
+ * assert/scene/{ep}/{shot}/voice/{index}-{character}.flac
+ */
+async function enrichSceneTtsParams(
+  project: string,
+  paramsObj: {
+    vars?: Record<string, string>;
+    promptPaths?: string[];
+    outputPath?: string;
+  },
+): Promise<{
+  vars: Record<string, string>;
+  outputPath: string;
+}> {
+  const vars = { ...(paramsObj.vars ?? {}) };
+  const episode = vars.episode?.trim();
+  const shot = vars.shot?.trim();
+  const indexStr = vars.index?.trim();
+  if (!episode || !shot || indexStr == null || indexStr === '') {
+    throw new Error('scene-tts 需要 vars.episode / vars.shot / vars.index');
+  }
+
+  const index = Number(indexStr);
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error(`scene-tts 无效的台词序号 index=${indexStr}`);
+  }
+
+  const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
+
+  const scriptRel = `prompt/scene/${episode}/${shot}/script.json`;
+  const scriptFull = path.resolve(DESIGN_DIR, project, scriptRel);
+  if (!scriptFull.startsWith(projectRoot)) {
+    throw new Error('Path traversal denied');
+  }
+
+  let script: ScriptLine[];
+  try {
+    const raw = await fs.readFile(scriptFull, 'utf-8');
+    script = JSON.parse(raw) as ScriptLine[];
+  } catch {
+    throw new Error(`无法读取台词文件: ${scriptRel}`);
+  }
+  if (!Array.isArray(script)) {
+    throw new Error(`script.json 格式无效: ${scriptRel}`);
+  }
+  if (index >= script.length) {
+    throw new Error(`台词序号越界: index=${index}, script.json 共 ${script.length} 项`);
+  }
+
+  const line = script[index];
+  const character = (line.角色名 ?? '').trim();
+  const text = (line.台词 ?? '').trim();
+  const emotion = (line.情绪 ?? '').trim();
+  if (!character) {
+    throw new Error(`台词 #${index} 缺少角色名`);
+  }
+  if (!text) {
+    throw new Error(`台词 #${index}（${character}）内容为空`);
+  }
+
+  const voiceRel = `prompt/character/${character}/voice.md`;
+  const voiceFull = path.resolve(DESIGN_DIR, project, voiceRel);
+  if (!voiceFull.startsWith(projectRoot)) {
+    throw new Error('Path traversal denied');
+  }
+  let voiceDesc: string;
+  try {
+    voiceDesc = (await fs.readFile(voiceFull, 'utf-8')).trim();
+  } catch {
+    throw new Error(`角色声线描述不存在: ${voiceRel}`);
+  }
+  if (!voiceDesc) {
+    throw new Error(`角色声线描述为空: ${voiceRel}`);
+  }
+
+  const outputPath = `assert/scene/${episode}/${shot}/voice/${index}-${character}.flac`;
+
+  return {
+    vars: {
+      ...vars,
+      episode,
+      shot,
+      index: String(index),
+      character,
+      text,
+      voiceDesc,
+      emotion,
+    },
+    outputPath,
+  };
+}
+
 /**
  * scene-stage-image 直接引用：登场角色与 prompt 同时为空时，
  * 由调度引擎将基础场景图复制为独立的分镜场景图资产，不调用 AI 工作流。
@@ -188,6 +288,13 @@ async function runTask(taskId: string): Promise<void> {
     outputPath?: string;
   };
   const projectConfig = await loadProjectConfig(task.project);
+
+  // scene-tts：引擎统一读取台词/声线/情绪，并规范输出路径
+  if (task.workflow_id === 'scene-tts') {
+    const enriched = await enrichSceneTtsParams(task.project, paramsObj);
+    paramsObj.vars = enriched.vars;
+    paramsObj.outputPath = enriched.outputPath;
+  }
 
   // vars 仅含业务字段 + 引擎注入的 seed；尺寸等走 projectConfig
   const vars: WorkflowVarsBase & Record<string, string> = {

@@ -65,23 +65,28 @@
                 {{ entry.情绪 }}
               </v-chip>
             </v-list-item-title>
-            <v-list-item-subtitle>{{ entry.台词 }}</v-list-item-subtitle>
-            <template #append>
-              <div class="d-flex align-center ga-1">
-                <v-icon
+            <v-list-item-subtitle>
+              <div class="d-flex flex-column">
+                <p>{{ entry.台词 }}</p>
+                <audio
                   v-if="voiceAssets[i]"
-                  color="success"
-                  size="small"
-                >
-                  mdi-check-circle
-                </v-icon>
+                  class="mt-2"
+                  style="height: 32px;"
+                  :src="voiceAssets[i]"
+                  controls
+                  preload="metadata"
+                />
+              </div>
+            </v-list-item-subtitle>
+            <template #append>
+              <div class="d-flex align-center ga-2">
                 <v-btn
                   size="x-small"
                   variant="tonal"
                   prepend-icon="mdi-account-voice"
                   @click="genDialog = { show: true, type: 'voice', index: i }"
                 >
-                  生成语音
+                  {{ voiceAssets[i] ? '重新生成' : '生成语音' }}
                 </v-btn>
               </div>
             </template>
@@ -372,8 +377,8 @@
       :project="props.project"
       workflow-id="scene-tts"
       workflow-name="分镜台词语音生成"
-      :vars="{ episode: props.episode, shot: props.shot, character: data?.script[genDialog.index]?.角色名 ?? '' }"
-      :output-path="`assert/scene/${props.episode}/${props.shot}/voice/${data?.script[genDialog.index]?.角色名}.flac`"
+      :vars="{ episode: props.episode, shot: props.shot, index: String(genDialog.index) }"
+      :output-path="`assert/scene/${props.episode}/${props.shot}/voice/${genDialog.index}-${data?.script[genDialog.index]?.角色名 ?? ''}.flac`"
       :prompt-paths="[`${basePath}/script.json`]"
       :existing-asset="voiceAssets[genDialog.index] ? '已有音频' : undefined"
       @refresh="load"
@@ -451,7 +456,8 @@ const props = defineProps<{ project: string; episode: string; shot: string }>()
 const tab = ref<string | null>(null)
 const data = ref<SceneData | null>(null)
 const stageDefs = ref<StageDefinition[]>([])
-const voiceAssets = ref<boolean[]>([])
+/** 每条台词对应的语音 URL；无资产时为空字符串 */
+const voiceAssets = ref<string[]>([])
 const hasVideo = ref(false)
 const stageAssetUrls = ref<Record<string, string>>({})
 const characterAssetUrls = ref<Record<string, string>>({})
@@ -618,12 +624,19 @@ async function load() {
     characterAssetUrls.value = {}
   }
 
-  // Check voice assets for each script entry
+  // Check voice assets for each script entry: {index}-{角色名}.flac
   if (scriptEntries.length) {
-    const voiceChecks = await Promise.all(
-      scriptEntries.map(entry => existsFs(props.project, `assert/scene/${ep}/${shot}/voice/${entry.角色名}.flac`)),
+    const ts = Date.now()
+    const voiceUrls = await Promise.all(
+      scriptEntries.map(async (entry, i) => {
+        const rel = `assert/scene/${ep}/${shot}/voice/${i}-${entry.角色名}.flac`
+        if (await existsFs(props.project, rel)) {
+          return `/api/fs/${props.project}/${rel}?t=${ts}`
+        }
+        return ''
+      }),
     )
-    voiceAssets.value = voiceChecks
+    voiceAssets.value = voiceUrls
   } else {
     voiceAssets.value = []
   }
@@ -688,6 +701,7 @@ watch(() => [props.project, props.episode, props.shot], load, { immediate: true 
 </script>
 
 <style scoped>
+
 .stage-prompt {
   white-space: pre-wrap;
   word-break: break-word;

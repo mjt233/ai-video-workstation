@@ -205,16 +205,27 @@ export async function discoverTasks(
                 const scriptPath = path.join(episodePath, shot, 'script.json');
                 try {
                   const scriptContent = await fs.readFile(scriptPath, 'utf-8');
-                  const script = JSON.parse(scriptContent) as Array<{ 角色名: string; 台词: string; 表情?: string }>;
-                  const uniqueCharacters = [...new Set(script.map(line => line.角色名))];
-                  for (const character of uniqueCharacters) {
-                    const outputPath = `assert/scene/${episode}/${shot}/voice_${character}.flac`;
+                  const script = JSON.parse(scriptContent) as Array<{ 角色名: string; 台词: string; 情绪?: string }>;
+                  if (!Array.isArray(script)) continue;
+                  for (let index = 0; index < script.length; index++) {
+                    const character = (script[index]?.角色名 ?? '').trim();
+                    if (!character) continue;
+                    // 引擎会再注入 character/text/voiceDesc/emotion，并强制规范 outputPath
+                    const outputPath = `assert/scene/${episode}/${shot}/voice/${index}-${character}.flac`;
                     if (await shouldSkipOutput(outputPath)) continue;
                     tasks.push({
                       workflowId: 'scene-tts',
                       impl: 'default',
-                      vars: { episode, shot, character } satisfies SceneTtsVars,
-                      promptPaths: [`prompt/scene/${episode}/${shot}/script.json`],
+                      vars: {
+                        episode,
+                        shot,
+                        index: String(index),
+                        character,
+                      } satisfies SceneTtsVars,
+                      promptPaths: [
+                        `prompt/scene/${episode}/${shot}/script.json`,
+                        `prompt/character/${character}/voice.md`,
+                      ],
                       outputPath,
                     });
                   }

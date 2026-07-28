@@ -294,8 +294,11 @@ function getTaskDisplayName(task: TaskResponse): string {
       return typeLabel
     }
     case 'scene-tts': {
-      if (vars.episode && vars.shot && vars.character) {
-        return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · ${vars.character}`
+      if (vars.episode && vars.shot && vars.index != null && vars.character) {
+        return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · #${vars.index} ${vars.character}`
+      }
+      if (vars.episode && vars.shot && vars.index != null) {
+        return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · 台词${vars.index}`
       }
       if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
       return typeLabel

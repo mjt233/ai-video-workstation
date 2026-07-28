@@ -27,11 +27,25 @@ export interface SceneStageImageVars extends WorkflowVarsBase {
   index: string;
 }
 
-/** 分镜台词 TTS */
+/**
+ * 分镜台词 TTS
+ *
+ * 调用方只需提供 episode / shot / index（台词序号）。
+ * 引擎会统一读取并注入：character / text / voiceDesc / emotion。
+ */
 export interface SceneTtsVars extends WorkflowVarsBase {
   episode: string;
   shot: string;
-  character: string;
+  /** 该分镜下的台词序号（script.json 数组下标，字符串形式） */
+  index: string;
+  /** 角色名称（引擎注入） */
+  character?: string;
+  /** 台词文本（引擎注入） */
+  text?: string;
+  /** 角色声线描述（引擎注入，来自 voice.md） */
+  voiceDesc?: string;
+  /** 台词情绪（引擎注入，可为空字符串） */
+  emotion?: string;
 }
 
 /** 视频生成 */
