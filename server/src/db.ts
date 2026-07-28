@@ -72,6 +72,7 @@ export interface TaskRecord {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  batch_id: string | null;
 }
 
 export interface LogEntry {
