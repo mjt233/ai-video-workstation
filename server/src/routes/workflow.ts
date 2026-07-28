@@ -147,7 +147,8 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
       });
     }
 
-    storeBatchConfig(batchId, concurrency ?? 1);
+    const effectiveConcurrency = Math.max(1, Math.min(10, Math.floor(concurrency ?? 1)));
+    storeBatchConfig(batchId, effectiveConcurrency);
 
     res.json({ batchId, totalTasks: discovered.length, project });
   } catch (err: unknown) {
