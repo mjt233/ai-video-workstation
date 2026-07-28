@@ -12,6 +12,24 @@
     <v-tabs-window v-model="tab">
       <!-- 项目总览 -->
       <v-tabs-window-item value="overview">
+        <v-alert
+          v-if="overviewError"
+          type="error"
+          variant="tonal"
+          class="ma-2"
+          density="compact"
+        >
+          {{ overviewError }}
+        </v-alert>
+        <v-alert
+          v-if="overviewSuccess"
+          type="success"
+          variant="tonal"
+          class="ma-2"
+          density="compact"
+        >
+          {{ overviewSuccess }}
+        </v-alert>
         <div class="d-flex mt-2 mb-2 ml-2">
           <v-btn @click="editOverview">
             编辑
@@ -229,6 +247,8 @@ const props = defineProps<{ project: string }>()
 
 const tab = ref<string | null>('overview')
 const overviewContent = ref('')
+const overviewError = ref('')
+const overviewSuccess = ref('')
 const configError = ref('')
 const configSuccess = ref('')
 const rawJsonText = ref('{}')
@@ -346,6 +366,8 @@ function applyConfigObject(obj: Record<string, unknown>) {
 }
 
 async function load() {
+  overviewError.value = ''
+  overviewSuccess.value = ''
   configError.value = ''
   configSuccess.value = ''
   overviewContent.value = ''
@@ -404,16 +426,16 @@ function editOverview() {
 
 async function saveOverview() {
   savingOverview.value = true
-  configSuccess.value = ''
-  configError.value = ''
+  overviewSuccess.value = ''
+  overviewError.value = ''
   try {
     await writeFs(props.project, 'overview.md', overviewDialog.content)
     overviewContent.value = overviewDialog.content
     overviewDialog.show = false
-    configSuccess.value = 'overview.md 已保存'
+    overviewSuccess.value = 'overview.md 已保存'
   } catch (e) {
     console.error(e)
-    configError.value = '保存 overview.md 失败'
+    overviewError.value = '保存 overview.md 失败'
   } finally {
     savingOverview.value = false
   }
@@ -430,21 +452,34 @@ async function saveForm() {
   try {
     // 重新读取，避免覆盖他人/他处修改的非核心字段
     let base: Record<string, unknown> = {}
+    let latest: unknown
     try {
-      const latest = await readFs(props.project, 'project.json')
+      latest = await readFs(props.project, 'project.json')
+    } catch {
+      // 文件不存在 / 读取失败 → 按空对象创建
+      latest = null
+      base = {}
+    }
+
+    if (latest !== null) {
       if (typeof latest === 'object' && latest !== null && !Array.isArray(latest) && !('entries' in latest)) {
         base = { ...(latest as Record<string, unknown>) }
       } else if (typeof latest === 'string') {
-        const parsed: unknown = JSON.parse(latest)
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        try {
+          const parsed: unknown = JSON.parse(latest)
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            configError.value = '无法解析 project.json，请使用「编辑原始 JSON」修复'
+            return
+          }
+          base = { ...(parsed as Record<string, unknown>) }
+        } catch {
           configError.value = '无法解析 project.json，请使用「编辑原始 JSON」修复'
           return
         }
-        base = { ...(parsed as Record<string, unknown>) }
+      } else {
+        configError.value = 'project.json 读取结果异常'
+        return
       }
-    } catch {
-      // 不存在 → 空对象
-      base = {}
     }
 
     const width = Number(form.width)
