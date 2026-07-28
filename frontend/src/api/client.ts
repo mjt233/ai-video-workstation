@@ -20,6 +20,9 @@ export async function getProjects(): Promise<ProjectEntry[]> {
   return data
 }
 
+/**
+ * 从文件系统读取文件内容。注意：如果文件是.json，返回的数据直接就是已完成反序列化的对象或数组。
+ */
 export async function readFs(project: string, path: string): Promise<DirResponse | string> {
   const { data } = await client.get<DirResponse | string>(`/fs/${project}/${path}`)
   return data

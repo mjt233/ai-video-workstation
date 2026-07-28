@@ -143,7 +143,7 @@ export async function submitImageEdit(params: SubmitImageEditParams): Promise<Br
     textParams.seed = params.seed;
   }
   return submitComfyuiBridge({
-    workflowId: `image_edit_${params.imgs.length}`,
+    workflowId: `img_edit_${params.imgs.length}`,
     params: textParams,
     files,
   });

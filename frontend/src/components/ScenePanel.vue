@@ -93,51 +93,110 @@
       </v-tabs-window-item>
 
       <v-tabs-window-item value="images">
-        <v-row>
-          <v-col
-            v-for="(img, i) in stageImages"
-            :key="i"
-            cols="6"
-          >
-            <v-card>
-              <v-card-text class="text-center">
-                场景{{ i }}
-              </v-card-text>
-              <v-img
-                v-if="img"
-                :src="img"
-                max-height="400"
-                contain
-              />
-              <div
-                v-else
-                class="text-grey d-flex align-center justify-center"
-                style="height: 200px;"
-              >
-                暂无图片
-              </div>
-              <div class="d-flex justify-center mt-1">
-                <v-btn
-                  size="x-small"
-                  color="primary"
-                  variant="tonal"
-                  prepend-icon="mdi-auto-fix"
-                  @click="genDialog = { show: true, type: 'image', index: i }"
+        <div class="d-flex mt-2 mb-2 ml-2">
+          <v-btn @click="editStageJson">
+            编辑 stage.json
+          </v-btn>
+        </div>
+
+        <div
+          v-for="(stage, i) in stageDefs"
+          :key="i"
+          class="mb-4"
+        >
+          <v-card variant="outlined">
+            <v-card-title class="text-subtitle-1">
+              场景{{ i }}
+            </v-card-title>
+            <v-card-text>
+              <v-row>
+                <v-col cols="6">
+                  <div class="mb-2">
+                    <div class="text-caption text-medium-emphasis mb-1">
+                      基础场景
+                    </div>
+                    <v-chip
+                      size="small"
+                      color="primary"
+                      variant="tonal"
+                    >
+                      {{ stage.基础场景 || '未指定' }}
+                    </v-chip>
+                  </div>
+                  <div class="mb-2">
+                    <div class="text-caption text-medium-emphasis mb-1">
+                      登场角色
+                    </div>
+                    <div
+                      v-if="stage.登场角色?.length"
+                      class="d-flex flex-wrap ga-1"
+                    >
+                      <v-chip
+                        v-for="charName in stage.登场角色"
+                        :key="charName"
+                        size="small"
+                        variant="outlined"
+                      >
+                        {{ charName }}
+                      </v-chip>
+                    </div>
+                    <div
+                      v-else
+                      class="text-grey text-body-2"
+                    >
+                      无
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-caption text-medium-emphasis mb-1">
+                      合成 Prompt
+                    </div>
+                    <div class="text-body-2 stage-prompt">
+                      {{ stage.prompt || '（空）' }}
+                    </div>
+                  </div>
+                </v-col>
+                <v-col
+                  cols="6"
+                  class="d-flex flex-column align-center"
                 >
-                  生成
-                </v-btn>
-              </div>
-            </v-card>
-          </v-col>
-          <v-col
-            v-if="!stageImages.length"
-            cols="12"
-          >
-            <div class="text-grey">
-              暂无场景图片
-            </div>
-          </v-col>
-        </v-row>
+                  <div class="d-flex justify-center mb-3">
+                    <v-btn
+                      size="small"
+                      color="primary"
+                      variant="tonal"
+                      prepend-icon="mdi-auto-fix"
+                      @click="genDialog = { show: true, type: 'image', index: i }"
+                    >
+                      生成图片
+                    </v-btn>
+                  </div>
+                  <v-img
+                    v-if="stage.imageUrl"
+                    :src="stage.imageUrl"
+                    max-height="65vh"
+                    contain
+                    width="100%"
+                  />
+                  <div
+                    v-else
+                    class="text-grey d-flex align-center justify-center"
+                    style="height: 200px; width: 100%;"
+                  >
+                    暂无图片
+                  </div>
+                </v-col>
+              </v-row>
+            </v-card-text>
+          </v-card>
+        </div>
+
+        <div
+          v-if="!stageDefs.length"
+          class="text-grey ml-2"
+        >
+          暂无场景图片定义（stage.json）
+        </div>
       </v-tabs-window-item>
       <v-tabs-window-item value="prompt">
         <div class="d-flex mt-2 mb-2 ml-2">
@@ -201,7 +260,8 @@
       workflow-name="分镜场景图生成"
       :vars="{ episode: props.episode, shot: props.shot, index: String(genDialog.index) }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/stage/${genDialog.index}.jpg`"
-      :existing-asset="stageImages[genDialog.index] ? '已有图片' : undefined"
+      :prompt-paths="[`${basePath}/stage.json`]"
+      :existing-asset="stageDefs[genDialog.index]?.imageUrl ? '已有图片' : undefined"
       @refresh="load"
     />
     <GenerateDialog
@@ -211,6 +271,7 @@
       workflow-name="分镜台词语音生成"
       :vars="{ episode: props.episode, shot: props.shot, character: data?.script[genDialog.index]?.角色名 ?? '' }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/voice/${data?.script[genDialog.index]?.角色名}.flac`"
+      :prompt-paths="[`${basePath}/script.json`]"
       :existing-asset="voiceAssets[genDialog.index] ? '已有音频' : undefined"
       @refresh="load"
     />
@@ -221,6 +282,7 @@
       workflow-name="视频生成"
       :vars="{ episode: props.episode, shot: props.shot, index: '0' }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/video/0.mp4`"
+      :prompt-paths="[`${basePath}/prompt.md`]"
       :existing-asset="hasVideo ? '已有视频' : undefined"
       @refresh="load"
     />
@@ -239,6 +301,13 @@ interface ScriptEntry {
   情绪: string
 }
 
+interface StageDefinition {
+  基础场景: string
+  登场角色?: string[]
+  prompt: string
+  imageUrl: string
+}
+
 interface DialogState {
   show: boolean
   field: string
@@ -247,14 +316,15 @@ interface DialogState {
 
 interface SceneData {
   overview: string
-  script: ScriptEntry[],
-  prompt: string
+  script: ScriptEntry[]
+  prompt: string,
+  stage: StageDefinition[]
 }
 
 const props = defineProps<{ project: string; episode: string; shot: string }>()
 const tab = ref<string | null>(null)
 const data = ref<SceneData | null>(null)
-const stageImages = ref<string[]>([])
+const stageDefs = ref<StageDefinition[]>([])
 const voiceAssets = ref<boolean[]>([])
 const hasVideo = ref(false)
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
@@ -262,15 +332,15 @@ const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index:
 
 const genImageDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'image',
-  set: (v) => { if (!v) genDialog.value.show = false }
+  set: (v) => { if (!v) genDialog.value.show = false },
 })
 const genVoiceDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'voice',
-  set: (v) => { if (!v) genDialog.value.show = false }
+  set: (v) => { if (!v) genDialog.value.show = false },
 })
 const genVideoDialog = computed({
   get: () => genDialog.value.show && genDialog.value.type === 'video',
-  set: (v) => { if (!v) genDialog.value.show = false }
+  set: (v) => { if (!v) genDialog.value.show = false },
 })
 
 const basePath = computed(() => `prompt/scene/${props.episode}/${props.shot}`)
@@ -287,36 +357,51 @@ async function load() {
       readFs(props.project, `${bp}/overview.md`).catch(() => ''),
       readFs(props.project, `${bp}/script.json`).catch(() => '[]'),
       readFs(props.project, `${bp}/prompt.md`).catch(() => ''),
+      readFs(props.project, `${bp}/stage.json`).catch(() => ''),
     ])
     const overview = results[0] as string
-    scriptEntries = results[1] as any as ScriptEntry[]
-    data.value = { overview, script: scriptEntries, prompt: results[2] as string }
-  } catch(err) {
+    const scriptRaw = results[1]
+    if (typeof scriptRaw === 'string') {
+      scriptEntries = JSON.parse(scriptRaw || '[]') as ScriptEntry[]
+    } else if (Array.isArray(scriptRaw)) {
+      scriptEntries = scriptRaw as ScriptEntry[]
+    } else {
+      scriptEntries = []
+    }
+    data.value = {
+      overview,
+      script: scriptEntries,
+      prompt: results[2] as string,
+      stage: results[3] as any as StageDefinition[]
+    }
+  } catch (err) {
     console.log(err)
   }
 
-  // Load stage images with existence check
+  // 无论是否已生成图片，都展示 stage.json 原型定义
   try {
-    const stageRaw = await readFs(props.project, `${bp}/stage.json`) as string
-    const stage = JSON.parse(stageRaw)
+    const stage = data.value?.stage
     if (Array.isArray(stage)) {
       const checks = await Promise.all(
-        stage.map((_, i) => existsFs(props.project, `assert/scene/${ep}/${shot}/stage/${i}.jpg`))
+        stage.map((_, i) => existsFs(props.project, `assert/scene/${ep}/${shot}/stage/${i}.jpg`)),
       )
-      stageImages.value = stage.map((_, i) =>
-        checks[i] ? `${assertBase.value}/${i}.jpg?t=${Date.now()}` : ''
-      )
+      stageDefs.value = stage.map((item, i) => ({
+        基础场景: item.基础场景 ?? '',
+        登场角色: item.登场角色 ?? [],
+        prompt: item.prompt ?? '',
+        imageUrl: checks[i] ? `${assertBase.value}/${i}.jpg?t=${Date.now()}` : '',
+      }))
     } else {
-      stageImages.value = []
+      stageDefs.value = []
     }
   } catch {
-    stageImages.value = []
+    stageDefs.value = []
   }
 
   // Check voice assets for each script entry
   if (scriptEntries.length) {
     const voiceChecks = await Promise.all(
-      scriptEntries.map(entry => existsFs(props.project, `assert/scene/${ep}/${shot}/voice/${entry.角色名}.flac`))
+      scriptEntries.map(entry => existsFs(props.project, `assert/scene/${ep}/${shot}/voice/${entry.角色名}.flac`)),
     )
     voiceAssets.value = voiceChecks
   } else {
@@ -335,18 +420,57 @@ function editJson(field: string) {
   dialog.value = { show: true, field, content: JSON.stringify(data.value![field as keyof SceneData], null, 2) }
 }
 
+function editStageJson() {
+  dialog.value = {
+    show: true,
+    field: 'stage',
+    content: JSON.stringify(
+      stageDefs.value.map(({ 基础场景, 登场角色, prompt }) => ({ 基础场景, 登场角色, prompt })),
+      null,
+      2,
+    ),
+  }
+}
+
 async function save() {
   const field = dialog.value.field
-  const file = field === 'script' ? 'script.json' : `${field}.md`
   const content = dialog.value.content
+
+  if (field === 'stage') {
+    try {
+      const parsed = JSON.parse(content)
+      if (!Array.isArray(parsed)) {
+        alert('stage.json 必须是数组')
+        return
+      }
+    } catch (e: unknown) {
+      alert('JSON 格式错误: ' + (e as Error).message)
+      return
+    }
+    await writeFs(props.project, `${basePath.value}/stage.json`, content)
+    dialog.value.show = false
+    await load()
+    return
+  }
+
+  const file = field === 'script' ? 'script.json' : `${field}.md`
   if (field === 'script') {
     try { JSON.parse(content) } catch (e: unknown) { alert('JSON 格式错误: ' + (e as Error).message); return }
   }
   await writeFs(props.project, `${basePath.value}/${file}`, content)
   if (field === 'script' && data.value) data.value.script = JSON.parse(content)
   else if (data.value && field === 'overview') data.value.overview = content
+  else if (data.value && field === 'prompt') data.value.prompt = content
   dialog.value.show = false
 }
 
 watch(() => [props.project, props.episode, props.shot], load, { immediate: true })
 </script>
+
+<style scoped>
+.stage-prompt {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+</style>
