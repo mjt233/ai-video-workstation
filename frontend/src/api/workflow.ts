@@ -40,8 +40,35 @@ export async function getWorkflows(): Promise<WorkflowInfo[]> {
   return data.workflows
 }
 
+export interface BatchRunParams {
+  project: string
+  assetTypes: string[]
+  concurrency?: number
+  overwrite?: boolean
+}
+
+export interface BatchSummary {
+  batch_id: string
+  project: string
+  total: number
+  completed: number
+  failed: number
+  running: number
+  pending: number
+}
+
 export async function runWorkflow(body: WorkflowRunParams): Promise<{ taskId: string; status: string }> {
   const { data } = await client.post<{ taskId: string; status: string }>('/workflow/run', body)
+  return data
+}
+
+export async function runBatch(body: BatchRunParams): Promise<{ batchId: string; totalTasks: number }> {
+  const { data } = await client.post<{ batchId: string; totalTasks: number }>('/workflow/batch-run', body)
+  return data
+}
+
+export async function getBatchStatus(batchId: string): Promise<BatchSummary> {
+  const { data } = await client.get<BatchSummary>(`/workflow/batch/${batchId}`)
   return data
 }
 
@@ -50,10 +77,11 @@ export async function getTaskStatus(taskId: string): Promise<TaskResponse> {
   return data
 }
 
-export async function listTasks(project?: string, status?: string): Promise<TaskResponse[]> {
+export async function listTasks(project?: string, status?: string, batchId?: string): Promise<TaskResponse[]> {
   const params = new URLSearchParams()
   if (project) params.set('project', project)
   if (status) params.set('status', status)
+  if (batchId) params.set('batchId', batchId)
   const { data } = await client.get<{ tasks: TaskResponse[] }>(`/workflow/tasks?${params}`)
   return data.tasks
 }
