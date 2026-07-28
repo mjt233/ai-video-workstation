@@ -141,6 +141,7 @@ import {
 import AssetCreateDialog, { type CreateAssetType } from './AssetCreateDialog.vue'
 
 type TreeKind =
+  | 'project-info'
   | 'root-character'
   | 'character'
   | 'root-stage'
@@ -197,6 +198,9 @@ function sortNumericNames(names: string[]): string[] {
 }
 
 function iconColor(item: TreeItem): string {
+  if (item.kind === 'project-info') {
+    return 'deep-purple'
+  }
   if (item.type === 'character' || item.kind === 'character' || item.kind === 'root-character') {
     return 'amber-darken-1'
   }
@@ -305,6 +309,13 @@ async function buildTree() {
 
   treeItems.value = [
     {
+      name: '项目信息',
+      path: 'project-info',
+      icon: 'mdi-information-outline',
+      type: 'project',
+      kind: 'project-info',
+    },
+    {
       name: '角色',
       path: 'root-character',
       icon: 'mdi-account-group',
@@ -360,6 +371,17 @@ function onSelect(items: unknown) {
   if (!selected.length) return
   const item = selected[0]
   if (!item) return
+
+  if (item.kind === 'project-info') {
+    patchQuery({
+      type: 'project',
+      name: undefined,
+      subscene: undefined,
+      episode: undefined,
+      shot: undefined,
+    })
+    return
+  }
 
   if (item.kind === 'character') {
     patchQuery({
