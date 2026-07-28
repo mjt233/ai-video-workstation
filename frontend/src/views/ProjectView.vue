@@ -31,6 +31,7 @@
       <AssetTree
         :key="treeKey"
         :project="project"
+        @refresh="refreshTree"
       />
       <BatchGenerateDialog
         v-model="showBatchDialog"
