@@ -74,7 +74,7 @@ design/{project}/
     │   └── {stage}-{subscene}.md   #   子场景 prompt
     └── scene/{episode}/{shot}/     # 分镜设计
         ├── overview.md             #   分镜总览
-        ├── stage.json              #   场景组合 + 角色合成 prompt
+        ├── stage.json              #   场景组合 + 角色合成 prompt（角色/prompt 皆空=直接引用基础场景）
         ├── script.json             #   台词序列
         └── prompt.md               #   图生视频模型提示词
 ```

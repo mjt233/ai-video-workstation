@@ -4,10 +4,10 @@
 
 检查内容:
   - project.json 的存在性、resolution 和 aspectRatio 字段格式
-  - 每个分镜的 stage.json 引用的场景资产文件是否存在
-  - 每个分镜的 stage.json 引用的角色资产目录是否存在
-  - 登场角色数量是否不超过 2
-  - prompt 字段中是否正确使用 "图像1/图像2/图像3" 标识
+  - 每个分镜的 stage.json 基础场景必须非空，且引用的场景资产文件存在
+  - 登场角色与 prompt 同时为空时视为直接引用基础场景（合法）
+  - 有登场角色时 prompt 不得为空，角色资产目录须存在，数量不超过 2
+  - 非直接引用时 prompt 字段中是否正确使用 "图像1/图像2/图像3" 标识
   - script.json 中出现的角色名是否在 stage.json 的登场角色中声明
   - 分镜编号是否连续无跳号（按集分别校验）
 
@@ -122,10 +122,10 @@ def validate_shot(shot: int, episode: int, project_name: str,
             errors.append(f"第{episode}集 分镜 {shot}: stage.json 应为数组类型")
         else:
             for i, entry in enumerate(stage_data):
-                # 检查基础场景完整性
+                # 检查基础场景完整性（必须非空）
                 stage_ref = entry.get("基础场景", "")
-                if not stage_ref:
-                    errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: 缺少 '基础场景' 字段")
+                if not stage_ref or not str(stage_ref).strip():
+                    errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: '基础场景' 不能为空")
                 else:
                     asset_path = get_stage_asset_path(stage_ref, project_name, project_root)
                     if not asset_path.exists():
@@ -133,10 +133,11 @@ def validate_shot(shot: int, episode: int, project_name: str,
 
                 # 检查登场角色
                 chars = entry.get("登场角色", [])
+                if chars is None:
+                    chars = []
                 if not isinstance(chars, list):
                     errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: '登场角色' 应为数组")
-                elif len(chars) == 0:
-                    errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: '登场角色' 为空")
+                    chars = []
                 elif len(chars) > 2:
                     errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: 登场角色超过2个 ({len(chars)})")
                 else:
@@ -146,16 +147,35 @@ def validate_shot(shot: int, episode: int, project_name: str,
                             errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: 角色资产不存在 ({ch_dir})")
 
                 # 检查 prompt 字段
+                # 登场角色与 prompt 同时为空 = 直接引用基础场景（合法）
                 prompt = entry.get("prompt", "")
-                if not prompt:
-                    errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: 缺少 'prompt' 字段")
-                elif "图像1" not in prompt:
-                    errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: prompt 中未使用 '图像1' 标识基础场景")
+                if prompt is None:
+                    prompt = ""
+                prompt_str = str(prompt)
+                is_direct_ref = len(chars) == 0 and not prompt_str.strip()
 
-                if len(chars) >= 1 and "图像2" not in prompt:
-                    errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: 有登场角色但 prompt 中未使用 '图像2' 标识第一个角色")
-                if len(chars) >= 2 and "图像3" not in prompt:
-                    errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: 有2个登场角色但 prompt 中未使用 '图像3' 标识第二个角色")
+                if is_direct_ref:
+                    # 直接引用基础场景，无需 prompt / 图像标识校验
+                    pass
+                elif not prompt_str.strip():
+                    # 有角色但 prompt 为空，或其它非直接引用却缺 prompt
+                    errors.append(
+                        f"第{episode}集 分镜 {shot}.stage[{i}]: 非直接引用时 prompt 不能为空"
+                        + ("（有登场角色）" if len(chars) > 0 else "")
+                    )
+                else:
+                    if "图像1" not in prompt_str:
+                        errors.append(
+                            f"第{episode}集 分镜 {shot}.stage[{i}]: prompt 中未使用 '图像1' 标识基础场景"
+                        )
+                    if len(chars) >= 1 and "图像2" not in prompt_str:
+                        errors.append(
+                            f"第{episode}集 分镜 {shot}.stage[{i}]: 有登场角色但 prompt 中未使用 '图像2' 标识第一个角色"
+                        )
+                    if len(chars) >= 2 and "图像3" not in prompt_str:
+                        errors.append(
+                            f"第{episode}集 分镜 {shot}.stage[{i}]: 有2个登场角色但 prompt 中未使用 '图像3' 标识第二个角色"
+                        )
 
     # ── 检查 script.json ──
     if not script_path.exists():

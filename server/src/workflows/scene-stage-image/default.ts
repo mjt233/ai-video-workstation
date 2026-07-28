@@ -9,7 +9,7 @@ const DESIGN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 interface SceneStageDefinition {
   基础场景: string;
   登场角色?: string[];
-  prompt: string;
+  prompt?: string;
 }
 
 async function loadAssertImage(project: string, relPath: string): Promise<File> {
@@ -31,7 +31,7 @@ register(createImageEditWorkflow({
   id: 'scene-stage-image',
   name: '场景图编辑',
   impl: 'default',
-  description: '基于参考图编辑生成场景图',
+  description: '基于基础场景图与角色外观图合成分镜场景图（直接引用由调度引擎处理）',
   async getParams(params) {
     const { episode, shot } = params.vars;
     const index = Number(params.vars.index ?? '0');
@@ -49,24 +49,39 @@ register(createImageEditWorkflow({
     }
 
     const stage = defs[index];
+    const baseStage = (stage.基础场景 ?? '').trim();
+    if (!baseStage) {
+      throw new Error('基础场景不能为空');
+    }
+
+    const characters = stage.登场角色 ?? [];
+    const prompt = (stage.prompt ?? '').trim();
+    // 直接引用由调度引擎短路处理；此处若仍进入说明约定被破坏
+    if (characters.length === 0 && !prompt) {
+      throw new Error('直接引用基础场景应由调度引擎处理，不应进入图像编辑工作流');
+    }
+    if (!prompt) {
+      throw new Error('非直接引用时 prompt 不能为空（有登场角色时必须提供合成提示词）');
+    }
+
     const imgs: File[] = [];
 
     // 图像1：基础场景图 assert/stage/{场景名}/{标签}.jpg
-    const slash = stage.基础场景.indexOf('/');
-    if (slash <= 0 || slash === stage.基础场景.length - 1) {
-      throw new Error(`基础场景格式无效（期望 场景名/标签）: ${stage.基础场景}`);
+    const slash = baseStage.indexOf('/');
+    if (slash <= 0 || slash === baseStage.length - 1) {
+      throw new Error(`基础场景格式无效（期望 场景名/标签）: ${baseStage}`);
     }
-    const stageName = stage.基础场景.slice(0, slash);
-    const stageLabel = stage.基础场景.slice(slash + 1);
+    const stageName = baseStage.slice(0, slash);
+    const stageLabel = baseStage.slice(slash + 1);
     imgs.push(await loadAssertImage(params.project, `assert/stage/${stageName}/${stageLabel}.jpg`));
 
     // 图像2+：登场角色外观图
-    for (const character of stage.登场角色 ?? []) {
+    for (const character of characters) {
       imgs.push(await loadAssertImage(params.project, `assert/character/${character}/appearance.jpg`));
     }
 
     return {
-      desc: stage.prompt,
+      desc: prompt,
       imgs,
       seed: params.vars.seed,
     };

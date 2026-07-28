@@ -144,7 +144,7 @@
                       v-else
                       class="text-grey text-body-2"
                     >
-                      无
+                      {{ isDirectStageRef(stage) ? '直接引用基础场景' : '无' }}
                     </div>
                   </div>
                   <div>
@@ -152,7 +152,7 @@
                       合成 Prompt
                     </div>
                     <div class="text-body-2 stage-prompt">
-                      {{ stage.prompt || '（空）' }}
+                      {{ stage.prompt || (isDirectStageRef(stage) ? '（直接引用，不做修改）' : '（空）') }}
                     </div>
                   </div>
                 </v-col>
@@ -345,6 +345,11 @@ const genVideoDialog = computed({
 
 const basePath = computed(() => `prompt/scene/${props.episode}/${props.shot}`)
 const assertBase = computed(() => `/api/fs/${props.project}/assert/scene/${props.episode}/${props.shot}/stage`)
+
+/** 登场角色与 prompt 同时为空 = 直接引用基础场景 */
+function isDirectStageRef(stage: Pick<StageDefinition, '登场角色' | 'prompt'>): boolean {
+  return !(stage.登场角色?.length) && !(stage.prompt ?? '').trim()
+}
 
 async function load() {
   const bp = basePath.value

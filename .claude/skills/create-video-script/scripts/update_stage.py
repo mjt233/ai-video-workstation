@@ -10,13 +10,14 @@
     分镜序号        - 整数，从 1 开始
     索引            - 要更新的条目索引（从 0 开始）
     --stage-ref     - 可选，新的基础场景完整标签
-    --characters    - 可选，新的登场角色名（逗号分隔，最多2个）
-    --prompt        - 可选，新的组合提示词
+    --characters    - 可选，新的登场角色名（逗号分隔，最多2个；传空字符串表示无角色）
+    --prompt        - 可选，新的组合提示词（与角色同时为空表示直接引用基础场景）
     -e, --episode   - 集数（默认: 1）
 
 示例:
     python scripts/update_stage.py -e 1 1 0 --prompt "图像1为背景：...；图像2为陈书文：..."
     python scripts/update_stage.py -e 1 1 0 --characters "陈书文" --stage-ref "现代商场/现代商场-白天-平视-晴-中央扶梯"
+    python scripts/update_stage.py -e 1 1 0 --characters "" --prompt ""
 """
 
 import argparse
@@ -76,9 +77,6 @@ def main():
 
     if args.characters is not None:
         characters = [c.strip() for c in args.characters.split(",") if c.strip()]
-        if len(characters) == 0:
-            print("❌ 必须指定至少一个角色。", file=sys.stderr)
-            sys.exit(1)
         if len(characters) > 2:
             print(f"❌ 角色数量不得超过 2 个（当前: {len(characters)}）。", file=sys.stderr)
             sys.exit(1)
@@ -96,6 +94,23 @@ def main():
     if not changed:
         print("⚠️  未指定任何更新字段（使用 --help 查看可用选项）。", file=sys.stderr)
         sys.exit(1)
+
+    # 更新后一致性校验：基础场景必填；角色与 prompt 同时为空=直接引用
+    final_stage = (entry.get("基础场景") or "").strip()
+    if not final_stage:
+        print("❌ 基础场景不能为空。", file=sys.stderr)
+        sys.exit(1)
+    final_chars = entry.get("登场角色") or []
+    if not isinstance(final_chars, list):
+        print("❌ 登场角色应为数组。", file=sys.stderr)
+        sys.exit(1)
+    final_prompt = (entry.get("prompt") or "").strip()
+    if len(final_chars) > 0 and not final_prompt:
+        print("❌ 有登场角色时 prompt 不能为空。", file=sys.stderr)
+        sys.exit(1)
+    if len(final_chars) == 0 and not final_prompt:
+        entry["prompt"] = ""
+        entry["登场角色"] = []
 
     data[args.index] = entry
     write_json(stage_path, data)

@@ -57,6 +57,114 @@ export async function discoverWorkflows(): Promise<void> {
   }
 }
 
+interface SceneStageDefinition {
+  基础场景?: string;
+  登场角色?: string[];
+  prompt?: string;
+}
+
+function resolveProjectAssertPath(project: string, relPath: string): string {
+  const full = path.resolve(DESIGN_DIR, project, relPath);
+  const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
+  if (!full.startsWith(projectRoot)) {
+    throw new Error(`Path traversal denied: ${relPath}`);
+  }
+  const relAssertPath = path.relative(path.resolve(DESIGN_DIR, project), full);
+  if (!relAssertPath.startsWith('assert')) {
+    throw new Error(`Path must be under assert/: ${relPath}`);
+  }
+  return full;
+}
+
+function parseBaseStageImagePath(baseStage: string): string {
+  const trimmed = baseStage.trim();
+  if (!trimmed) {
+    throw new Error('基础场景不能为空');
+  }
+  const slash = trimmed.indexOf('/');
+  if (slash <= 0 || slash === trimmed.length - 1) {
+    throw new Error(`基础场景格式无效（期望 场景名/标签）: ${baseStage}`);
+  }
+  const stageName = trimmed.slice(0, slash);
+  const stageLabel = trimmed.slice(slash + 1);
+  return `assert/stage/${stageName}/${stageLabel}.jpg`;
+}
+
+/**
+ * scene-stage-image 直接引用：登场角色与 prompt 同时为空时，
+ * 由调度引擎将基础场景图复制为独立的分镜场景图资产，不调用 AI 工作流。
+ * @returns true 表示已处理完成（成功或失败均已落库），调用方应直接 return
+ */
+async function tryHandleSceneStageDirectReference(
+  taskId: string,
+  project: string,
+  paramsObj: { vars?: Record<string, string>; outputPath?: string },
+): Promise<boolean> {
+  const vars = paramsObj.vars ?? {};
+  const { episode, shot } = vars;
+  const index = Number(vars.index ?? '0');
+  if (!episode || !shot || !Number.isInteger(index) || index < 0) {
+    return false;
+  }
+
+  const stageJsonRel = `prompt/scene/${episode}/${shot}/stage.json`;
+  const stageJsonFull = path.resolve(DESIGN_DIR, project, stageJsonRel);
+  const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
+  if (!stageJsonFull.startsWith(projectRoot)) {
+    throw new Error('Path traversal denied');
+  }
+
+  let defs: SceneStageDefinition[];
+  try {
+    const raw = await fs.readFile(stageJsonFull, 'utf-8');
+    defs = JSON.parse(raw) as SceneStageDefinition[];
+  } catch {
+    // stage.json 不存在或无法解析时，交由工作流处理/报错
+    return false;
+  }
+  if (!Array.isArray(defs) || index >= defs.length) {
+    return false;
+  }
+
+  const stage = defs[index];
+  const characters = stage.登场角色 ?? [];
+  const prompt = (stage.prompt ?? '').trim();
+  if (characters.length > 0 || prompt) {
+    return false;
+  }
+
+  // 直接引用路径：复制基础场景图 → 分镜场景图资产
+  db.addLog(taskId, 'info', '检测到直接引用基础场景（登场角色与 prompt 均为空），由调度引擎复制资产');
+  db.updateTaskStatus(taskId, 'running');
+
+  const outputPath = paramsObj.outputPath;
+  if (!outputPath) {
+    throw new Error('outputPath is required in task params');
+  }
+
+  const baseStage = (stage.基础场景 ?? '').trim();
+  if (!baseStage) {
+    throw new Error('基础场景不能为空');
+  }
+
+  const sourceRel = parseBaseStageImagePath(baseStage);
+  const sourceFull = resolveProjectAssertPath(project, sourceRel);
+  const destFull = resolveProjectAssertPath(project, outputPath);
+
+  try {
+    await fs.access(sourceFull);
+  } catch {
+    throw new Error(`基础场景图不存在: ${sourceRel}`);
+  }
+
+  await fs.mkdir(path.dirname(destFull), { recursive: true });
+  await fs.copyFile(sourceFull, destFull);
+
+  db.addLog(taskId, 'info', `已复制基础场景图 ${sourceRel} → ${outputPath}`);
+  db.updateTaskStatus(taskId, 'completed', { result: { path: outputPath, directReference: true } });
+  return true;
+}
+
 /**
  * Run a single workflow task
  */
@@ -74,7 +182,11 @@ async function runTask(taskId: string): Promise<void> {
     return;
   }
 
-  const paramsObj = JSON.parse(task.params);
+  const paramsObj = JSON.parse(task.params) as {
+    vars?: Record<string, string>;
+    promptPaths?: string[];
+    outputPath?: string;
+  };
   const projectConfig = await loadProjectConfig(task.project);
 
   const workflowParams: WorkflowParams = {
@@ -82,7 +194,7 @@ async function runTask(taskId: string): Promise<void> {
     vars: {
       ...projectConfig,
       ...(paramsObj.vars ?? {}),
-      seed: new Date().getTime()
+      seed: String(new Date().getTime()),
     },
     projectConfig: {
       width: projectConfig.width ? Number(projectConfig.width) : 0,
@@ -100,6 +212,14 @@ async function runTask(taskId: string): Promise<void> {
   };
 
   try {
+    // scene-stage-image：直接引用由调度引擎处理，仍写出独立分镜场景图资产
+    if (task.workflow_id === 'scene-stage-image') {
+      const handled = await tryHandleSceneStageDirectReference(taskId, task.project, paramsObj);
+      if (handled) {
+        return;
+      }
+    }
+
     db.addLog(taskId, 'info', `Starting workflow: ${wf.name} (impl: ${wf.impl})`);
     db.updateTaskStatus(taskId, 'running');
 
@@ -144,19 +264,8 @@ async function runTask(taskId: string): Promise<void> {
     if (!outputPath) {
       throw new Error('outputPath is required in task params');
     }
-    const assertFullPath = path.resolve(DESIGN_DIR, task.project, outputPath);
+    const assertFullPath = resolveProjectAssertPath(task.project, outputPath);
     const assertDir = path.dirname(assertFullPath);
-
-    // Security: verify path is within project directory
-    const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;
-    if (!assertFullPath.startsWith(projectRoot)) {
-      throw new Error('Path traversal denied');
-    }
-    // Verify it's under assert/
-    const relAssertPath = path.relative(path.resolve(DESIGN_DIR, task.project), assertFullPath);
-    if (!relAssertPath.startsWith('assert')) {
-      throw new Error('Output path must be under assert/');
-    }
 
     await fs.mkdir(assertDir, { recursive: true });
 

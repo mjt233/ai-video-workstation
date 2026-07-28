@@ -223,6 +223,8 @@ python .claude/skills/create-video-script/scripts/set_project_property.py --proj
 
 输出路径由前端在提交任务时指定（`outputPath` 参数），工作流脚本只需要在 `parseOutput` 中返回正确的输出方式（URL / 请求 / body），引擎负责写入。
 
+**`scene-stage-image` 直接引用：** 当对应 `stage.json` 条目的 `登场角色` 与 `prompt` 同时为空时，调度引擎会短路处理——将 `assert/stage/{场景}/{标签}.jpg` 复制为上述分镜场景图输出路径，不调用 AI 图像编辑工作流。直接引用结果仍是独立的分镜资产文件。
+
 ---
 
 ## 工作流实现注册与多实现切换
