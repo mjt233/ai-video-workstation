@@ -1,0 +1,132 @@
+import client from './client'
+import type { AxiosError } from 'axios'
+
+export interface AssetRef {
+  episode: string
+  shot: string
+  file: string
+  detail?: string
+}
+
+export interface RenamePair {
+  from: string
+  to: string
+}
+
+export class AssetApiError extends Error {
+  code?: string
+  refs?: AssetRef[]
+  constructor(message: string, code?: string, refs?: AssetRef[]) {
+    super(message)
+    this.code = code
+    this.refs = refs
+  }
+}
+
+function rethrow(err: unknown): never {
+  const ax = err as AxiosError<{ error?: string; code?: string; refs?: AssetRef[] }>
+  const data = ax.response?.data
+  if (data?.error) {
+    throw new AssetApiError(data.error, data.code, data.refs)
+  }
+  throw err
+}
+
+export async function createCharacter(
+  project: string,
+  body: { name: string; gender?: string; age?: string; personality?: string },
+) {
+  try {
+    const { data } = await client.post(`/assets/${project}/character`, body)
+    return data as { success: boolean; path: string }
+  } catch (e) { rethrow(e) }
+}
+
+export async function createStage(project: string, body: { name: string }) {
+  try {
+    const { data } = await client.post(`/assets/${project}/stage`, body)
+    return data as { success: boolean; path: string }
+  } catch (e) { rethrow(e) }
+}
+
+export async function createSubscene(
+  project: string,
+  body: { stage: string; label: string; time?: string; angle?: string; weather?: string; description?: string },
+) {
+  try {
+    const { data } = await client.post(`/assets/${project}/subscene`, body)
+    return data as { success: boolean; path: string }
+  } catch (e) { rethrow(e) }
+}
+
+export async function createEpisode(project: string, body: { episode?: string } = {}) {
+  try {
+    const { data } = await client.post(`/assets/${project}/episode`, body)
+    return data as { success: boolean; path: string; episode: string }
+  } catch (e) { rethrow(e) }
+}
+
+export async function createShot(
+  project: string,
+  body: { episode: string; shot?: string; position?: 'insert' | 'end' },
+) {
+  try {
+    const { data } = await client.post(`/assets/${project}/shot`, body)
+    return data as { success: boolean; path: string; episode: string; shot: string; renames: RenamePair[] }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteCharacter(project: string, name: string) {
+  try {
+    const { data } = await client.delete(`/assets/${project}/character/${encodeURIComponent(name)}`)
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteStage(project: string, name: string) {
+  try {
+    const { data } = await client.delete(`/assets/${project}/stage/${encodeURIComponent(name)}`)
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteSubscene(project: string, stage: string, label: string) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/subscene/${encodeURIComponent(stage)}/${encodeURIComponent(label)}`,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteEpisode(project: string, episode: string) {
+  try {
+    const { data } = await client.delete(`/assets/${project}/episode/${encodeURIComponent(episode)}`)
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteShot(project: string, episode: string, shot: string) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/shot/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}`,
+    )
+    return data as { success: boolean; renames: RenamePair[] }
+  } catch (e) { rethrow(e) }
+}
+
+export async function reorderSceneStage(
+  project: string,
+  episode: string,
+  shot: string,
+  from: number,
+  to: number,
+) {
+  try {
+    const { data } = await client.post(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/stage/reorder`,
+      { from, to },
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
