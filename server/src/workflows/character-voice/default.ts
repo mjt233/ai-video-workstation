@@ -1,26 +1,16 @@
+import { createTtsDesignWorkflow } from '../bridge-client.js';
 import { register } from '../registry.js';
-import type { WorkflowDefinition } from '../types.js';
 
-register({
+register(createTtsDesignWorkflow({
   id: 'character-voice',
-  name: '角色声音生成 (TTS)',
+  name: 'qwen3-tts-voice-design',
   impl: 'default',
-  description: '根据角色声音描述生成语音样本',
-
-  async submit(params) {
-    const voiceDesc = await params.readFile(`prompt/character/${params.vars.name}/voice.md`);
-    return { taskId: 'voice-mock-' + Date.now() };
-  },
-
-  async poll(taskId) {
-    return { status: 'completed', done: true };
-  },
-
-  async parseOutput(taskId, response) {
-    return {
-      type: 'download',
-      url: 'https://via.placeholder.com/audio',
-      filename: 'voice.flac',
-    };
+  description: '根据角色声音描述生成语音样本'
+}, async params => {
+  const voiceDesc = await params.readFile(`prompt/character/${params.vars.name}/voice.md`);
+  return {
+    desc: voiceDesc,
+    text: '你好，我叫' + params.vars.name,
+    seed: params.vars.seed
   }
-} satisfies WorkflowDefinition);
+}))

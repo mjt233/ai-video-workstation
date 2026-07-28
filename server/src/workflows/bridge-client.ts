@@ -386,3 +386,34 @@ export function createImageEditWorkflow(
     },
   });
 }
+
+
+export interface TtsWorkflowParam {
+  desc: string
+  text: string
+  seed?: string
+}
+
+/**
+ * 创建图片编辑工作流的快捷工厂。
+ *
+ * 封装了 submit → poll → parseOutput 的完整生命周期，
+ * 调用方只需提供 getParams（返回 desc / imgs / seed）即可，
+ * 内部通过 multipart 提交到 image_edit_N 工作流。
+ */
+export function createTtsDesignWorkflow(
+  baseDefinition: WorkflowBaseDefinition,
+  getTtsWorkflowParams: (params: WorkflowParams) => Promise<TtsWorkflowParam> | TtsWorkflowParam
+): WorkflowDefinition {
+  return createComfyuiBridgeWorkflow({
+    baseDefinition: baseDefinition,
+    async submit(params) {
+      return submitComfyuiBridge({
+        workflowId: 'tts_voice_design',
+        params: {
+          ...await getTtsWorkflowParams(params)
+        }
+      })
+    },
+  });
+}
