@@ -107,6 +107,7 @@ workflowRouter.post('/workflow/retry/:taskId', (req: Request, res: Response) => 
     workflow_id: existing.workflow_id,
     impl: existing.impl,
     params: JSON.parse(existing.params),
+    batch_id: existing.batch_id,
   });
 
   db.addLog(newTaskId, 'info', `Retry of task ${existing.id}`);

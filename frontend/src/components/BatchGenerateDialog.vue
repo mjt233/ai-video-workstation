@@ -264,13 +264,6 @@ watch(show, (val) => {
   }
 })
 
-// When progress mode and all tasks done, closing refreshes parent
-watch(mode, (newMode) => {
-  if (newMode === 'progress') {
-    // nothing
-  }
-})
-
 async function startGenerate() {
   submitting.value = true
   submitError.value = null
