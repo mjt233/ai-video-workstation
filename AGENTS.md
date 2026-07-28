@@ -37,3 +37,4 @@ overview.md
 - 服务端开发时使用 `tsx watch` 自动重启（支持 TypeScript）
 - 图片/音频文件以二进制流传输；文本/markdown/JSON 以 UTF-8 传输
 - 资产管理 Python 脚本位于 `.claude/skills/create-video-script/scripts/`
+- `design` 目录下的整体资产约定见 [./docs/asset-layout.md](./docs/asset-layout.md)
