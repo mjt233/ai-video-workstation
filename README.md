@@ -87,7 +87,7 @@ design/{project}/
 |------|------|------|
 | GET | `/api/projects` | 列出所有项目 |
 | GET | `/api/fs/:project/*` | 读取文件或目录列表 |
-| POST | `/api/fs/:project/*` | 写入文件（仅限 `prompt/` 和 `assert/`） |
+| POST | `/api/fs/:project/*` | 写入文件（`prompt/`、`assert/`，以及根级 `overview.md` / `project.json`） |
 
 ## 剧本创作
 

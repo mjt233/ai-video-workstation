@@ -29,7 +29,7 @@ design/{project}/
 - 名称不能为空、不能有首尾空白，不能包含 `\ / : * ? " < > |`
 - 集数、分镜目录名必须是正整数，且同一集内分镜编号连续为 `1..N`
 
-**API 写入范围：** 仅允许写入 `prompt/` 与 `assert/` 前缀；路径不得越出 `design/{project}/`。
+**API 写入范围：** 允许写入 `prompt/`、`assert/` 前缀，以及项目根级 `overview.md`、`project.json`；路径不得越出 `design/{project}/`。
 
 ---
 

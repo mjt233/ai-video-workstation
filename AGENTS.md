@@ -29,7 +29,7 @@ assert/  (图片, 音频)
 overview.md
 ```
 - API：`GET /api/projects`、`GET /api/fs/:project/*`（目录列表或文件读取）、`POST /api/fs/:project/*`（写入）
-- 写入仅限于 `prompt/` 和 `assert/` 前缀
+- 写入限于 `prompt/`、`assert/` 前缀，以及根级 `overview.md`、`project.json`
 - 前端状态完全由 URL 查询参数驱动：`project`、`type`、`name`、`episode`、`shot`
 
 ## 约定
