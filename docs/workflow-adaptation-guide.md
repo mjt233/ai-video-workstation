@@ -50,7 +50,8 @@ interface WorkflowDefinition<TPollResult = Record<string, unknown>> {
 ```typescript
 interface WorkflowParams {
   project: string                          // 项目名称
-  readFile(relPath: string): Promise<string>  // 读取 prompt/ 下的文件内容
+  readFile(relPath: string): Promise<string>  // 读取项目内文本文件（UTF-8）
+  readAssertFile(relPath: string): Promise<File> // 读取 assert/ 下二进制为 File
   vars: Record<string, string>             // 变量，如 { name, episode, shot, label }
   projectConfig: ProjectConfig             // 项目配置（自动从 project.json 注入）
 }
@@ -59,10 +60,14 @@ interface ProjectConfig {
   width: number;                           // 画面宽度（像素），如 1080
   height: number;                          // 画面高度（像素），如 1920
   aspectRatio?: string;                    // 画面比例，如 "9:16"
+  fps?: number;                            // 帧率，如 24；缺失时引擎默认 24
 }
 ```
 
-> `projectConfig` 由引擎自动从 `design/{项目}/project.json` 读取并注入。`vars` 中也会同步注入 `width`、`height`、`aspectRatio` 的字符串版本（兼容已有工作流）。
+> `projectConfig` 由引擎自动从 `design/{项目}/project.json` 读取并注入。  
+> 视频生成（`video-generate`）还会由引擎：
+> - 读取分镜 `overview.json`，注入 `vars.duration`（秒，正整数）
+> - 按 `stage.json` 顺序收集 `assert/scene/{ep}/{shot}/stage/{i}.jpg`，注入 `vars.stageImages`（JSON 字符串数组；缺失则报错）
 
 ### WorkflowOutput（三种输出方式）
 
@@ -183,27 +188,44 @@ register({
 async submit(params) {
   const prompt = await params.readFile(`prompt/scene/${params.vars.episode}/${params.vars.shot}/prompt.md`);
 
-  // 从 projectConfig 获取项目分辨率（类型安全！）
-  const { width, height } = params.projectConfig;
+  // 从 projectConfig 获取项目分辨率与帧率（类型安全！）
+  const { width, height, fps = 24 } = params.projectConfig;
+  // 引擎从分镜 overview.json 注入时长（秒，正整数）
+  const durationSec = Number(params.vars.duration);
+  // 引擎按 stage.json 顺序注入场景图相对路径列表
+  const stageImagePaths = JSON.parse(params.vars.stageImages ?? '[]') as string[];
+  // 例：["assert/scene/1/1/stage/0.jpg", "assert/scene/1/1/stage/1.jpg"]
+  // 与 scene-stage-image 相同：通过 readAssertFile 得到 File 对象
+  const stageImages: File[] = [];
+  for (const rel of stageImagePaths) {
+    stageImages.push(await params.readAssertFile(rel));
+  }
+
+  const form = new FormData();
+  form.append('prompt', prompt);
+  form.append('width', String(width));
+  form.append('height', String(height));
+  form.append('fps', String(fps));
+  form.append('duration', String(durationSec));
+  for (const img of stageImages) {
+    form.append('images', img, img.name);
+  }
 
   const response = await fetch('https://api.example.com/generate', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${process.env.API_KEY}` },
-    body: JSON.stringify({
-      prompt,
-      width,        // number: 1080
-      height,       // number: 1920
-    }),
+    body: form,
   });
   // ...
 }
 ```
 
-如果项目暂无 `project.json`，`width` 和 `height` 会返回 `0`。建议在 `design/{项目}/` 下创建：
+如果项目暂无 `project.json`，`width` 和 `height` 会返回 `0`，`fps` 默认 `24`。建议在 `design/{项目}/` 下创建：
 
 ```bash
 python .claude/skills/create-video-script/scripts/set_project_property.py --project "项目名" width 1080
 python .claude/skills/create-video-script/scripts/set_project_property.py --project "项目名" height 1920
+python .claude/skills/create-video-script/scripts/set_project_property.py --project "项目名" fps 24
 ```
 
 ---

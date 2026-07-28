@@ -18,12 +18,19 @@ export interface ProjectConfig {
   height: number;
   /** 画面比例，如 "9:16" */
   aspectRatio?: string;
+  /** 帧率（fps），如 24；缺失时引擎默认 24 */
+  fps?: number;
 }
 
 export interface WorkflowParams<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
   project: string;
-  /** Read a file from the project's prompt/ directory */
+  /** 读取项目内文本文件（UTF-8），路径相对 design/{project}/ */
   readFile(relPath: string): Promise<string>;
+  /**
+   * 读取项目 assert/ 下的二进制文件为 File 对象。
+   * 路径须以 assert/ 开头，相对 design/{project}/。
+   */
+  readAssertFile(relPath: string): Promise<File>;
   /** 工作流业务变量（按工作流类型约束字段） */
   vars: TVars;
   /** Project configuration from design/{project}/project.json (auto-injected) */

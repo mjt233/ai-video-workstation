@@ -48,8 +48,24 @@ export interface SceneTtsVars extends WorkflowVarsBase {
   emotion?: string;
 }
 
-/** 视频生成 */
+/**
+ * 视频生成
+ *
+ * 调用方只需提供 episode / shot。
+ * 引擎会：
+ * - 读取分镜 overview.json 注入 duration（秒，正整数）
+ * - 按 stage.json 顺序收集已生成的场景图路径，注入 stageImages（JSON 数组字符串）
+ * 分辨率与帧率通过 projectConfig.width / height / fps 提供。
+ */
 export interface VideoGenerateVars extends WorkflowVarsBase {
   episode: string;
   shot: string;
+  /** 分镜时长（秒，正整数；引擎从 overview.json 注入） */
+  duration?: string;
+  /**
+   * 分镜场景图相对路径列表（JSON 数组字符串；引擎注入）
+   * 例：`["assert/scene/1/1/stage/0.jpg","assert/scene/1/1/stage/1.jpg"]`
+   * 顺序与 stage.json 数组下标一致。
+   */
+  stageImages?: string;
 }

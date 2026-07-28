@@ -17,19 +17,24 @@ export { getAllWorkflows };
  * 读取项目级配置（project.json）。
  * 文件不存在或解析失败时返回 width/height 为 0 的默认配置。
  */
+const DEFAULT_PROJECT_FPS = 24;
+
 async function loadProjectConfig(project: string): Promise<ProjectConfig> {
   const configPath = path.resolve(DESIGN_DIR, project, 'project.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    const config = JSON.parse(content) as Partial<ProjectConfig>;
+    const config = JSON.parse(content) as Partial<ProjectConfig> & Record<string, unknown>;
+    const fpsRaw = config.fps;
+    const fpsNum = fpsRaw != null ? Number(fpsRaw) : DEFAULT_PROJECT_FPS;
     return {
       width: config.width != null ? Number(config.width) : 0,
       height: config.height != null ? Number(config.height) : 0,
       aspectRatio: config.aspectRatio != null ? String(config.aspectRatio) : undefined,
+      fps: Number.isInteger(fpsNum) && fpsNum > 0 ? fpsNum : DEFAULT_PROJECT_FPS,
     };
   } catch {
     // 文件不存在或解析失败，静默忽略以保持向后兼容
-    return { width: 0, height: 0 };
+    return { width: 0, height: 0, fps: DEFAULT_PROJECT_FPS };
   }
 }
 
@@ -94,6 +99,98 @@ interface ScriptLine {
   角色名?: string;
   台词?: string;
   情绪?: string;
+}
+
+/**
+ * video-generate：由引擎统一读取分镜 overview.json / stage.json，
+ * 注入 duration（秒，正整数）与 stageImages（场景图相对路径 JSON 数组）。
+ * 分辨率/帧率走 projectConfig。
+ */
+async function enrichVideoGenerateParams(
+  project: string,
+  paramsObj: {
+    vars?: Record<string, string>;
+  },
+): Promise<{
+  vars: Record<string, string>;
+}> {
+  const vars = { ...(paramsObj.vars ?? {}) };
+  const episode = vars.episode?.trim();
+  const shot = vars.shot?.trim();
+  if (!episode || !shot) {
+    throw new Error('video-generate 需要 vars.episode / vars.shot');
+  }
+
+  const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
+
+  const resolveUnderProject = (relPath: string): string => {
+    const full = path.resolve(DESIGN_DIR, project, relPath);
+    if (!full.startsWith(projectRoot)) {
+      throw new Error(`Path traversal denied: ${relPath}`);
+    }
+    return full;
+  };
+
+  // ── duration from overview.json ──
+  const overviewRel = `prompt/scene/${episode}/${shot}/overview.json`;
+  let overview: { duration?: unknown };
+  try {
+    const raw = await fs.readFile(resolveUnderProject(overviewRel), 'utf-8');
+    overview = JSON.parse(raw) as { duration?: unknown };
+  } catch {
+    throw new Error(`无法读取分镜总览: ${overviewRel}`);
+  }
+  if (!overview || typeof overview !== 'object' || Array.isArray(overview)) {
+    throw new Error(`overview.json 格式无效: ${overviewRel}`);
+  }
+
+  const duration = overview.duration;
+  if (typeof duration !== 'number' || !Number.isInteger(duration) || duration <= 0) {
+    throw new Error(
+      `分镜时长无效（overview.json.duration 须为正整数秒）: ${overviewRel}, 当前=${String(duration)}`,
+    );
+  }
+
+  // ── stage images from stage.json + assert/scene/.../stage/{i}.jpg ──
+  const stageJsonRel = `prompt/scene/${episode}/${shot}/stage.json`;
+  let stageDefs: unknown;
+  try {
+    const raw = await fs.readFile(resolveUnderProject(stageJsonRel), 'utf-8');
+    stageDefs = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`无法读取分镜场景定义: ${stageJsonRel}`);
+  }
+  if (!Array.isArray(stageDefs) || stageDefs.length === 0) {
+    throw new Error(`stage.json 须为非空数组: ${stageJsonRel}`);
+  }
+
+  const stageImages: string[] = [];
+  const missing: string[] = [];
+  for (let i = 0; i < stageDefs.length; i++) {
+    const rel = `assert/scene/${episode}/${shot}/stage/${i}.jpg`;
+    const full = resolveUnderProject(rel);
+    try {
+      await fs.access(full);
+      stageImages.push(rel);
+    } catch {
+      missing.push(rel);
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `分镜场景图缺失（请先生成 scene-stage-image）: ${missing.join(', ')}`,
+    );
+  }
+
+  return {
+    vars: {
+      ...vars,
+      episode,
+      shot,
+      duration: String(duration),
+      stageImages: JSON.stringify(stageImages),
+    },
+  };
 }
 
 /**
@@ -296,11 +393,19 @@ async function runTask(taskId: string): Promise<void> {
     paramsObj.outputPath = enriched.outputPath;
   }
 
-  // vars 仅含业务字段 + 引擎注入的 seed；尺寸等走 projectConfig
+  // video-generate：引擎统一读取 overview.json / stage 图路径
+  if (task.workflow_id === 'video-generate') {
+    const enriched = await enrichVideoGenerateParams(task.project, paramsObj);
+    paramsObj.vars = enriched.vars;
+  }
+
+  // vars 仅含业务字段 + 引擎注入的 seed；尺寸/帧率等走 projectConfig
   const vars: WorkflowVarsBase & Record<string, string> = {
     ...(paramsObj.vars ?? {}),
     seed: String(Date.now()),
   };
+
+  const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;
 
   const workflowParams: WorkflowParams = {
     project: task.project,
@@ -308,12 +413,37 @@ async function runTask(taskId: string): Promise<void> {
     projectConfig,
     async readFile(relPath: string): Promise<string> {
       const full = path.resolve(DESIGN_DIR, task.project, relPath);
-      const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;
       if (!full.startsWith(projectRoot)) {
         throw new Error('Path traversal denied');
       }
       return fs.readFile(full, 'utf-8');
-    }
+    },
+    async readAssertFile(relPath: string): Promise<File> {
+      const full = path.resolve(DESIGN_DIR, task.project, relPath);
+      if (!full.startsWith(projectRoot)) {
+        throw new Error(`Path traversal denied: ${relPath}`);
+      }
+      const relAssertPath = path.relative(path.resolve(DESIGN_DIR, task.project), full);
+      // Windows 下 relative 使用反斜杠，统一为正斜杠再判断
+      const normalized = relAssertPath.split(path.sep).join('/');
+      if (!normalized.startsWith('assert/') && normalized !== 'assert') {
+        throw new Error(`Path must be under assert/: ${relPath}`);
+      }
+      try {
+        const buf = await fs.readFile(full);
+        const filename = path.basename(full);
+        const ext = path.extname(filename).toLowerCase();
+        const type =
+          ext === '.png' ? 'image/png'
+            : ext === '.webp' ? 'image/webp'
+              : ext === '.flac' ? 'audio/flac'
+                : ext === '.mp4' ? 'video/mp4'
+                  : 'image/jpeg';
+        return new File([buf], filename, { type });
+      } catch {
+        throw new Error(`assert 文件不存在: ${relPath}`);
+      }
+    },
   };
 
   try {

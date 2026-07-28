@@ -1,31 +1,11 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { createImageEditWorkflow } from '../bridge-client.js';
 import { register } from '../registry.js';
 import type { SceneStageImageVars } from '../types.js';
-
-const DESIGN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../design');
 
 interface SceneStageDefinition {
   基础场景: string;
   登场角色?: string[];
   prompt?: string;
-}
-
-async function loadAssertImage(project: string, relPath: string): Promise<File> {
-  const full = path.resolve(DESIGN_DIR, project, relPath);
-  const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
-  if (!full.startsWith(projectRoot)) {
-    throw new Error(`Path traversal denied: ${relPath}`);
-  }
-  try {
-    const buf = await fs.readFile(full);
-    const filename = path.basename(full);
-    return new File([buf], filename, { type: 'image/jpeg' });
-  } catch {
-    throw new Error(`参考图不存在: ${relPath}`);
-  }
 }
 
 register(createImageEditWorkflow<SceneStageImageVars>({
@@ -74,11 +54,11 @@ register(createImageEditWorkflow<SceneStageImageVars>({
     }
     const stageName = baseStage.slice(0, slash);
     const stageLabel = baseStage.slice(slash + 1);
-    imgs.push(await loadAssertImage(params.project, `assert/stage/${stageName}/${stageLabel}.jpg`));
+    imgs.push(await params.readAssertFile(`assert/stage/${stageName}/${stageLabel}.jpg`));
 
     // 图像2+：登场角色外观图
     for (const character of characters) {
-      imgs.push(await loadAssertImage(params.project, `assert/character/${character}/appearance.jpg`));
+      imgs.push(await params.readAssertFile(`assert/character/${character}/appearance.jpg`));
     }
 
     return {

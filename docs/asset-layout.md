@@ -19,7 +19,7 @@ design/{project}/
 | 路径 | 职责 |
 |------|------|
 | `overview.md` | 项目级总览，供人工阅读与脚本识别项目 |
-| `project.json` | 分辨率、画面比例等；工作流引擎会注入 `projectConfig` |
+| `project.json` | 分辨率、画面比例、帧率（`fps`）等；工作流引擎会注入 `projectConfig` |
 | `prompt/` | 可编辑的 Markdown / JSON 原型 |
 | `assert/` | 工作流输出；创建资产时**不**预生成 |
 

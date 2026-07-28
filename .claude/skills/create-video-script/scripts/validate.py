@@ -104,6 +104,11 @@ def validate_project_config(project_name: str, project_root: str | None) -> list
         if not re.match(r'^\d+:\d+$', ratio):
             errors.append(f"project.json: aspectRatio 格式无效 '{ratio}'，应为 宽:高 格式（如 9:16）")
 
+    if "fps" in config:
+        fps = config["fps"]
+        if not isinstance(fps, int) or isinstance(fps, bool) or fps <= 0:
+            errors.append(f"project.json: 'fps' 应为正整数，当前值: {fps}")
+
     return errors
 
 
