@@ -46,6 +46,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_task_logs_task ON task_logs(task_id);
 `);
 
+// Migration: add batch_id column
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN batch_id TEXT;`);
+} catch {
+  // Column already exists, ignore
+}
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_batch ON tasks(batch_id);`);
+} catch {
+  // Index already exists, ignore
+}
+
 export interface TaskRecord {
   id: string;
   project: string;
@@ -75,12 +87,13 @@ export function createTask(task: {
   workflow_id: string;
   impl: string;
   params: object;
+  batch_id?: string;
 }): void {
   const stmt = db.prepare(`
-    INSERT INTO tasks (id, project, workflow_id, impl, params)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO tasks (id, project, workflow_id, impl, params, batch_id)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
-  stmt.run(task.id, task.project, task.workflow_id, task.impl, JSON.stringify(task.params));
+  stmt.run(task.id, task.project, task.workflow_id, task.impl, JSON.stringify(task.params), task.batch_id ?? null);
 }
 
 export function getTask(id: string): TaskRecord | undefined {
@@ -104,12 +117,13 @@ export function updateTaskStatus(
   db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...values);
 }
 
-export function listTasks(project?: string, status?: string): TaskRecord[] {
+export function listTasks(project?: string, status?: string, batchId?: string): TaskRecord[] {
   const conditions: string[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const values: any[] = [];
   if (project) { conditions.push('project = ?'); values.push(project); }
   if (status) { conditions.push('status = ?'); values.push(status); }
+  if (batchId) { conditions.push('batch_id = ?'); values.push(batchId); }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   return db.prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC`).all(...values) as TaskRecord[];
 }
@@ -129,6 +143,36 @@ export function incrementRetry(id: string): void {
 
 export function getPendingTasks(): TaskRecord[] {
   return db.prepare("SELECT * FROM tasks WHERE status IN ('pending', 'running') ORDER BY created_at ASC").all() as TaskRecord[];
+}
+
+export interface BatchSummary {
+  batchId: string
+  project: string
+  total: number
+  completed: number
+  failed: number
+  running: number
+  pending: number
+}
+
+export function getBatchSummary(batchId: string): BatchSummary | null {
+  const rows = db.prepare(`
+    SELECT
+      batch_id AS batchId,
+      project,
+      COUNT(*) AS total,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running,
+      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending
+    FROM tasks WHERE batch_id = ?
+    GROUP BY batch_id
+  `).get(batchId) as BatchSummary | undefined;
+  return rows ?? null;
+}
+
+export function listTasksByBatch(batchId: string): TaskRecord[] {
+  return db.prepare('SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC').all(batchId) as TaskRecord[];
 }
 
 export default db;
