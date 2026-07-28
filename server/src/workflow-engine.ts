@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as db from './db.js';
 import { register, getImpl, getAllWorkflows } from './workflows/registry.js';
 import type { WorkflowDefinition, WorkflowParams } from './workflows/types.js';
+import { getBatchConcurrency } from './routes/workflow.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../design');
@@ -205,13 +206,46 @@ export function startEngine(): void {
 
   async function tick() {
     try {
-      const pending = db.getPendingTasks();
-      for (const task of pending) {
+      const allTasks = db.getPendingTasks();
+
+      // Group tasks by batch_id
+      const batchGroups = new Map<string, typeof allTasks>();
+      const nonBatchTasks: typeof allTasks = [];
+
+      for (const task of allTasks) {
+        if (task.batch_id) {
+          const group = batchGroups.get(task.batch_id) ?? [];
+          group.push(task);
+          batchGroups.set(task.batch_id, group);
+        } else {
+          nonBatchTasks.push(task);
+        }
+      }
+
+      // Process non-batch tasks (backward compatible) — no concurrency limit
+      for (const task of nonBatchTasks) {
         if (task.status === 'pending') {
           db.updateTaskStatus(task.id, 'running');
           runTask(task.id).catch(err => {
             console.error(`Task ${task.id} crashed:`, err);
           });
+        }
+      }
+
+      // Process batch tasks with per-batch concurrency limit
+      for (const [batchId, tasks] of batchGroups) {
+        const concurrency = getBatchConcurrency(batchId);
+        const runningCount = tasks.filter(t => t.status === 'running').length;
+        const slots = concurrency - runningCount;
+
+        if (slots > 0) {
+          const pendingTasks = tasks.filter(t => t.status === 'pending');
+          for (const task of pendingTasks.slice(0, slots)) {
+            db.updateTaskStatus(task.id, 'running');
+            runTask(task.id).catch(err => {
+              console.error(`Task ${task.id} crashed:`, err);
+            });
+          }
         }
       }
     } catch (err) {
