@@ -1,7 +1,8 @@
 import { createTtsDesignWorkflow } from '../bridge-client.js';
 import { register } from '../registry.js';
+import type { CharacterVoiceVars } from '../types.js';
 
-register(createTtsDesignWorkflow({
+register(createTtsDesignWorkflow<CharacterVoiceVars>({
   id: 'character-voice',
   name: 'qwen3-tts-voice-design',
   impl: 'default',

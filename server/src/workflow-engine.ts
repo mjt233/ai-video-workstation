@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as db from './db.js';
 import { register, getImpl, getAllWorkflows } from './workflows/registry.js';
-import type { WorkflowDefinition, WorkflowParams } from './workflows/types.js';
+import type { ProjectConfig, WorkflowDefinition, WorkflowParams, WorkflowVarsBase } from './workflows/types.js';
 import { getBatchConcurrency } from './routes/workflow.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,22 +14,22 @@ const WORKFLOWS_DIR = path.resolve(__dirname, 'workflows');
 export { getAllWorkflows };
 
 /**
- * 读取项目级配置（project.json）并返回可注入 vars 的键值对。
- * 文件不存在或解析失败时返回空对象。
+ * 读取项目级配置（project.json）。
+ * 文件不存在或解析失败时返回 width/height 为 0 的默认配置。
  */
-async function loadProjectConfig(project: string): Promise<Record<string, string>> {
+async function loadProjectConfig(project: string): Promise<ProjectConfig> {
   const configPath = path.resolve(DESIGN_DIR, project, 'project.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    const config = JSON.parse(content);
-    const result: Record<string, string> = {};
-    if (config.width != null) result.width = String(config.width);
-    if (config.height != null) result.height = String(config.height);
-    if (config.aspectRatio != null) result.aspectRatio = String(config.aspectRatio);
-    return result;
+    const config = JSON.parse(content) as Partial<ProjectConfig>;
+    return {
+      width: config.width != null ? Number(config.width) : 0,
+      height: config.height != null ? Number(config.height) : 0,
+      aspectRatio: config.aspectRatio != null ? String(config.aspectRatio) : undefined,
+    };
   } catch {
     // 文件不存在或解析失败，静默忽略以保持向后兼容
-    return {};
+    return { width: 0, height: 0 };
   }
 }
 
@@ -189,18 +189,16 @@ async function runTask(taskId: string): Promise<void> {
   };
   const projectConfig = await loadProjectConfig(task.project);
 
+  // vars 仅含业务字段 + 引擎注入的 seed；尺寸等走 projectConfig
+  const vars: WorkflowVarsBase & Record<string, string> = {
+    ...(paramsObj.vars ?? {}),
+    seed: String(Date.now()),
+  };
+
   const workflowParams: WorkflowParams = {
     project: task.project,
-    vars: {
-      ...projectConfig,
-      ...(paramsObj.vars ?? {}),
-      seed: String(new Date().getTime()),
-    },
-    projectConfig: {
-      width: projectConfig.width ? Number(projectConfig.width) : 0,
-      height: projectConfig.height ? Number(projectConfig.height) : 0,
-      aspectRatio: projectConfig.aspectRatio,
-    },
+    vars,
+    projectConfig,
     async readFile(relPath: string): Promise<string> {
       const full = path.resolve(DESIGN_DIR, task.project, relPath);
       const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;

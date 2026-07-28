@@ -1,6 +1,15 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import type {
+  CharacterAppearanceVars,
+  CharacterVoiceVars,
+  SceneStageImageVars,
+  SceneTtsVars,
+  StageImageVars,
+  VideoGenerateVars,
+  WorkflowVarsBase,
+} from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../../design');
@@ -8,7 +17,7 @@ const DESIGN_DIR = path.resolve(__dirname, '../../../design');
 export interface DiscoveredTask {
   workflowId: string;
   impl: string;
-  vars: Record<string, string>;
+  vars: WorkflowVarsBase & Record<string, string>;
   promptPaths: string[];
   outputPath: string;
 }
@@ -77,7 +86,7 @@ export async function discoverTasks(
             tasks.push({
               workflowId: 'character-appearance',
               impl: 'default',
-              vars: { name },
+              vars: { name } satisfies CharacterAppearanceVars,
               promptPaths: [`prompt/character/${name}/appearance.md`],
               outputPath,
             });
@@ -101,7 +110,7 @@ export async function discoverTasks(
             tasks.push({
               workflowId: 'character-voice',
               impl: 'default',
-              vars: { name },
+              vars: { name } satisfies CharacterVoiceVars,
               promptPaths: [`prompt/character/${name}/voice.md`],
               outputPath,
             });
@@ -130,7 +139,7 @@ export async function discoverTasks(
               tasks.push({
                 workflowId: 'stage-image',
                 impl: 'default',
-                vars: { name: stageName, label },
+                vars: { name: stageName, label } satisfies StageImageVars,
                 promptPaths: [`prompt/stage/${stageName}/${label}.md`],
                 outputPath,
               });
@@ -171,7 +180,7 @@ export async function discoverTasks(
                     tasks.push({
                       workflowId: 'scene-stage-image',
                       impl: 'default',
-                      vars: { episode, shot, index: String(index) },
+                      vars: { episode, shot, index: String(index) } satisfies SceneStageImageVars,
                       promptPaths: [
                         `prompt/scene/${episode}/${shot}/overview.md`,
                         `prompt/scene/${episode}/${shot}/stage.json`,
@@ -188,7 +197,7 @@ export async function discoverTasks(
                 tasks.push({
                   workflowId: 'video-generate',
                   impl: 'default',
-                  vars: { episode, shot },
+                  vars: { episode, shot } satisfies VideoGenerateVars,
                   promptPaths: [`prompt/scene/${episode}/${shot}/prompt.md`],
                   outputPath,
                 });
@@ -204,7 +213,7 @@ export async function discoverTasks(
                     tasks.push({
                       workflowId: 'scene-tts',
                       impl: 'default',
-                      vars: { episode, shot, character },
+                      vars: { episode, shot, character } satisfies SceneTtsVars,
                       promptPaths: [`prompt/scene/${episode}/${shot}/script.json`],
                       outputPath,
                     });

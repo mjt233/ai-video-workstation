@@ -1,3 +1,15 @@
+import type { WorkflowVarsBase } from './vars.js';
+
+export type {
+  WorkflowVarsBase,
+  CharacterAppearanceVars,
+  CharacterVoiceVars,
+  StageImageVars,
+  SceneStageImageVars,
+  SceneTtsVars,
+  VideoGenerateVars,
+} from './vars.js';
+
 /** Project-level structured config from design/{project}/project.json */
 export interface ProjectConfig {
   /** 画面宽度（像素），如 1080 */
@@ -8,12 +20,12 @@ export interface ProjectConfig {
   aspectRatio?: string;
 }
 
-export interface WorkflowParams {
+export interface WorkflowParams<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
   project: string;
   /** Read a file from the project's prompt/ directory */
   readFile(relPath: string): Promise<string>;
-  /** Variable substitution values, e.g. { name } → "小霓" */
-  vars: Record<string, string>;
+  /** 工作流业务变量（按工作流类型约束字段） */
+  vars: TVars;
   /** Project configuration from design/{project}/project.json (auto-injected) */
   projectConfig: ProjectConfig;
 }
@@ -25,10 +37,13 @@ export interface WorkflowBaseDefinition {
   description?: string;
 }
 
-export interface WorkflowDefinition<TPollResult = Record<string, unknown>> extends WorkflowBaseDefinition {
+export interface WorkflowDefinition<
+  TVars extends WorkflowVarsBase = WorkflowVarsBase,
+  TPollResult = Record<string, unknown>,
+> extends WorkflowBaseDefinition {
 
   /** Submit task to AI API, return remote task ID */
-  submit(params: WorkflowParams): Promise<{ taskId: string }>;
+  submit(params: WorkflowParams<TVars>): Promise<{ taskId: string }>;
 
   /** Optional: poll task status. Not implementing = synchronous task */
   poll?(taskId: string): Promise<{ status: string; done: boolean } & TPollResult>;

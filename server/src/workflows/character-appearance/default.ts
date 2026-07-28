@@ -1,7 +1,8 @@
 import { register } from '../registry.js';
 import { createTextToImageWorkflow } from '../bridge-client.js';
+import type { CharacterAppearanceVars } from '../types.js';
 
-register(createTextToImageWorkflow({
+register(createTextToImageWorkflow<CharacterAppearanceVars>({
   id: 'character-appearance',
   name: 'Krea2',
   impl: 'default',

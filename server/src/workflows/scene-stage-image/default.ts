@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createImageEditWorkflow } from '../bridge-client.js';
 import { register } from '../registry.js';
+import type { SceneStageImageVars } from '../types.js';
 
 const DESIGN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../design');
 
@@ -27,16 +28,16 @@ async function loadAssertImage(project: string, relPath: string): Promise<File> 
   }
 }
 
-register(createImageEditWorkflow({
+register(createImageEditWorkflow<SceneStageImageVars>({
   id: 'scene-stage-image',
   name: '场景图编辑',
   impl: 'default',
   description: '基于基础场景图与角色外观图合成分镜场景图（直接引用由调度引擎处理）',
   async getParams(params) {
-    const { episode, shot } = params.vars;
-    const index = Number(params.vars.index ?? '0');
+    const { episode, shot, index: indexStr } = params.vars;
+    const index = Number(indexStr ?? '0');
     if (!Number.isInteger(index) || index < 0) {
-      throw new Error(`无效的分镜场景索引 index=${params.vars.index}`);
+      throw new Error(`无效的分镜场景索引 index=${indexStr}`);
     }
 
     const defs = JSON.parse(

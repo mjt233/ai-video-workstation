@@ -1,10 +1,12 @@
-import type { WorkflowDefinition } from './types.js';
+import type { WorkflowDefinition, WorkflowVarsBase } from './types.js';
 
+/** 注册表擦除具体 TVars，统一按基类存储异构实现 */
 const registry = new Map<string, WorkflowDefinition[]>();
 
-export function register(w: WorkflowDefinition): void {
+export function register<TVars extends WorkflowVarsBase>(w: WorkflowDefinition<TVars>): void {
   const list = registry.get(w.id) ?? [];
-  list.push(w);
+  // 类型擦除：具体工作流的 TVars 在定义处保留，注册后按基类存储
+  list.push(w as WorkflowDefinition);
   registry.set(w.id, list);
 }
 

@@ -1,7 +1,8 @@
 import { register } from '../registry.js';
 import { createTextToImageWorkflow } from '../bridge-client.js';
+import type { StageImageVars } from '../types.js';
 
-register(createTextToImageWorkflow({
+register(createTextToImageWorkflow<StageImageVars>({
   id: 'stage-image',
   name: '场景图片生成',
   impl: 'default',

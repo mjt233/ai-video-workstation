@@ -11,7 +11,7 @@
  * 首次调用 status/output-files 时自动登录获取 token 并缓存。
  */
 
-import type { WorkflowDefinition, WorkflowParams, WorkflowBaseDefinition } from './types.js';
+import type { WorkflowDefinition, WorkflowParams, WorkflowBaseDefinition, WorkflowVarsBase } from './types.js';
 
 const BRIDGE_URL = (process.env.COMFYUI_BRIDGE_URL || 'http://localhost:10721').replace(/\/+$/, '');
 const BRIDGE_PASSWORD = process.env.COMFYUI_BRIDGE_PASSWORD || '0d000721';
@@ -273,23 +273,23 @@ export async function buildDownloadRequest(taskId: string): Promise<{
 
 // ── 文生图工作流快捷工厂 ─────────────────────────────────────────────
 
-export interface TextToImageWorkflowConfig {
+export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
   id: string;
   name: string;
   impl: string;
   description?: string;
   /** 返回文生图的提示词（imd_desc） */
-  getPrompt(params: WorkflowParams): Promise<string> | string;
+  getPrompt(params: WorkflowParams<TVars>): Promise<string> | string;
   /** 返回图片宽度，默认 1080 */
-  getWidth?(params: WorkflowParams): number;
+  getWidth?(params: WorkflowParams<TVars>): number;
   /** 返回图片高度，默认 1920 */
-  getHeight?(params: WorkflowParams): number;
+  getHeight?(params: WorkflowParams<TVars>): number;
 }
 
-export function createComfyuiBridgeWorkflow({ baseDefinition, submit }: {
+export function createComfyuiBridgeWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>({ baseDefinition, submit }: {
   baseDefinition: WorkflowBaseDefinition,
-  submit: (params: WorkflowParams) => Promise<{ taskId: string }>
-}): WorkflowDefinition {
+  submit: (params: WorkflowParams<TVars>) => Promise<{ taskId: string }>
+}): WorkflowDefinition<TVars> {
   return {
     ...baseDefinition,
     submit,
@@ -321,13 +321,13 @@ export function createComfyuiBridgeWorkflow({ baseDefinition, submit }: {
  * 调用方只需提供 getPrompt / getWidth / getHeight 即可，
  * 无需重复编写轮询和输出处理的样板代码。
  */
-export function createTextToImageWorkflow(
-  config: TextToImageWorkflowConfig,
-): WorkflowDefinition {
+export function createTextToImageWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>(
+  config: TextToImageWorkflowConfig<TVars>,
+): WorkflowDefinition<TVars> {
   const WIDTH_DEFAULT = 1080;
   const HEIGHT_DEFAULT = 1920;
 
-  return createComfyuiBridgeWorkflow({
+  return createComfyuiBridgeWorkflow<TVars>({
     baseDefinition: {
       id: config.id,
       name: config.name,
@@ -347,12 +347,12 @@ export function createTextToImageWorkflow(
 
 // ── 图片编辑工作流快捷工厂 ───────────────────────────────────────────
 
-export interface ImageEditWorkflowConfig {
+export interface ImageEditWorkflowConfig<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
   id: string;
   name: string;
   impl: string;
   description?: string;
-  getParams(params: WorkflowParams): Promise<{
+  getParams(params: WorkflowParams<TVars>): Promise<{
     desc: string,
     imgs: File[],
     seed?: string | number
@@ -366,10 +366,10 @@ export interface ImageEditWorkflowConfig {
  * 调用方只需提供 getParams（返回 desc / imgs / seed）即可，
  * 内部通过 multipart 提交到 image_edit_N 工作流。
  */
-export function createImageEditWorkflow(
-  config: ImageEditWorkflowConfig,
-): WorkflowDefinition {
-  return createComfyuiBridgeWorkflow({
+export function createImageEditWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>(
+  config: ImageEditWorkflowConfig<TVars>,
+): WorkflowDefinition<TVars> {
+  return createComfyuiBridgeWorkflow<TVars>({
     baseDefinition: {
       id: config.id,
       name: config.name,
@@ -395,17 +395,16 @@ export interface TtsWorkflowParam {
 }
 
 /**
- * 创建图片编辑工作流的快捷工厂。
+ * 创建 TTS 音色设计工作流的快捷工厂。
  *
  * 封装了 submit → poll → parseOutput 的完整生命周期，
- * 调用方只需提供 getParams（返回 desc / imgs / seed）即可，
- * 内部通过 multipart 提交到 image_edit_N 工作流。
+ * 调用方只需提供 getTtsWorkflowParams（返回 desc / text / seed）即可。
  */
-export function createTtsDesignWorkflow(
+export function createTtsDesignWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>(
   baseDefinition: WorkflowBaseDefinition,
-  getTtsWorkflowParams: (params: WorkflowParams) => Promise<TtsWorkflowParam> | TtsWorkflowParam
-): WorkflowDefinition {
-  return createComfyuiBridgeWorkflow({
+  getTtsWorkflowParams: (params: WorkflowParams<TVars>) => Promise<TtsWorkflowParam> | TtsWorkflowParam
+): WorkflowDefinition<TVars> {
+  return createComfyuiBridgeWorkflow<TVars>({
     baseDefinition: baseDefinition,
     async submit(params) {
       return submitComfyuiBridge({
