@@ -16,9 +16,27 @@
           size="small"
         />
         资产浏览器
+        <v-spacer />
+        <v-btn
+          size="x-small"
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-lightning-bolt"
+          @click="showBatchDialog = true"
+        >
+          一键生成
+        </v-btn>
       </div>
       <v-divider class="mb-2" />
-      <AssetTree :project="project" />
+      <AssetTree
+        :key="treeKey"
+        :project="project"
+      />
+      <BatchGenerateDialog
+        v-model="showBatchDialog"
+        :project="project"
+        @refresh="refreshTree"
+      />
     </v-col>
     <v-col
       cols="9"
@@ -62,12 +80,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AssetTree from '../components/AssetTree.vue'
 import CharacterPanel from '../components/CharacterPanel.vue'
 import StagePanel from '../components/StagePanel.vue'
 import ScenePanel from '../components/ScenePanel.vue'
+import BatchGenerateDialog from '../components/BatchGenerateDialog.vue'
 
 const route = useRoute()
 const project = computed(() => route.query.project as string)
@@ -75,4 +94,11 @@ const type = computed(() => route.query.type as string)
 const name = computed(() => route.query.name as string)
 const episode = computed(() => route.query.episode as string)
 const shot = computed(() => route.query.shot as string)
+
+const showBatchDialog = ref(false)
+const treeKey = ref(0)
+
+function refreshTree() {
+  treeKey.value++
+}
 </script>
