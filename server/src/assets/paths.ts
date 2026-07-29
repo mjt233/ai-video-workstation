@@ -95,6 +95,10 @@ export function httpError(res: import('express').Response, err: unknown, fallbac
     res.status(409).json({ error: e.message, code: 'CONFLICT' });
     return;
   }
+  if (e?.code === 'LAST_ONE') {
+    res.status(409).json({ error: e.message, code: 'LAST_ONE' });
+    return;
+  }
   console.error(err);
   res.status(500).json({ error: fallback });
 }

@@ -141,6 +141,15 @@
                 >
                   {{ voiceAssets[i] ? '重新生成' : '生成语音' }}
                 </v-btn>
+                <v-btn
+                  size="x-small"
+                  variant="text"
+                  prepend-icon="mdi-history"
+                  :disabled="!voiceAssets[i]"
+                  @click="openVoiceHistory(i)"
+                >
+                  历史
+                </v-btn>
               </div>
             </template>
           </v-list-item>
@@ -151,8 +160,18 @@
       </v-tabs-window-item>
 
       <v-tabs-window-item value="images">
-        <div class="d-flex mt-2 mb-2 ml-2">
-          <v-btn @click="editStageJson">
+        <div class="d-flex mt-2 mb-2 ml-2 ga-2 flex-wrap">
+          <v-btn
+            color="primary"
+            prepend-icon="mdi-plus"
+            @click="openCreateStageFrame"
+          >
+            新增场景
+          </v-btn>
+          <v-btn
+            variant="text"
+            @click="editStageJson"
+          >
             编辑 stage.json
           </v-btn>
         </div>
@@ -166,6 +185,22 @@
             <v-card-title class="text-subtitle-1 d-flex align-center">
               <span>场景{{ i }}</span>
               <v-spacer />
+              <v-btn
+                icon="mdi-pencil"
+                size="x-small"
+                variant="text"
+                title="编辑"
+                @click="openEditStageFrame(i)"
+              />
+              <v-btn
+                icon="mdi-delete"
+                size="x-small"
+                variant="text"
+                color="error"
+                title="删除"
+                :disabled="stageDefs.length <= 1 || deletingStageIndex === i"
+                @click="removeStageFrame(i)"
+              />
               <v-btn
                 icon="mdi-arrow-up"
                 size="x-small"
@@ -321,7 +356,7 @@
                   cols="6"
                   class="d-flex flex-column align-center"
                 >
-                  <div class="d-flex justify-center mb-3">
+                  <div class="d-flex justify-center mb-3 ga-2 flex-wrap">
                     <v-btn
                       size="small"
                       color="primary"
@@ -330,6 +365,15 @@
                       @click="genDialog = { show: true, type: 'image', index: i }"
                     >
                       生成图片
+                    </v-btn>
+                    <v-btn
+                      size="small"
+                      variant="text"
+                      prepend-icon="mdi-history"
+                      :disabled="!stage.imageUrl"
+                      @click="openStageImageHistory(i)"
+                    >
+                      历史版本
                     </v-btn>
                   </div>
                   <v-img
@@ -370,7 +414,7 @@
           </v-btn>
         </div>
         <MarkdownView :content="data.prompt" />
-        <div class="d-flex justify-center mt-2">
+        <div class="d-flex justify-center mt-2 ga-2 flex-wrap">
           <v-btn
             color="primary"
             variant="tonal"
@@ -378,6 +422,14 @@
             @click="genDialog = { show: true, type: 'video', index: 0 }"
           >
             生成视频
+          </v-btn>
+          <v-btn
+            variant="text"
+            prepend-icon="mdi-history"
+            :disabled="!hasVideo"
+            @click="openVideoHistory"
+          >
+            历史版本
           </v-btn>
         </div>
       </v-tabs-window-item>
@@ -545,15 +597,39 @@
       :existing-asset="characterAssetUrls[refGenDialog.name] ? '已有图片' : undefined"
       @refresh="load"
     />
+
+    <StageFrameDialog
+      v-model="stageFrameDialog.show"
+      :project="props.project"
+      :episode="props.episode"
+      :shot="props.shot"
+      :mode="stageFrameDialog.mode"
+      :index="stageFrameDialog.index"
+      :initial="stageFrameDialog.initial"
+      @saved="load"
+    />
+
+    <AssetHistoryDialog
+      v-model="historyDialog.show"
+      :project="props.project"
+      :asset-path="historyDialog.path"
+      @activated="load"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { readFs, writeFs, existsFs } from '../api/client'
-import { reorderSceneStage, AssetApiError } from '../api/assets'
+import {
+  reorderSceneStage,
+  deleteSceneStageFrame,
+  AssetApiError,
+} from '../api/assets'
 import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
+import StageFrameDialog from './StageFrameDialog.vue'
+import AssetHistoryDialog from './AssetHistoryDialog.vue'
 
 interface ScriptEntry {
   角色名: string
@@ -671,6 +747,7 @@ const overviewDialog = ref<OverviewDialogState>({
   form: emptyOverview(),
 })
 const reordering = ref(false)
+const deletingStageIndex = ref<number | null>(null)
 const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index: number }>({ show: false, type: 'image', index: 0 })
 const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: string; label: string }>({
   show: false,
@@ -678,6 +755,13 @@ const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: str
   name: '',
   label: '',
 })
+const stageFrameDialog = ref<{
+  show: boolean
+  mode: 'create' | 'edit'
+  index?: number
+  initial?: { 基础场景: string; 登场角色?: string[]; prompt?: string }
+}>({ show: false, mode: 'create' })
+const historyDialog = ref<{ show: boolean; path: string }>({ show: false, path: '' })
 
 const overviewDurationError = computed(() => {
   const duration = overviewDialog.value.form.duration
@@ -697,6 +781,69 @@ async function moveStage(from: number, to: number) {
     alert(e instanceof AssetApiError ? e.message : '调整顺序失败')
   } finally {
     reordering.value = false
+  }
+}
+
+function openCreateStageFrame() {
+  stageFrameDialog.value = {
+    show: true,
+    mode: 'create',
+    initial: { 基础场景: '', 登场角色: [], prompt: '' },
+  }
+}
+
+function openEditStageFrame(index: number) {
+  const stage = stageDefs.value[index]
+  if (!stage) return
+  stageFrameDialog.value = {
+    show: true,
+    mode: 'edit',
+    index,
+    initial: {
+      基础场景: stage.基础场景 ?? '',
+      登场角色: [...(stage.登场角色 ?? [])],
+      prompt: stage.prompt ?? '',
+    },
+  }
+}
+
+async function removeStageFrame(index: number) {
+  if (stageDefs.value.length <= 1) {
+    alert('至少保留一个场景，无法删除')
+    return
+  }
+  if (!confirm(`确定删除场景${index}？对应图片资产也会删除。`)) return
+  deletingStageIndex.value = index
+  try {
+    await deleteSceneStageFrame(props.project, props.episode, props.shot, index)
+    await load()
+  } catch (e) {
+    alert(e instanceof AssetApiError ? e.message : '删除失败')
+  } finally {
+    deletingStageIndex.value = null
+  }
+}
+
+function openStageImageHistory(index: number) {
+  historyDialog.value = {
+    show: true,
+    path: `assert/scene/${props.episode}/${props.shot}/stage/${index}.jpg`,
+  }
+}
+
+function openVoiceHistory(index: number) {
+  const name = data.value?.script[index]?.角色名
+  if (!name) return
+  historyDialog.value = {
+    show: true,
+    path: `assert/scene/${props.episode}/${props.shot}/voice/${index}-${name}.flac`,
+  }
+}
+
+function openVideoHistory() {
+  historyDialog.value = {
+    show: true,
+    path: `assert/scene/${props.episode}/${props.shot}/video/0.mp4`,
   }
 }
 

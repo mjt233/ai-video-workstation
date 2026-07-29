@@ -55,4 +55,23 @@ export async function reorderStageFrames(
       await fs.rename(tmp, path.join(stageDir, `${newIndex}.jpg`));
     }
   }
+
+  // 同步 history/{index} 目录顺序
+  const historyRoot = path.join(stageDir, 'history');
+  if (await pathExists(historyRoot)) {
+    const histTmp = `.reorder-tmp-${Date.now()}`;
+    for (let i = 0; i < n; i++) {
+      const src = path.join(historyRoot, String(i));
+      if (await pathExists(src)) {
+        await fs.rename(src, path.join(historyRoot, `${i}${histTmp}`));
+      }
+    }
+    for (let newIndex = 0; newIndex < n; newIndex++) {
+      const oldIndex = mapping[newIndex];
+      const tmp = path.join(historyRoot, `${oldIndex}${histTmp}`);
+      if (await pathExists(tmp)) {
+        await fs.rename(tmp, path.join(historyRoot, String(newIndex)));
+      }
+    }
+  }
 }

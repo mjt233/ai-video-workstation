@@ -40,7 +40,7 @@
             <MarkdownView :content="data.appearance" />
           </v-col>
           <v-col cols="6">
-            <div class="d-flex justify-center mb-4">
+            <div class="d-flex justify-center mb-4 ga-2 flex-wrap">
               <v-btn
                 size="small"
                 color="primary"
@@ -49,6 +49,15 @@
                 @click="genDialog = { show: true, type: 'appearance' }"
               >
                 生成图片
+              </v-btn>
+              <v-btn
+                size="small"
+                variant="text"
+                prepend-icon="mdi-history"
+                :disabled="!appearanceImg"
+                @click="openHistory(`assert/character/${props.name}/appearance.jpg`)"
+              >
+                历史版本
               </v-btn>
             </div>
             <v-img
@@ -94,7 +103,7 @@
             </div>
           </v-col>
         </v-row>
-        <div class="d-flex justify-center mt-2">
+        <div class="d-flex justify-center mt-2 ga-2 flex-wrap">
           <v-btn
             size="small"
             color="primary"
@@ -103,6 +112,15 @@
             @click="genDialog = { show: true, type: 'voice' }"
           >
             生成
+          </v-btn>
+          <v-btn
+            size="small"
+            variant="text"
+            prepend-icon="mdi-history"
+            :disabled="!voiceAudio"
+            @click="openHistory(`assert/character/${props.name}/voice.flac`)"
+          >
+            历史版本
           </v-btn>
         </div>
       </v-tabs-window-item>
@@ -118,6 +136,13 @@
       :prompt-paths="genConfig.promptPaths"
       :existing-asset="genConfig.existingAsset"
       @refresh="load"
+    />
+
+    <AssetHistoryDialog
+      v-model="historyDialog.show"
+      :project="props.project"
+      :asset-path="historyDialog.path"
+      @activated="load"
     />
 
     <v-dialog
@@ -158,6 +183,7 @@ import { ref, watch, computed } from 'vue'
 import { readFs, writeFs, existsFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
+import AssetHistoryDialog from './AssetHistoryDialog.vue'
 
 interface DialogState {
   show: boolean
@@ -179,6 +205,12 @@ const appearanceImg = ref('')
 const voiceAudio = ref('')
 
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
+
+const historyDialog = ref<{ show: boolean; path: string }>({ show: false, path: '' })
+
+function openHistory(path: string) {
+  historyDialog.value = { show: true, path }
+}
 
 const genDialog = ref<{ show: boolean; type: 'appearance' | 'voice' }>({ show: false, type: 'appearance' })
 const genConfig = computed(() => {

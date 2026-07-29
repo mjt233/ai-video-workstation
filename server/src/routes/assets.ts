@@ -22,6 +22,8 @@ import {
 import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/refs.js';
 import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
 import { reorderStageFrames } from '../assets/stage-reorder.js';
+import { addStageFrame, deleteStageFrame, updateStageFrame, type StageFrameInput } from '../assets/stage-frames.js';
+import { activateHistoryVersion, listAssetHistory } from '../assets/history.js';
 
 export const assetsRouter = Router();
 
@@ -286,6 +288,89 @@ assetsRouter.post('/assets/:project/scene/:episode/:shot/stage/reorder', async (
     }
     await reorderStageFrames(project, episode, shot, from, to);
     res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 新增分镜场景帧
+assetsRouter.post('/assets/:project/scene/:episode/:shot/stage', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    const body = req.body as StageFrameInput & { index?: number };
+    const result = await addStageFrame(project, episode, shot, body, body.index);
+    res.json({ success: true, index: result.index });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT 更新分镜场景帧
+assetsRouter.put('/assets/:project/scene/:episode/:shot/stage/:index', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    const index = Number(req.params.index);
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    if (!Number.isInteger(index) || index < 0) {
+      throw Object.assign(new Error('index 必须是非负整数'), { code: 'INVALID' });
+    }
+    await updateStageFrame(project, episode, shot, index, req.body as StageFrameInput);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE 删除分镜场景帧（至少保留 1 个）
+assetsRouter.delete('/assets/:project/scene/:episode/:shot/stage/:index', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    const index = Number(req.params.index);
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    if (!Number.isInteger(index) || index < 0) {
+      throw Object.assign(new Error('index 必须是非负整数'), { code: 'INVALID' });
+    }
+    await deleteStageFrame(project, episode, shot, index);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// GET 资产历史版本列表  ?path=assert/...
+assetsRouter.get('/assets/:project/history', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const assetPath = String(req.query.path ?? '');
+    if (!assetPath) throw Object.assign(new Error('path 必填'), { code: 'INVALID' });
+    const versions = await listAssetHistory(project, assetPath);
+    res.json({ versions });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 激活历史版本
+// body: { path: "assert/...", versionPath: "assert/.../history/.../xxx.jpg" }
+assetsRouter.post('/assets/:project/history/activate', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const { path: assetPath, versionPath } = req.body as { path?: string; versionPath?: string };
+    if (!assetPath || !versionPath) {
+      throw Object.assign(new Error('path 与 versionPath 必填'), { code: 'INVALID' });
+    }
+    const result = await activateHistoryVersion(project, assetPath, versionPath);
+    res.json({ success: true, ...result });
   } catch (err) {
     httpError(res, err);
   }

@@ -181,6 +181,28 @@ assert/
 
 创建角色/场景/分镜时**不会**预创建 `assert` 文件；由工作流或批量发现任务写入。
 
+### 3.0 历史版本
+
+重复生成同一资产时，引擎会先将**当前文件**移入历史目录，再写入新文件：
+
+```
+assert/.../{file}.ext
+assert/.../history/{stem}/{YYYYMMDD-HHmmss}.ext
+```
+
+示例：
+
+| 当前资产 | 历史目录 |
+|----------|----------|
+| `assert/character/陈书文/appearance.jpg` | `assert/character/陈书文/history/appearance/` |
+| `assert/stage/现代商场/xxx.jpg` | `assert/stage/现代商场/history/xxx/` |
+| `assert/scene/1/1/stage/0.jpg` | `assert/scene/1/1/stage/history/0/` |
+| `assert/scene/1/1/voice/0-陈书文.flac` | `assert/scene/1/1/voice/history/0-陈书文/` |
+
+- 历史文件名按时间戳排序；同秒冲突时追加 `-1`、`-2`…
+- API：`GET /api/assets/:project/history?path=assert/...` 列出版本
+- API：`POST /api/assets/:project/history/activate` 将某历史版本激活为当前（原当前再归档）
+
 ### 3.1 角色产物
 
 | 路径 | 来源工作流 | 输入 prompt |

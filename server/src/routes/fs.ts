@@ -67,7 +67,7 @@ fsRouter.get('/fs/:project/*', async (req: Request, res: Response) => {
       res.json({ entries: result });
     } else {
       const ext = path.extname(fullPath).toLowerCase();
-      const binaryExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.flac', '.mp3', '.wav'];
+      const binaryExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.flac', '.mp3', '.wav', '.mp4', '.webm'];
       if (binaryExts.includes(ext)) {
         res.sendFile(fullPath);
       } else {

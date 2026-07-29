@@ -130,3 +130,85 @@ export async function reorderSceneStage(
     return data as { success: boolean }
   } catch (e) { rethrow(e) }
 }
+
+export interface StageFrameBody {
+  基础场景: string
+  登场角色?: string[]
+  prompt?: string
+  index?: number
+}
+
+export async function createSceneStageFrame(
+  project: string,
+  episode: string,
+  shot: string,
+  body: StageFrameBody,
+) {
+  try {
+    const { data } = await client.post(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/stage`,
+      body,
+    )
+    return data as { success: boolean; index: number }
+  } catch (e) { rethrow(e) }
+}
+
+export async function updateSceneStageFrame(
+  project: string,
+  episode: string,
+  shot: string,
+  index: number,
+  body: StageFrameBody,
+) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/stage/${index}`,
+      body,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteSceneStageFrame(
+  project: string,
+  episode: string,
+  shot: string,
+  index: number,
+) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/stage/${index}`,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export interface HistoryVersion {
+  name: string
+  path: string
+  mtime: string
+  size: number
+}
+
+export async function listAssetHistory(project: string, assetPath: string) {
+  try {
+    const { data } = await client.get(`/assets/${project}/history`, {
+      params: { path: assetPath },
+    })
+    return data as { versions: HistoryVersion[] }
+  } catch (e) { rethrow(e) }
+}
+
+export async function activateAssetHistory(
+  project: string,
+  assetPath: string,
+  versionPath: string,
+) {
+  try {
+    const { data } = await client.post(`/assets/${project}/history/activate`, {
+      path: assetPath,
+      versionPath,
+    })
+    return data as { success: boolean; archived: string | null; current: string }
+  } catch (e) { rethrow(e) }
+}

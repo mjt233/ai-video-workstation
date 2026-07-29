@@ -5,6 +5,7 @@ import * as db from './db.js';
 import { register, getImpl, getAllWorkflows } from './workflows/registry.js';
 import type { ProjectConfig, WorkflowDefinition, WorkflowParams, WorkflowVarsBase } from './workflows/types.js';
 import { getBatchConcurrency } from './routes/workflow.js';
+import { archiveExistingAsset } from './assets/history.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../design');
@@ -354,6 +355,11 @@ async function tryHandleSceneStageDirectReference(
     throw new Error(`基础场景图不存在: ${sourceRel}`);
   }
 
+  const archived = await archiveExistingAsset(project, outputPath);
+  if (archived) {
+    db.addLog(taskId, 'info', `已有资产已归档为历史版本: ${archived}`);
+  }
+
   await fs.mkdir(path.dirname(destFull), { recursive: true });
   await fs.copyFile(sourceFull, destFull);
 
@@ -502,6 +508,12 @@ async function runTask(taskId: string): Promise<void> {
     const assertFullPath = resolveProjectAssertPath(task.project, outputPath);
     const assertDir = path.dirname(assertFullPath);
 
+    // 重复生成时，将已有资产归档到历史版本
+    const archived = await archiveExistingAsset(task.project, outputPath);
+    if (archived) {
+      db.addLog(taskId, 'info', `已有资产已归档为历史版本: ${archived}`);
+    }
+
     await fs.mkdir(assertDir, { recursive: true });
 
     if (output.type === 'download') {
@@ -514,7 +526,7 @@ async function runTask(taskId: string): Promise<void> {
       db.addLog(taskId, 'info', `Fetching output from: ${output.request.url}`);
       const res = await fetch(output.request.url, {
         method: output.request.method,
-        headers: output.request.headers
+        headers: output.request.headers,
       });
       if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
       const buffer = Buffer.from(await res.arrayBuffer());

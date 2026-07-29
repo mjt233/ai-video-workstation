@@ -44,7 +44,7 @@
             class="d-flex flex-column align-center"
             style="overflow-y: auto;"
           >
-            <div class="d-flex justify-center mb-4 mt-2">
+            <div class="d-flex justify-center mb-4 mt-2 ga-2 flex-wrap">
               <v-btn
                 size="small"
                 color="primary"
@@ -54,6 +54,15 @@
                 @click="genDialog = true"
               >
                 生成图片
+              </v-btn>
+              <v-btn
+                size="small"
+                variant="text"
+                prepend-icon="mdi-history"
+                :disabled="!selected?.imageUrl"
+                @click="openHistory"
+              >
+                历史版本
               </v-btn>
             </div>
             <v-img
@@ -123,6 +132,13 @@
       :existing-asset="selected?.imageUrl ? '已有图片' : undefined"
       @refresh="load"
     />
+
+    <AssetHistoryDialog
+      v-model="historyDialog.show"
+      :project="props.project"
+      :asset-path="historyDialog.path"
+      @activated="load"
+    />
   </div>
 </template>
 
@@ -132,6 +148,7 @@ import { readFs, writeFs, existsFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
 import { useAutoComputeHeight } from '../composables/useAutoComputeHeight'
 import GenerateDialog from './GenerateDialog.vue'
+import AssetHistoryDialog from './AssetHistoryDialog.vue'
 
 interface SubScene {
   label: string
@@ -154,6 +171,16 @@ const selected = ref<SubScene | null>(null)
 const loadError = ref('')
 const dialog = ref<DialogState>({ show: false, content: '' })
 const genDialog = ref(false)
+const historyDialog = ref<{ show: boolean; path: string }>({ show: false, path: '' })
+
+function openHistory() {
+  const label = selected.value?.label ?? props.subscene
+  if (!label) return
+  historyDialog.value = {
+    show: true,
+    path: `assert/stage/${props.name}/${label}.jpg`,
+  }
+}
 
 const panelRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
