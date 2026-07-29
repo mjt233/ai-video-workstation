@@ -237,7 +237,7 @@
                           color="primary"
                           variant="tonal"
                         >
-                          {{ stage.基础场景 }}
+                          {{ isPrevStageRef(stage.基础场景) ? 'prev（上一分镜最后场景）' : stage.基础场景 }}
                         </v-chip>
                       </template>
                       <v-card
@@ -256,9 +256,10 @@
                           class="d-flex flex-column align-center ga-2 pa-2"
                         >
                           <div class="text-caption text-medium-emphasis">
-                            暂无设定图
+                            {{ isPrevStageRef(stage.基础场景) ? '上一分镜最后场景图尚未生成' : '暂无设定图' }}
                           </div>
                           <v-btn
+                            v-if="!isPrevStageRef(stage.基础场景)"
                             size="small"
                             color="primary"
                             variant="tonal"
@@ -340,7 +341,11 @@
                       v-else
                       class="text-grey text-body-2"
                     >
-                      {{ isDirectStageRef(stage) ? '直接引用基础场景' : '无' }}
+                      {{
+                        isDirectStageRef(stage)
+                          ? (isPrevStageRef(stage.基础场景) ? '直接引用上一分镜最后场景' : '直接引用基础场景')
+                          : '无'
+                      }}
                     </div>
                   </div>
                   <div>
@@ -348,7 +353,12 @@
                       合成 Prompt
                     </div>
                     <div class="text-body-2 stage-prompt">
-                      {{ stage.prompt || (isDirectStageRef(stage) ? '（直接引用，不做修改）' : '（空）') }}
+                      {{
+                        stage.prompt
+                          || (isDirectStageRef(stage)
+                            ? (isPrevStageRef(stage.基础场景) ? '（直接引用上一分镜最后场景，不做修改）' : '（直接引用，不做修改）')
+                            : '（空）')
+                      }}
                     </div>
                   </div>
                 </v-col>
@@ -911,14 +921,25 @@ const genCharacterAssetDialog = computed({
 const basePath = computed(() => `prompt/scene/${props.episode}/${props.shot}`)
 const assertBase = computed(() => `/api/fs/${props.project}/assert/scene/${props.episode}/${props.shot}/stage`)
 
-/** 登场角色与 prompt 同时为空 = 直接引用基础场景 */
+/** 引用同集上一分镜最后场景图的固定关键字。 */
+const PREV_STAGE_REF = 'prev'
+
+/** 登场角色与 prompt 同时为空 = 直接引用基础场景 / prev */
 function isDirectStageRef(stage: Pick<StageDefinition, '登场角色' | 'prompt'>): boolean {
   return !(stage.登场角色?.length) && !(stage.prompt ?? '').trim()
 }
 
 /**
+ * 是否为上一分镜最后场景引用。
+ * @param ref 基础场景字段
+ */
+function isPrevStageRef(ref: string | undefined): boolean {
+  return (ref ?? '').trim() === PREV_STAGE_REF
+}
+
+/**
  * 解析基础场景引用。
- * 支持 `场景名/标签` 与 `场景名/标签@变体id`。
+ * 支持 `场景名/标签` 与 `场景名/标签@变体id`；`prev` 返回 null（需分镜上下文）。
  */
 function parseStageRef(ref: string): {
   name: string
@@ -928,6 +949,7 @@ function parseStageRef(ref: string): {
 } | null {
   if (!ref) return null
   const trimmed = ref.trim()
+  if (trimmed === PREV_STAGE_REF) return null
   const at = trimmed.indexOf('@')
   const main = at >= 0 ? trimmed.slice(0, at) : trimmed
   const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : ''
@@ -952,6 +974,27 @@ function parseStageRef(ref: string): {
 }
 
 /**
+ * 解析 prev 对应的上一分镜最后场景图 assert 路径。
+ * @returns assert 相对路径；无法解析时返回 null
+ */
+async function resolvePrevAssertPath(): Promise<string | null> {
+  const shotNum = Number(String(props.shot).trim())
+  if (!Number.isInteger(shotNum) || shotNum <= 1) return null
+  const prevShot = String(shotNum - 1)
+  try {
+    const raw = await readFs(props.project, `prompt/scene/${props.episode}/${prevShot}/stage.json`)
+    let defs: unknown = raw
+    if (typeof raw === 'string') {
+      defs = JSON.parse(raw || '[]')
+    }
+    if (!Array.isArray(defs) || defs.length === 0) return null
+    return `assert/scene/${props.episode}/${prevShot}/stage/${defs.length - 1}.jpg`
+  } catch {
+    return null
+  }
+}
+
+/**
  * 解析角色引用为 assert 路径。
  * 支持 `角色名` 与 `角色名@变体id`。
  */
@@ -966,6 +1009,10 @@ function characterRefToAssertPath(ref: string): string | null {
   return `assert/character/${name}/variants/${variantId}.jpg`
 }
 
+/**
+ * 打开基础场景设定图生成对话框。
+ * @param stageRef 基础场景引用（prev 不支持）
+ */
 function openStageAssetGen(stageRef: string) {
   const parsed = parseStageRef(stageRef)
   if (!parsed) return
@@ -974,6 +1021,10 @@ function openStageAssetGen(stageRef: string) {
   refGenDialog.value = { show: true, type: 'stage', name: parsed.name, label: parsed.label }
 }
 
+/**
+ * 打开角色设定图生成对话框。
+ * @param charName 角色引用
+ */
 function openCharacterAssetGen(charName: string) {
   if (!charName) return
   // 变体图在角色详情中生成
@@ -981,6 +1032,10 @@ function openCharacterAssetGen(charName: string) {
   refGenDialog.value = { show: true, type: 'character', name: charName, label: '' }
 }
 
+/**
+ * 加载基础场景与角色引用资产预览 URL。
+ * @param stages 当前分镜场景定义列表
+ */
 async function loadRefAssets(stages: StageDefinition[]) {
   const stageRefs = new Set<string>()
   const charNames = new Set<string>()
@@ -997,6 +1052,13 @@ async function loadRefAssets(stages: StageDefinition[]) {
 
   await Promise.all([
     ...[...stageRefs].map(async (ref) => {
+      if (isPrevStageRef(ref)) {
+        const path = await resolvePrevAssertPath()
+        if (path && await existsFs(props.project, path)) {
+          nextStageUrls[ref] = `/api/fs/${props.project}/${path}?t=${ts}`
+        }
+        return
+      }
       const parsed = parseStageRef(ref)
       if (!parsed) return
       if (await existsFs(props.project, parsed.assertPath)) {

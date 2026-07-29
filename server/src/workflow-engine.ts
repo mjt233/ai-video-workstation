@@ -288,20 +288,25 @@ async function enrichSceneTtsParams(
  */
 
 /**
- * 解析基础场景引用为 assert 路径。
+ * 解析基础场景引用为 assert 路径（不含 `prev`）。
  * 支持：
  * - `场景名/标签` → assert/stage/{场景名}/{标签}.jpg
  * - `场景名/标签@变体id` → assert/stage/{场景名}/variants/{标签}/{变体id}.jpg
+ * @param baseStage 基础场景引用
+ * @returns assert 相对路径
  */
 function resolveStageAssetPath(baseStage: string): string {
   const trimmed = baseStage.trim();
   if (!trimmed) throw new Error('基础场景不能为空');
+  if (trimmed === 'prev') {
+    throw new Error('基础场景 prev 需结合分镜上下文解析，不能单独解析为 stage 资产路径');
+  }
   const at = trimmed.indexOf('@');
   const main = at >= 0 ? trimmed.slice(0, at) : trimmed;
   const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : '';
   const slash = main.indexOf('/');
   if (slash <= 0 || slash === main.length - 1) {
-    throw new Error(`基础场景格式无效（期望 场景名/标签 或 场景名/标签@变体）: ${baseStage}`);
+    throw new Error(`基础场景格式无效（期望 场景名/标签、场景名/标签@变体，或关键字 prev）: ${baseStage}`);
   }
   const stageName = main.slice(0, slash);
   const stageLabel = main.slice(slash + 1);
@@ -309,6 +314,44 @@ function resolveStageAssetPath(baseStage: string): string {
     return `assert/stage/${stageName}/variants/${stageLabel}/${variantId}.jpg`;
   }
   return `assert/stage/${stageName}/${stageLabel}.jpg`;
+}
+
+/**
+ * 解析 `prev`：同集上一分镜 stage.json 最后一项对应的分镜场景图。
+ * @param project 项目名
+ * @param episode 集数
+ * @param shot 当前分镜编号
+ * @returns assert 相对路径
+ */
+async function resolvePrevStageAssetPath(
+  project: string,
+  episode: string,
+  shot: string,
+): Promise<string> {
+  const shotNum = Number(String(shot).trim());
+  if (!Number.isInteger(shotNum) || shotNum <= 1) {
+    throw new Error('第 1 个分镜不能使用基础场景 prev（无上一分镜）');
+  }
+  const prevShot = String(shotNum - 1);
+  const prevStageJsonRel = `prompt/scene/${episode}/${prevShot}/stage.json`;
+  const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
+  const prevStageJsonFull = path.resolve(DESIGN_DIR, project, prevStageJsonRel);
+  if (!prevStageJsonFull.startsWith(projectRoot)) {
+    throw new Error('Path traversal denied');
+  }
+
+  let prevDefs: SceneStageDefinition[];
+  try {
+    const raw = await fs.readFile(prevStageJsonFull, 'utf-8');
+    prevDefs = JSON.parse(raw) as SceneStageDefinition[];
+  } catch {
+    throw new Error(`无法读取上一分镜场景定义: ${prevStageJsonRel}`);
+  }
+  if (!Array.isArray(prevDefs) || prevDefs.length === 0) {
+    throw new Error(`上一分镜 ${episode}/${prevShot} 的 stage.json 为空，无法引用 prev`);
+  }
+  const lastIndex = prevDefs.length - 1;
+  return `assert/scene/${episode}/${prevShot}/stage/${lastIndex}.jpg`;
 }
 
 /**
@@ -382,6 +425,9 @@ async function enrichSceneStageImageParams(
   if (!baseStage) {
     throw new Error('基础场景不能为空');
   }
+  if (baseStage === 'prev') {
+    throw new Error('基础场景 prev 仅支持直接引用，不能用于图像编辑合成');
+  }
   const characters = stage.登场角色 ?? [];
   const prompt = (stage.prompt ?? '').trim();
   if (characters.length === 0 && !prompt) {
@@ -448,8 +494,20 @@ async function tryHandleSceneStageDirectReference(
     return false;
   }
 
-  // 直接引用路径：复制基础场景图 → 分镜场景图资产
-  db.addLog(taskId, 'info', '检测到直接引用基础场景（登场角色与 prompt 均为空），由调度引擎复制资产');
+  // 直接引用路径：复制基础场景图 / 上一分镜最后场景图 → 分镜场景图资产
+  const baseStage = (stage.基础场景 ?? '').trim();
+  if (!baseStage) {
+    throw new Error('基础场景不能为空');
+  }
+
+  const isPrev = baseStage === 'prev';
+  db.addLog(
+    taskId,
+    'info',
+    isPrev
+      ? '检测到直接引用上一分镜最后场景（基础场景=prev，登场角色与 prompt 均为空），由调度引擎复制资产'
+      : '检测到直接引用基础场景（登场角色与 prompt 均为空），由调度引擎复制资产',
+  );
   db.updateTaskStatus(taskId, 'running');
 
   const outputPath = paramsObj.outputPath;
@@ -457,19 +515,20 @@ async function tryHandleSceneStageDirectReference(
     throw new Error('outputPath is required in task params');
   }
 
-  const baseStage = (stage.基础场景 ?? '').trim();
-  if (!baseStage) {
-    throw new Error('基础场景不能为空');
-  }
-
-  const sourceRel = resolveStageAssetPath(baseStage);
+  const sourceRel = isPrev
+    ? await resolvePrevStageAssetPath(project, episode, shot)
+    : resolveStageAssetPath(baseStage);
   const sourceFull = resolveProjectAssertPath(project, sourceRel);
   const destFull = resolveProjectAssertPath(project, outputPath);
 
   try {
     await fs.access(sourceFull);
   } catch {
-    throw new Error(`基础场景图不存在: ${sourceRel}`);
+    throw new Error(
+      isPrev
+        ? `上一分镜最后场景图不存在: ${sourceRel}（请先生成上一分镜对应场景图）`
+        : `基础场景图不存在: ${sourceRel}`,
+    );
   }
 
   const archived = await archiveExistingAsset(project, outputPath);
@@ -480,8 +539,16 @@ async function tryHandleSceneStageDirectReference(
   await fs.mkdir(path.dirname(destFull), { recursive: true });
   await fs.copyFile(sourceFull, destFull);
 
-  db.addLog(taskId, 'info', `已复制基础场景图 ${sourceRel} → ${outputPath}`);
-  db.updateTaskStatus(taskId, 'completed', { result: { path: outputPath, directReference: true } });
+  db.addLog(
+    taskId,
+    'info',
+    isPrev
+      ? `已复制上一分镜最后场景图 ${sourceRel} → ${outputPath}`
+      : `已复制基础场景图 ${sourceRel} → ${outputPath}`,
+  );
+  db.updateTaskStatus(taskId, 'completed', {
+    result: { path: outputPath, directReference: true, prevReference: isPrev },
+  });
   return true;
 }
 

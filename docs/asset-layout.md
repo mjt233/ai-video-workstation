@@ -148,14 +148,27 @@ assert/stage/{场景名}/variants/{完整场景标签}/{变体id}.jpg
 ]
 ```
 
+也可引用**同集上一分镜的最后一个场景图**（仅直接引用）：
+
+```json
+[
+  {
+    "基础场景": "prev",
+    "登场角色": [],
+    "prompt": ""
+  }
+]
+```
+
 约束：
 
 | 规则 | 说明 |
 |------|------|
-| `基础场景` 必填 | 格式 `场景名/标签` 或 `场景名/标签@变体id`；变体对应 `prompt/.../variants/...` 与 `assert/.../variants/...` |
-| 直接引用 | `登场角色` 与 `prompt` **同时为空**：引擎复制基础场景图，不调用图像编辑 |
-| 合成/修改 | `prompt` 必填；有角色时角色须存在，且 `登场角色` 长度建议 ≤ 2 |
-| 禁止 | 仅有角色、`prompt` 为空 |
+| `基础场景` 必填 | 格式 `场景名/标签`、`场景名/标签@变体id`，或关键字 `prev` |
+| `prev` | 表示同集上一分镜 `stage.json` **最后一项**对应的 `assert/scene/{ep}/{shot-1}/stage/{n-1}.jpg`；**仅直接引用**（角色与 prompt 必须为空）；第 1 个分镜禁止 |
+| 直接引用 | `登场角色` 与 `prompt` **同时为空**：引擎复制基础场景图或上一分镜最后场景图，不调用图像编辑 |
+| 合成/修改 | `prompt` 必填；有角色时角色须存在，且 `登场角色` 长度建议 ≤ 2；**不可**对 `prev` 做合成 |
+| 禁止 | 仅有角色、`prompt` 为空；`prev` 叠加角色/prompt |
 | 运镜 | 不写在 `stage.json` 的 `prompt` 中，写在 `prompt.md` |
 | 图像编号 | 图像1=基础场景图，图像2/3=登场角色外观图 |
 
@@ -269,8 +282,9 @@ assert/.../history/{stem}/{YYYYMMDD-HHmmss}.ext
 
 1. 读取 `prompt/scene/{ep}/{shot}/stage.json[index]`
 2. **直接引用**（无角色且 `prompt` 为空）：  
-   复制 `assert/stage/{场景}/{标签}.jpg` → `assert/scene/{ep}/{shot}/stage/{index}.jpg`
-3. **合成**：  
+   - 普通引用：复制 `assert/stage/{场景}/{标签}.jpg`（或变体图）→ `assert/scene/{ep}/{shot}/stage/{index}.jpg`  
+   - `prev`：复制 `assert/scene/{ep}/{shot-1}/stage/{last}.jpg` → 当前分镜目标帧（`last` 为上一分镜 `stage.json` 数组末下标）
+3. **合成**（`基础场景` 不得为 `prev`）：  
    - 图像1：`assert/stage/{场景}/{标签}.jpg`  
    - 图像2+：`assert/character/{角色}/appearance.jpg`  
    - 文本：条目内 `prompt`  

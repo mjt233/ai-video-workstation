@@ -47,23 +47,24 @@ python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人
 |------|------|------|
 | `python .claude/skills/create-video-script/scripts/add_stage.py` | 添加一条场景定义 | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
 | `python .claude/skills/create-video-script/scripts/add_stage.py` | 直接引用基础场景（无角色/无修改） | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "" ""` |
+| `python .claude/skills/create-video-script/scripts/add_stage.py` | 直接引用上一分镜最后场景（`prev`） | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 2 prev "" ""` |
 | `python .claude/skills/create-video-script/scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python .claude/skills/create-video-script/scripts/remove_stage.py -p 古人在现代 -e 1 1 0` |
 | `python .claude/skills/create-video-script/scripts/update_stage.py` | 更新场景定义的字段 | `python .claude/skills/create-video-script/scripts/update_stage.py -p 古人在现代 -e 1 1 0 --prompt "新提示词"` |
 
 ### `add_stage.py` 参数说明
 
 1. `分镜序号` — 整数，从 1 开始
-2. `基础场景标签` — **必填**，场景完整标签，如 `现代商场/现代商场-白天-平视-晴-中央扶梯`（需与 `stage/` 下的资产文件路径一致）
-3. `角色名` — 逗号分隔，最多 2 个，如 `陈书文` 或 `陈书文,现代女孩`；传空字符串 `""` 表示无登场角色
-4. `prompt` — 组合提示词，使用 `图像1` 代表场景、`图像2/3` 代表角色；传空字符串 `""` 且角色也为空时，表示直接引用基础场景。**有登场角色时**须写清：人物相对场景地标/彼此的位置关系，以及面部与身体朝向（朝向须以人或场景特征为参考点，见 [`03-asset-output.md`](./03-asset-output.md#场景组合jsonstagejson)）
+2. `基础场景标签` — **必填**，场景完整标签如 `现代商场/现代商场-白天-平视-晴-中央扶梯`（需与 `stage/` 下的资产文件路径一致），或关键字 `prev`（同集上一分镜最后场景，**仅直接引用**）
+3. `角色名` — 逗号分隔，最多 2 个，如 `陈书文` 或 `陈书文,现代女孩`；传空字符串 `""` 表示无登场角色；`prev` 时必须为空
+4. `prompt` — 组合提示词，使用 `图像1` 代表场景、`图像2/3` 代表角色；传空字符串 `""` 且角色也为空时，表示直接引用。**有登场角色时**须写清：人物相对场景地标/彼此的位置关系，以及面部与身体朝向（朝向须以人或场景特征为参考点，见 [`03-asset-output.md`](./03-asset-output.md#场景组合jsonstagejson)）；`prev` 时必须为空
 5. `-p` 或 `--project` — 剧本项目名称（默认自动检测）
 6. `-e` 或 `--episode` — 集数（默认: 1）
 
 脚本会自动校验：
-- `基础场景` 非空，且场景资产文件（`design/prompt/stage/{场景}/{完整场景标签}.md`）存在
+- `基础场景` 非空；普通引用时场景资产文件（`design/prompt/stage/{场景}/{完整场景标签}.md`）存在；`prev` 时当前分镜 > 1 且上一分镜 `stage.json` 非空
 - 角色资产目录（`design/prompt/character/{角色名}/`）是否存在（有角色时）
 - 角色数量是否 ≤ 2
-- `登场角色` 与 `prompt` 同时为空 → 直接引用模式；有角色时 `prompt` 不得为空
+- `登场角色` 与 `prompt` 同时为空 → 直接引用模式；有角色时 `prompt` 不得为空；`prev` 仅允许直接引用
 
 ## 台词管理（script.json）
 

@@ -6,8 +6,9 @@
   - project.json 的存在性、resolution 和 aspectRatio 字段格式
   - 每个分镜 overview.json 必须存在，字段齐全，duration 为 >0 的整数
   - 分镜目录不得残留 overview.md（应已迁移为 overview.json）
-  - 每个分镜的 stage.json 基础场景必须非空，且引用的场景资产文件存在
-  - 登场角色与 prompt 同时为空时视为直接引用基础场景（合法）
+  - 每个分镜的 stage.json 基础场景必须非空；普通引用须有场景资产，关键字 prev 须同集上一分镜 stage 非空
+  - 登场角色与 prompt 同时为空时视为直接引用（基础场景或 prev，合法）
+  - prev 仅允许直接引用（角色与 prompt 必须为空），且当前分镜 > 1
   - 有登场角色时 prompt 不得为空，角色资产目录须存在，数量不超过 2
   - 非直接引用时 prompt 字段中是否正确使用 "图像1/图像2/图像3" 标识
   - script.json 中出现的角色名是否在 stage.json 的登场角色中声明
@@ -31,6 +32,7 @@ from _common import (
     DEFAULT_EPISODE,
     OVERVIEW_REQUIRED_FIELDS,
     OVERVIEW_STRING_FIELDS,
+    is_prev_stage_ref,
     read_json,
     write_json,
     get_project_dir,
@@ -193,10 +195,30 @@ def validate_shot(shot: int, episode: int, project_name: str,
             for i, entry in enumerate(stage_data):
                 # 检查基础场景完整性（必须非空）
                 stage_ref = entry.get("基础场景", "")
-                if not stage_ref or not str(stage_ref).strip():
+                stage_ref_str = str(stage_ref).strip() if stage_ref is not None else ""
+                if not stage_ref_str:
                     errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: '基础场景' 不能为空")
+                elif is_prev_stage_ref(stage_ref_str):
+                    if not isinstance(shot, int) or shot <= 1:
+                        errors.append(
+                            f"第{episode}集 分镜 {shot}.stage[{i}]: 第 1 个分镜不能使用基础场景 prev"
+                        )
+                    else:
+                        prev_stage_path = get_stage_json_path(
+                            shot - 1, project_name, episode, project_root
+                        )
+                        if not prev_stage_path.exists():
+                            errors.append(
+                                f"第{episode}集 分镜 {shot}.stage[{i}]: prev 引用失败，上一分镜 stage.json 不存在 ({prev_stage_path})"
+                            )
+                        else:
+                            prev_data = read_json(prev_stage_path)
+                            if not isinstance(prev_data, list) or len(prev_data) == 0:
+                                errors.append(
+                                    f"第{episode}集 分镜 {shot}.stage[{i}]: prev 引用失败，上一分镜 stage.json 为空"
+                                )
                 else:
-                    asset_path = get_stage_asset_path(stage_ref, project_name, project_root)
+                    asset_path = get_stage_asset_path(stage_ref_str, project_name, project_root)
                     if not asset_path.exists():
                         errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: 场景资产不存在 ({asset_path})")
 
@@ -216,15 +238,19 @@ def validate_shot(shot: int, episode: int, project_name: str,
                             errors.append(f"第{episode}集 分镜 {shot}.stage[{i}]: 角色资产不存在 ({ch_dir})")
 
                 # 检查 prompt 字段
-                # 登场角色与 prompt 同时为空 = 直接引用基础场景（合法）
+                # 登场角色与 prompt 同时为空 = 直接引用基础场景 / prev（合法）
                 prompt = entry.get("prompt", "")
                 if prompt is None:
                     prompt = ""
                 prompt_str = str(prompt)
                 is_direct_ref = len(chars) == 0 and not prompt_str.strip()
 
-                if is_direct_ref:
-                    # 直接引用基础场景，无需 prompt / 图像标识校验
+                if is_prev_stage_ref(stage_ref_str) and not is_direct_ref:
+                    errors.append(
+                        f"第{episode}集 分镜 {shot}.stage[{i}]: 基础场景为 prev 时仅支持直接引用（登场角色与 prompt 必须为空）"
+                    )
+                elif is_direct_ref:
+                    # 直接引用，无需 prompt / 图像标识校验
                     pass
                 elif not prompt_str.strip():
                     # 有角色但 prompt 为空，或其它非直接引用却缺 prompt

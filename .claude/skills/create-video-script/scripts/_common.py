@@ -127,6 +127,14 @@ def write_json(path: Path, data: Any) -> None:
     print(f"✅ 已写入: {path}")
 
 
+PREV_STAGE_REF = "prev"
+
+
+def is_prev_stage_ref(stage_ref: str) -> bool:
+    """是否为上一分镜最后场景引用关键字 prev。"""
+    return (stage_ref or "").strip() == PREV_STAGE_REF
+
+
 def get_stage_asset_path(stage_ref: str, project_name: str, project_root: Optional[str] = None) -> Path:
     """
     根据 stage_ref（如 "现代商场/现代商场-白天-平视-晴-中央扶梯"
@@ -135,8 +143,12 @@ def get_stage_asset_path(stage_ref: str, project_name: str, project_root: Option
 
     - 基础场景：design/{project}/prompt/stage/{场景名}/{标签}.md
     - 衍生变体：design/{project}/prompt/stage/{场景名}/variants/{标签}/{变体id}.json
+    - prev：不对应 prompt/stage 资产；请用 validate_stage_ref / validate_prev_stage_ref
     """
     ref = (stage_ref or "").strip()
+    if is_prev_stage_ref(ref):
+        # prev 不映射到 prompt/stage；返回不存在路径，避免被误判为普通场景
+        return get_project_dir(project_name, project_root) / "prompt" / "stage" / "__prev__" / "__invalid__.md"
     at = ref.find("@")
     main = ref[:at] if at >= 0 else ref
     variant_id = ref[at + 1:].strip() if at >= 0 else ""
@@ -150,6 +162,31 @@ def get_stage_asset_path(stage_ref: str, project_name: str, project_root: Option
         stage_name, label = parts[0], "/".join(parts[1:])
         return base / stage_name / "variants" / label / f"{variant_id}.json"
     return base.joinpath(*parts[:-1], f"{parts[-1]}.md") if parts else base / "__invalid__.md"
+
+
+def validate_prev_stage_ref(
+    shot_number: int,
+    project_name: str,
+    episode: int = DEFAULT_EPISODE,
+    project_root: Optional[str] = None,
+) -> bool:
+    """
+    校验 prev 引用上下文：
+    - 当前分镜须 > 1
+    - 同集上一分镜 stage.json 存在且为非空数组
+    """
+    if not isinstance(shot_number, int) or shot_number <= 1:
+        print("⚠️  第 1 个分镜不能使用基础场景 prev（无上一分镜）", file=sys.stderr)
+        return False
+    prev_path = get_stage_json_path(shot_number - 1, project_name, episode, project_root)
+    if not prev_path.exists():
+        print(f"⚠️  上一分镜 stage.json 不存在: {prev_path}", file=sys.stderr)
+        return False
+    data = read_json(prev_path)
+    if not isinstance(data, list) or len(data) == 0:
+        print(f"⚠️  上一分镜 stage.json 为空: {prev_path}", file=sys.stderr)
+        return False
+    return True
 
 
 def get_character_dir(character_name: str, project_name: str, project_root: Optional[str] = None) -> Path:
@@ -208,9 +245,27 @@ def list_episodes(project_name: str, project_root: Optional[str] = None) -> list
     return sorted(episodes)
 
 
-def validate_stage_ref(stage_ref: str, project_name: str, project_root: Optional[str] = None) -> bool:
-    """检查场景引用是否存在对应的资产文件（支持基础场景与衍生变体）。"""
-    path = get_stage_asset_path(stage_ref, project_name, project_root)
+def validate_stage_ref(
+    stage_ref: str,
+    project_name: str,
+    project_root: Optional[str] = None,
+    *,
+    shot_number: Optional[int] = None,
+    episode: int = DEFAULT_EPISODE,
+) -> bool:
+    """
+    检查场景引用是否合法。
+
+    - 普通引用：对应 prompt/stage 资产文件存在（支持基础场景与衍生变体）
+    - prev：须提供 shot_number，并校验同集上一分镜 stage.json 非空
+    """
+    ref = (stage_ref or "").strip()
+    if is_prev_stage_ref(ref):
+        if shot_number is None:
+            print("⚠️  校验 prev 时需要提供当前分镜序号 shot_number", file=sys.stderr)
+            return False
+        return validate_prev_stage_ref(shot_number, project_name, episode, project_root)
+    path = get_stage_asset_path(ref, project_name, project_root)
     exists = path.exists()
     if not exists:
         print(f"⚠️  场景资产不存在: {path}", file=sys.stderr)

@@ -20,7 +20,7 @@
         <div class="text-caption text-medium-emphasis mb-1">
           基础场景
         </div>
-        <div class="d-flex align-center ga-3 mb-4">
+        <div class="d-flex align-center ga-3 mb-2">
           <v-avatar
             size="64"
             rounded="lg"
@@ -42,7 +42,13 @@
               v-if="form.基础场景"
               class="text-body-2"
             >
-              {{ form.基础场景 }}
+              <template v-if="isPrevRef">
+                prev
+                <span class="text-medium-emphasis">（上一分镜最后场景）</span>
+              </template>
+              <template v-else>
+                {{ form.基础场景 }}
+              </template>
             </div>
             <div
               v-else
@@ -54,9 +60,11 @@
               v-if="form.基础场景 && !stagePreviewUrl"
               class="text-grey text-caption"
             >
-              未生成资产
+              {{ isPrevRef ? '上一分镜最后场景图尚未生成' : '未生成资产' }}
             </div>
           </div>
+        </div>
+        <div class="d-flex flex-wrap ga-2 mb-4">
           <v-btn
             variant="tonal"
             color="primary"
@@ -64,7 +72,25 @@
           >
             选择基础场景
           </v-btn>
+          <v-btn
+            variant="tonal"
+            color="secondary"
+            :disabled="!canUsePrev"
+            :title="canUsePrev ? '引用同集上一分镜最后一个场景图（仅直接引用）' : '第 1 个分镜无上一分镜，无法使用 prev'"
+            @click="selectPrevStage"
+          >
+            引用上一分镜最后场景
+          </v-btn>
         </div>
+        <v-alert
+          v-if="isPrevRef"
+          type="info"
+          density="compact"
+          variant="tonal"
+          class="mb-4"
+        >
+          prev 仅支持直接引用：将复制上一分镜最后一帧场景图，不可叠加角色或合成 Prompt。
+        </v-alert>
 
         <div class="text-caption text-medium-emphasis mb-1">
           登场角色
@@ -73,7 +99,7 @@
           <v-chip
             v-for="name in form.登场角色"
             :key="name"
-            closable
+            :closable="!isPrevRef"
             @click:close="removeCharacter(name)"
           >
             <v-avatar
@@ -96,10 +122,11 @@
           <span
             v-if="!form.登场角色.length"
             class="text-grey text-body-2"
-          >无（直接引用基础场景时可不选）</span>
+          >{{ isPrevRef ? '无（prev 仅直接引用）' : '无（直接引用基础场景时可不选）' }}</span>
           <v-btn
             size="small"
             variant="tonal"
+            :disabled="isPrevRef"
             @click="characterPickerOpen = true"
           >
             选择角色
@@ -120,7 +147,8 @@
           rows="5"
           auto-grow
           variant="outlined"
-          hint="直接引用基础场景时留空；有登场角色时必填"
+          :disabled="isPrevRef"
+          :hint="isPrevRef ? 'prev 仅直接引用，不可填写合成 Prompt' : '直接引用基础场景时留空；有登场角色时必填'"
           persistent-hint
         />
       </v-card-text>
@@ -160,8 +188,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
-import { existsFs } from '../api/client'
+import { computed, reactive, ref, watch } from 'vue'
+import { existsFs, readFs } from '../api/client'
 import {
   AssetApiError,
   createSceneStageFrame,
@@ -169,6 +197,9 @@ import {
 } from '../api/assets'
 import StagePicker from './StagePicker.vue'
 import CharacterPicker from './CharacterPicker.vue'
+
+/** 引用同集上一分镜最后场景图的固定关键字。 */
+const PREV_STAGE_REF = 'prev'
 
 const props = defineProps<{
   modelValue: boolean
@@ -202,17 +233,37 @@ const form = reactive({
   prompt: '',
 })
 
+/**
+ * 当前是否选择了 prev 引用。
+ */
+const isPrevRef = computed(() => form.基础场景.trim() === PREV_STAGE_REF)
+
+/**
+ * 当前分镜是否允许使用 prev（同集 shot > 1）。
+ */
+const canUsePrev = computed(() => {
+  const n = Number(String(props.shot).trim())
+  return Number.isInteger(n) && n > 1
+})
+
+/**
+ * 移除登场角色。
+ * @param name 角色引用
+ */
 function removeCharacter(name: string) {
+  if (isPrevRef.value) return
   form.登场角色 = form.登场角色.filter((n) => n !== name)
 }
 
 /**
- * 解析基础场景引用为 assert 路径。
- * 支持 `场景/标签` 与 `场景/标签@变体`。
+ * 解析普通基础场景引用为 assert 路径。
+ * 支持 `场景/标签` 与 `场景/标签@变体`；`prev` 返回 null（需上下文解析）。
+ * @param ref 场景引用
+ * @returns assert 相对路径或 null
  */
 function stageRefToAssertPath(ref: string): string | null {
   const trimmed = ref.trim()
-  if (!trimmed) return null
+  if (!trimmed || trimmed === PREV_STAGE_REF) return null
   const at = trimmed.indexOf('@')
   const main = at >= 0 ? trimmed.slice(0, at) : trimmed
   const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : ''
@@ -229,6 +280,8 @@ function stageRefToAssertPath(ref: string): string | null {
 /**
  * 解析角色引用为 assert 路径。
  * 支持 `角色名` 与 `角色名@变体`。
+ * @param ref 角色引用
+ * @returns assert 相对路径或 null
  */
 function characterRefToAssertPath(ref: string): string | null {
   const trimmed = ref.trim()
@@ -239,6 +292,27 @@ function characterRefToAssertPath(ref: string): string | null {
   const variantId = trimmed.slice(at + 1).trim()
   if (!name || !variantId) return null
   return `assert/character/${name}/variants/${variantId}.jpg`
+}
+
+/**
+ * 解析 prev 对应的上一分镜最后场景图 assert 路径。
+ * @returns assert 相对路径；无法解析时返回 null
+ */
+async function resolvePrevAssertPath(): Promise<string | null> {
+  if (!canUsePrev.value) return null
+  const prevShot = String(Number(props.shot) - 1)
+  try {
+    const raw = await readFs(props.project, `prompt/scene/${props.episode}/${prevShot}/stage.json`)
+    let defs: unknown = raw
+    if (typeof raw === 'string') {
+      defs = JSON.parse(raw || '[]')
+    }
+    if (!Array.isArray(defs) || defs.length === 0) return null
+    const lastIndex = defs.length - 1
+    return `assert/scene/${props.episode}/${prevShot}/stage/${lastIndex}.jpg`
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -256,6 +330,13 @@ async function refreshStagePreview(ref: string, knownImageUrl?: string) {
     return
   }
   stagePreviewUrl.value = ''
+  if (ref.trim() === PREV_STAGE_REF) {
+    const path = await resolvePrevAssertPath()
+    if (path && await existsFs(props.project, path)) {
+      stagePreviewUrl.value = `/api/fs/${props.project}/${path}?t=${Date.now()}`
+    }
+    return
+  }
   const path = stageRefToAssertPath(ref)
   if (!path) return
   if (await existsFs(props.project, path)) {
@@ -290,6 +371,23 @@ async function refreshCharacterPreviews(
 }
 
 /**
+ * 选择引用上一分镜最后场景（prev）。
+ * 强制清空角色与 prompt，仅直接引用。
+ */
+function selectPrevStage() {
+  if (!canUsePrev.value) {
+    error.value = '第 1 个分镜不能使用 prev'
+    return
+  }
+  error.value = ''
+  form.基础场景 = PREV_STAGE_REF
+  form.登场角色 = []
+  form.prompt = ''
+  characterPreviewUrls.value = {}
+  void refreshStagePreview(PREV_STAGE_REF)
+}
+
+/**
  * 选择器确认基础场景。
  * @param payload 引用与可选已有图 URL
  */
@@ -310,17 +408,31 @@ function onStagePicked(payload: { ref: string; imageUrl: string } | string) {
  * @param imageUrls 可选：引用 → 图片 URL
  */
 function onCharactersPicked(names: string[], imageUrls?: Record<string, string>) {
+  if (isPrevRef.value) return
   form.登场角色 = names
   void refreshCharacterPreviews(names, imageUrls)
 }
 
+/**
+ * 提交新增/编辑场景帧。
+ */
 async function submit() {
   error.value = ''
-  if (!form.基础场景.trim()) {
+  const base = form.基础场景.trim()
+  if (!base) {
     error.value = '请选择基础场景'
     return
   }
-  if (form.登场角色.length > 0 && !form.prompt.trim()) {
+  if (base === PREV_STAGE_REF) {
+    if (!canUsePrev.value) {
+      error.value = '第 1 个分镜不能使用 prev'
+      return
+    }
+    if (form.登场角色.length > 0 || form.prompt.trim()) {
+      error.value = 'prev 仅支持直接引用（登场角色与 prompt 必须为空）'
+      return
+    }
+  } else if (form.登场角色.length > 0 && !form.prompt.trim()) {
     error.value = '有登场角色时必须填写合成 Prompt'
     return
   }
@@ -328,9 +440,9 @@ async function submit() {
   saving.value = true
   try {
     const body = {
-      基础场景: form.基础场景.trim(),
-      登场角色: form.登场角色,
-      prompt: form.prompt.trim(),
+      基础场景: base,
+      登场角色: base === PREV_STAGE_REF ? [] : form.登场角色,
+      prompt: base === PREV_STAGE_REF ? '' : form.prompt.trim(),
     }
     if (props.mode === 'edit') {
       if (props.index == null) throw new Error('缺少场景索引')
@@ -353,6 +465,10 @@ watch(() => props.modelValue, (open) => {
   form.基础场景 = props.initial?.基础场景 ?? ''
   form.登场角色 = [...(props.initial?.登场角色 ?? [])]
   form.prompt = props.initial?.prompt ?? ''
+  if (form.基础场景.trim() === PREV_STAGE_REF) {
+    form.登场角色 = []
+    form.prompt = ''
+  }
   void refreshStagePreview(form.基础场景)
   void refreshCharacterPreviews(form.登场角色)
 })

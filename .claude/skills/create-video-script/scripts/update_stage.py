@@ -9,15 +9,16 @@
 参数:
     分镜序号        - 整数，从 1 开始
     索引            - 要更新的条目索引（从 0 开始）
-    --stage-ref     - 可选，新的基础场景完整标签
+    --stage-ref     - 可选，新的基础场景完整标签，或关键字 prev（仅直接引用）
     --characters    - 可选，新的登场角色名（逗号分隔，最多2个；传空字符串表示无角色）
-    --prompt        - 可选，新的组合提示词（与角色同时为空表示直接引用基础场景）
+    --prompt        - 可选，新的组合提示词（与角色同时为空表示直接引用基础场景；prev 时必须为空）
     -e, --episode   - 集数（默认: 1）
 
 示例:
     python scripts/update_stage.py -e 1 1 0 --prompt "图像1为背景：中央扶梯；图像2站在扶梯右侧，身体朝向扶梯，面部微侧向镜头。"
     python scripts/update_stage.py -e 1 1 0 --characters "陈书文" --stage-ref "现代商场/现代商场-白天-平视-晴-中央扶梯"
     python scripts/update_stage.py -e 1 1 0 --characters "" --prompt ""
+    python scripts/update_stage.py -e 1 2 0 --stage-ref prev --characters "" --prompt ""
 """
 
 import argparse
@@ -25,6 +26,8 @@ import sys
 from _common import (
     DEFAULT_PROJECT,
     DEFAULT_EPISODE,
+    PREV_STAGE_REF,
+    is_prev_stage_ref,
     read_json,
     write_json,
     get_stage_json_path,
@@ -69,10 +72,22 @@ def main():
     changed = []
 
     if args.stage_ref is not None:
-        if not validate_stage_ref(args.stage_ref, project_name, project_root):
-            print(f"❌ 场景资产不存在: {args.stage_ref}", file=sys.stderr)
+        stage_ref = (args.stage_ref or "").strip()
+        if is_prev_stage_ref(stage_ref):
+            stage_ref = PREV_STAGE_REF
+        if not validate_stage_ref(
+            stage_ref,
+            project_name,
+            project_root,
+            shot_number=args.shot,
+            episode=episode,
+        ):
+            if is_prev_stage_ref(stage_ref):
+                print("❌ prev 引用无效：请确认当前分镜 > 1 且上一分镜 stage.json 非空。", file=sys.stderr)
+            else:
+                print(f"❌ 场景资产不存在: {stage_ref}", file=sys.stderr)
             sys.exit(1)
-        entry["基础场景"] = args.stage_ref
+        entry["基础场景"] = stage_ref
         changed.append("基础场景")
 
     if args.characters is not None:
@@ -105,10 +120,26 @@ def main():
         print("❌ 登场角色应为数组。", file=sys.stderr)
         sys.exit(1)
     final_prompt = (entry.get("prompt") or "").strip()
-    if len(final_chars) > 0 and not final_prompt:
+    if is_prev_stage_ref(final_stage):
+        if len(final_chars) > 0 or final_prompt:
+            print("❌ 基础场景为 prev 时仅支持直接引用（登场角色与 prompt 必须为空）。", file=sys.stderr)
+            sys.exit(1)
+        if not validate_stage_ref(
+            PREV_STAGE_REF,
+            project_name,
+            project_root,
+            shot_number=args.shot,
+            episode=episode,
+        ):
+            print("❌ prev 引用无效：请确认当前分镜 > 1 且上一分镜 stage.json 非空。", file=sys.stderr)
+            sys.exit(1)
+        entry["基础场景"] = PREV_STAGE_REF
+        entry["prompt"] = ""
+        entry["登场角色"] = []
+    elif len(final_chars) > 0 and not final_prompt:
         print("❌ 有登场角色时 prompt 不能为空。", file=sys.stderr)
         sys.exit(1)
-    if len(final_chars) == 0 and not final_prompt:
+    elif len(final_chars) == 0 and not final_prompt:
         entry["prompt"] = ""
         entry["登场角色"] = []
 
