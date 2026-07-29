@@ -130,9 +130,15 @@
     <GenerateDialog
       v-model="genDialog"
       :project="props.project"
-      workflow-id="stage-image"
-      workflow-name="场景图片生成"
-      :vars="{ name: props.name, label: selected?.label ?? props.subscene ?? '' }"
+      workflow-id="text-to-image"
+      workflow-name="场景图片生成（文生图）"
+      :vars="{
+        promptPath: `prompt/stage/${props.name}/${selected?.label ?? props.subscene}.md`,
+        purpose: 'stage-image',
+        stageName: props.name,
+        label: selected?.label ?? props.subscene ?? '',
+        name: props.name,
+      }"
       :output-path="`assert/stage/${props.name}/${selected?.label ?? props.subscene}.jpg`"
       :prompt-paths="[`prompt/stage/${props.name}/${selected?.label ?? props.subscene}.md`]"
       :existing-asset="selected?.imageUrl ? '已有图片' : undefined"

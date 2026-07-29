@@ -82,19 +82,6 @@ function resolveProjectAssertPath(project: string, relPath: string): string {
   return full;
 }
 
-function parseBaseStageImagePath(baseStage: string): string {
-  const trimmed = baseStage.trim();
-  if (!trimmed) {
-    throw new Error('基础场景不能为空');
-  }
-  const slash = trimmed.indexOf('/');
-  if (slash <= 0 || slash === trimmed.length - 1) {
-    throw new Error(`基础场景格式无效（期望 场景名/标签）: ${baseStage}`);
-  }
-  const stageName = trimmed.slice(0, slash);
-  const stageLabel = trimmed.slice(slash + 1);
-  return `assert/stage/${stageName}/${stageLabel}.jpg`;
-}
 
 interface ScriptLine {
   角色名?: string;
@@ -103,11 +90,11 @@ interface ScriptLine {
 }
 
 /**
- * video-generate：由引擎统一读取分镜 overview.json / stage.json，
+ * image-to-video：由引擎统一读取分镜 overview.json / stage.json，
  * 注入 duration（秒，正整数）与 stageImages（场景图相对路径 JSON 数组）。
  * 分辨率/帧率走 projectConfig。
  */
-async function enrichVideoGenerateParams(
+async function enrichImageToVideoParams(
   project: string,
   paramsObj: {
     vars?: Record<string, string>;
@@ -119,7 +106,7 @@ async function enrichVideoGenerateParams(
   const episode = vars.episode?.trim();
   const shot = vars.shot?.trim();
   if (!episode || !shot) {
-    throw new Error('video-generate 需要 vars.episode / vars.shot');
+    throw new Error('image-to-video 需要 vars.episode / vars.shot');
   }
 
   const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
@@ -179,7 +166,7 @@ async function enrichVideoGenerateParams(
   }
   if (missing.length > 0) {
     throw new Error(
-      `分镜场景图缺失（请先生成 scene-stage-image）: ${missing.join(', ')}`,
+      `分镜场景图缺失（请先生成 scene-stage-image / image-edit）: ${missing.join(', ')}`,
     );
   }
 
@@ -273,9 +260,14 @@ async function enrichSceneTtsParams(
 
   const outputPath = `assert/scene/${episode}/${shot}/voice/${index}-${character}.flac`;
 
+  const desc = emotion
+    ? `${voiceDesc}\n当前情绪：${emotion}`
+    : voiceDesc;
+
   return {
     vars: {
       ...vars,
+      purpose: 'scene-tts',
       episode,
       shot,
       index: String(index),
@@ -283,6 +275,7 @@ async function enrichSceneTtsParams(
       text,
       voiceDesc,
       emotion,
+      desc,
     },
     outputPath,
   };
@@ -293,6 +286,130 @@ async function enrichSceneTtsParams(
  * 由调度引擎将基础场景图复制为独立的分镜场景图资产，不调用 AI 工作流。
  * @returns true 表示已处理完成（成功或失败均已落库），调用方应直接 return
  */
+
+/**
+ * 解析基础场景引用为 assert 路径。
+ * 支持：
+ * - `场景名/标签` → assert/stage/{场景名}/{标签}.jpg
+ * - `场景名/标签@变体id` → assert/stage/{场景名}/variants/{标签}/{变体id}.jpg
+ */
+function resolveStageAssetPath(baseStage: string): string {
+  const trimmed = baseStage.trim();
+  if (!trimmed) throw new Error('基础场景不能为空');
+  const at = trimmed.indexOf('@');
+  const main = at >= 0 ? trimmed.slice(0, at) : trimmed;
+  const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : '';
+  const slash = main.indexOf('/');
+  if (slash <= 0 || slash === main.length - 1) {
+    throw new Error(`基础场景格式无效（期望 场景名/标签 或 场景名/标签@变体）: ${baseStage}`);
+  }
+  const stageName = main.slice(0, slash);
+  const stageLabel = main.slice(slash + 1);
+  if (variantId) {
+    return `assert/stage/${stageName}/variants/${stageLabel}/${variantId}.jpg`;
+  }
+  return `assert/stage/${stageName}/${stageLabel}.jpg`;
+}
+
+/**
+ * 解析角色引用为 assert 路径。
+ * 支持：
+ * - `角色名` → assert/character/{角色名}/appearance.jpg
+ * - `角色名@变体id` → assert/character/{角色名}/variants/{变体id}.jpg
+ */
+function resolveCharacterAssetPath(character: string): string {
+  const trimmed = character.trim();
+  if (!trimmed) throw new Error('角色名不能为空');
+  const at = trimmed.indexOf('@');
+  if (at < 0) {
+    return `assert/character/${trimmed}/appearance.jpg`;
+  }
+  const name = trimmed.slice(0, at).trim();
+  const variantId = trimmed.slice(at + 1).trim();
+  if (!name || !variantId) {
+    throw new Error(`角色引用格式无效（期望 角色名 或 角色名@变体）: ${character}`);
+  }
+  return `assert/character/${name}/variants/${variantId}.jpg`;
+}
+
+/**
+ * image-edit / scene-stage-image：由引擎读取 stage.json，组装 desc 与 imagePaths。
+ * 直接引用（无角色且无 prompt）由 tryHandleSceneStageDirectReference 处理，不应进入本函数。
+ */
+async function enrichSceneStageImageParams(
+  project: string,
+  paramsObj: {
+    vars?: Record<string, string>;
+    outputPath?: string;
+  },
+): Promise<{
+  vars: Record<string, string>;
+}> {
+  const vars = { ...(paramsObj.vars ?? {}) };
+  const episode = vars.episode?.trim();
+  const shot = vars.shot?.trim();
+  const indexStr = vars.index?.trim() ?? '0';
+  if (!episode || !shot) {
+    throw new Error('scene-stage-image 需要 vars.episode / vars.shot / vars.index');
+  }
+  const index = Number(indexStr);
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error(`scene-stage-image 无效的分镜场景索引 index=${indexStr}`);
+  }
+
+  const stageJsonRel = `prompt/scene/${episode}/${shot}/stage.json`;
+  const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
+  const stageJsonFull = path.resolve(DESIGN_DIR, project, stageJsonRel);
+  if (!stageJsonFull.startsWith(projectRoot)) {
+    throw new Error('Path traversal denied');
+  }
+
+  let defs: SceneStageDefinition[];
+  try {
+    const raw = await fs.readFile(stageJsonFull, 'utf-8');
+    defs = JSON.parse(raw) as SceneStageDefinition[];
+  } catch {
+    throw new Error(`无法读取分镜场景定义: ${stageJsonRel}`);
+  }
+  if (!Array.isArray(defs) || index >= defs.length) {
+    throw new Error(
+      `分镜场景索引越界: index=${index}, stage.json 共 ${Array.isArray(defs) ? defs.length : 0} 项`,
+    );
+  }
+
+  const stage = defs[index];
+  const baseStage = (stage.基础场景 ?? '').trim();
+  if (!baseStage) {
+    throw new Error('基础场景不能为空');
+  }
+  const characters = stage.登场角色 ?? [];
+  const prompt = (stage.prompt ?? '').trim();
+  if (characters.length === 0 && !prompt) {
+    throw new Error('直接引用基础场景应由调度引擎处理，不应进入图像编辑参数组装');
+  }
+  if (!prompt) {
+    throw new Error('非直接引用时 prompt 不能为空（有登场角色时必须提供合成提示词）');
+  }
+
+  const imagePaths: string[] = [];
+  imagePaths.push(resolveStageAssetPath(baseStage));
+  for (const character of characters) {
+    imagePaths.push(resolveCharacterAssetPath(character));
+  }
+
+  return {
+    vars: {
+      ...vars,
+      purpose: 'scene-stage-image',
+      episode,
+      shot,
+      index: String(index),
+      desc: prompt,
+      imagePaths: JSON.stringify(imagePaths),
+    },
+  };
+}
+
 async function tryHandleSceneStageDirectReference(
   taskId: string,
   project: string,
@@ -345,7 +462,7 @@ async function tryHandleSceneStageDirectReference(
     throw new Error('基础场景不能为空');
   }
 
-  const sourceRel = parseBaseStageImagePath(baseStage);
+  const sourceRel = resolveStageAssetPath(baseStage);
   const sourceFull = resolveProjectAssertPath(project, sourceRel);
   const destFull = resolveProjectAssertPath(project, outputPath);
 
@@ -392,16 +509,76 @@ async function runTask(taskId: string): Promise<void> {
   };
   const projectConfig = await loadProjectConfig(task.project);
 
-  // scene-tts：引擎统一读取台词/声线/情绪，并规范输出路径
-  if (task.workflow_id === 'scene-tts') {
+  // tts-voice-design + purpose=scene-tts：引擎统一读取台词/声线/情绪，并规范输出路径
+  if (
+    task.workflow_id === 'tts-voice-design'
+    && (
+      paramsObj.vars?.purpose === 'scene-tts'
+      || (
+        !paramsObj.vars?.desc
+        && !!paramsObj.vars?.episode
+        && !!paramsObj.vars?.shot
+        && paramsObj.vars?.index != null
+        && paramsObj.vars?.index !== ''
+      )
+    )
+  ) {
     const enriched = await enrichSceneTtsParams(task.project, paramsObj);
     paramsObj.vars = enriched.vars;
     paramsObj.outputPath = enriched.outputPath;
   }
 
-  // video-generate：引擎统一读取 overview.json / stage 图路径
-  if (task.workflow_id === 'video-generate') {
-    const enriched = await enrichVideoGenerateParams(task.project, paramsObj);
+  // tts-voice-design + purpose=character-voice：若未提供 desc，从 voice.md 读取
+  if (
+    task.workflow_id === 'tts-voice-design'
+    && paramsObj.vars?.purpose === 'character-voice'
+    && !(paramsObj.vars?.desc ?? '').trim()
+  ) {
+    const name = (paramsObj.vars?.character || paramsObj.vars?.name || '').trim();
+    if (!name) {
+      throw new Error('character-voice 需要 vars.character 或 vars.name');
+    }
+    const voiceRel = `prompt/character/${name}/voice.md`;
+    const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;
+    const voiceFull = path.resolve(DESIGN_DIR, task.project, voiceRel);
+    if (!voiceFull.startsWith(projectRoot)) {
+      throw new Error('Path traversal denied');
+    }
+    let voiceDesc: string;
+    try {
+      voiceDesc = (await fs.readFile(voiceFull, 'utf-8')).trim();
+    } catch {
+      throw new Error(`角色声线描述不存在: ${voiceRel}`);
+    }
+    if (!voiceDesc) {
+      throw new Error(`角色声线描述为空: ${voiceRel}`);
+    }
+    paramsObj.vars = {
+      ...paramsObj.vars,
+      purpose: 'character-voice',
+      character: name,
+      name,
+      desc: voiceDesc,
+      text: (paramsObj.vars?.text ?? '').trim() || `你好，我叫${name}`,
+    };
+  }
+
+  // image-to-video：引擎统一读取 overview.json / stage 图路径
+  if (task.workflow_id === 'image-to-video') {
+    const enriched = await enrichImageToVideoParams(task.project, paramsObj);
+    paramsObj.vars = enriched.vars;
+  }
+
+  // image-edit + purpose=scene-stage-image：直接引用或组装 desc/imagePaths
+  if (
+    task.workflow_id === 'image-edit'
+    && paramsObj.vars?.purpose === 'scene-stage-image'
+  ) {
+    const handled = await tryHandleSceneStageDirectReference(taskId, task.project, paramsObj);
+    if (handled) {
+      return;
+    }
+    const enriched = await enrichSceneStageImageParams(task.project, paramsObj);
     paramsObj.vars = enriched.vars;
   }
 
@@ -453,14 +630,6 @@ async function runTask(taskId: string): Promise<void> {
   };
 
   try {
-    // scene-stage-image：直接引用由调度引擎处理，仍写出独立分镜场景图资产
-    if (task.workflow_id === 'scene-stage-image') {
-      const handled = await tryHandleSceneStageDirectReference(taskId, task.project, paramsObj);
-      if (handled) {
-        return;
-      }
-    }
-
     db.addLog(taskId, 'info', `Starting workflow: ${wf.name} (impl: ${wf.impl})`);
     db.updateTaskStatus(taskId, 'running');
 

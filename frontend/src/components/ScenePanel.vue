@@ -550,9 +550,16 @@
     <GenerateDialog
       v-model="genImageDialog"
       :project="props.project"
-      workflow-id="scene-stage-image"
-      workflow-name="分镜场景图生成"
-      :vars="{ episode: props.episode, shot: props.shot, index: String(genDialog.index) }"
+      workflow-id="image-edit"
+      workflow-name="分镜场景图生成（图片编辑）"
+      :vars="{
+        desc: '',
+        imagePaths: '[]',
+        purpose: 'scene-stage-image',
+        episode: props.episode,
+        shot: props.shot,
+        index: String(genDialog.index),
+      }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/stage/${genDialog.index}.jpg`"
       :prompt-paths="[`${basePath}/stage.json`]"
       :existing-asset="stageDefs[genDialog.index]?.imageUrl ? '已有图片' : undefined"
@@ -561,9 +568,17 @@
     <GenerateDialog
       v-model="genVoiceDialog"
       :project="props.project"
-      workflow-id="scene-tts"
-      workflow-name="分镜台词语音生成"
-      :vars="{ episode: props.episode, shot: props.shot, index: String(genDialog.index) }"
+      workflow-id="tts-voice-design"
+      workflow-name="分镜台词语音生成（音色设计）"
+      :vars="{
+        desc: '',
+        text: '',
+        purpose: 'scene-tts',
+        episode: props.episode,
+        shot: props.shot,
+        index: String(genDialog.index),
+        character: data?.script[genDialog.index]?.角色名 ?? '',
+      }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/voice/${genDialog.index}-${data?.script[genDialog.index]?.角色名 ?? ''}.flac`"
       :prompt-paths="[`${basePath}/script.json`]"
       :existing-asset="voiceAssets[genDialog.index] ? '已有音频' : undefined"
@@ -572,9 +587,9 @@
     <GenerateDialog
       v-model="genVideoDialog"
       :project="props.project"
-      workflow-id="video-generate"
-      workflow-name="视频生成"
-      :vars="{ episode: props.episode, shot: props.shot, index: '0' }"
+      workflow-id="image-to-video"
+      workflow-name="视频生成（图生视频）"
+      :vars="{ episode: props.episode, shot: props.shot }"
       :output-path="`assert/scene/${props.episode}/${props.shot}/video/0.mp4`"
       :prompt-paths="[`${basePath}/prompt.md`]"
       :existing-asset="hasVideo ? '已有视频' : undefined"
@@ -583,9 +598,15 @@
     <GenerateDialog
       v-model="genStageAssetDialog"
       :project="props.project"
-      workflow-id="stage-image"
-      workflow-name="场景设定图生成"
-      :vars="{ name: refGenDialog.name, label: refGenDialog.label }"
+      workflow-id="text-to-image"
+      workflow-name="场景设定图生成（文生图）"
+      :vars="{
+        promptPath: `prompt/stage/${refGenDialog.name}/${refGenDialog.label}.md`,
+        purpose: 'stage-image',
+        stageName: refGenDialog.name,
+        label: refGenDialog.label,
+        name: refGenDialog.name,
+      }"
       :output-path="`assert/stage/${refGenDialog.name}/${refGenDialog.label}.jpg`"
       :prompt-paths="[`prompt/stage/${refGenDialog.name}/${refGenDialog.label}.md`]"
       :existing-asset="stageAssetUrls[`${refGenDialog.name}/${refGenDialog.label}`] ? '已有图片' : undefined"
@@ -594,9 +615,15 @@
     <GenerateDialog
       v-model="genCharacterAssetDialog"
       :project="props.project"
-      workflow-id="character-appearance"
-      workflow-name="角色设定图生成"
-      :vars="{ name: refGenDialog.name }"
+      workflow-id="text-to-image"
+      workflow-name="角色设定图生成（文生图）"
+      :vars="{
+        promptPath: `prompt/character/${refGenDialog.name}/appearance.md`,
+        width: '1280',
+        height: '720',
+        purpose: 'character-appearance',
+        name: refGenDialog.name,
+      }"
       :output-path="`assert/character/${refGenDialog.name}/appearance.jpg`"
       :prompt-paths="[`prompt/character/${refGenDialog.name}/appearance.md`]"
       :existing-asset="characterAssetUrls[refGenDialog.name] ? '已有图片' : undefined"

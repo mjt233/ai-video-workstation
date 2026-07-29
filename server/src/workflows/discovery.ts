@@ -2,24 +2,38 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type {
-  CharacterAppearanceVars,
-  CharacterVoiceVars,
-  SceneStageImageVars,
-  SceneTtsVars,
-  StageImageVars,
-  VideoGenerateVars,
+  ImageEditVars,
+  ImageToVideoVars,
+  TextToImageVars,
+  TtsVoiceDesignVars,
   WorkflowVarsBase,
 } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../../design');
 
+/**
+ * 批量发现得到的生成任务描述。
+ *
+ * workflowId 为工作流类型（text-to-image / image-edit / ...），
+ * assetType 为资产用途（character-appearance / stage-image / ...），便于前端展示。
+ */
 export interface DiscoveredTask {
+  /** 工作流类型 ID */
   workflowId: string;
+  /** 实现标识 */
   impl: string;
+  /** 业务变量 */
   vars: WorkflowVarsBase & Record<string, string>;
+  /** 相关 prompt 路径（展示用） */
   promptPaths: string[];
+  /** 输出 assert 路径 */
   outputPath: string;
+  /**
+   * 资产用途类型（批量选择用，与前端 assetTypes 对齐）。
+   * 例：character-appearance / character-voice / stage-image / scene-stage-image / scene-tts / video-generate / variant-edit
+   */
+  assetType?: string;
 }
 
 /**
@@ -51,21 +65,15 @@ export async function discoverTasks(
   const projectDir = path.resolve(DESIGN_DIR, project);
   const promptDir = path.join(projectDir, 'prompt');
 
-  // Guard: ensure the project directory exists
   try {
     await fs.access(projectDir);
   } catch {
     return tasks;
   }
 
-  /**
-   * Check whether an output file should be skipped.
-   * outputRelPath is a project-relative path like "assert/character/xxx/appearance.jpg".
-   */
   async function shouldSkipOutput(outputRelPath: string): Promise<boolean> {
     if (overwrite) return false;
     const fullPath = path.resolve(projectDir, outputRelPath);
-    // Prevent path traversal
     const rel = path.relative(projectDir, fullPath);
     if (rel.startsWith('..') || path.isAbsolute(rel)) return true;
     return await fileExists(fullPath);
@@ -73,7 +81,6 @@ export async function discoverTasks(
 
   for (const assetType of assetTypes) {
     switch (assetType) {
-      // ── Character Appearance ──────────────────────────────────────
       case 'character-appearance': {
         const charDir = path.join(promptDir, 'character');
         try {
@@ -83,21 +90,28 @@ export async function discoverTasks(
             const name = entry.name;
             const outputPath = `assert/character/${name}/appearance.jpg`;
             if (await shouldSkipOutput(outputPath)) continue;
+            const promptPath = `prompt/character/${name}/appearance.md`;
             tasks.push({
-              workflowId: 'character-appearance',
+              workflowId: 'text-to-image',
               impl: 'default',
-              vars: { name } satisfies CharacterAppearanceVars,
-              promptPaths: [`prompt/character/${name}/appearance.md`],
+              assetType,
+              vars: {
+                promptPath,
+                width: '1280',
+                height: '720',
+                purpose: 'character-appearance',
+                name,
+              } satisfies TextToImageVars,
+              promptPaths: [promptPath],
               outputPath,
             });
           }
         } catch {
-          // prompt/character/ doesn't exist — skip this asset type
+          // skip
         }
         break;
       }
 
-      // ── Character Voice ───────────────────────────────────────────
       case 'character-voice': {
         const charDir = path.join(promptDir, 'character');
         try {
@@ -107,21 +121,35 @@ export async function discoverTasks(
             const name = entry.name;
             const outputPath = `assert/character/${name}/voice.flac`;
             if (await shouldSkipOutput(outputPath)) continue;
+            const voicePath = `prompt/character/${name}/voice.md`;
+            let voiceDesc = '';
+            try {
+              voiceDesc = (await fs.readFile(path.join(projectDir, voicePath), 'utf-8')).trim();
+            } catch {
+              continue;
+            }
+            if (!voiceDesc) continue;
             tasks.push({
-              workflowId: 'character-voice',
+              workflowId: 'tts-voice-design',
               impl: 'default',
-              vars: { name } satisfies CharacterVoiceVars,
-              promptPaths: [`prompt/character/${name}/voice.md`],
+              assetType,
+              vars: {
+                desc: voiceDesc,
+                text: `你好，我叫${name}`,
+                purpose: 'character-voice',
+                character: name,
+                name,
+              } satisfies TtsVoiceDesignVars & { name: string },
+              promptPaths: [voicePath],
               outputPath,
             });
           }
         } catch {
-          // prompt/character/ doesn't exist
+          // skip
         }
         break;
       }
 
-      // ── Stage Image ───────────────────────────────────────────────
       case 'stage-image': {
         const stageDir = path.join(promptDir, 'stage');
         try {
@@ -136,22 +164,146 @@ export async function discoverTasks(
               const label = file.slice(0, -'.md'.length);
               const outputPath = `assert/stage/${stageName}/${label}.jpg`;
               if (await shouldSkipOutput(outputPath)) continue;
+              const promptPath = `prompt/stage/${stageName}/${label}.md`;
               tasks.push({
-                workflowId: 'stage-image',
+                workflowId: 'text-to-image',
                 impl: 'default',
-                vars: { name: stageName, label } satisfies StageImageVars,
-                promptPaths: [`prompt/stage/${stageName}/${label}.md`],
+                assetType,
+                vars: {
+                  promptPath,
+                  purpose: 'stage-image',
+                  stageName,
+                  label,
+                  name: stageName,
+                } satisfies TextToImageVars,
+                promptPaths: [promptPath],
                 outputPath,
               });
             }
           }
         } catch {
-          // prompt/stage/ doesn't exist
+          // skip
         }
         break;
       }
 
-      // ── Scene-level asset types (shared iteration) ────────────────
+      case 'variant-edit': {
+        const charDir = path.join(promptDir, 'character');
+        try {
+          const entries = await fs.readdir(charDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const name = entry.name;
+            const variantsDir = path.join(charDir, name, 'variants');
+            let variantFiles: string[] = [];
+            try {
+              variantFiles = (await fs.readdir(variantsDir)).filter((f) => f.endsWith('.json'));
+            } catch {
+              continue;
+            }
+            for (const vf of variantFiles) {
+              const variantId = vf.slice(0, -'.json'.length);
+              let meta: { desc?: string; baseImage?: string };
+              try {
+                meta = JSON.parse(await fs.readFile(path.join(variantsDir, vf), 'utf-8')) as {
+                  desc?: string;
+                  baseImage?: string;
+                };
+              } catch {
+                continue;
+              }
+              const desc = (meta.desc ?? '').trim();
+              if (!desc) continue;
+              const outputPath = `assert/character/${name}/variants/${variantId}.jpg`;
+              if (await shouldSkipOutput(outputPath)) continue;
+              const baseImage = (meta.baseImage ?? `assert/character/${name}/appearance.jpg`).trim();
+              tasks.push({
+                workflowId: 'image-edit',
+                impl: 'default',
+                assetType,
+                vars: {
+                  desc,
+                  imagePaths: JSON.stringify([baseImage]),
+                  purpose: 'variant-edit',
+                  variantKind: 'character',
+                  variantOwner: name,
+                  variantId,
+                } satisfies ImageEditVars,
+                promptPaths: [`prompt/character/${name}/variants/${variantId}.json`],
+                outputPath,
+              });
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        const stageDir = path.join(promptDir, 'stage');
+        try {
+          const stageEntries = await fs.readdir(stageDir, { withFileTypes: true });
+          for (const stageEntry of stageEntries) {
+            if (!stageEntry.isDirectory()) continue;
+            const stageName = stageEntry.name;
+            const variantsRoot = path.join(stageDir, stageName, 'variants');
+            let baseLabels: string[] = [];
+            try {
+              baseLabels = (await fs.readdir(variantsRoot, { withFileTypes: true }))
+                .filter((e) => e.isDirectory())
+                .map((e) => e.name);
+            } catch {
+              continue;
+            }
+            for (const baseLabel of baseLabels) {
+              const vDir = path.join(variantsRoot, baseLabel);
+              let variantFiles: string[] = [];
+              try {
+                variantFiles = (await fs.readdir(vDir)).filter((f) => f.endsWith('.json'));
+              } catch {
+                continue;
+              }
+              for (const vf of variantFiles) {
+                const variantId = vf.slice(0, -'.json'.length);
+                let meta: { desc?: string; baseImage?: string };
+                try {
+                  meta = JSON.parse(await fs.readFile(path.join(vDir, vf), 'utf-8')) as {
+                    desc?: string;
+                    baseImage?: string;
+                  };
+                } catch {
+                  continue;
+                }
+                const desc = (meta.desc ?? '').trim();
+                if (!desc) continue;
+                const outputPath = `assert/stage/${stageName}/variants/${baseLabel}/${variantId}.jpg`;
+                if (await shouldSkipOutput(outputPath)) continue;
+                const baseImage = (
+                  meta.baseImage ?? `assert/stage/${stageName}/${baseLabel}.jpg`
+                ).trim();
+                tasks.push({
+                  workflowId: 'image-edit',
+                  impl: 'default',
+                  assetType,
+                  vars: {
+                    desc,
+                    imagePaths: JSON.stringify([baseImage]),
+                    purpose: 'variant-edit',
+                    variantKind: 'stage',
+                    variantOwner: stageName,
+                    baseLabel,
+                    variantId,
+                  } satisfies ImageEditVars,
+                  promptPaths: [`prompt/stage/${stageName}/variants/${baseLabel}/${variantId}.json`],
+                  outputPath,
+                });
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+        break;
+      }
+
       case 'scene-stage-image':
       case 'scene-tts':
       case 'video-generate': {
@@ -168,7 +320,6 @@ export async function discoverTasks(
               const shot = shotEntry.name;
 
               if (assetType === 'scene-stage-image') {
-                // stage.json 可能包含多个分镜场景，每个 index 单独生成一张图
                 const stageJsonPath = path.join(episodePath, shot, 'stage.json');
                 try {
                   const stageContent = await fs.readFile(stageJsonPath, 'utf-8');
@@ -178,9 +329,17 @@ export async function discoverTasks(
                     const outputPath = `assert/scene/${episode}/${shot}/stage/${index}.jpg`;
                     if (await shouldSkipOutput(outputPath)) continue;
                     tasks.push({
-                      workflowId: 'scene-stage-image',
+                      workflowId: 'image-edit',
                       impl: 'default',
-                      vars: { episode, shot, index: String(index) } satisfies SceneStageImageVars,
+                      assetType,
+                      vars: {
+                        desc: '',
+                        imagePaths: '[]',
+                        purpose: 'scene-stage-image',
+                        episode,
+                        shot,
+                        index: String(index),
+                      } satisfies ImageEditVars,
                       promptPaths: [
                         `prompt/scene/${episode}/${shot}/overview.json`,
                         `prompt/scene/${episode}/${shot}/stage.json`,
@@ -189,15 +348,16 @@ export async function discoverTasks(
                     });
                   }
                 } catch {
-                  // stage.json missing or invalid — skip this shot
+                  // skip
                 }
               } else if (assetType === 'video-generate') {
                 const outputPath = `assert/scene/${episode}/${shot}/video.mp4`;
                 if (await shouldSkipOutput(outputPath)) continue;
                 tasks.push({
-                  workflowId: 'video-generate',
+                  workflowId: 'image-to-video',
                   impl: 'default',
-                  vars: { episode, shot } satisfies VideoGenerateVars,
+                  assetType,
+                  vars: { episode, shot } satisfies ImageToVideoVars,
                   promptPaths: [`prompt/scene/${episode}/${shot}/prompt.md`],
                   outputPath,
                 });
@@ -210,18 +370,21 @@ export async function discoverTasks(
                   for (let index = 0; index < script.length; index++) {
                     const character = (script[index]?.角色名 ?? '').trim();
                     if (!character) continue;
-                    // 引擎会再注入 character/text/voiceDesc/emotion，并强制规范 outputPath
                     const outputPath = `assert/scene/${episode}/${shot}/voice/${index}-${character}.flac`;
                     if (await shouldSkipOutput(outputPath)) continue;
                     tasks.push({
-                      workflowId: 'scene-tts',
+                      workflowId: 'tts-voice-design',
                       impl: 'default',
+                      assetType,
                       vars: {
+                        desc: '',
+                        text: '',
+                        purpose: 'scene-tts',
                         episode,
                         shot,
                         index: String(index),
                         character,
-                      } satisfies SceneTtsVars,
+                      } satisfies TtsVoiceDesignVars,
                       promptPaths: [
                         `prompt/scene/${episode}/${shot}/script.json`,
                         `prompt/character/${character}/voice.md`,
@@ -230,13 +393,13 @@ export async function discoverTasks(
                     });
                   }
                 } catch {
-                  // script.json missing or invalid — skip this shot
+                  // skip
                 }
               }
             }
           }
         } catch {
-          // prompt/scene/ doesn't exist
+          // skip
         }
         break;
       }

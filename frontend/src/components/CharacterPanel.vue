@@ -221,19 +221,37 @@ function openHistory(path: string) {
 const genDialog = ref<{ show: boolean; type: 'appearance' | 'voice' }>({ show: false, type: 'appearance' })
 const genConfig = computed(() => {
   const type = genDialog.value.type
+  if (type === 'appearance') {
+    const promptPath = `prompt/character/${props.name}/appearance.md`
+    return {
+      workflowId: 'text-to-image',
+      workflowName: '角色外观生成（文生图）',
+      outputPath: `assert/character/${props.name}/appearance.jpg`,
+      vars: {
+        promptPath,
+        width: '1280',
+        height: '720',
+        purpose: 'character-appearance',
+        name: props.name,
+      } as Record<string, string>,
+      promptPaths: [promptPath],
+      existingAsset: appearanceImg.value ? '已有图片' : undefined,
+    }
+  }
+  // 角色声音：音色设计；desc 优先用已加载的 voice.md，引擎也会在缺失时补全
   return {
-    workflowId: type === 'appearance' ? 'character-appearance' : 'character-voice',
-    workflowName: type === 'appearance' ? '角色外观生成' : '角色声音生成',
-    outputPath: type === 'appearance'
-      ? `assert/character/${props.name}/appearance.jpg`
-      : `assert/character/${props.name}/voice.flac`,
-    vars: { name: props.name },
-    promptPaths: type === 'appearance'
-      ? [`prompt/character/${props.name}/appearance.md`]
-      : [`prompt/character/${props.name}/voice.md`],
-    existingAsset: type === 'appearance'
-      ? (appearanceImg.value ? '已有图片' : undefined)
-      : (voiceAudio.value ? '已有音频' : undefined),
+    workflowId: 'tts-voice-design',
+    workflowName: '角色声音生成（音色设计）',
+    outputPath: `assert/character/${props.name}/voice.flac`,
+    vars: {
+      desc: data.value?.voice?.trim() || '',
+      text: `你好，我叫${props.name}`,
+      purpose: 'character-voice',
+      character: props.name,
+      name: props.name,
+    } as Record<string, string>,
+    promptPaths: [`prompt/character/${props.name}/voice.md`],
+    existingAsset: voiceAudio.value ? '已有音频' : undefined,
   }
 })
 

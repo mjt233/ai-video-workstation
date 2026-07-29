@@ -2,6 +2,11 @@ import type { WorkflowVarsBase } from './vars.js';
 
 export type {
   WorkflowVarsBase,
+  TextToImageVars,
+  ImageEditVars,
+  TtsVoiceDesignVars,
+  ImageToVideoVars,
+  // 兼容旧名
   CharacterAppearanceVars,
   CharacterVoiceVars,
   StageImageVars,
@@ -9,6 +14,20 @@ export type {
   SceneTtsVars,
   VideoGenerateVars,
 } from './vars.js';
+
+/**
+ * 工作流执行类型（按 AI 能力分类，而非资产类型）。
+ *
+ * - text-to-image：文生图
+ * - image-edit：图片编辑
+ * - tts-voice-design：音色设计 / TTS
+ * - image-to-video：图生视频
+ */
+export type WorkflowTypeId =
+  | 'text-to-image'
+  | 'image-edit'
+  | 'tts-voice-design'
+  | 'image-to-video';
 
 /** Project-level structured config from design/{project}/project.json */
 export interface ProjectConfig {
@@ -22,7 +41,13 @@ export interface ProjectConfig {
   fps?: number;
 }
 
+/**
+ * 工作流执行参数。
+ *
+ * @typeParam TVars - 该工作流类型的业务变量 interface
+ */
 export interface WorkflowParams<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
+  /** 项目名（design 下子目录） */
   project: string;
   /** 读取项目内文本文件（UTF-8），路径相对 design/{project}/ */
   readFile(relPath: string): Promise<string>;
@@ -37,18 +62,28 @@ export interface WorkflowParams<TVars extends WorkflowVarsBase = WorkflowVarsBas
   projectConfig: ProjectConfig;
 }
 
+/** 工作流基础元信息 */
 export interface WorkflowBaseDefinition {
+  /** 工作流类型 ID，如 text-to-image */
   id: string;
+  /** 展示名称 */
   name: string;
+  /** 实现标识，如 default / flux / ltx */
   impl: string;
+  /** 可选描述 */
   description?: string;
 }
 
+/**
+ * 工作流完整定义。
+ *
+ * @typeParam TVars - 业务变量类型
+ * @typeParam TPollResult - poll 返回的额外字段类型
+ */
 export interface WorkflowDefinition<
   TVars extends WorkflowVarsBase = WorkflowVarsBase,
   TPollResult = Record<string, unknown>,
 > extends WorkflowBaseDefinition {
-
   /** Submit task to AI API, return remote task ID */
   submit(params: WorkflowParams<TVars>): Promise<{ taskId: string }>;
 

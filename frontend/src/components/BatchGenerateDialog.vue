@@ -212,6 +212,7 @@ const assetTypes = [
   { id: 'character-appearance', label: '🧑 角色外观' },
   { id: 'character-voice', label: '🎤 角色声音' },
   { id: 'stage-image', label: '🏙️ 场景图片' },
+  { id: 'variant-edit', label: '✨ 衍生变体' },
   { id: 'scene-stage-image', label: '🎬 分镜场景图' },
   { id: 'scene-tts', label: '🔈 分镜语音' },
   { id: 'video-generate', label: '🎥 视频' },
@@ -270,42 +271,60 @@ function getStatusColor(status: string): string {
 }
 
 function getTaskDisplayName(task: TaskResponse): string {
-  const typeLabel = assetTypes.find(a => a.id === task.workflowId)?.label ?? task.workflowId
   const vars = task.params?.vars ?? {}
+  const purpose = vars.purpose || ''
+  const assetTypeId =
+    purpose
+    || (task.workflowId === 'image-to-video' ? 'video-generate' : task.workflowId)
+  const typeLabel = assetTypes.find(a => a.id === assetTypeId)?.label
+    ?? assetTypes.find(a => a.id === purpose)?.label
+    ?? task.workflowId
 
-  switch (task.workflowId) {
-    case 'character-appearance':
-    case 'character-voice':
-      return vars.name ? `${typeLabel} — ${vars.name}` : typeLabel
-    case 'stage-image': {
-      if (vars.name && vars.label) return `${typeLabel} — ${vars.name}/${vars.label}`
-      if (vars.name) return `${typeLabel} — ${vars.name}`
-      return typeLabel
-    }
-    case 'scene-stage-image': {
-      if (vars.episode && vars.shot && vars.index != null) {
-        return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · 场景${vars.index}`
-      }
-      if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
-      return typeLabel
-    }
-    case 'video-generate': {
-      if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
-      return typeLabel
-    }
-    case 'scene-tts': {
-      if (vars.episode && vars.shot && vars.index != null && vars.character) {
-        return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · #${vars.index} ${vars.character}`
-      }
-      if (vars.episode && vars.shot && vars.index != null) {
-        return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · 台词${vars.index}`
-      }
-      if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
-      return typeLabel
-    }
-    default:
-      return typeLabel
+  // 按资产用途 / 工作流类型展示
+  if (purpose === 'character-appearance' || (task.workflowId === 'text-to-image' && vars.name && !vars.label && !vars.stageName)) {
+    return vars.name ? `${typeLabel} — ${vars.name}` : typeLabel
   }
+  if (purpose === 'character-voice' || (task.workflowId === 'tts-voice-design' && purpose !== 'scene-tts' && (vars.character || vars.name))) {
+    const n = vars.character || vars.name
+    return n ? `${typeLabel} — ${n}` : typeLabel
+  }
+  if (purpose === 'stage-image' || (task.workflowId === 'text-to-image' && (vars.stageName || vars.label))) {
+    const stageName = vars.stageName || vars.name
+    if (stageName && vars.label) return `${typeLabel} — ${stageName}/${vars.label}`
+    if (stageName) return `${typeLabel} — ${stageName}`
+    return typeLabel
+  }
+  if (purpose === 'variant-edit') {
+    if (vars.variantKind === 'character' && vars.variantOwner && vars.variantId) {
+      return `${typeLabel} — ${vars.variantOwner}@${vars.variantId}`
+    }
+    if (vars.variantKind === 'stage' && vars.variantOwner && vars.baseLabel && vars.variantId) {
+      return `${typeLabel} — ${vars.variantOwner}/${vars.baseLabel}@${vars.variantId}`
+    }
+    return typeLabel
+  }
+  if (purpose === 'scene-stage-image' || (task.workflowId === 'image-edit' && vars.episode && vars.shot && vars.index != null)) {
+    if (vars.episode && vars.shot && vars.index != null) {
+      return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · 场景${vars.index}`
+    }
+    if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
+    return typeLabel
+  }
+  if (task.workflowId === 'image-to-video' || purpose === 'video-generate') {
+    if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
+    return typeLabel
+  }
+  if (purpose === 'scene-tts' || (task.workflowId === 'tts-voice-design' && vars.episode)) {
+    if (vars.episode && vars.shot && vars.index != null && vars.character) {
+      return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · #${vars.index} ${vars.character}`
+    }
+    if (vars.episode && vars.shot && vars.index != null) {
+      return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot} · 台词${vars.index}`
+    }
+    if (vars.episode && vars.shot) return `${typeLabel} — 第${vars.episode}集 镜头${vars.shot}`
+    return typeLabel
+  }
+  return typeLabel
 }
 
 function resetConfig() {
