@@ -17,7 +17,6 @@
       <v-card-text>
         <!-- Implementation selector -->
         <v-select
-          v-if="implementations.length > 1"
           v-model="selectedImpl"
           :items="implementations"
           item-title="name"
