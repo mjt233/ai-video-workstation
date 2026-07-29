@@ -1,4 +1,6 @@
-import { reactive } from 'vue'
+import { createApp, h, nextTick, ref } from 'vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { vuetify } from '../plugins/vuetify'
 
 /**
  * 确认对话框选项。
@@ -20,44 +22,10 @@ export interface ConfirmOptions {
   maxWidth?: number | string
 }
 
-interface ConfirmState {
-  open: boolean
-  title: string
-  content: string
-  confirmText: string
-  cancelText: string
-  confirmColor: string
-  maxWidth: number | string
-  resolve: ((value: boolean) => void) | null
-}
-
-const state = reactive<ConfirmState>({
-  open: false,
-  title: '确认',
-  content: '',
-  confirmText: '确定',
-  cancelText: '取消',
-  confirmColor: 'primary',
-  maxWidth: 420,
-  resolve: null,
-})
-
 /**
- * 供宿主组件读取的确认框状态（只读使用）。
- */
-export function getConfirmState() {
-  return state
-}
-
-function close(result: boolean) {
-  const resolve = state.resolve
-  state.open = false
-  state.resolve = null
-  resolve?.(result)
-}
-
-/**
- * 以 Promise 方式弹出 Vuetify 确认对话框。
+ * 以 Promise 方式动态挂载 Vuetify 确认对话框。
+ * 关闭后自动卸载组件并移除 DOM，无需在 App.vue 常驻实例。
+ *
  * @param options 标题、内容等配置
  * @returns 用户点击确认返回 true，取消/关闭返回 false
  *
@@ -73,30 +41,54 @@ function close(result: boolean) {
  * ```
  */
 export function confirm(options: ConfirmOptions = {}): Promise<boolean> {
-  // 若已有未关闭的确认框，先按取消处理，避免 Promise 泄漏
-  if (state.open && state.resolve) {
-    state.resolve(false)
-  }
-
-  state.title = options.title ?? '确认'
-  state.content = options.content ?? options.message ?? ''
-  state.confirmText = options.confirmText ?? '确定'
-  state.cancelText = options.cancelText ?? '取消'
-  state.confirmColor = options.confirmColor ?? 'primary'
-  state.maxWidth = options.maxWidth ?? 420
-  state.open = true
-
   return new Promise<boolean>((resolve) => {
-    state.resolve = resolve
-  })
-}
+    const container = document.createElement('div')
+    document.body.appendChild(container)
 
-/**
- * 宿主组件：用户确认。
- */
-export function resolveConfirm(result: boolean) {
-  if (!state.open) return
-  close(result)
+    const open = ref(true)
+    let settled = false
+
+    const app = createApp({
+      setup() {
+        /**
+         * 关闭并卸载对话框。
+         * @param result 用户是否确认
+         */
+        function finish(result: boolean) {
+          if (settled) return
+          settled = true
+          open.value = false
+          // 等对话框关闭动画后再卸载，避免闪断
+          window.setTimeout(() => {
+            app.unmount()
+            container.remove()
+            resolve(result)
+          }, 200)
+        }
+
+        return () => h(ConfirmDialog, {
+          modelValue: open.value,
+          title: options.title ?? '确认',
+          content: options.content ?? options.message ?? '',
+          confirmText: options.confirmText ?? '确定',
+          cancelText: options.cancelText ?? '取消',
+          confirmColor: options.confirmColor ?? 'primary',
+          maxWidth: options.maxWidth ?? 420,
+          'onUpdate:modelValue': (v: boolean) => {
+            if (!v) finish(false)
+          },
+          onConfirm: () => finish(true),
+          onCancel: () => finish(false),
+        })
+      },
+    })
+
+    app.use(vuetify)
+    app.mount(container)
+
+    // 确保首帧打开动画正常
+    void nextTick()
+  })
 }
 
 export default confirm

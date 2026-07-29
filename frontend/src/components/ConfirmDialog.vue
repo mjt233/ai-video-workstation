@@ -1,30 +1,30 @@
 <template>
   <v-dialog
-    :model-value="state.open"
-    :max-width="state.maxWidth"
+    :model-value="modelValue"
+    :max-width="maxWidth"
     persistent
-    @update:model-value="onModelUpdate"
+    @update:model-value="onUpdate"
   >
     <v-card>
       <v-card-title>
-        {{ state.title }}
+        {{ title }}
       </v-card-title>
       <v-card-text class="text-body-2">
-        {{ state.content }}
+        {{ content }}
       </v-card-text>
       <v-card-actions>
         <v-spacer />
         <v-btn
           variant="text"
-          @click="resolveConfirm(false)"
+          @click="cancel"
         >
-          {{ state.cancelText }}
+          {{ cancelText }}
         </v-btn>
         <v-btn
-          :color="state.confirmColor"
-          @click="resolveConfirm(true)"
+          :color="confirmColor"
+          @click="confirm"
         >
-          {{ state.confirmText }}
+          {{ confirmText }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -33,18 +33,49 @@
 
 <script setup lang="ts">
 /**
- * 全局确认对话框宿主：配合 utils/confirm 的 Promise API 使用。
- * 应在 App 根节点挂载一次。
+ * 确认对话框 UI 组件。
+ * 通常由 utils/confirm 动态挂载，也可在模板中直接使用。
  */
-import { getConfirmState, resolveConfirm } from '../utils/confirm'
+withDefaults(defineProps<{
+  modelValue: boolean
+  title?: string
+  content?: string
+  confirmText?: string
+  cancelText?: string
+  confirmColor?: string
+  maxWidth?: number | string
+}>(), {
+  title: '确认',
+  content: '',
+  confirmText: '确定',
+  cancelText: '取消',
+  confirmColor: 'primary',
+  maxWidth: 420,
+})
 
-const state = getConfirmState()
+const emit = defineEmits<{
+  'update:modelValue': [boolean]
+  confirm: []
+  cancel: []
+}>()
 
 /**
- * 处理对话框关闭（如 Esc）；视为取消。
+ * 对话框开关变化（如 Esc）；关闭时视为取消。
  * @param open 是否打开
  */
-function onModelUpdate(open: boolean) {
-  if (!open) resolveConfirm(false)
+function onUpdate(open: boolean) {
+  emit('update:modelValue', open)
+  if (!open) emit('cancel')
+}
+
+/** 取消 */
+function cancel() {
+  emit('update:modelValue', false)
+  emit('cancel')
+}
+
+/** 确认 */
+function confirm() {
+  emit('confirm')
 }
 </script>
