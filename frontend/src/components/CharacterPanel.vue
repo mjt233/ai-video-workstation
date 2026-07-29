@@ -50,6 +50,11 @@
               >
                 生成图片
               </v-btn>
+              <AssetImageUploadButton
+                :project="props.project"
+                :asset-path="`assert/character/${props.name}/appearance.jpg`"
+                @uploaded="load"
+              />
               <v-btn
                 size="small"
                 variant="text"
@@ -184,6 +189,7 @@ import { readFs, writeFs, existsFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
+import AssetImageUploadButton from './AssetImageUploadButton.vue'
 
 interface DialogState {
   show: boolean

@@ -366,6 +366,11 @@
                     >
                       生成图片
                     </v-btn>
+                    <AssetImageUploadButton
+                      :project="props.project"
+                      :asset-path="`assert/scene/${props.episode}/${props.shot}/stage/${i}.jpg`"
+                      @uploaded="load"
+                    />
                     <v-btn
                       size="small"
                       variant="text"
@@ -630,6 +635,7 @@ import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 import StageFrameDialog from './StageFrameDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
+import AssetImageUploadButton from './AssetImageUploadButton.vue'
 
 interface ScriptEntry {
   角色名: string

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs/promises';
 import path from 'path';
+import multer from 'multer';
 import {
   assertPositiveIntId,
   assertSafeName,
@@ -23,9 +24,33 @@ import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/re
 import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
 import { reorderStageFrames } from '../assets/stage-reorder.js';
 import { addStageFrame, deleteStageFrame, updateStageFrame, type StageFrameInput } from '../assets/stage-frames.js';
-import { activateHistoryVersion, listAssetHistory } from '../assets/history.js';
+import {
+  activateHistoryVersion,
+  deleteHistoryVersion,
+  listAssetHistory,
+  saveUploadedAsset,
+} from '../assets/history.js';
 
 export const assetsRouter = Router();
+
+const ALLOWED_IMAGE_MIME = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+]);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_IMAGE_MIME.has(file.mimetype)) {
+      cb(Object.assign(new Error('仅支持 JPG / PNG / WebP 图片'), { code: 'INVALID' }));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 // POST /api/assets/:project/character
 assetsRouter.post('/assets/:project/character', async (req: Request, res: Response) => {
@@ -375,3 +400,52 @@ assetsRouter.post('/assets/:project/history/activate', async (req: Request, res:
     httpError(res, err);
   }
 });
+
+// DELETE 删除历史版本
+// body: { path: "assert/...", versionPath: "assert/.../history/.../xxx.jpg" }
+assetsRouter.delete('/assets/:project/history', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const { path: assetPath, versionPath } = req.body as { path?: string; versionPath?: string };
+    if (!assetPath || !versionPath) {
+      throw Object.assign(new Error('path 与 versionPath 必填'), { code: 'INVALID' });
+    }
+    const result = await deleteHistoryVersion(project, assetPath, versionPath);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+/**
+ * POST 上传图片资产（角色外观 / 场景设定图 / 分镜场景图）
+ * multipart: file + path（assert 相对路径，扩展名固定 .jpg）
+ * 若已有当前资产，先归档历史再写入。
+ */
+assetsRouter.post(
+  '/assets/:project/upload',
+  (req: Request, res: Response, next) => {
+    upload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        httpError(res, err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const project = req.params.project as string;
+      const assetPath = String((req.body as { path?: string }).path ?? '');
+      if (!assetPath) throw Object.assign(new Error('path 必填'), { code: 'INVALID' });
+      const file = req.file;
+      if (!file?.buffer?.length) {
+        throw Object.assign(new Error('请选择要上传的图片文件'), { code: 'INVALID' });
+      }
+      const result = await saveUploadedAsset(project, assetPath, file.buffer);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      httpError(res, err);
+    }
+  },
+);

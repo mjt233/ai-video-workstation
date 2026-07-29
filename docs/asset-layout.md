@@ -202,6 +202,21 @@ assert/.../history/{stem}/{YYYYMMDD-HHmmss}.ext
 - 历史文件名按时间戳排序；同秒冲突时追加 `-1`、`-2`…
 - API：`GET /api/assets/:project/history?path=assert/...` 列出版本
 - API：`POST /api/assets/:project/history/activate` 将某历史版本激活为当前（原当前再归档）
+- API：`DELETE /api/assets/:project/history` 删除指定历史版本（body: `path` + `versionPath`）
+
+### 3.0.1 用户上传图片
+
+支持用户自行上传覆盖以下图片资产（与生成产物路径一致）：
+
+| 类型 | 路径 |
+|------|------|
+| 角色外观 | `assert/character/{name}/appearance.jpg` |
+| 场景设定图 | `assert/stage/{场景名}/{标签}.jpg` |
+| 分镜场景图 | `assert/scene/{集}/{镜}/stage/{index}.jpg` |
+
+- API：`POST /api/assets/:project/upload`（`multipart/form-data`：`file` + `path`）
+- 允许 MIME：`image/jpeg`、`image/png`、`image/webp`；落盘路径扩展名固定为 `.jpg`
+- 若目标路径已有当前资产，**先归档历史**再写入上传内容
 
 ### 3.1 角色产物
 

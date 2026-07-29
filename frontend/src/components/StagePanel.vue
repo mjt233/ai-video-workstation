@@ -55,6 +55,12 @@
               >
                 生成图片
               </v-btn>
+              <AssetImageUploadButton
+                :project="props.project"
+                :asset-path="`assert/stage/${props.name}/${selected?.label ?? props.subscene}.jpg`"
+                :disabled="!selected"
+                @uploaded="load"
+              />
               <v-btn
                 size="small"
                 variant="text"
@@ -149,6 +155,7 @@ import MarkdownView from './MarkdownView.vue'
 import { useAutoComputeHeight } from '../composables/useAutoComputeHeight'
 import GenerateDialog from './GenerateDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
+import AssetImageUploadButton from './AssetImageUploadButton.vue'
 
 interface SubScene {
   label: string

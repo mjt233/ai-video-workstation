@@ -212,3 +212,37 @@ export async function activateAssetHistory(
     return data as { success: boolean; archived: string | null; current: string }
   } catch (e) { rethrow(e) }
 }
+
+export async function deleteAssetHistory(
+  project: string,
+  assetPath: string,
+  versionPath: string,
+) {
+  try {
+    const { data } = await client.delete(`/assets/${project}/history`, {
+      data: {
+        path: assetPath,
+        versionPath,
+      },
+    })
+    return data as { success: boolean; deleted: string }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 上传图片资产到指定 assert 路径。
+ * 服务端会先归档已有当前资产，再写入新文件。
+ */
+export async function uploadAssetImage(
+  project: string,
+  assetPath: string,
+  file: File,
+) {
+  try {
+    const form = new FormData()
+    form.append('path', assetPath)
+    form.append('file', file)
+    const { data } = await client.post(`/assets/${project}/upload`, form)
+    return data as { success: boolean; path: string; archived: string | null }
+  } catch (e) { rethrow(e) }
+}

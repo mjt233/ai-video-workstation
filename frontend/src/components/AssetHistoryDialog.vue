@@ -85,12 +85,23 @@
                 </div>
               </v-card-text>
               <v-card-actions>
+                <v-btn
+                  size="small"
+                  color="error"
+                  variant="text"
+                  :loading="deleting === v.path"
+                  :disabled="!!activating || (!!deleting && deleting !== v.path)"
+                  @click="remove(v.path)"
+                >
+                  删除
+                </v-btn>
                 <v-spacer />
                 <v-btn
                   size="small"
                   color="primary"
                   variant="tonal"
                   :loading="activating === v.path"
+                  :disabled="!!deleting || (!!activating && activating !== v.path)"
                   @click="activate(v.path)"
                 >
                   激活为当前
@@ -118,6 +129,7 @@ import { computed, ref, watch } from 'vue'
 import {
   AssetApiError,
   activateAssetHistory,
+  deleteAssetHistory,
   listAssetHistory,
   type HistoryVersion,
 } from '../api/assets'
@@ -137,6 +149,7 @@ const loading = ref(false)
 const error = ref('')
 const versions = ref<HistoryVersion[]>([])
 const activating = ref('')
+const deleting = ref('')
 
 const ext = computed(() => {
   const p = props.assetPath.toLowerCase()
@@ -192,6 +205,20 @@ async function activate(versionPath: string) {
     error.value = e instanceof AssetApiError ? e.message : '激活失败'
   } finally {
     activating.value = ''
+  }
+}
+
+async function remove(versionPath: string) {
+  if (!confirm('确定永久删除该历史版本？此操作不可撤销。')) return
+  deleting.value = versionPath
+  error.value = ''
+  try {
+    await deleteAssetHistory(props.project, props.assetPath, versionPath)
+    await load()
+  } catch (e) {
+    error.value = e instanceof AssetApiError ? e.message : '删除失败'
+  } finally {
+    deleting.value = ''
   }
 }
 
