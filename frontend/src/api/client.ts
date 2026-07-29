@@ -42,4 +42,31 @@ export async function existsFs(project: string, path: string): Promise<boolean> 
   }
 }
 
+/** 创建目录（用于 assert/custom/ 下） */
+export async function mkdirFs(project: string, dirPath: string): Promise<{ success: boolean }> {
+  const { data } = await client.post<{ success: boolean }>(`/fs/${project}/mkdir`, { path: dirPath })
+  return data
+}
+
+/** 重命名/移动文件或目录（用于 assert/custom/ 下） */
+export async function renameFs(project: string, from: string, to: string): Promise<{ success: boolean }> {
+  const { data } = await client.post<{ success: boolean }>(`/fs/${project}/rename`, { from, to })
+  return data
+}
+
+/** 删除文件或目录递归（用于 assert/custom/ 下） */
+export async function deleteFs(project: string, relPath: string): Promise<{ success: boolean }> {
+  const { data } = await client.delete<{ success: boolean }>(`/fs/${project}/${relPath}`)
+  return data
+}
+
+/** 上传任意文件到自定义资产目录 */
+export async function uploadFs(project: string, destPath: string, file: File): Promise<{ success: boolean; path: string }> {
+  const form = new FormData()
+  form.append('path', destPath)
+  form.append('file', file)
+  const { data } = await client.post<{ success: boolean; path: string }>(`/fs/${project}/upload`, form)
+  return data
+}
+
 export default client

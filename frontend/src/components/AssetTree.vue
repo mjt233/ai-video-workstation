@@ -123,6 +123,7 @@ type TreeKind =
   | 'root-scene'
   | 'episode'
   | 'shot'
+  | 'root-custom'
 
 interface TreeItem {
   name: string
@@ -176,6 +177,9 @@ function iconColor(item: TreeItem): string {
   }
   if (item.type === 'stage' || item.kind === 'stage' || item.kind === 'subscene' || item.kind === 'root-stage') {
     return 'green-darken-1'
+  }
+  if (item.kind === 'root-custom') {
+    return 'cyan-darken-1'
   }
   return 'primary'
 }
@@ -306,6 +310,12 @@ async function buildTree() {
       kind: 'root-scene',
       children: episodeItems,
     },
+    {
+      name: '自定义资产',
+      path: 'root-custom',
+      icon: 'mdi-folder-multiple-outline',
+      kind: 'root-custom',
+    },
   ]
 }
 
@@ -395,6 +405,13 @@ function resolveSelectionFromRoute(): { activePath: string | null; openPaths: st
     }
   }
 
+  if (type === 'custom') {
+    return {
+      activePath: 'root-custom',
+      openPaths: [],
+    }
+  }
+
   return { activePath: null, openPaths: [] }
 }
 
@@ -473,6 +490,17 @@ function onSelect(items: unknown) {
       subscene: undefined,
       episode: item.episode,
       shot: item.shot,
+    })
+  }
+
+  if (item.kind === 'root-custom') {
+    patchQuery({
+      type: 'custom',
+      name: undefined,
+      subscene: undefined,
+      episode: undefined,
+      shot: undefined,
+      path: undefined,
     })
   }
 }

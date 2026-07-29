@@ -70,6 +70,10 @@
         :episode
         :shot
       />
+      <CustomAssetPanel
+        v-else-if="type === 'custom'"
+        :project
+      />
       <div
         v-else
         class="d-flex align-center justify-center"
@@ -138,6 +142,7 @@ import ProjectPanel from '../components/ProjectPanel.vue'
 import CharacterPanel from '../components/CharacterPanel.vue'
 import StagePanel from '../components/StagePanel.vue'
 import ScenePanel from '../components/ScenePanel.vue'
+import CustomAssetPanel from '../components/CustomAssetPanel.vue'
 import BatchGenerateDialog from '../components/BatchGenerateDialog.vue'
 import { useBatchTask } from '../composables/useBatchTask'
 
