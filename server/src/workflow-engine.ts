@@ -170,6 +170,18 @@ async function enrichImageToVideoParams(
     );
   }
 
+  // ── merged audio from audio-edit.json ──
+  let audioPath = '';
+  const audioEditRel = `prompt/scene/${episode}/${shot}/audio-edit.json`;
+  const mergedAudioRel = `assert/scene/${episode}/${shot}/audio/merged.flac`;
+  try {
+    await fs.access(resolveUnderProject(audioEditRel));
+    await fs.access(resolveUnderProject(mergedAudioRel));
+    audioPath = mergedAudioRel;
+  } catch {
+    // 没有音频编辑或合并产物，跳过
+  }
+
   return {
     vars: {
       ...vars,
@@ -177,6 +189,7 @@ async function enrichImageToVideoParams(
       shot,
       duration: String(duration),
       stageImages: JSON.stringify(stageImages),
+      ...(audioPath ? { audioPath } : {}),
     },
   };
 }
