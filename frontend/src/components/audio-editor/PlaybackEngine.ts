@@ -1,6 +1,7 @@
 /**
  * 音频回放引擎。
  * 使用 Web Audio API 根据编辑状态在内存中混合各音频片段进行预览。
+ * 支持播放、暂停、恢复和 seek 到指定时间点。
  */
 
 import type { AudioClipState, PlayState } from './types'
@@ -12,15 +13,19 @@ export interface PlaybackClip {
 
 export class PlaybackEngine {
   private audioCtx: AudioContext | null = null
-  private sourceNodes: AudioBufferSourceNode[] = []
   private gainNode: GainNode | null = null
   private _state: PlayState = 'idle'
+  /** AudioContext 创建时的时间戳（用于计算 elapsed） */
   private _startTime = 0
+  /** 暂停时记录的位置（秒） */
   private _pauseOffset = 0
   private _duration = 0
+  /** 保存的 clips，用于恢复/seek 时重建 */
+  private _savedClips: PlaybackClip[] = []
   private _onStateChange: ((state: PlayState) => void) | null = null
   private _onTimeUpdate: ((time: number) => void) | null = null
   private _rafId = 0
+  private sourceNodes: AudioBufferSourceNode[] = []
 
   get state(): PlayState {
     return this._state
@@ -56,44 +61,68 @@ export class PlaybackEngine {
   }
 
   /**
-   * 加载所有音频文件并开始播放。
-   * 可在用户交互（如点击播放按钮）后调用。
+   * 开始播放（从指定时间点或开头）。
+   * @param clips 音频片段列表
+   * @param fromTime 时间轴起始位置（秒），默认 0
    */
-  async play(clips: PlaybackClip[]): Promise<void> {
+  async play(clips: PlaybackClip[], fromTime = 0): Promise<void> {
     this.stop()
+    this._savedClips = clips
+    this._duration = PlaybackEngine.computeDuration(clips.map(c => c.state))
+    this._pauseOffset = fromTime
+    this._startTime = 0
+
+    if (fromTime >= this._duration) return
 
     this.audioCtx = new AudioContext()
     this.gainNode = this.audioCtx.createGain()
     this.gainNode.connect(this.audioCtx.destination)
 
-    this._duration = PlaybackEngine.computeDuration(clips.map(c => c.state))
+    const now = this.audioCtx.currentTime
 
-    // 为每个片段创建 SourceNode 并按时调度
     for (const { state, buffer } of clips) {
-      const source = this.audioCtx.createBufferSource()
-      source.buffer = buffer
-
-      // 计算裁剪后的片段
       const trimStart = state.trimStart || 0
       const trimEnd = state.trimEnd || 0
-      const clipDuration = Math.max(0, buffer.duration - trimStart - trimEnd)
+      const clipTotal = buffer.duration - trimStart - trimEnd // 裁剪后实际时长
+      if (clipTotal <= 0) continue
 
-      // 从 trimStart 偏移处开始播放，持续 clipDuration
-      // startOffset 决定该片段在时间轴上的起始位置
+      const clipStartOnTimeline = state.startOffset
+      const clipEndOnTimeline = clipStartOnTimeline + clipTotal
+
+      // 如果 fromTime 在这个片段的范围之外，跳过
+      if (fromTime >= clipEndOnTimeline) continue
+
+      let offsetInClip: number
+      let scheduleDelay: number
+
+      if (fromTime < clipStartOnTimeline) {
+        // 片段尚未开始，将来再播放
+        offsetInClip = 0
+        scheduleDelay = clipStartOnTimeline - fromTime
+      } else {
+        // 片段正在播放中，需要从中间开始
+        offsetInClip = fromTime - clipStartOnTimeline
+        scheduleDelay = 0
+      }
+
+      const playDuration = clipTotal - offsetInClip
+      if (playDuration <= 0) continue
+
+      const source = this.audioCtx.createBufferSource()
+      source.buffer = buffer
       source.loop = false
 
       const gain = this.audioCtx.createGain()
       source.connect(gain)
       gain.connect(this.gainNode!)
 
-      const when = this.audioCtx.currentTime + state.startOffset
-      source.start(when, trimStart, clipDuration)
+      const startAt = now + scheduleDelay
+      source.start(startAt, trimStart + offsetInClip, playDuration)
 
       this.sourceNodes.push(source)
     }
 
-    this._startTime = this.audioCtx.currentTime
-    this._pauseOffset = 0
+    this._startTime = now - fromTime  // 使得 getCurrentTime = now - _startTime = fromTime
     this.setState('playing')
     this.startTimeUpdateLoop()
   }
@@ -113,8 +142,13 @@ export class PlaybackEngine {
    * 恢复播放。
    */
   resume(): void {
-    if (this._state !== 'paused' || !this.audioCtx) return
-    this.playFrom(this._pauseOffset)
+    if (this._state !== 'paused') return
+    if (this._pauseOffset >= this._duration) {
+      this.stop()
+      return
+    }
+    // 用保存的 clips 从暂停位置重新开始
+    this.play(this._savedClips, this._pauseOffset)
   }
 
   /**
@@ -126,7 +160,8 @@ export class PlaybackEngine {
     } else if (this._state === 'paused') {
       this.resume()
     } else {
-      this.play(clips)
+      // idle：从 _pauseOffset 处开始（若之前 seek 过）
+      this.play(clips, this._pauseOffset)
     }
   }
 
@@ -154,13 +189,17 @@ export class PlaybackEngine {
   }
 
   /**
-   * 从指定时间点开始播放（用于 seek）。
+   * 跳转到指定时间点播放（若正在播放则从该点继续，否则记录位置供下次播放）。
    */
-  private async playFrom(_offset: number): Promise<void> {
-    // 简化实现：停止后重新播放所有片段
-    // 实际可优化为使用 GrainPlayer 或 seek
-    this.stop()
-    // 重新加载 clips 后调用 play
+  seek(time: number): void {
+    const clamped = Math.max(0, Math.min(time, this._duration))
+    if (this._state === 'playing') {
+      this.play(this._savedClips, clamped)
+    } else {
+      // paused / idle 均记录位置
+      this._pauseOffset = clamped
+      this._onTimeUpdate?.(clamped)
+    }
   }
 
   /**
@@ -170,6 +209,10 @@ export class PlaybackEngine {
     const tick = () => {
       if (this._state === 'playing') {
         this._onTimeUpdate?.(this.getCurrentTime())
+        if (this.getCurrentTime() >= this._duration) {
+          this.stop()
+          return
+        }
         this._rafId = requestAnimationFrame(tick)
       }
     }
@@ -183,4 +226,6 @@ export class PlaybackEngine {
     }
     this.sourceNodes = []
   }
+
+
 }

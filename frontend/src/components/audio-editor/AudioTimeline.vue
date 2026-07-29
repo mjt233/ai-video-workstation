@@ -10,6 +10,7 @@
     <div
       class="ruler"
       :style="{ width: `${rulerWidth}px` }"
+      @mousedown="onTimelineMouseDown"
     >
       <div
         v-for="mark in rulerMarks"
@@ -28,7 +29,7 @@
     <div
       class="tracks-area"
       :style="{ width: `${timelineWidth}px` }"
-      @mousedown="onTrackClick"
+      @mousedown="onTimelineMouseDown"
     >
       <AudioClip
         v-for="clip in clips"
@@ -53,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import type { AudioClipState, WaveformData } from './types'
 import AudioClip from './AudioClip.vue'
 
@@ -122,30 +123,39 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
-// 点击轨道跳转
-function onTrackClick(e: MouseEvent) {
-  // 使用容器的滚动偏移来计算点击位置
-  if (!containerRef.value) return
+// 点击/拖拽时间轴跳转
+let seeking = false
+
+function seekFromEvent(e: MouseEvent) {
+  if (!containerRef.value) return 0
   const rect = containerRef.value.getBoundingClientRect()
   const x = e.clientX - rect.left + containerRef.value.scrollLeft
-  const sec = x / props.zoom
-  emit('seek', Math.max(0, sec))
+  return Math.max(0, x / props.zoom)
 }
 
-// 同步外部 scrollOffset（可由父组件控制）
-// 这里直接在 container 上监听 scroll
-function onContainerScroll() {
-  if (containerRef.value) {
-    // 不使用 scrollOffset ref，直接用 scrollLeft
-  }
+function onTimelineMouseDown(e: MouseEvent) {
+  if (!containerRef.value) return
+  seeking = true
+  const sec = seekFromEvent(e)
+  emit('seek', sec)
+  document.addEventListener('mousemove', onTimelineMouseMove)
+  document.addEventListener('mouseup', onTimelineMouseUp)
+}
+
+function onTimelineMouseMove(e: MouseEvent) {
+  if (!seeking) return
+  const sec = seekFromEvent(e)
+  emit('seek', sec)
+}
+
+function onTimelineMouseUp() {
+  seeking = false
+  document.removeEventListener('mousemove', onTimelineMouseMove)
+  document.removeEventListener('mouseup', onTimelineMouseUp)
 }
 
 onMounted(() => {
-  if (containerRef.value) {
-    containerRef.value.addEventListener('scroll', () => {
-      // 不做额外处理，卷轴由容器原生滚动
-    })
-  }
+  // 不做额外处理
 })
 </script>
 

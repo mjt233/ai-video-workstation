@@ -2,7 +2,7 @@
   <div
     class="audio-clip"
     :style="clipStyle"
-    @mousedown="onDragStart"
+    @mousedown.stop="onDragStart"
   >
     <!-- 左裁剪手柄 -->
     <div

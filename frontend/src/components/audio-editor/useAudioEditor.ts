@@ -177,15 +177,6 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
    * 播放/暂停切换。
    */
   async function togglePlay(): Promise<void> {
-    if (playState.value === 'playing') {
-      engine.pause()
-      return
-    }
-    if (playState.value === 'paused') {
-      engine.resume()
-      return
-    }
-    // idle → 重新播放
     const playableClips: PlaybackClip[] = []
     for (const c of clips.value) {
       const buf = audioBuffers.value.get(c.index)
@@ -194,7 +185,8 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
       }
     }
     if (playableClips.length === 0) return
-    await engine.play(playableClips)
+    // 委托给引擎统一处理（含 _pauseOffset 寻位逻辑）
+    engine.togglePlay(playableClips)
   }
 
   /**
@@ -202,6 +194,16 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
    */
   function stopPlay(): void {
     engine.stop()
+  }
+
+  /**
+   * 跳转到指定时间点。
+   */
+  function seek(time: number): void {
+    engine.seek(time)
+    if (engine.state !== 'playing') {
+      currentTime.value = Math.max(0, Math.min(time, totalDuration.value))
+    }
   }
 
   /**
@@ -227,5 +229,6 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
     togglePlay,
     stopPlay,
     setZoom,
+    seek,
   }
 }

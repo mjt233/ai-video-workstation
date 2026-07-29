@@ -187,6 +187,7 @@ const {
   togglePlay,
   stopPlay,
   setZoom,
+  seek,
 } = useAudioEditor(props.project, props.episode, props.shot)
 
 const merging = ref(false)
@@ -228,7 +229,7 @@ function onUpdateTrim(index: number, trimStart: number, trimEnd: number) {
 }
 
 function onSeek(time: number) {
-  // 暂不实现 seek
+  seek(time)
 }
 
 function resetToDefaults() {
