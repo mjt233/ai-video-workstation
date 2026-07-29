@@ -14,6 +14,10 @@
 - **前端：** Vue 3 + Vuetify 3 + vue-router + axios + TypeScript，Vite 构建，`vue-tsc` 类型检查
 - **ESLint** flat config，TypeScript + Vue 规则
 
+## 编码规范
+
+- 编写代码时，类或方法需要有详细JsDoc文档注释，并标注每个字段、参数和返回值的含义和用法。
+
 ## 约束
 - **修改代码后必须执行 `npm run typecheck`，确保无类型错误**
 - **修改代码后必须执行 `npm run lint`，确保无 ESLint 错误**
