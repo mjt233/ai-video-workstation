@@ -69,6 +69,7 @@ export interface TaskRecord {
   updated_at: string;
   completed_at: string | null;
   batch_id: string | null;
+  phase: number;
 }
 
 export interface LogEntry {
@@ -85,12 +86,13 @@ export function createTask(task: {
   impl: string;
   params: object;
   batch_id?: string;
+  phase?: number;
 }): void {
   const stmt = db.prepare(`
-    INSERT INTO tasks (id, project, workflow_id, impl, params, batch_id)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO tasks (id, project, workflow_id, impl, params, batch_id, phase)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run(task.id, task.project, task.workflow_id, task.impl, JSON.stringify(task.params), task.batch_id ?? null);
+  stmt.run(task.id, task.project, task.workflow_id, task.impl, JSON.stringify(task.params), task.batch_id ?? null, task.phase ?? 0);
 }
 
 export function getTask(id: string): TaskRecord | undefined {
@@ -139,7 +141,7 @@ export function incrementRetry(id: string): void {
 }
 
 export function getPendingTasks(): TaskRecord[] {
-  return db.prepare("SELECT * FROM tasks WHERE status IN ('pending', 'running') ORDER BY created_at ASC").all() as TaskRecord[];
+  return db.prepare("SELECT * FROM tasks WHERE status IN ('pending', 'running') ORDER BY phase ASC, created_at ASC").all() as TaskRecord[];
 }
 
 export interface BatchSummary {

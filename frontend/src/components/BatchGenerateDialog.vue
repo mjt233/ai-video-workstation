@@ -18,6 +18,16 @@
 
         <v-card-text>
           <v-alert
+            v-if="dependencyWarning"
+            type="warning"
+            variant="tonal"
+            class="mb-3"
+            density="compact"
+          >
+            {{ dependencyWarning }}
+          </v-alert>
+
+          <v-alert
             v-if="configWarning"
             type="warning"
             variant="tonal"
@@ -219,7 +229,7 @@ const assetTypes = [
 ]
 
 const mode = ref<'config' | 'progress'>('config')
-const selectedTypes = ref<string[]>(assetTypes.map(at => at.id))
+const selectedTypes = ref<string[]>([])
 const concurrency = ref(1)
 const overwrite = ref(false)
 const submitting = ref(false)
@@ -237,6 +247,41 @@ const batchFinished = computed(() =>
   props.summary.total > 0
   && props.summary.completed + props.summary.failed === props.summary.total,
 )
+
+const sel = computed(() => new Set(selectedTypes.value))
+
+const dependencyWarning = computed(() => {
+  const warnings: string[] = []
+
+  // scene-stage-image 需要角色外观和场景图片
+  if (sel.value.has('scene-stage-image')) {
+    if (!sel.value.has('character-appearance')) {
+      warnings.push('分镜场景图需要「角色外观」已存在')
+    }
+    if (!sel.value.has('stage-image')) {
+      warnings.push('分镜场景图需要「场景图片」已存在')
+    }
+  }
+
+  // video-generate 需要分镜场景图和分镜语音
+  if (sel.value.has('video-generate')) {
+    if (!sel.value.has('scene-stage-image')) {
+      warnings.push('视频需要「分镜场景图」已存在')
+    }
+    if (!sel.value.has('scene-tts')) {
+      warnings.push('视频需要「分镜语音」已存在')
+    }
+  }
+
+  // variant-edit 需要角色外观或场景图片
+  if (sel.value.has('variant-edit')) {
+    if (!sel.value.has('character-appearance') && !sel.value.has('stage-image')) {
+      warnings.push('衍生变体需要「角色外观」或「场景图片」已存在')
+    }
+  }
+
+  return warnings.length > 0 ? warnings.join('；') + '。请先勾选前置资产类型，否则对应任务会因找不到引用文件而失败。' : null
+})
 
 function getTaskStatusText(status: string): string {
   switch (status) {
@@ -328,7 +373,7 @@ function getTaskDisplayName(task: TaskResponse): string {
 }
 
 function resetConfig() {
-  selectedTypes.value = assetTypes.map(at => at.id)
+  selectedTypes.value = []
   concurrency.value = 1
   overwrite.value = false
   submitting.value = false

@@ -125,6 +125,7 @@ workflowRouter.post('/workflow/retry/:taskId', (req: Request, res: Response) => 
     impl: existing.impl,
     params: JSON.parse(existing.params),
     batch_id: existing.batch_id ?? undefined,
+    phase: existing.phase,
   });
 
   db.addLog(newTaskId, 'info', `Retry of task ${existing.id}`);
@@ -155,9 +156,24 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
       return;
     }
 
+    // 资产类型 → 执行阶段映射
+    // Phase 0：无依赖（角色外观/声音、场景图片）
+    // Phase 1：依赖 Phase 0 产出（分镜场景图、衍生变体、分镜语音）
+    // Phase 2：依赖 Phase 1 产出（视频）
+    const ASSET_PHASE: Record<string, number> = {
+      'character-appearance': 0,
+      'character-voice': 0,
+      'stage-image': 0,
+      'variant-edit': 1,
+      'scene-stage-image': 1,
+      'scene-tts': 1,
+      'video-generate': 2,
+    };
+
     const batchId = uuidv4();
 
     for (const task of discovered) {
+      const phase = ASSET_PHASE[task.assetType ?? ''] ?? 0;
       db.createTask({
         id: uuidv4(),
         project,
@@ -169,6 +185,7 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
           outputPath: task.outputPath,
         },
         batch_id: batchId,
+        phase,
       });
     }
 

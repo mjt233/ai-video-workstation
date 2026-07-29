@@ -758,14 +758,43 @@ export function startEngine(): void {
         }
       }
 
-      // Process batch tasks with per-batch concurrency limit
+      // Process batch tasks with per-batch concurrency limit + phase ordering
       for (const [batchId, tasks] of batchGroups) {
+        // 找出当前批次的最低 active phase（有 pending 或 running 任务的最小 phase）
+        const phases = [...new Set(tasks.map(t => t.phase))].sort((a, b) => a - b);
+        let currentPhase = phases[0];
+        for (const ph of phases) {
+          const hasIncomplete = tasks.some(
+            t => t.phase === ph && (t.status === 'pending' || t.status === 'running'),
+          );
+          if (hasIncomplete) {
+            currentPhase = ph;
+            break;
+          }
+        }
+
+        // 检查更低 phase 的任务是否全部 completed
+        const lowerPhasesDone = phases
+          .filter(ph => ph < currentPhase)
+          .every(ph => tasks
+            .filter(t => t.phase === ph)
+            .every(t => t.status === 'completed'),
+          );
+
+        if (!lowerPhasesDone) {
+          continue; // 前置阶段未完成，本轮不启动该批次任务
+        }
+
         const concurrency = getBatchConcurrency(batchId);
-        const runningCount = tasks.filter(t => t.status === 'running').length;
+        const runningCount = tasks.filter(
+          t => t.phase === currentPhase && t.status === 'running',
+        ).length;
         const slots = concurrency - runningCount;
 
         if (slots > 0) {
-          const pendingTasks = tasks.filter(t => t.status === 'pending');
+          const pendingTasks = tasks.filter(
+            t => t.phase === currentPhase && t.status === 'pending',
+          );
           for (const task of pendingTasks.slice(0, slots)) {
             db.updateTaskStatus(task.id, 'running');
             runTask(task.id).catch(err => {
