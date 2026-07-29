@@ -18,8 +18,10 @@
     <v-main>
       <router-view />
     </v-main>
+    <ConfirmDialog />
   </v-app>
 </template>
 
 <script setup lang="ts">
+import ConfirmDialog from './components/ConfirmDialog.vue'
 </script>

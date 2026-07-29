@@ -133,6 +133,7 @@ import {
   listAssetHistory,
   type HistoryVersion,
 } from '../api/assets'
+import { confirm } from '../utils/confirm'
 
 const props = defineProps<{
   modelValue: boolean
@@ -194,7 +195,13 @@ async function load() {
 }
 
 async function activate(versionPath: string) {
-  if (!confirm('确定将该历史版本激活为当前使用版本？当前版本将归档到历史。')) return
+  const ok = await confirm({
+    title: '激活历史版本',
+    content: '确定将该历史版本激活为当前使用版本？当前版本将归档到历史。',
+    confirmText: '激活',
+    confirmColor: 'primary',
+  })
+  if (!ok) return
   activating.value = versionPath
   error.value = ''
   try {
@@ -209,7 +216,13 @@ async function activate(versionPath: string) {
 }
 
 async function remove(versionPath: string) {
-  if (!confirm('确定永久删除该历史版本？此操作不可撤销。')) return
+  const ok = await confirm({
+    title: '确认删除',
+    content: '确定永久删除该历史版本？此操作不可撤销。',
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
   deleting.value = versionPath
   error.value = ''
   try {

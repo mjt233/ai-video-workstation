@@ -631,6 +631,7 @@ import {
   deleteSceneStageFrame,
   AssetApiError,
 } from '../api/assets'
+import { confirm } from '../utils/confirm'
 import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 import StageFrameDialog from './StageFrameDialog.vue'
@@ -818,7 +819,13 @@ async function removeStageFrame(index: number) {
     alert('至少保留一个场景，无法删除')
     return
   }
-  if (!confirm(`确定删除场景${index}？对应图片资产也会删除。`)) return
+  const ok = await confirm({
+    title: '确认删除',
+    content: `确定删除场景${index}？对应图片资产也会删除。`,
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
   deletingStageIndex.value = index
   try {
     await deleteSceneStageFrame(props.project, props.episode, props.shot, index)

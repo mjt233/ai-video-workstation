@@ -52,35 +52,6 @@
     />
 
     <v-dialog
-      v-model="confirmDialog.show"
-      max-width="420"
-    >
-      <v-card>
-        <v-card-title>确认删除</v-card-title>
-        <v-card-text>
-          确定删除「{{ confirmDialog.label }}」？此操作不可撤销。
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn
-            variant="text"
-            :disabled="deleting"
-            @click="confirmDialog.show = false"
-          >
-            取消
-          </v-btn>
-          <v-btn
-            color="error"
-            :loading="deleting"
-            @click="doDelete"
-          >
-            删除
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <v-dialog
       v-model="errorDialog.show"
       max-width="520"
     >
@@ -140,6 +111,7 @@ import {
   type RenamePair,
 } from '../api/assets'
 import AssetCreateDialog, { type CreateAssetType } from './AssetCreateDialog.vue'
+import { confirm } from '../utils/confirm'
 
 type TreeKind =
   | 'project-info'
@@ -179,12 +151,6 @@ const createDialog = reactive({
   show: false,
   type: 'character' as CreateAssetType,
   defaults: {} as Partial<{ name: string; stage: string; episode: string }>,
-})
-
-const confirmDialog = reactive({
-  show: false,
-  label: '',
-  item: null as TreeItem | null,
 })
 
 const errorDialog = reactive({
@@ -533,7 +499,7 @@ function openCreate(item: TreeItem) {
   createDialog.show = true
 }
 
-function openDelete(item: TreeItem) {
+async function openDelete(item: TreeItem) {
   let label = item.name
   if (item.kind === 'subscene') {
     label = `${item.stageName}/${item.label}`
@@ -542,9 +508,14 @@ function openDelete(item: TreeItem) {
   } else if (item.kind === 'episode') {
     label = `第${item.episode}集`
   }
-  confirmDialog.label = label
-  confirmDialog.item = item
-  confirmDialog.show = true
+  const ok = await confirm({
+    title: '确认删除',
+    content: `确定删除「${label}」？此操作不可撤销。`,
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
+  await doDelete(item)
 }
 
 async function onCreated(payload: {
@@ -623,9 +594,7 @@ function clearSelectionIfDeleted(item: TreeItem) {
   }
 }
 
-async function doDelete() {
-  const item = confirmDialog.item
-  if (!item) return
+async function doDelete(item: TreeItem) {
   deleting.value = true
   try {
     let renames: RenamePair[] | undefined
@@ -642,7 +611,6 @@ async function doDelete() {
       renames = r.renames
     }
 
-    confirmDialog.show = false
     clearSelectionIfDeleted(item)
     if (renames?.length) {
       const q = router.currentRoute.value.query
@@ -652,7 +620,6 @@ async function doDelete() {
     }
     await rebuildAndRefresh()
   } catch (e) {
-    confirmDialog.show = false
     if (e instanceof AssetApiError && e.code === 'IN_USE') {
       errorDialog.message = e.message || '资源正在被引用，无法删除'
       errorDialog.refs = e.refs ?? []
