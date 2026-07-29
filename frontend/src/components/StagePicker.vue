@@ -9,7 +9,7 @@
       <v-card-text>
         <v-text-field
           v-model="filter"
-          label="筛选场景"
+          label="筛选场景 / 变体"
           density="compact"
           variant="outlined"
           hide-details
@@ -59,8 +59,23 @@
                 </v-icon>
               </v-avatar>
             </template>
-            <v-list-item-title>{{ item.ref }}</v-list-item-title>
+            <v-list-item-title>
+              {{ item.ref }}
+              <v-chip
+                v-if="item.isVariant"
+                size="x-small"
+                class="ml-1"
+                color="secondary"
+                variant="tonal"
+              >
+                变体
+              </v-chip>
+            </v-list-item-title>
             <v-list-item-subtitle>
+              <span
+                v-if="item.isVariant"
+                class="text-caption"
+              >{{ item.variantDesc || '衍生变体' }} · </span>
               <span
                 v-if="item.imageUrl"
                 class="text-success"
@@ -104,12 +119,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { existsFs, readFs, type DirResponse } from '../api/client'
+import { listStageVariants } from '../api/assets'
 
 interface StageOption {
   ref: string
   stage: string
   label: string
   imageUrl: string
+  isVariant?: boolean
+  variantDesc?: string
 }
 
 const props = defineProps<{
@@ -131,7 +149,10 @@ const localSelected = ref('')
 const filtered = computed(() => {
   const q = filter.value.trim().toLowerCase()
   if (!q) return options.value
-  return options.value.filter((o) => o.ref.toLowerCase().includes(q))
+  return options.value.filter((o) =>
+    o.ref.toLowerCase().includes(q)
+    || (o.variantDesc ?? '').toLowerCase().includes(q),
+  )
 })
 
 function confirm() {
@@ -163,7 +184,24 @@ async function load() {
             stage,
             label,
             imageUrl: has ? `/api/fs/${props.project}/${path}?t=${ts}` : '',
+            isVariant: false,
           })
+          // 衍生变体
+          try {
+            const { variants } = await listStageVariants(props.project, stage, label)
+            for (const v of variants) {
+              all.push({
+                ref: v.ref,
+                stage,
+                label,
+                imageUrl: v.hasImage ? `/api/fs/${props.project}/${v.imagePath}?t=${ts}` : '',
+                isVariant: true,
+                variantDesc: v.desc,
+              })
+            }
+          } catch {
+            // ignore variant load errors
+          }
         }))
       } catch {
         // ignore missing stage dir

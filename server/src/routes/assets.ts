@@ -30,6 +30,16 @@ import {
   listAssetHistory,
   saveUploadedAsset,
 } from '../assets/history.js';
+import {
+  createCharacterVariant,
+  createStageVariant,
+  deleteCharacterVariant,
+  deleteStageVariant,
+  listCharacterVariants,
+  listStageVariants,
+  updateCharacterVariant,
+  updateStageVariant,
+} from '../assets/variants.js';
 
 export const assetsRouter = Router();
 
@@ -449,3 +459,120 @@ assetsRouter.post(
     }
   },
 );
+
+
+// ── 衍生变体 API ────────────────────────────────────────────────────
+
+// GET 角色衍生变体列表
+assetsRouter.get('/assets/:project/character/:name/variants', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const variants = await listCharacterVariants(project, name);
+    res.json({ variants });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 创建角色衍生变体
+assetsRouter.post('/assets/:project/character/:name/variants', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const body = req.body as { id?: string; desc?: string };
+    if (!body.id || !body.desc) {
+      throw Object.assign(new Error('id 与 desc 必填'), { code: 'INVALID' });
+    }
+    const variant = await createCharacterVariant(project, name, { id: body.id, desc: body.desc });
+    res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT 更新角色衍生变体描述
+assetsRouter.put('/assets/:project/character/:name/variants/:variantId', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const variantId = req.params.variantId as string;
+    const body = req.body as { desc?: string };
+    const variant = await updateCharacterVariant(project, name, variantId, body);
+    res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE 删除角色衍生变体
+assetsRouter.delete('/assets/:project/character/:name/variants/:variantId', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const variantId = req.params.variantId as string;
+    await deleteCharacterVariant(project, name, variantId);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// GET 场景子场景衍生变体列表
+assetsRouter.get('/assets/:project/stage/:stage/:label/variants', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const stage = req.params.stage as string;
+    const label = req.params.label as string;
+    const variants = await listStageVariants(project, stage, label);
+    res.json({ variants });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 创建场景衍生变体
+assetsRouter.post('/assets/:project/stage/:stage/:label/variants', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const stage = req.params.stage as string;
+    const label = req.params.label as string;
+    const body = req.body as { id?: string; desc?: string };
+    if (!body.id || !body.desc) {
+      throw Object.assign(new Error('id 与 desc 必填'), { code: 'INVALID' });
+    }
+    const variant = await createStageVariant(project, stage, label, { id: body.id, desc: body.desc });
+    res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT 更新场景衍生变体
+assetsRouter.put('/assets/:project/stage/:stage/:label/variants/:variantId', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const stage = req.params.stage as string;
+    const label = req.params.label as string;
+    const variantId = req.params.variantId as string;
+    const body = req.body as { desc?: string };
+    const variant = await updateStageVariant(project, stage, label, variantId, body);
+    res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE 删除场景衍生变体
+assetsRouter.delete('/assets/:project/stage/:stage/:label/variants/:variantId', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const stage = req.params.stage as string;
+    const label = req.params.label as string;
+    const variantId = req.params.variantId as string;
+    await deleteStageVariant(project, stage, label, variantId);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});

@@ -206,14 +206,46 @@ function removeCharacter(name: string) {
   form.登场角色 = form.登场角色.filter((n) => n !== name)
 }
 
+/**
+ * 解析基础场景引用为 assert 路径。
+ * 支持 `场景/标签` 与 `场景/标签@变体`。
+ */
+function stageRefToAssertPath(ref: string): string | null {
+  const trimmed = ref.trim()
+  if (!trimmed) return null
+  const at = trimmed.indexOf('@')
+  const main = at >= 0 ? trimmed.slice(0, at) : trimmed
+  const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : ''
+  const slash = main.indexOf('/')
+  if (slash <= 0 || slash === main.length - 1) return null
+  const stage = main.slice(0, slash)
+  const label = main.slice(slash + 1)
+  if (variantId) {
+    return `assert/stage/${stage}/variants/${label}/${variantId}.jpg`
+  }
+  return `assert/stage/${stage}/${label}.jpg`
+}
+
+/**
+ * 解析角色引用为 assert 路径。
+ * 支持 `角色名` 与 `角色名@变体`。
+ */
+function characterRefToAssertPath(ref: string): string | null {
+  const trimmed = ref.trim()
+  if (!trimmed) return null
+  const at = trimmed.indexOf('@')
+  if (at < 0) return `assert/character/${trimmed}/appearance.jpg`
+  const name = trimmed.slice(0, at).trim()
+  const variantId = trimmed.slice(at + 1).trim()
+  if (!name || !variantId) return null
+  return `assert/character/${name}/variants/${variantId}.jpg`
+}
+
 async function refreshStagePreview(ref: string) {
   stagePreviewUrl.value = ''
   if (!ref) return
-  const slash = ref.indexOf('/')
-  if (slash <= 0) return
-  const stage = ref.slice(0, slash)
-  const label = ref.slice(slash + 1)
-  const path = `assert/stage/${stage}/${label}.jpg`
+  const path = stageRefToAssertPath(ref)
+  if (!path) return
   if (await existsFs(props.project, path)) {
     stagePreviewUrl.value = `/api/fs/${props.project}/${path}?t=${Date.now()}`
   }
@@ -223,7 +255,8 @@ async function refreshCharacterPreviews(names: string[]) {
   const next: Record<string, string> = {}
   const ts = Date.now()
   await Promise.all(names.map(async (name) => {
-    const path = `assert/character/${name}/appearance.jpg`
+    const path = characterRefToAssertPath(name)
+    if (!path) return
     if (await existsFs(props.project, path)) {
       next[name] = `/api/fs/${props.project}/${path}?t=${ts}`
     }

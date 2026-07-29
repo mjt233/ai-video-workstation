@@ -19,7 +19,7 @@
       <v-card-text>
         <v-text-field
           v-model="filter"
-          label="筛选角色"
+          label="筛选角色 / 变体"
           density="compact"
           variant="outlined"
           hide-details
@@ -46,9 +46,9 @@
         >
           <v-list-item
             v-for="item in filtered"
-            :key="item.name"
-            :active="isSelected(item.name)"
-            @click="toggle(item.name)"
+            :key="item.ref"
+            :active="isSelected(item.ref)"
+            @click="toggle(item.ref)"
           >
             <template #prepend>
               <v-avatar
@@ -69,8 +69,23 @@
                 </v-icon>
               </v-avatar>
             </template>
-            <v-list-item-title>{{ item.name }}</v-list-item-title>
+            <v-list-item-title>
+              {{ item.ref }}
+              <v-chip
+                v-if="item.isVariant"
+                size="x-small"
+                class="ml-1"
+                color="secondary"
+                variant="tonal"
+              >
+                变体
+              </v-chip>
+            </v-list-item-title>
             <v-list-item-subtitle>
+              <span
+                v-if="item.isVariant"
+                class="text-caption"
+              >{{ item.variantDesc || '衍生变体' }} · </span>
               <span
                 v-if="item.imageUrl"
                 class="text-success"
@@ -83,11 +98,11 @@
             <template #append>
               <v-checkbox-btn
                 v-if="multiple"
-                :model-value="isSelected(item.name)"
-                @click.stop="toggle(item.name)"
+                :model-value="isSelected(item.ref)"
+                @click.stop="toggle(item.ref)"
               />
               <v-icon
-                v-else-if="isSelected(item.name)"
+                v-else-if="isSelected(item.ref)"
                 color="primary"
               >
                 mdi-check
@@ -118,10 +133,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { existsFs, readFs, type DirResponse } from '../api/client'
+import { listCharacterVariants } from '../api/assets'
 
 interface CharacterOption {
+  /** 选择值：角色名 或 角色名@变体id */
+  ref: string
   name: string
   imageUrl: string
+  isVariant?: boolean
+  variantDesc?: string
 }
 
 const props = withDefaults(defineProps<{
@@ -147,22 +167,26 @@ const localSelected = ref<string[]>([])
 const filtered = computed(() => {
   const q = filter.value.trim().toLowerCase()
   if (!q) return options.value
-  return options.value.filter((o) => o.name.toLowerCase().includes(q))
+  return options.value.filter((o) =>
+    o.ref.toLowerCase().includes(q)
+    || o.name.toLowerCase().includes(q)
+    || (o.variantDesc ?? '').toLowerCase().includes(q),
+  )
 })
 
-function isSelected(name: string) {
-  return localSelected.value.includes(name)
+function isSelected(ref: string) {
+  return localSelected.value.includes(ref)
 }
 
-function toggle(name: string) {
+function toggle(ref: string) {
   if (props.multiple) {
-    if (isSelected(name)) {
-      localSelected.value = localSelected.value.filter((n) => n !== name)
+    if (isSelected(ref)) {
+      localSelected.value = localSelected.value.filter((n) => n !== ref)
     } else {
-      localSelected.value = [...localSelected.value, name]
+      localSelected.value = [...localSelected.value, ref]
     }
   } else {
-    localSelected.value = [name]
+    localSelected.value = [ref]
   }
 }
 
@@ -177,15 +201,32 @@ async function load() {
     const res = await readFs(props.project, 'prompt/character') as DirResponse
     const dirs = (res.entries ?? []).filter((e) => e.type === 'dir').map((e) => e.name)
     const ts = Date.now()
-    const items = await Promise.all(dirs.map(async (name) => {
+    const items: CharacterOption[] = []
+    await Promise.all(dirs.map(async (name) => {
       const path = `assert/character/${name}/appearance.jpg`
       const has = await existsFs(props.project, path)
-      return {
+      items.push({
+        ref: name,
         name,
         imageUrl: has ? `/api/fs/${props.project}/${path}?t=${ts}` : '',
+        isVariant: false,
+      })
+      try {
+        const { variants } = await listCharacterVariants(props.project, name)
+        for (const v of variants) {
+          items.push({
+            ref: v.ref,
+            name,
+            imageUrl: v.hasImage ? `/api/fs/${props.project}/${v.imagePath}?t=${ts}` : '',
+            isVariant: true,
+            variantDesc: v.desc,
+          })
+        }
+      } catch {
+        // ignore
       }
     }))
-    options.value = items.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+    options.value = items.sort((a, b) => a.ref.localeCompare(b.ref, 'zh'))
   } catch {
     options.value = []
   } finally {

@@ -87,6 +87,15 @@
           </v-col>
         </v-row>
 
+        <VariantPanel
+          v-if="selected"
+          :project="props.project"
+          kind="stage"
+          :owner="props.name"
+          :base-label="selected.label"
+          @refresh="load"
+        />
+
         <div
           v-if="!selected && loadError"
           class="text-grey mt-4"
@@ -162,6 +171,7 @@ import { useAutoComputeHeight } from '../composables/useAutoComputeHeight'
 import GenerateDialog from './GenerateDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
 import AssetImageUploadButton from './AssetImageUploadButton.vue'
+import VariantPanel from './VariantPanel.vue'
 
 interface SubScene {
   label: string

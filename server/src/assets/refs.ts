@@ -57,33 +57,57 @@ async function readJsonArray<T>(filePath: string): Promise<T[] | null> {
   }
 }
 
+function characterRefMatches(ref: string, name: string): boolean {
+  const trimmed = (ref ?? '').trim();
+  if (!trimmed) return false;
+  if (trimmed === name) return true;
+  // 角色名@变体id
+  return trimmed.startsWith(`${name}@`);
+}
+
 export async function findCharacterRefs(project: string, name: string): Promise<AssetRef[]> {
   const refs: AssetRef[] = [];
   for (const { episode, shot, dir } of await walkShots(project)) {
     const stages = await readJsonArray<StageEntry>(path.join(dir, 'stage.json'));
     if (stages) {
       for (const s of stages) {
-        if ((s.登场角色 ?? []).includes(name)) {
+        if ((s.登场角色 ?? []).some((c) => characterRefMatches(c, name))) {
           refs.push({ episode, shot, file: 'stage.json', detail: '登场角色' });
           break;
         }
       }
     }
     const scripts = await readJsonArray<ScriptEntry>(path.join(dir, 'script.json'));
-    if (scripts?.some(s => s.角色名 === name)) {
+    if (scripts?.some(s => s.角色名 === name || characterRefMatches(String(s.角色名 ?? ''), name))) {
       refs.push({ episode, shot, file: 'script.json', detail: '角色名' });
     }
   }
   return refs;
 }
 
+function stageRefMatchesStage(ref: string, stageName: string): boolean {
+  const trimmed = (ref ?? '').trim();
+  if (!trimmed) return false;
+  if (trimmed === stageName) return true;
+  // 场景名/标签 或 场景名/标签@变体
+  return trimmed.startsWith(`${stageName}/`);
+}
+
+function stageRefMatchesSubscene(ref: string, stageName: string, label: string): boolean {
+  const trimmed = (ref ?? '').trim();
+  if (!trimmed) return false;
+  const full = `${stageName}/${label}`;
+  if (trimmed === full) return true;
+  // 场景名/标签@变体id
+  return trimmed.startsWith(`${full}@`);
+}
+
 export async function findStageRefs(project: string, stageName: string): Promise<AssetRef[]> {
-  const prefix = `${stageName}/`;
   const refs: AssetRef[] = [];
   for (const { episode, shot, dir } of await walkShots(project)) {
     const stages = await readJsonArray<StageEntry>(path.join(dir, 'stage.json'));
     if (!stages) continue;
-    if (stages.some(s => (s.基础场景 ?? '').startsWith(prefix) || s.基础场景 === stageName)) {
+    if (stages.some(s => stageRefMatchesStage(s.基础场景 ?? '', stageName))) {
       refs.push({ episode, shot, file: 'stage.json', detail: '基础场景' });
     }
   }
@@ -91,12 +115,11 @@ export async function findStageRefs(project: string, stageName: string): Promise
 }
 
 export async function findSubsceneRefs(project: string, stageName: string, label: string): Promise<AssetRef[]> {
-  const full = `${stageName}/${label}`;
   const refs: AssetRef[] = [];
   for (const { episode, shot, dir } of await walkShots(project)) {
     const stages = await readJsonArray<StageEntry>(path.join(dir, 'stage.json'));
     if (!stages) continue;
-    if (stages.some(s => s.基础场景 === full)) {
+    if (stages.some(s => stageRefMatchesSubscene(s.基础场景 ?? '', stageName, label))) {
       refs.push({ episode, shot, file: 'stage.json', detail: '基础场景' });
     }
   }

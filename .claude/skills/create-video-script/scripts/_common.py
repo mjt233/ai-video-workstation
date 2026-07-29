@@ -129,16 +129,57 @@ def write_json(path: Path, data: Any) -> None:
 
 def get_stage_asset_path(stage_ref: str, project_name: str, project_root: Optional[str] = None) -> Path:
     """
-    根据 stage_ref（如 "现代商场/现代商场-白天-平视-晴-中央扶梯"）
-    解析对应的场景资产 .md 文件路径。
-    路径规则：design/{project_name}/prompt/stage/{stage_ref}.md
+    根据 stage_ref（如 "现代商场/现代商场-白天-平视-晴-中央扶梯"
+    或衍生变体 "现代商场/现代商场-白天-平视-正门入口@门已打开"）
+    解析对应的场景资产路径。
+
+    - 基础场景：design/{project}/prompt/stage/{场景名}/{标签}.md
+    - 衍生变体：design/{project}/prompt/stage/{场景名}/variants/{标签}/{变体id}.json
     """
-    return get_project_dir(project_name, project_root) / "prompt" / "stage" / f"{stage_ref}.md"
+    ref = (stage_ref or "").strip()
+    at = ref.find("@")
+    main = ref[:at] if at >= 0 else ref
+    variant_id = ref[at + 1:].strip() if at >= 0 else ""
+    # main 形如 场景名/标签（使用正斜杠）
+    parts = [p for p in main.replace("\\", "/").split("/") if p]
+    base = get_project_dir(project_name, project_root) / "prompt" / "stage"
+    if variant_id:
+        if len(parts) < 2:
+            # 非法引用，返回一个不存在的路径供 exists 检查失败
+            return base / "__invalid__" / f"{variant_id}.json"
+        stage_name, label = parts[0], "/".join(parts[1:])
+        return base / stage_name / "variants" / label / f"{variant_id}.json"
+    return base.joinpath(*parts[:-1], f"{parts[-1]}.md") if parts else base / "__invalid__.md"
 
 
 def get_character_dir(character_name: str, project_name: str, project_root: Optional[str] = None) -> Path:
-    """获取指定角色资产目录路径。"""
-    return get_project_dir(project_name, project_root) / "prompt" / "character" / character_name
+    """获取指定角色资产目录路径（忽略 @变体 后缀）。"""
+    name = (character_name or "").strip()
+    at = name.find("@")
+    base = name[:at].strip() if at >= 0 else name
+    return get_project_dir(project_name, project_root) / "prompt" / "character" / base
+
+
+def get_character_variant_meta_path(
+    character_ref: str, project_name: str, project_root: Optional[str] = None
+) -> Optional[Path]:
+    """若引用含 @变体，返回变体 meta JSON 路径，否则 None。"""
+    ref = (character_ref or "").strip()
+    at = ref.find("@")
+    if at < 0:
+        return None
+    name = ref[:at].strip()
+    variant_id = ref[at + 1:].strip()
+    if not name or not variant_id:
+        return None
+    return (
+        get_project_dir(project_name, project_root)
+        / "prompt"
+        / "character"
+        / name
+        / "variants"
+        / f"{variant_id}.json"
+    )
 
 
 def list_projects(project_root: Optional[str] = None) -> list[str]:
@@ -168,7 +209,7 @@ def list_episodes(project_name: str, project_root: Optional[str] = None) -> list
 
 
 def validate_stage_ref(stage_ref: str, project_name: str, project_root: Optional[str] = None) -> bool:
-    """检查场景引用是否存在对应的资产文件。"""
+    """检查场景引用是否存在对应的资产文件（支持基础场景与衍生变体）。"""
     path = get_stage_asset_path(stage_ref, project_name, project_root)
     exists = path.exists()
     if not exists:
@@ -177,12 +218,17 @@ def validate_stage_ref(stage_ref: str, project_name: str, project_root: Optional
 
 
 def validate_character_ref(character_name: str, project_name: str, project_root: Optional[str] = None) -> bool:
-    """检查角色引用是否存在对应的资产目录。"""
+    """检查角色引用是否存在对应的资产目录（支持 角色名@变体）。"""
     path = get_character_dir(character_name, project_name, project_root)
     exists = path.exists()
     if not exists:
         print(f"⚠️  角色资产不存在: {path}", file=sys.stderr)
-    return exists
+        return False
+    variant_meta = get_character_variant_meta_path(character_name, project_name, project_root)
+    if variant_meta is not None and not variant_meta.exists():
+        print(f"⚠️  角色衍生变体不存在: {variant_meta}", file=sys.stderr)
+        return False
+    return True
 
 
 def get_project_config_path(project_name: str, project_root: Optional[str] = None) -> Path:

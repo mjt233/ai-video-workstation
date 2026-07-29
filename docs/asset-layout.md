@@ -55,10 +55,22 @@ prompt/
 | 文件 | 用途 |
 |------|------|
 | `overview.md` | 姓名、性别、年龄、性格、背景、关系 |
-| `appearance.md` | 三视角全身图要求 + 结构化外貌描述，供 `character-appearance` |
-| `voice.md` | 1–3 句自然语言声线描述，供 `character-voice` / `scene-tts` |
+| `appearance.md` | 三视角全身图要求 + 结构化外貌描述，供 `text-to-image`（角色外观） |
+| `voice.md` | 1–3 句自然语言声线描述，供 `tts-voice-design`（角色声音 / 分镜台词） |
 
 创建角色时会按模板生成上述三个文件；目录名即角色唯一 ID。
+
+#### 衍生变体（角色）
+
+```
+prompt/character/{角色名}/variants/{变体id}.json
+assert/character/{角色名}/variants/{变体id}.jpg
+```
+
+- 不出现在资产浏览器树中，仅在角色详情「衍生变体」页管理
+- 生成使用 **图片编辑** 工作流（`image-edit`，purpose=`variant-edit`）
+- 分镜引用：`{角色名}@{变体id}`
+
 
 ### 2.2 场景 `prompt/stage/{场景名}/`
 
@@ -74,7 +86,19 @@ prompt/
 示例：`便利店内部-夜晚-平视-冷白霓虹-收银台`
 
 子场景 Markdown 通常包含：时间、角度、天气/光线、画面描述、主色调。  
-该文件供 `stage-image` 文生图使用。
+该文件供 `text-to-image`（场景图）使用。
+
+#### 衍生变体（场景）
+
+```
+prompt/stage/{场景名}/variants/{完整场景标签}/{变体id}.json
+assert/stage/{场景名}/variants/{完整场景标签}/{变体id}.jpg
+```
+
+- 不出现在资产浏览器树中，仅在子场景详情中管理
+- 创建时填写衍生描述（图片编辑提示词）；图片需手动/批量生成
+- 分镜引用：`{场景名}/{完整场景标签}@{变体id}`
+
 
 ### 2.3 分镜 `prompt/scene/{集数}/{分镜}/`
 
@@ -128,7 +152,7 @@ prompt/
 
 | 规则 | 说明 |
 |------|------|
-| `基础场景` 必填 | 格式 `场景名/标签`，对应 `prompt/stage/{场景名}/{标签}.md` 与 `assert/stage/{场景名}/{标签}.jpg` |
+| `基础场景` 必填 | 格式 `场景名/标签` 或 `场景名/标签@变体id`；变体对应 `prompt/.../variants/...` 与 `assert/.../variants/...` |
 | 直接引用 | `登场角色` 与 `prompt` **同时为空**：引擎复制基础场景图，不调用图像编辑 |
 | 合成/修改 | `prompt` 必填；有角色时角色须存在，且 `登场角色` 长度建议 ≤ 2 |
 | 禁止 | 仅有角色、`prompt` 为空 |

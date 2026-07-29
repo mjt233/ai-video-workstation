@@ -246,3 +246,124 @@ export async function uploadAssetImage(
     return data as { success: boolean; path: string; archived: string | null }
   } catch (e) { rethrow(e) }
 }
+
+
+// ── 衍生变体 ────────────────────────────────────────────────────────
+
+export interface VariantInfo {
+  id: string
+  desc: string
+  baseImage?: string
+  createdAt?: string
+  updatedAt?: string
+  kind: 'character' | 'stage'
+  owner: string
+  baseLabel?: string
+  metaPath: string
+  imagePath: string
+  hasImage: boolean
+  ref: string
+}
+
+export async function listCharacterVariants(project: string, name: string) {
+  try {
+    const { data } = await client.get(`/assets/${project}/character/${encodeURIComponent(name)}/variants`)
+    return data as { variants: VariantInfo[] }
+  } catch (e) { rethrow(e) }
+}
+
+export async function createCharacterVariant(
+  project: string,
+  name: string,
+  body: { id: string; desc: string },
+) {
+  try {
+    const { data } = await client.post(
+      `/assets/${project}/character/${encodeURIComponent(name)}/variants`,
+      body,
+    )
+    return data as { success: boolean; variant: VariantInfo }
+  } catch (e) { rethrow(e) }
+}
+
+export async function updateCharacterVariant(
+  project: string,
+  name: string,
+  variantId: string,
+  body: { desc?: string },
+) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/character/${encodeURIComponent(name)}/variants/${encodeURIComponent(variantId)}`,
+      body,
+    )
+    return data as { success: boolean; variant: VariantInfo }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteCharacterVariant(
+  project: string,
+  name: string,
+  variantId: string,
+) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/character/${encodeURIComponent(name)}/variants/${encodeURIComponent(variantId)}`,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export async function listStageVariants(project: string, stage: string, label: string) {
+  try {
+    const { data } = await client.get(
+      `/assets/${project}/stage/${encodeURIComponent(stage)}/${encodeURIComponent(label)}/variants`,
+    )
+    return data as { variants: VariantInfo[] }
+  } catch (e) { rethrow(e) }
+}
+
+export async function createStageVariant(
+  project: string,
+  stage: string,
+  label: string,
+  body: { id: string; desc: string },
+) {
+  try {
+    const { data } = await client.post(
+      `/assets/${project}/stage/${encodeURIComponent(stage)}/${encodeURIComponent(label)}/variants`,
+      body,
+    )
+    return data as { success: boolean; variant: VariantInfo }
+  } catch (e) { rethrow(e) }
+}
+
+export async function updateStageVariant(
+  project: string,
+  stage: string,
+  label: string,
+  variantId: string,
+  body: { desc?: string },
+) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/stage/${encodeURIComponent(stage)}/${encodeURIComponent(label)}/variants/${encodeURIComponent(variantId)}`,
+      body,
+    )
+    return data as { success: boolean; variant: VariantInfo }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteStageVariant(
+  project: string,
+  stage: string,
+  label: string,
+  variantId: string,
+) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/stage/${encodeURIComponent(stage)}/${encodeURIComponent(label)}/variants/${encodeURIComponent(variantId)}`,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}

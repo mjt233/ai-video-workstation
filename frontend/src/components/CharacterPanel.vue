@@ -13,6 +13,9 @@
       <v-tab value="voice">
         声音
       </v-tab>
+      <v-tab value="variants">
+        衍生变体
+      </v-tab>
     </v-tabs>
 
     <v-tabs-window v-model="tab">
@@ -129,6 +132,14 @@
           </v-btn>
         </div>
       </v-tabs-window-item>
+
+      <v-tabs-window-item value="variants">
+        <VariantPanel
+          :project="props.project"
+          kind="character"
+          :owner="props.name"
+        />
+      </v-tabs-window-item>
     </v-tabs-window>
 
     <GenerateDialog
@@ -182,6 +193,7 @@
     </v-dialog>
   </div>
 </template>
+import VariantPanel from './VariantPanel.vue'
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
