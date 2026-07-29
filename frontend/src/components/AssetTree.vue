@@ -1,10 +1,11 @@
 <template>
   <div>
     <v-treeview
+      v-model:activated="activated"
+      v-model:opened="opened"
       :items="treeItems"
       item-title="name"
       item-value="path"
-      return-object
       color="primary"
       hoverable
       open-on-click
@@ -125,8 +126,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { nextTick, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { readFs, type DirResponse } from '../api/client'
 import {
   AssetApiError,
@@ -166,9 +167,12 @@ interface TreeItem {
 
 const props = defineProps<{ project: string }>()
 const emit = defineEmits<{ refresh: [] }>()
+const route = useRoute()
 const router = useRouter()
 
 const treeItems = ref<TreeItem[]>([])
+const activated = ref<string[]>([])
+const opened = ref<string[]>([])
 const deleting = ref(false)
 
 const createDialog = reactive({
@@ -341,6 +345,8 @@ async function buildTree() {
 
 async function rebuildAndRefresh() {
   await buildTree()
+  await nextTick()
+  syncTreeSelectionFromRoute()
   emit('refresh')
 }
 
@@ -366,10 +372,87 @@ function applyShotRenames(renames?: RenamePair[]) {
   }
 }
 
+function findItemByPath(items: TreeItem[], path: string): TreeItem | null {
+  for (const item of items) {
+    if (item.path === path) return item
+    if (item.children) {
+      const found = findItemByPath(item.children, path)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/** 根据当前 URL 查询参数，计算应激活的节点 path 及其祖先展开 path */
+function resolveSelectionFromRoute(): { activePath: string | null; openPaths: string[] } {
+  const type = route.query.type as string | undefined
+  const name = route.query.name as string | undefined
+  const subscene = route.query.subscene as string | undefined
+  const episode = route.query.episode as string | undefined
+  const shot = route.query.shot as string | undefined
+
+  if (type === 'project') {
+    return { activePath: 'project-info', openPaths: [] }
+  }
+
+  if (type === 'character' && name) {
+    return {
+      activePath: `character-${name}`,
+      openPaths: ['root-character'],
+    }
+  }
+
+  if (type === 'stage' && name) {
+    if (subscene) {
+      return {
+        activePath: `subscene-${name}-${subscene}`,
+        openPaths: ['root-stage', `stage-${name}`],
+      }
+    }
+    return {
+      activePath: `stage-${name}`,
+      openPaths: ['root-stage'],
+    }
+  }
+
+  if (type === 'scene' && episode && shot) {
+    return {
+      activePath: `scene-${episode}-${shot}`,
+      openPaths: ['root-scene', `episode-${episode}`],
+    }
+  }
+
+  if (type === 'scene' && episode) {
+    return {
+      activePath: `episode-${episode}`,
+      openPaths: ['root-scene'],
+    }
+  }
+
+  return { activePath: null, openPaths: [] }
+}
+
+function syncTreeSelectionFromRoute() {
+  const { activePath, openPaths } = resolveSelectionFromRoute()
+
+  // 合并展开路径，避免用户手动展开的其它分支被强制收起
+  const openSet = new Set(opened.value)
+  for (const p of openPaths) openSet.add(p)
+  opened.value = [...openSet]
+
+  if (activePath && findItemByPath(treeItems.value, activePath)) {
+    activated.value = [activePath]
+  } else if (!activePath) {
+    activated.value = []
+  }
+}
+
 function onSelect(items: unknown) {
-  const selected = (Array.isArray(items) ? items : items ? [items] : []) as TreeItem[]
+  const selected = (Array.isArray(items) ? items : items ? [items] : []) as string[]
   if (!selected.length) return
-  const item = selected[0]
+  const path = selected[0]
+  if (!path) return
+  const item = findItemByPath(treeItems.value, path)
   if (!item) return
 
   if (item.kind === 'project-info') {
@@ -584,5 +667,24 @@ async function doDelete() {
   }
 }
 
-watch(() => props.project, buildTree, { immediate: true })
+watch(() => props.project, async () => {
+  await buildTree()
+  await nextTick()
+  syncTreeSelectionFromRoute()
+}, { immediate: true })
+
+// URL 变化时（刷新、前进后退、详情内跳转）同步树的展开与高亮
+watch(
+  () => [
+    route.query.type,
+    route.query.name,
+    route.query.subscene,
+    route.query.episode,
+    route.query.shot,
+  ],
+  () => {
+    if (!treeItems.value.length) return
+    syncTreeSelectionFromRoute()
+  },
+)
 </script>
