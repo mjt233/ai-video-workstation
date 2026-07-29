@@ -13,9 +13,6 @@
       <v-tab value="voice">
         声音
       </v-tab>
-      <v-tab value="variants">
-        衍生变体
-      </v-tab>
     </v-tabs>
 
     <v-tabs-window v-model="tab">
@@ -82,6 +79,12 @@
             </div>
           </v-col>
         </v-row>
+
+        <VariantPanel
+          :project="props.project"
+          kind="character"
+          :owner="props.name"
+        />
       </v-tabs-window-item>
 
       <v-tabs-window-item value="voice">
@@ -131,14 +134,6 @@
             历史版本
           </v-btn>
         </div>
-      </v-tabs-window-item>
-
-      <v-tabs-window-item value="variants">
-        <VariantPanel
-          :project="props.project"
-          kind="character"
-          :owner="props.name"
-        />
       </v-tabs-window-item>
     </v-tabs-window>
 
@@ -193,7 +188,6 @@
     </v-dialog>
   </div>
 </template>
-import VariantPanel from './VariantPanel.vue'
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
@@ -202,6 +196,7 @@ import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
 import AssetImageUploadButton from './AssetImageUploadButton.vue'
+import VariantPanel from './VariantPanel.vue'
 
 interface DialogState {
   show: boolean

@@ -1,19 +1,20 @@
 <template>
   <div class="mt-4">
-    <div class="d-flex align-center mb-2">
+    <div>
       <div class="text-subtitle-2">
         衍生变体
       </div>
-      <v-spacer />
-      <v-btn
-        size="small"
-        color="primary"
-        variant="tonal"
-        prepend-icon="mdi-plus"
-        @click="openCreate"
-      >
-        创建衍生变体
-      </v-btn>
+      <div class="mb-2 mt-1">
+        <v-btn
+          size="small"
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-plus"
+          icon="mdi-plus"
+          title="创建衍生变体"
+          @click="openCreate"
+        />
+      </div>
     </div>
 
     <div
@@ -31,88 +32,116 @@
     >
       暂无衍生变体。可为当前{{ kindLabel }}创建变体（如图片编辑描述「门已打开」），生成时使用图片编辑工作流。
     </div>
-    <v-row v-else>
+    <v-row
+      v-else
+      style="width: 90%;"
+      dense
+    >
       <v-col
         v-for="v in variants"
         :key="v.id"
-        cols="12"
-        md="6"
+        cols="6"
+        sm="4"
+        md="3"
+        lg="2"
       >
         <v-card
           variant="outlined"
-          class="pa-3"
+          class="variant-card"
         >
-          <div class="d-flex align-center mb-2">
-            <div class="text-body-1 font-weight-medium">
-              {{ v.id }}
-            </div>
-            <v-chip
-              size="x-small"
-              class="ml-2"
-              :color="v.hasImage ? 'success' : 'grey'"
-              variant="tonal"
-            >
-              {{ v.hasImage ? '已有图' : '未生成' }}
-            </v-chip>
-            <v-spacer />
-            <v-btn
-              size="x-small"
-              variant="text"
-              icon="mdi-pencil"
-              @click="openEdit(v)"
-            />
-            <v-btn
-              size="x-small"
-              variant="text"
-              color="error"
-              icon="mdi-delete"
-              @click="onDelete(v)"
-            />
-          </div>
-          <div
-            class="text-body-2 text-medium-emphasis mb-2"
-            style="white-space: pre-wrap;"
-          >
-            {{ v.desc }}
-          </div>
-          <div class="d-flex justify-center mb-2">
+          <div class="variant-media">
             <v-img
               v-if="imageUrls[v.id]"
               :src="imageUrls[v.id]"
-              max-height="180"
+              aspect-ratio="1"
               contain
+              class="variant-image variant-image--clickable"
+              title="点击放大查看"
+              @click="openPreview(v)"
             />
             <div
               v-else
-              class="text-grey text-caption"
+              class="variant-placeholder text-grey text-caption"
             >
               暂无图片
             </div>
+
+            <div class="variant-actions">
+              <v-btn
+                size="x-small"
+                variant="flat"
+                icon="mdi-magnify"
+                title="放大查看"
+                :disabled="!imageUrls[v.id]"
+                @click.stop="openPreview(v)"
+              />
+              <v-btn
+                size="x-small"
+                color="primary"
+                variant="flat"
+                icon="mdi-auto-fix"
+                title="生成图片"
+                @click.stop="openGenerate(v)"
+              />
+              <AssetImageUploadButton
+                :project="project"
+                :asset-path="v.imagePath"
+                icon-only
+                size="x-small"
+                variant="flat"
+                icon="mdi-upload"
+                label="上传图片"
+                @uploaded="reload"
+              />
+              <v-btn
+                size="x-small"
+                variant="flat"
+                icon="mdi-history"
+                title="历史版本"
+                :disabled="!v.hasImage"
+                @click.stop="openHistory(v)"
+              />
+              <v-btn
+                size="x-small"
+                variant="flat"
+                icon="mdi-pencil"
+                title="编辑描述"
+                @click.stop="openEdit(v)"
+              />
+              <v-btn
+                size="x-small"
+                variant="flat"
+                color="error"
+                icon="mdi-delete"
+                title="删除"
+                @click.stop="onDelete(v)"
+              />
+            </div>
           </div>
-          <div class="d-flex flex-wrap ga-2 justify-center">
-            <v-btn
-              size="small"
-              color="primary"
-              variant="tonal"
-              prepend-icon="mdi-auto-fix"
-              @click="openGenerate(v)"
+
+          <div class="pa-2">
+            <div class="d-flex align-center ga-1 mb-1">
+              <div
+                class="text-body-2 font-weight-medium text-truncate"
+                :title="v.id"
+              >
+                {{ v.id }}
+              </div>
+              <v-chip
+                size="x-small"
+                :color="v.hasImage ? 'success' : 'grey'"
+                variant="tonal"
+                class="flex-shrink-0"
+              >
+                {{ v.hasImage ? '已有图' : '未生成' }}
+              </v-chip>
+            </div>
+            <div
+              class="text-caption text-medium-emphasis variant-desc"
+              :title="v.desc"
             >
-              生成图片
-            </v-btn>
-            <AssetImageUploadButton
-              :project="project"
-              :asset-path="v.imagePath"
-              @uploaded="reload"
-            />
-            <v-btn
-              size="small"
-              variant="text"
-              prepend-icon="mdi-history"
-              :disabled="!v.hasImage"
-              @click="openHistory(v)"
-            >
-              历史
-            </v-btn>
+              {{ v.desc }}
+            </div>
           </div>
         </v-card>
       </v-col>
@@ -192,6 +221,42 @@
       :asset-path="historyDialog.path"
       @activated="reload"
     />
+
+    <v-dialog
+      v-model="previewDialog.show"
+      max-width="960"
+    >
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <span class="text-truncate">{{ previewDialog.title }}</span>
+          <v-spacer />
+          <v-btn
+            icon="mdi-close"
+            variant="text"
+            size="small"
+            title="关闭"
+            @click="previewDialog.show = false"
+          />
+        </v-card-title>
+        <v-card-text class="pt-0">
+          <div class="variant-preview-wrap d-flex justify-center align-center">
+            <v-img
+              v-if="previewDialog.url"
+              :src="previewDialog.url"
+              max-height="80vh"
+              contain
+            />
+          </div>
+          <div
+            v-if="previewDialog.desc"
+            class="text-body-2 text-medium-emphasis mt-3"
+            style="white-space: pre-wrap;"
+          >
+            {{ previewDialog.desc }}
+          </div>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -251,6 +316,20 @@ const genDialog = reactive({
 const historyDialog = reactive({
   show: false,
   path: '',
+})
+
+/**
+ * 变体图片放大预览对话框状态。
+ * @property show 是否显示预览
+ * @property title 预览标题（变体名称）
+ * @property url 预览图片 URL
+ * @property desc 变体描述文案
+ */
+const previewDialog = reactive({
+  show: false,
+  title: '',
+  url: '',
+  desc: '',
 })
 
 async function reload() {
@@ -391,6 +470,19 @@ function openHistory(v: VariantInfo) {
   historyDialog.show = true
 }
 
+/**
+ * 打开变体图片放大预览。
+ * @param v 目标变体信息
+ */
+function openPreview(v: VariantInfo) {
+  const url = imageUrls.value[v.id]
+  if (!url) return
+  previewDialog.title = v.id
+  previewDialog.url = url
+  previewDialog.desc = v.desc
+  previewDialog.show = true
+}
+
 watch(
   () => [props.project, props.kind, props.owner, props.baseLabel] as const,
   () => { void reload() },
@@ -399,3 +491,71 @@ watch(
 
 defineExpose({ reload })
 </script>
+
+<style scoped>
+.variant-card {
+  overflow: hidden;
+  height: 100%;
+}
+
+.variant-media {
+  position: relative;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  min-height: 120px;
+}
+
+.variant-image {
+  width: 100%;
+}
+
+.variant-image--clickable {
+  cursor: zoom-in;
+}
+
+.variant-preview-wrap {
+  min-height: 240px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.variant-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  min-height: 120px;
+}
+
+.variant-actions {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.variant-card:hover .variant-actions,
+.variant-card:focus-within .variant-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.variant-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  word-break: break-word;
+  min-height: 2.4em;
+}
+</style>

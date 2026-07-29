@@ -8,16 +8,28 @@
       @change="onFileChange"
     >
     <v-btn
+      v-if="iconOnly"
       :size="size"
       :variant="variant"
       :color="color"
-      prepend-icon="mdi-upload"
+      :icon="iconOnly ? icon : undefined"
+      :prepend-icon="iconOnly ? undefined : icon"
       :loading="uploading"
       :disabled="disabled || uploading"
+      :title="label"
       @click="openPicker"
-    >
-      {{ label }}
-    </v-btn>
+    />
+    <v-btn
+      v-else
+      :size="size"
+      :variant="variant"
+      :color="color"
+      :icon="icon"
+      :loading="uploading"
+      :disabled="disabled || uploading"
+      :title="label"
+      @click="openPicker"
+    />
   </span>
 </template>
 
@@ -29,17 +41,24 @@ const props = withDefaults(defineProps<{
   project: string
   /** 目标 assert 相对路径，如 assert/character/陈书文/appearance.jpg */
   assetPath: string
+  /** 按钮文案；iconOnly 时作为 title 提示 */
   label?: string
   size?: string | number
   variant?: 'flat' | 'text' | 'elevated' | 'outlined' | 'plain' | 'tonal'
   color?: string
   disabled?: boolean
+  /** 是否仅显示图标按钮 */
+  iconOnly?: boolean
+  /** 图标名称 */
+  icon?: string
 }>(), {
   label: '上传图片',
   size: 'small',
   variant: 'tonal',
   color: undefined,
   disabled: false,
+  iconOnly: false,
+  icon: 'mdi-upload',
 })
 
 const emit = defineEmits<{
