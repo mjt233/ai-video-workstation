@@ -138,7 +138,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [boolean]
-  confirm: [string]
+  /**
+   * 确认选择。
+   * @param payload.ref 场景引用（含可选 @变体）
+   * @param payload.imageUrl 已探测到的设定图 URL（无图时为空串）
+   */
+  confirm: [payload: { ref: string; imageUrl: string }]
 }>()
 
 const loading = ref(false)
@@ -157,7 +162,11 @@ const filtered = computed(() => {
 
 function confirm() {
   if (!localSelected.value) return
-  emit('confirm', localSelected.value)
+  const selected = options.value.find((o) => o.ref === localSelected.value)
+  emit('confirm', {
+    ref: localSelected.value,
+    imageUrl: selected?.imageUrl ?? '',
+  })
   emit('update:modelValue', false)
 }
 

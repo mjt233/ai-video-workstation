@@ -156,7 +156,12 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [boolean]
-  confirm: [string[]]
+  /**
+   * 确认选择。
+   * @param refs 角色引用列表（可含 @变体）
+   * @param imageUrls 引用 → 已探测图片 URL
+   */
+  confirm: [refs: string[], imageUrls: Record<string, string>]
 }>()
 
 const loading = ref(false)
@@ -191,7 +196,13 @@ function toggle(ref: string) {
 }
 
 function confirm() {
-  emit('confirm', [...localSelected.value])
+  const refs = [...localSelected.value]
+  const imageUrls: Record<string, string> = {}
+  for (const ref of refs) {
+    const opt = options.value.find((o) => o.ref === ref)
+    if (opt?.imageUrl) imageUrls[ref] = opt.imageUrl
+  }
+  emit('confirm', refs, imageUrls)
   emit('update:modelValue', false)
 }
 

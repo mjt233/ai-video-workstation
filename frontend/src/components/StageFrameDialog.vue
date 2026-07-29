@@ -241,9 +241,21 @@ function characterRefToAssertPath(ref: string): string | null {
   return `assert/character/${name}/variants/${variantId}.jpg`
 }
 
-async function refreshStagePreview(ref: string) {
+/**
+ * 刷新基础场景预览。
+ * @param ref 场景引用
+ * @param knownImageUrl 选择器已探测到的图片 URL（优先使用，避免二次 HEAD 失败误判）
+ */
+async function refreshStagePreview(ref: string, knownImageUrl?: string) {
+  if (!ref) {
+    stagePreviewUrl.value = ''
+    return
+  }
+  if (knownImageUrl) {
+    stagePreviewUrl.value = knownImageUrl
+    return
+  }
   stagePreviewUrl.value = ''
-  if (!ref) return
   const path = stageRefToAssertPath(ref)
   if (!path) return
   if (await existsFs(props.project, path)) {
@@ -251,10 +263,23 @@ async function refreshStagePreview(ref: string) {
   }
 }
 
-async function refreshCharacterPreviews(names: string[]) {
+/**
+ * 刷新登场角色预览图。
+ * @param names 角色引用列表（可含 @变体）
+ * @param knownImageUrls 选择器已探测到的图片 URL 映射
+ */
+async function refreshCharacterPreviews(
+  names: string[],
+  knownImageUrls?: Record<string, string>,
+) {
   const next: Record<string, string> = {}
   const ts = Date.now()
   await Promise.all(names.map(async (name) => {
+    const known = knownImageUrls?.[name]
+    if (known) {
+      next[name] = known
+      return
+    }
     const path = characterRefToAssertPath(name)
     if (!path) return
     if (await existsFs(props.project, path)) {
@@ -264,14 +289,29 @@ async function refreshCharacterPreviews(names: string[]) {
   characterPreviewUrls.value = next
 }
 
-function onStagePicked(ref: string) {
-  form.基础场景 = ref
-  void refreshStagePreview(ref)
+/**
+ * 选择器确认基础场景。
+ * @param payload 引用与可选已有图 URL
+ */
+function onStagePicked(payload: { ref: string; imageUrl: string } | string) {
+  // 兼容旧签名（仅 string）
+  if (typeof payload === 'string') {
+    form.基础场景 = payload
+    void refreshStagePreview(payload)
+    return
+  }
+  form.基础场景 = payload.ref
+  void refreshStagePreview(payload.ref, payload.imageUrl || undefined)
 }
 
-function onCharactersPicked(names: string[]) {
+/**
+ * 选择器确认登场角色。
+ * @param names 角色引用列表
+ * @param imageUrls 可选：引用 → 图片 URL
+ */
+function onCharactersPicked(names: string[], imageUrls?: Record<string, string>) {
   form.登场角色 = names
-  void refreshCharacterPreviews(names)
+  void refreshCharacterPreviews(names, imageUrls)
 }
 
 async function submit() {

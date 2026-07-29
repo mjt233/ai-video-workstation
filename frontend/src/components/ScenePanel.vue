@@ -916,22 +916,68 @@ function isDirectStageRef(stage: Pick<StageDefinition, '登场角色' | 'prompt'
   return !(stage.登场角色?.length) && !(stage.prompt ?? '').trim()
 }
 
-/** 基础场景引用格式：场景名/子场景标签 */
-function parseStageRef(ref: string): { name: string; label: string } | null {
+/**
+ * 解析基础场景引用。
+ * 支持 `场景名/标签` 与 `场景名/标签@变体id`。
+ */
+function parseStageRef(ref: string): {
+  name: string
+  label: string
+  variantId?: string
+  assertPath: string
+} | null {
   if (!ref) return null
-  const idx = ref.indexOf('/')
-  if (idx <= 0 || idx >= ref.length - 1) return null
-  return { name: ref.slice(0, idx), label: ref.slice(idx + 1) }
+  const trimmed = ref.trim()
+  const at = trimmed.indexOf('@')
+  const main = at >= 0 ? trimmed.slice(0, at) : trimmed
+  const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : ''
+  const idx = main.indexOf('/')
+  if (idx <= 0 || idx >= main.length - 1) return null
+  const name = main.slice(0, idx)
+  const label = main.slice(idx + 1)
+  if (!name || !label) return null
+  if (variantId) {
+    return {
+      name,
+      label,
+      variantId,
+      assertPath: `assert/stage/${name}/variants/${label}/${variantId}.jpg`,
+    }
+  }
+  return {
+    name,
+    label,
+    assertPath: `assert/stage/${name}/${label}.jpg`,
+  }
+}
+
+/**
+ * 解析角色引用为 assert 路径。
+ * 支持 `角色名` 与 `角色名@变体id`。
+ */
+function characterRefToAssertPath(ref: string): string | null {
+  const trimmed = (ref ?? '').trim()
+  if (!trimmed) return null
+  const at = trimmed.indexOf('@')
+  if (at < 0) return `assert/character/${trimmed}/appearance.jpg`
+  const name = trimmed.slice(0, at).trim()
+  const variantId = trimmed.slice(at + 1).trim()
+  if (!name || !variantId) return null
+  return `assert/character/${name}/variants/${variantId}.jpg`
 }
 
 function openStageAssetGen(stageRef: string) {
   const parsed = parseStageRef(stageRef)
   if (!parsed) return
+  // 变体图在场景详情中生成；此处仅为基础场景设定图快捷入口
+  if (parsed.variantId) return
   refGenDialog.value = { show: true, type: 'stage', name: parsed.name, label: parsed.label }
 }
 
 function openCharacterAssetGen(charName: string) {
   if (!charName) return
+  // 变体图在角色详情中生成
+  if (charName.includes('@')) return
   refGenDialog.value = { show: true, type: 'character', name: charName, label: '' }
 }
 
@@ -953,13 +999,13 @@ async function loadRefAssets(stages: StageDefinition[]) {
     ...[...stageRefs].map(async (ref) => {
       const parsed = parseStageRef(ref)
       if (!parsed) return
-      const path = `assert/stage/${parsed.name}/${parsed.label}.jpg`
-      if (await existsFs(props.project, path)) {
-        nextStageUrls[ref] = `/api/fs/${props.project}/${path}?t=${ts}`
+      if (await existsFs(props.project, parsed.assertPath)) {
+        nextStageUrls[ref] = `/api/fs/${props.project}/${parsed.assertPath}?t=${ts}`
       }
     }),
     ...[...charNames].map(async (name) => {
-      const path = `assert/character/${name}/appearance.jpg`
+      const path = characterRefToAssertPath(name)
+      if (!path) return
       if (await existsFs(props.project, path)) {
         nextCharUrls[name] = `/api/fs/${props.project}/${path}?t=${ts}`
       }
