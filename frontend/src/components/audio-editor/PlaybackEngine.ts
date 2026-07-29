@@ -66,13 +66,18 @@ export class PlaybackEngine {
    * @param fromTime 时间轴起始位置（秒），默认 0
    */
   async play(clips: PlaybackClip[], fromTime = 0): Promise<void> {
-    this.stop()
+    this.stopSources()
+    this.audioCtx?.close().catch(() => {})
+    cancelAnimationFrame(this._rafId)
     this._savedClips = clips
     this._duration = PlaybackEngine.computeDuration(clips.map(c => c.state))
     this._pauseOffset = fromTime
     this._startTime = 0
 
-    if (fromTime >= this._duration) return
+    if (fromTime >= this._duration) {
+      this.setState('idle')
+      return
+    }
 
     this.audioCtx = new AudioContext()
     this.gainNode = this.audioCtx.createGain()
@@ -140,25 +145,28 @@ export class PlaybackEngine {
 
   /**
    * 恢复播放。
+   * @param clips 可选，最新的片段列表（拖拽后 clips 可能已变化）
    */
-  resume(): void {
+  resume(clips?: PlaybackClip[]): void {
     if (this._state !== 'paused') return
     if (this._pauseOffset >= this._duration) {
       this.stop()
       return
     }
-    // 用保存的 clips 从暂停位置重新开始
-    this.play(this._savedClips, this._pauseOffset)
+    // 用最新的 clips 从暂停位置重新开始
+    const useClips = clips ?? this._savedClips
+    this.play(useClips, this._pauseOffset)
   }
 
   /**
    * 切换播放/暂停。
+   * @param clips 音频片段列表
    */
   togglePlay(clips: PlaybackClip[]): void {
     if (this._state === 'playing') {
       this.pause()
     } else if (this._state === 'paused') {
-      this.resume()
+      this.resume(clips)
     } else {
       // idle：从 _pauseOffset 处开始（若之前 seek 过）
       this.play(clips, this._pauseOffset)
@@ -167,12 +175,15 @@ export class PlaybackEngine {
 
   /**
    * 停止播放，重置状态。
+   * @param resetPosition 是否重置播放位置到 0（默认 true）
    */
-  stop(): void {
+  stop(resetPosition = true): void {
     this.stopSources()
     this.audioCtx?.close().catch(() => {})
     this.audioCtx = null
-    this._pauseOffset = 0
+    if (resetPosition) {
+      this._pauseOffset = 0
+    }
     this._duration = 0
     cancelAnimationFrame(this._rafId)
     this.setState('idle')
@@ -190,11 +201,19 @@ export class PlaybackEngine {
 
   /**
    * 跳转到指定时间点播放（若正在播放则从该点继续，否则记录位置供下次播放）。
+   * @param time 目标时间（秒）
+   * @param clips 可选，最新的片段列表（playing 状态下 seek 时需要）
    */
-  seek(time: number): void {
+  seek(time: number, clips?: PlaybackClip[]): void {
+    // 若 duration 未知（idle 状态），根据 clips 计算
+    if (this._duration <= 0 && clips && clips.length > 0) {
+      this._duration = PlaybackEngine.computeDuration(clips.map(c => c.state))
+    }
     const clamped = Math.max(0, Math.min(time, this._duration))
     if (this._state === 'playing') {
-      this.play(this._savedClips, clamped)
+      // 使用传入的最新 clips，或回退到保存的
+      const useClips = clips ?? this._savedClips
+      this.play(useClips, clamped)
     } else {
       // paused / idle 均记录位置
       this._pauseOffset = clamped

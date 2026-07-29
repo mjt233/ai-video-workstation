@@ -200,7 +200,14 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
    * 跳转到指定时间点。
    */
   function seek(time: number): void {
-    engine.seek(time)
+    const playableClips: PlaybackClip[] = []
+    for (const c of clips.value) {
+      const buf = audioBuffers.value.get(c.index)
+      if (buf) {
+        playableClips.push({ state: c, buffer: buf })
+      }
+    }
+    engine.seek(time, playableClips)
     if (engine.state !== 'playing') {
       currentTime.value = Math.max(0, Math.min(time, totalDuration.value))
     }
