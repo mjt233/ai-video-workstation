@@ -115,6 +115,19 @@ export async function deleteShot(project: string, episode: string, shot: string)
   } catch (e) { rethrow(e) }
 }
 
+export async function mergeSceneAudio(
+  project: string,
+  episode: string,
+  shot: string,
+) {
+  try {
+    const { data } = await client.post(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/audio/merge`,
+    )
+    return data as { success: boolean; path: string }
+  } catch (e) { rethrow(e) }
+}
+
 export async function reorderSceneScript(
   project: string,
   episode: string,

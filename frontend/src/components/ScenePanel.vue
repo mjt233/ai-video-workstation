@@ -98,6 +98,15 @@
           >
             编辑 JSON
           </v-btn>
+          <v-btn
+            variant="tonal"
+            color="secondary"
+            prepend-icon="mdi-waveform"
+            :disabled="!hasFullVoice"
+            @click="showAudioEditor = true"
+          >
+            分镜音频编辑
+          </v-btn>
         </div>
         <v-list
           v-if="data.script.length"
@@ -708,6 +717,14 @@
       :character-names="characterNames"
       @save="onScriptSave"
     />
+
+    <AudioEditor
+      v-model="showAudioEditor"
+      :project="props.project"
+      :episode="props.episode"
+      :shot="props.shot"
+      @refresh="load"
+    />
   </div>
 </template>
 
@@ -729,6 +746,7 @@ import StageFrameDialog from './StageFrameDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
 import AssetImageUploadButton from './AssetImageUploadButton.vue'
 import ScriptEditDialog from './ScriptEditDialog.vue'
+import AudioEditor from './audio-editor/AudioEditor.vue'
 
 interface ScriptEntry {
   角色名: string
@@ -880,6 +898,13 @@ const stageFrameDialog = ref<{
   initial?: { 基础场景: string; 登场角色?: string[]; prompt?: string }
 }>({ show: false, mode: 'create' })
 const historyDialog = ref<{ show: boolean; path: string }>({ show: false, path: '' })
+const showAudioEditor = ref(false)
+
+const hasFullVoice = computed(() => {
+  const script = data.value?.script
+  if (!script || !script.length) return false
+  return voiceAssets.value.length > 0 && voiceAssets.value.every(v => v !== '')
+})
 
 const overviewDurationError = computed(() => {
   const duration = overviewDialog.value.form.duration

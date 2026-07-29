@@ -24,6 +24,7 @@ import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/re
 import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
 import { reorderStageFrames } from '../assets/stage-reorder.js';
 import { reorderScriptEntries, deleteScriptEntry, updateScriptEntry } from '../assets/script-reorder.js';
+import { mergeSceneAudio } from '../assets/audio-merge.js';
 import { addStageFrame, deleteStageFrame, updateStageFrame, type StageFrameInput } from '../assets/stage-frames.js';
 import {
   activateHistoryVersion,
@@ -389,6 +390,21 @@ assetsRouter.put('/assets/:project/scene/:episode/:shot/script/:index', async (r
       情绪: 情绪 ?? '',
     });
     res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 合并分镜音频（根据 audio-edit.json 生成 merged.flac）
+assetsRouter.post('/assets/:project/scene/:episode/:shot/audio/merge', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    const outputPath = await mergeSceneAudio(project, episode, shot);
+    res.json({ success: true, path: outputPath });
   } catch (err) {
     httpError(res, err);
   }
