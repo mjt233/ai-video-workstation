@@ -15,7 +15,7 @@
     -e, --episode   - 集数（默认: 1）
 
 示例:
-    python scripts/update_stage.py -e 1 1 0 --prompt "图像1为背景：...；图像2为陈书文：..."
+    python scripts/update_stage.py -e 1 1 0 --prompt "图像1为背景：中央扶梯；图像2站在扶梯右侧，身体朝向扶梯，面部微侧向镜头。"
     python scripts/update_stage.py -e 1 1 0 --characters "陈书文" --stage-ref "现代商场/现代商场-白天-平视-晴-中央扶梯"
     python scripts/update_stage.py -e 1 1 0 --characters "" --prompt ""
 """
