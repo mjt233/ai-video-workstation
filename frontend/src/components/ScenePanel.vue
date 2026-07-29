@@ -84,11 +84,19 @@
       </v-tabs-window-item>
 
       <v-tabs-window-item value="script">
-        <div class="d-flex mt-2 mb-2 ml-2">
+        <div class="d-flex mt-2 mb-2 ml-2 ga-2">
           <v-btn
+            color="primary"
+            prepend-icon="mdi-plus"
+            @click="openScriptDialog('add')"
+          >
+            新增台词
+          </v-btn>
+          <v-btn
+            variant="text"
             @click="editJson('script')"
           >
-            编辑
+            编辑 JSON
           </v-btn>
         </div>
         <v-list
@@ -132,7 +140,40 @@
               </div>
             </v-list-item-subtitle>
             <template #append>
-              <div class="d-flex align-center ga-2">
+              <div class="d-flex align-center ga-1">
+                <v-btn
+                  size="x-small"
+                  icon="mdi-pencil"
+                  variant="text"
+                  title="编辑"
+                  @click="openScriptDialog('edit', i)"
+                />
+                <v-btn
+                  size="x-small"
+                  icon="mdi-delete"
+                  variant="text"
+                  color="error"
+                  title="删除"
+                  @click="deleteScriptEntry(i)"
+                />
+                <v-btn
+                  size="x-small"
+                  icon="mdi-arrow-up"
+                  variant="text"
+                  :disabled="i === 0"
+                  @click="moveScriptEntry(i, i - 1)"
+                />
+                <v-btn
+                  size="x-small"
+                  icon="mdi-arrow-down"
+                  variant="text"
+                  :disabled="i === data.script.length - 1"
+                  @click="moveScriptEntry(i, i + 1)"
+                />
+                <v-divider
+                  vertical
+                  class="mx-1"
+                />
                 <v-btn
                   size="x-small"
                   variant="tonal"
@@ -155,7 +196,9 @@
           </v-list-item>
         </v-list>
         <div v-else>
-          <p>该分镜没有台词</p>
+          <p class="ml-2">
+            该分镜没有台词
+          </p>
         </div>
       </v-tabs-window-item>
 
@@ -657,15 +700,26 @@
       :asset-path="historyDialog.path"
       @activated="load"
     />
+
+    <ScriptEditDialog
+      v-model="scriptDialog.show"
+      :mode="scriptDialog.mode"
+      :entry="scriptDialog.entry"
+      :character-names="characterNames"
+      @save="onScriptSave"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { readFs, writeFs, existsFs } from '../api/client'
+import { readFs, writeFs, existsFs, type DirResponse } from '../api/client'
 import {
   reorderSceneStage,
+  reorderSceneScript,
   deleteSceneStageFrame,
+  deleteSceneScriptEntry,
+  updateSceneScriptEntry,
   AssetApiError,
 } from '../api/assets'
 import { confirm } from '../utils/confirm'
@@ -674,6 +728,7 @@ import GenerateDialog from './GenerateDialog.vue'
 import StageFrameDialog from './StageFrameDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
 import AssetImageUploadButton from './AssetImageUploadButton.vue'
+import ScriptEditDialog from './ScriptEditDialog.vue'
 
 interface ScriptEntry {
   角色名: string
@@ -792,6 +847,25 @@ const overviewDialog = ref<OverviewDialogState>({
 })
 const reordering = ref(false)
 const deletingStageIndex = ref<number | null>(null)
+
+interface ScriptForm {
+  角色名: string
+  台词: string
+  情绪: string
+}
+
+const scriptDialog = ref<{
+  show: boolean
+  mode: 'add' | 'edit'
+  index: number
+  entry: ScriptForm | null
+}>({
+  show: false,
+  mode: 'add',
+  index: -1,
+  entry: null,
+})
+const characterNames = ref<string[]>([])
 const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index: number }>({ show: false, type: 'image', index: 0 })
 const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: string; label: string }>({
   show: false,
@@ -1078,6 +1152,64 @@ async function loadRefAssets(stages: StageDefinition[]) {
   characterAssetUrls.value = nextCharUrls
 }
 
+async function loadCharacters() {
+  try {
+    const res = await readFs(props.project, 'prompt/character') as DirResponse
+    characterNames.value = (res.entries ?? [])
+      .filter((e) => e.type === 'dir')
+      .map((e) => e.name)
+  } catch {
+    characterNames.value = []
+  }
+}
+
+function openScriptDialog(mode: 'add' | 'edit', index?: number) {
+  if (mode === 'add') {
+    scriptDialog.value = { show: true, mode: 'add', index: -1, entry: null }
+  } else if (index !== undefined) {
+    const entry = data.value?.script[index]
+    if (!entry) return
+    scriptDialog.value = { show: true, mode: 'edit', index, entry: { ...entry } }
+  }
+}
+
+async function onScriptSave(form: ScriptForm) {
+  if (scriptDialog.value.mode === 'add') {
+    const arr = [...(data.value?.script ?? [])]
+    arr.push(form)
+    const path = `${basePath.value}/script.json`
+    await writeFs(props.project, path, JSON.stringify(arr, null, 2))
+  } else {
+    await updateSceneScriptEntry(
+      props.project,
+      props.episode,
+      props.shot,
+      scriptDialog.value.index,
+      form,
+    )
+  }
+  scriptDialog.value.show = false
+  await load()
+}
+
+async function deleteScriptEntry(index: number) {
+  const name = data.value?.script[index]?.角色名 ?? ''
+  const ok = await confirm({
+    title: '确认删除',
+    content: `确定删除「${name}」的这条台词？对应的语音文件及历史版本也会删除。`,
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
+  await deleteSceneScriptEntry(props.project, props.episode, props.shot, index)
+  await load()
+}
+
+async function moveScriptEntry(from: number, to: number) {
+  await reorderSceneScript(props.project, props.episode, props.shot, from, to)
+  await load()
+}
+
 async function load() {
   const bp = basePath.value
   const ep = props.episode
@@ -1249,6 +1381,7 @@ async function save() {
 }
 
 watch(() => [props.project, props.episode, props.shot], load, { immediate: true })
+watch(() => props.project, loadCharacters, { immediate: true })
 </script>
 
 <style scoped>

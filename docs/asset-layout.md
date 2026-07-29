@@ -303,6 +303,26 @@ assert/.../history/{stem}/{YYYYMMDD-HHmmss}.ext
 assert/scene/{ep}/{shot}/voice/{index}-{角色名}.flac
 ```
 
+#### 分镜语音历史结构
+
+```text
+assert/scene/{ep}/{shot}/voice/
+├── {index}-{角色名}.flac              # 当前语音文件
+└── history/
+    └── {index}-{角色名}/
+        ├── {YYYYMMDD-HHmmss}.flac    # 历史版本
+        ├── {YYYYMMDD-HHmmss}-1.flac  # 同秒冲突
+        └── ...
+```
+
+语音文件在以下操作中会自动同步历史目录：
+
+| 操作 | 历史处理 |
+|------|----------|
+| 编辑台词 → 修改角色名 | 删除原角色 `{oldIndex}-{oldChar}/` 整个历史目录 |
+| 删除台词 | 删除对应 `{index}-{char}/` 整个历史目录；后续条目语音文件前移 |
+| 调序台词 | 历史目录与当前语音文件同步重命名（`{oldIndex}-{oldChar}` → `{newIndex}-{newChar}`） |
+
 ---
 
 ## 4. prompt ↔ assert 对照总表
@@ -372,6 +392,16 @@ assert/scene/{ep}/{shot}/stage/{i}.jpg
 ```
 
 不改动 `script.json` 与语音文件。
+
+### 5.5 分镜台词调序 / 删除 / 编辑
+
+对 `script.json` 的操作会自动同步语音文件及其历史目录：
+
+| 操作 | 同步内容 |
+|------|----------|
+| 调序（数组元素移动） | 当前语音 `{i}.flac` + 历史目录 `{i}-{char}/` 同步 rename |
+| 删除 | 删除语音文件 + 历史目录；后续条目前移 |
+| 编辑（修改角色名） | 删除原角色语音文件 + 历史目录 |
 
 ---
 

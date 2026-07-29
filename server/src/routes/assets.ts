@@ -23,6 +23,7 @@ import {
 import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/refs.js';
 import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
 import { reorderStageFrames } from '../assets/stage-reorder.js';
+import { reorderScriptEntries, deleteScriptEntry, updateScriptEntry } from '../assets/script-reorder.js';
 import { addStageFrame, deleteStageFrame, updateStageFrame, type StageFrameInput } from '../assets/stage-frames.js';
 import {
   activateHistoryVersion,
@@ -322,6 +323,71 @@ assetsRouter.post('/assets/:project/scene/:episode/:shot/stage/reorder', async (
       throw Object.assign(new Error('from/to 必须是数字'), { code: 'INVALID' });
     }
     await reorderStageFrames(project, episode, shot, from, to);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 重新排序分镜台词（同步语音文件）
+assetsRouter.post('/assets/:project/scene/:episode/:shot/script/reorder', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    const { from, to } = req.body as { from?: number; to?: number };
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    if (typeof from !== 'number' || typeof to !== 'number') {
+      throw Object.assign(new Error('from/to 必须是数字'), { code: 'INVALID' });
+    }
+    await reorderScriptEntries(project, episode, shot, from, to);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE 删除分镜台词（同步语音文件）
+assetsRouter.delete('/assets/:project/scene/:episode/:shot/script/:index', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    const index = Number(req.params.index);
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    if (!Number.isInteger(index) || index < 0) {
+      throw Object.assign(new Error('index 必须是非负整数'), { code: 'INVALID' });
+    }
+    await deleteScriptEntry(project, episode, shot, index);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT 更新分镜台词（角色变更时同步删除旧语音文件）
+assetsRouter.put('/assets/:project/scene/:episode/:shot/script/:index', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    const index = Number(req.params.index);
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    if (!Number.isInteger(index) || index < 0) {
+      throw Object.assign(new Error('index 必须是非负整数'), { code: 'INVALID' });
+    }
+    const { 角色名, 台词, 情绪 } = req.body as { 角色名?: string; 台词?: string; 情绪?: string };
+    if (!角色名) {
+      throw Object.assign(new Error('角色名不能为空'), { code: 'INVALID' });
+    }
+    await updateScriptEntry(project, episode, shot, index, {
+      角色名,
+      台词: 台词 ?? '',
+      情绪: 情绪 ?? '',
+    });
     res.json({ success: true });
   } catch (err) {
     httpError(res, err);

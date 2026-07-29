@@ -115,6 +115,22 @@ export async function deleteShot(project: string, episode: string, shot: string)
   } catch (e) { rethrow(e) }
 }
 
+export async function reorderSceneScript(
+  project: string,
+  episode: string,
+  shot: string,
+  from: number,
+  to: number,
+) {
+  try {
+    const { data } = await client.post(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/script/reorder`,
+      { from, to },
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
 export async function reorderSceneStage(
   project: string,
   episode: string,
@@ -164,6 +180,36 @@ export async function updateSceneStageFrame(
     const { data } = await client.put(
       `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/stage/${index}`,
       body,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export async function updateSceneScriptEntry(
+  project: string,
+  episode: string,
+  shot: string,
+  index: number,
+  body: { 角色名: string; 台词: string; 情绪: string },
+) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/script/${index}`,
+      body,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteSceneScriptEntry(
+  project: string,
+  episode: string,
+  shot: string,
+  index: number,
+) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/script/${index}`,
     )
     return data as { success: boolean }
   } catch (e) { rethrow(e) }
