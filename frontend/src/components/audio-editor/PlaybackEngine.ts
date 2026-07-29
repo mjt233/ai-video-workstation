@@ -79,13 +79,15 @@ export class PlaybackEngine {
       const clipDuration = Math.max(0, buffer.duration - trimStart - trimEnd)
 
       // 从 trimStart 偏移处开始播放，持续 clipDuration
+      // startOffset 决定该片段在时间轴上的起始位置
       source.loop = false
 
       const gain = this.audioCtx.createGain()
       source.connect(gain)
       gain.connect(this.gainNode!)
 
-      source.start(0, trimStart, clipDuration)
+      const when = this.audioCtx.currentTime + state.startOffset
+      source.start(when, trimStart, clipDuration)
 
       this.sourceNodes.push(source)
     }

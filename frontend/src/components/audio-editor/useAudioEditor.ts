@@ -79,18 +79,19 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
         // 没有保存的编辑状态
       }
 
-      // 4) 构建 clips
+      // 4) 构建 clips 与波形数据
       const newClips: AudioClipState[] = []
+      const newWaveforms = new Map<number, WaveformData>()
+      const newBuffers = new Map<number, AudioBuffer>()
       let cursor = 0
       for (let i = 0; i < script.length; i++) {
         const entry = script[i]
         const existing = savedProject?.tracks.find(t => t.index === i)
-        // 获取音频时长（通过加载波形数据间接获取）
         const url = `/api/fs/${project}/assert/scene/${episode}/${shot}/voice/${i}-${entry.角色名}.flac`
         let duration = 0
         try {
           const wf = await extractWaveform(url, 50)
-          waveforms.value.set(i, wf)
+          newWaveforms.set(i, wf)
           duration = wf.duration
         } catch {
           duration = 0
@@ -103,7 +104,7 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
           const ctx = new AudioContext()
           const buf = await ctx.decodeAudioData(ab)
           ctx.close()
-          audioBuffers.value.set(i, buf)
+          newBuffers.set(i, buf)
         } catch {
           // 无法解码
         }
@@ -119,6 +120,10 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
         })
         cursor += duration
       }
+
+      // 一次性替换 ref 值以触发响应式更新
+      waveforms.value = newWaveforms
+      audioBuffers.value = newBuffers
 
       clips.value = newClips
       hasEdit.value = !!savedProject

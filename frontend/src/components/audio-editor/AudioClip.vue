@@ -14,7 +14,7 @@
       ref="canvasRef"
       class="waveform-canvas"
       :width="canvasWidth"
-      :height="clipHeight - 4"
+      :height="clipHeight - 24"
     />
     <!-- 标签 -->
     <div class="clip-label">
@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import type { AudioClipState, WaveformData } from './types'
 import { drawWaveform, clipVisibleDuration } from './waveform'
 
@@ -132,18 +132,18 @@ function redraw() {
     props.zoom,
     props.clip.trimStart * props.zoom,
     canvasWidth.value,
-    clipHeight.value - 4,
+    clipHeight.value - 24,
   )
 }
 
 watch(
   () => [props.waveform, props.zoom, props.clip.trimStart, props.clip.trimEnd],
   redraw,
-  { deep: false },
+  { deep: false, flush: 'post' },
 )
 
 onMounted(() => {
-  redraw()
+  nextTick(redraw)
 })
 </script>
 
