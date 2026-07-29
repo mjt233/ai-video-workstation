@@ -24,12 +24,14 @@
       :size="size"
       :variant="variant"
       :color="color"
-      :icon="icon"
+      :prepend-icon="icon"
       :loading="uploading"
       :disabled="disabled || uploading"
       :title="label"
       @click="openPicker"
-    />
+    >
+      {{ label }}
+    </v-btn>
   </span>
 </template>
 
