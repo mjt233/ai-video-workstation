@@ -541,13 +541,13 @@ async function submitForm() {
       const desc = formDialog.desc.trim()
       if (!desc) { formDialog.error = '衍生描述不能为空'; return }
       if (props.kind === 'character') {
-        await updateCharacterVariant(props.project, props.owner, formDialog.id, { desc, parentId: formDialog.parentId || undefined, refs: formDialog.refs })
+        await updateCharacterVariant(props.project, props.owner, formDialog.originalId, { desc, parentId: formDialog.parentId || undefined, refs: formDialog.refs })
         if (formDialog.id !== formDialog.originalId) {
           await renameCharacterVariant(props.project, props.owner, formDialog.originalId, formDialog.id)
         }
       } else {
         if (!props.baseLabel) throw new Error('缺少 baseLabel')
-        await updateStageVariant(props.project, props.owner, props.baseLabel, formDialog.id, { desc, parentId: formDialog.parentId || undefined, refs: formDialog.refs })
+        await updateStageVariant(props.project, props.owner, props.baseLabel, formDialog.originalId, { desc, parentId: formDialog.parentId || undefined, refs: formDialog.refs })
         if (formDialog.id !== formDialog.originalId) {
           await renameStageVariant(props.project, props.owner, props.baseLabel, formDialog.originalId, formDialog.id)
         }
