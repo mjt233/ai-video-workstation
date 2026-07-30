@@ -13,8 +13,8 @@
       <v-tab value="images">
         场景图片
       </v-tab>
-      <v-tab value="prompt">
-        prompt
+      <v-tab value="video">
+        视频生成
       </v-tab>
     </v-tabs>
 
@@ -470,17 +470,27 @@
           暂无场景图片定义（stage.json）
         </div>
       </v-tabs-window-item>
-      <v-tabs-window-item value="prompt">
+      <v-tabs-window-item value="video">
         <div class="d-flex mt-2 mb-2 ml-2">
           <v-btn
-            variant="text"
-            size="small"
             @click="edit('prompt')"
           >
             编辑
           </v-btn>
         </div>
         <MarkdownView :content="data.prompt" />
+        <div
+          v-if="hasVideo"
+          class="d-flex justify-center ma-4"
+        >
+          <video
+            :src="`/api/fs/${props.project}/assert/scene/${props.episode}/${props.shot}/video/0.mp4?t=${Date.now()}`"
+            controls
+            style="max-width: 100%; max-height: 50vh;"
+          >
+            您的浏览器不支持视频预览
+          </video>
+        </div>
         <div class="d-flex justify-center mt-2 ga-2 flex-wrap">
           <v-btn
             color="primary"
