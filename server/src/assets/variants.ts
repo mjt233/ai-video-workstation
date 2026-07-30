@@ -27,6 +27,7 @@ import {
   pathExists,
   resolveProjectPath,
 } from './paths.js';
+import { replaceVariantRefInFrames } from './refs.js';
 
 export type VariantKind = 'character' | 'stage';
 
@@ -631,4 +632,177 @@ export async function deleteStageVariant(
   if (await pathExists(histDir)) {
     await fs.rm(histDir, { recursive: true, force: true });
   }
+}
+
+/** 扫描同目录下所有变体 meta，替换 parentId 引用 */
+async function replaceParentRef(
+  project: string,
+  dirFull: string,
+  oldId: string,
+  newId: string,
+): Promise<void> {
+  let files: string[] = [];
+  try {
+    files = (await fs.readdir(dirFull)).filter(f => f.endsWith('.json'));
+  } catch { return; }
+  for (const f of files) {
+    const filePath = path.join(dirFull, f);
+    try {
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const data = JSON.parse(raw) as Partial<VariantMeta>;
+      if (data.parentId === oldId) {
+        data.parentId = newId;
+        data.updatedAt = new Date().toISOString();
+        await fs.writeFile(filePath, `${JSON.stringify(data, null, 2)}
+`, 'utf-8');
+      }
+    } catch { continue; }
+  }
+}
+
+export async function renameCharacterVariant(
+  project: string,
+  name: string,
+  oldId: string,
+  newId: string,
+): Promise<VariantInfo> {
+  assertSafeName(name, '角色名');
+  assertSafeName(oldId, '变体名称');
+  assertSafeName(newId, '变体名称');
+
+  if (oldId === newId) {
+    const list = await listCharacterVariants(project, name);
+    const found = list.find(v => v.id === oldId);
+    if (!found) throw Object.assign(new Error('衍生变体不存在'), { code: 'NOT_FOUND' });
+    return found;
+  }
+
+  const oldMetaPath = characterMetaRel(name, oldId);
+  const newMetaPath = characterMetaRel(name, newId);
+
+  if (!(await pathExists(resolveProjectPath(project, oldMetaPath)))) {
+    throw Object.assign(new Error('衍生变体不存在'), { code: 'NOT_FOUND' });
+  }
+  if (await pathExists(resolveProjectPath(project, newMetaPath))) {
+    throw Object.assign(new Error('目标名称已存在'), { code: 'EXISTS' });
+  }
+
+  const meta = await readMeta(project, oldMetaPath);
+  if (!meta) throw Object.assign(new Error('meta 读取失败'), { code: 'INTERNAL' });
+
+  meta.id = newId;
+  meta.updatedAt = new Date().toISOString();
+  await writeMeta(project, newMetaPath, meta);
+  await fs.unlink(resolveProjectPath(project, oldMetaPath));
+
+  // 重命名图片
+  const oldImagePath = characterImageRel(name, oldId);
+  const newImagePath = characterImageRel(name, newId);
+  const oldImageFull = resolveProjectPath(project, oldImagePath);
+  const newImageFull = resolveProjectPath(project, newImagePath);
+  if (await pathExists(oldImageFull)) {
+    await ensureDir(path.dirname(newImageFull));
+    await fs.rename(oldImageFull, newImageFull);
+  }
+
+  // 重命名历史目录
+  const oldHistDir = resolveProjectPath(project, `assert/character/${name}/variants/history/${oldId}`);
+  const newHistDir = resolveProjectPath(project, `assert/character/${name}/variants/history/${newId}`);
+  if (await pathExists(oldHistDir)) {
+    await ensureDir(path.dirname(newHistDir));
+    await fs.rename(oldHistDir, newHistDir);
+  }
+
+  // 更新子变体的 parentId
+  const variantsDir = path.dirname(resolveProjectPath(project, oldMetaPath));
+  await replaceParentRef(project, variantsDir, oldId, newId);
+
+  // 更新分镜引用
+  await replaceVariantRefInFrames(project, 'character', name, undefined, oldId, newId);
+
+  const hasImage = await pathExists(newImageFull);
+  return {
+    ...meta,
+    kind: 'character' as const,
+    owner: name,
+    metaPath: newMetaPath,
+    imagePath: newImagePath,
+    hasImage,
+    ref: `${name}@${newId}`,
+  };
+}
+
+export async function renameStageVariant(
+  project: string,
+  stage: string,
+  baseLabel: string,
+  oldId: string,
+  newId: string,
+): Promise<VariantInfo> {
+  assertSafeName(stage, '场景名');
+  assertSafeName(baseLabel, '子场景标签');
+  assertSafeName(oldId, '变体名称');
+  assertSafeName(newId, '变体名称');
+
+  if (oldId === newId) {
+    const list = await listStageVariants(project, stage, baseLabel);
+    const found = list.find(v => v.id === oldId);
+    if (!found) throw Object.assign(new Error('衍生变体不存在'), { code: 'NOT_FOUND' });
+    return found;
+  }
+
+  const oldMetaPath = stageMetaRel(stage, baseLabel, oldId);
+  const newMetaPath = stageMetaRel(stage, baseLabel, newId);
+
+  if (!(await pathExists(resolveProjectPath(project, oldMetaPath)))) {
+    throw Object.assign(new Error('衍生变体不存在'), { code: 'NOT_FOUND' });
+  }
+  if (await pathExists(resolveProjectPath(project, newMetaPath))) {
+    throw Object.assign(new Error('目标名称已存在'), { code: 'EXISTS' });
+  }
+
+  const meta = await readMeta(project, oldMetaPath);
+  if (!meta) throw Object.assign(new Error('meta 读取失败'), { code: 'INTERNAL' });
+
+  meta.id = newId;
+  meta.updatedAt = new Date().toISOString();
+  await writeMeta(project, newMetaPath, meta);
+  await fs.unlink(resolveProjectPath(project, oldMetaPath));
+
+  // 重命名图片
+  const oldImagePath = stageImageRel(stage, baseLabel, oldId);
+  const newImagePath = stageImageRel(stage, baseLabel, newId);
+  const oldImageFull = resolveProjectPath(project, oldImagePath);
+  const newImageFull = resolveProjectPath(project, newImagePath);
+  if (await pathExists(oldImageFull)) {
+    await ensureDir(path.dirname(newImageFull));
+    await fs.rename(oldImageFull, newImageFull);
+  }
+
+  // 重命名历史目录
+  const oldHistDir = resolveProjectPath(project, `assert/stage/${stage}/variants/${baseLabel}/history/${oldId}`);
+  const newHistDir = resolveProjectPath(project, `assert/stage/${stage}/variants/${baseLabel}/history/${newId}`);
+  if (await pathExists(oldHistDir)) {
+    await ensureDir(path.dirname(newHistDir));
+    await fs.rename(oldHistDir, newHistDir);
+  }
+
+  // 更新子变体的 parentId
+  const variantsDir = path.dirname(resolveProjectPath(project, oldMetaPath));
+  await replaceParentRef(project, variantsDir, oldId, newId);
+
+  // 更新分镜引用
+  await replaceVariantRefInFrames(project, 'stage', stage, baseLabel, oldId, newId);
+
+  const hasImage = await pathExists(newImageFull);
+  return {
+    ...meta,
+    kind: 'stage' as const,
+    owner: stage,
+    baseLabel,
+    metaPath: newMetaPath,
+    imagePath: newImagePath,
+    hasImage,
+    ref: `${stage}/${baseLabel}@${newId}`,
+  };
 }
