@@ -52,7 +52,7 @@
           variant="flat"
           icon="mdi-upload"
           label="上传图片"
-          @uploaded="reload"
+          @uploaded="refreshVariants"
         />
       </template>
     </VariantTreeView>
@@ -243,14 +243,14 @@
       :output-path="genDialog.outputPath"
       :prompt-paths="genDialog.promptPaths"
       :existing-asset="genDialog.existingAsset"
-      @refresh="reload"
+      @refresh="refreshVariants"
     />
 
     <AssetHistoryDialog
       v-model="historyDialog.show"
       :project="project"
       :asset-path="historyDialog.path"
-      @activated="reload"
+      @activated="refreshVariants"
     />
 
     <v-dialog
@@ -377,19 +377,9 @@ const previewDialog = reactive({
   desc: '',
 })
 
-async function reload() {
-  loading.value = true
+/** 静默刷新变体列表（不触发 loading spinner，保持滚动位置） */
+async function refreshVariants() {
   try {
-    // 加载项目宽高比
-    try {
-      const config = (await readFs(props.project, 'project.json')) as unknown as Record<string, unknown>
-      if (config && typeof config === 'object') {
-        const w = Number(config.width ?? 0)
-        const h = Number(config.height ?? 0)
-        if (w > 0 && h > 0) aspectRatioNum.value = w / h
-      }
-    } catch { /* 使用默认 1 */ }
-
     if (props.kind === 'character') {
       const res = await listCharacterVariants(props.project, props.owner)
       variants.value = res.variants
@@ -405,8 +395,25 @@ async function reload() {
     }
     imageUrls.value = urls
   } catch {
-    variants.value = []
-    imageUrls.value = {}
+    // 静默失败
+  }
+}
+
+/** 完整重新加载（含宽高比），首次挂载时使用 */
+async function reload() {
+  loading.value = true
+  try {
+    // 加载项目宽高比
+    try {
+      const config = (await readFs(props.project, 'project.json')) as unknown as Record<string, unknown>
+      if (config && typeof config === 'object') {
+        const w = Number(config.width ?? 0)
+        const h = Number(config.height ?? 0)
+        if (w > 0 && h > 0) aspectRatioNum.value = w / h
+      }
+    } catch { /* 使用默认 1 */ }
+
+    await refreshVariants()
   } finally {
     loading.value = false
   }
@@ -537,8 +544,7 @@ async function submitForm() {
       }
     }
     formDialog.show = false
-    await reload()
-    emit('refresh')
+    await refreshVariants()
   } catch (e) {
     formDialog.error = e instanceof AssetApiError ? e.message : (e instanceof Error ? e.message : String(e))
   } finally {
@@ -563,7 +569,7 @@ async function onDelete(v: VariantInfo) {
           if (!props.baseLabel) return
           await deleteStageVariant(props.project, props.owner, props.baseLabel, v.id, true)
         }
-        await reload(); emit('refresh')
+        await refreshVariants()
       } catch (e) { window.alert(e instanceof AssetApiError ? e.message : String(e)) }
       return
     }
@@ -579,7 +585,7 @@ async function onDelete(v: VariantInfo) {
         if (!props.baseLabel) return
         await deleteStageVariant(props.project, props.owner, props.baseLabel, v.id, false)
       }
-      await reload(); emit('refresh')
+      await refreshVariants()
     } catch (e) { window.alert(e instanceof AssetApiError ? e.message : String(e)) }
   } else {
     const ok = await confirm({
@@ -594,7 +600,7 @@ async function onDelete(v: VariantInfo) {
         if (!props.baseLabel) return
         await deleteStageVariant(props.project, props.owner, props.baseLabel, v.id)
       }
-      await reload(); emit('refresh')
+      await refreshVariants()
     } catch (e) { window.alert(e instanceof AssetApiError ? e.message : String(e)) }
   }
 }
