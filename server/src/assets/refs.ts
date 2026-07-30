@@ -125,3 +125,88 @@ export async function findSubsceneRefs(project: string, stageName: string, label
   }
   return refs;
 }
+
+/** 查找角色变体在分镜场景帧中的引用 */
+export async function findCharacterVariantRefs(
+  project: string,
+  name: string,
+  variantId: string,
+): Promise<AssetRef[]> {
+  const refs: AssetRef[] = [];
+  const searchRef = `${name}@${variantId}`;
+  for (const { episode, shot, dir } of await walkShots(project)) {
+    const stages = await readJsonArray<StageEntry>(path.join(dir, 'stage.json'));
+    if (!stages) continue;
+    for (let i = 0; i < stages.length; i++) {
+      const s = stages[i];
+      if ((s.登场角色 ?? []).some((c) => c.trim() === searchRef)) {
+        refs.push({ episode, shot, file: 'stage.json', detail: `登场角色[${i}]` });
+      }
+    }
+  }
+  return refs;
+}
+
+/** 查找场景变体在分镜场景帧中的引用 */
+export async function findStageVariantRefs(
+  project: string,
+  stage: string,
+  label: string,
+  variantId: string,
+): Promise<AssetRef[]> {
+  const refs: AssetRef[] = [];
+  const searchRef = `${stage}/${label}@${variantId}`;
+  for (const { episode, shot, dir } of await walkShots(project)) {
+    const stages = await readJsonArray<StageEntry>(path.join(dir, 'stage.json'));
+    if (!stages) continue;
+    for (let i = 0; i < stages.length; i++) {
+      if (stages[i].基础场景?.trim() === searchRef) {
+        refs.push({ episode, shot, file: 'stage.json', detail: `基础场景[${i}]` });
+      }
+    }
+  }
+  return refs;
+}
+
+/** 将分镜中所有旧变体引用替换为新引用 */
+export async function replaceVariantRefInFrames(
+  project: string,
+  kind: 'character' | 'stage',
+  owner: string,
+  baseLabel: string | undefined,
+  oldId: string,
+  newId: string,
+): Promise<void> {
+  const oldRef = kind === 'character'
+    ? `${owner}@${oldId}`
+    : `${owner}/${baseLabel}@${oldId}`;
+  const newRef = kind === 'character'
+    ? `${owner}@${newId}`
+    : `${owner}/${baseLabel}@${newId}`;
+
+  for (const { episode, shot, dir } of await walkShots(project)) {
+    const stagePath = path.join(dir, 'stage.json');
+    const stages = await readJsonArray<StageEntry>(stagePath);
+    if (!stages) continue;
+
+    let changed = false;
+    for (const s of stages) {
+      if (kind === 'stage' && s.基础场景?.trim() === oldRef) {
+        s.基础场景 = newRef;
+        changed = true;
+      }
+      if (kind === 'character') {
+        const chars = s.登场角色 ?? [];
+        for (let i = 0; i < chars.length; i++) {
+          if (chars[i].trim() === oldRef) {
+            chars[i] = newRef;
+            changed = true;
+          }
+        }
+      }
+    }
+    if (changed) {
+      await fs.writeFile(stagePath, `${JSON.stringify(stages, null, 2)}\n`, 'utf-8');
+    }
+  }
+}
