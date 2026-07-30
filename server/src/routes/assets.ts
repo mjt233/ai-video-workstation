@@ -24,6 +24,7 @@ import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/re
 import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
 import { reorderStageFrames } from '../assets/stage-reorder.js';
 import { reorderScriptEntries, deleteScriptEntry, updateScriptEntry } from '../assets/script-reorder.js';
+import { mergeSceneAudio } from '../assets/audio-merge.js';
 import { addStageFrame, deleteStageFrame, updateStageFrame, type StageFrameInput } from '../assets/stage-frames.js';
 import {
   activateHistoryVersion,
@@ -394,6 +395,21 @@ assetsRouter.put('/assets/:project/scene/:episode/:shot/script/:index', async (r
   }
 });
 
+// POST 合并分镜音频（根据 audio-edit.json 生成 merged.flac）
+assetsRouter.post('/assets/:project/scene/:episode/:shot/audio/merge', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    const outputPath = await mergeSceneAudio(project, episode, shot);
+    res.json({ success: true, path: outputPath });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
 // POST 新增分镜场景帧
 assetsRouter.post('/assets/:project/scene/:episode/:shot/stage', async (req: Request, res: Response) => {
   try {
@@ -546,11 +562,16 @@ assetsRouter.post('/assets/:project/character/:name/variants', async (req: Reque
   try {
     const project = req.params.project as string;
     const name = req.params.name as string;
-    const body = req.body as { id?: string; desc?: string };
+    const body = req.body as { id?: string; desc?: string; parentId?: string; refs?: string[] };
     if (!body.id || !body.desc) {
       throw Object.assign(new Error('id 与 desc 必填'), { code: 'INVALID' });
     }
-    const variant = await createCharacterVariant(project, name, { id: body.id, desc: body.desc });
+    const variant = await createCharacterVariant(project, name, {
+      id: body.id,
+      desc: body.desc,
+      parentId: body.parentId,
+      refs: body.refs,
+    });
     res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
@@ -563,8 +584,12 @@ assetsRouter.put('/assets/:project/character/:name/variants/:variantId', async (
     const project = req.params.project as string;
     const name = req.params.name as string;
     const variantId = req.params.variantId as string;
-    const body = req.body as { desc?: string };
-    const variant = await updateCharacterVariant(project, name, variantId, body);
+    const body = req.body as { desc?: string; parentId?: string; refs?: string[] };
+    const variant = await updateCharacterVariant(project, name, variantId, {
+      desc: body.desc,
+      parentId: body.parentId,
+      refs: body.refs,
+    });
     res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
@@ -577,7 +602,8 @@ assetsRouter.delete('/assets/:project/character/:name/variants/:variantId', asyn
     const project = req.params.project as string;
     const name = req.params.name as string;
     const variantId = req.params.variantId as string;
-    await deleteCharacterVariant(project, name, variantId);
+    const cascade = req.query.cascade === 'true';
+    await deleteCharacterVariant(project, name, variantId, cascade ? { cascade: true } : undefined);
     res.json({ success: true });
   } catch (err) {
     httpError(res, err);
@@ -603,11 +629,16 @@ assetsRouter.post('/assets/:project/stage/:stage/:label/variants', async (req: R
     const project = req.params.project as string;
     const stage = req.params.stage as string;
     const label = req.params.label as string;
-    const body = req.body as { id?: string; desc?: string };
+    const body = req.body as { id?: string; desc?: string; parentId?: string; refs?: string[] };
     if (!body.id || !body.desc) {
       throw Object.assign(new Error('id 与 desc 必填'), { code: 'INVALID' });
     }
-    const variant = await createStageVariant(project, stage, label, { id: body.id, desc: body.desc });
+    const variant = await createStageVariant(project, stage, label, {
+      id: body.id,
+      desc: body.desc,
+      parentId: body.parentId,
+      refs: body.refs,
+    });
     res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
@@ -621,8 +652,12 @@ assetsRouter.put('/assets/:project/stage/:stage/:label/variants/:variantId', asy
     const stage = req.params.stage as string;
     const label = req.params.label as string;
     const variantId = req.params.variantId as string;
-    const body = req.body as { desc?: string };
-    const variant = await updateStageVariant(project, stage, label, variantId, body);
+    const body = req.body as { desc?: string; parentId?: string; refs?: string[] };
+    const variant = await updateStageVariant(project, stage, label, variantId, {
+      desc: body.desc,
+      parentId: body.parentId,
+      refs: body.refs,
+    });
     res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
@@ -636,7 +671,8 @@ assetsRouter.delete('/assets/:project/stage/:stage/:label/variants/:variantId', 
     const stage = req.params.stage as string;
     const label = req.params.label as string;
     const variantId = req.params.variantId as string;
-    await deleteStageVariant(project, stage, label, variantId);
+    const cascade = req.query.cascade === 'true';
+    await deleteStageVariant(project, stage, label, variantId, cascade ? { cascade: true } : undefined);
     res.json({ success: true });
   } catch (err) {
     httpError(res, err);
