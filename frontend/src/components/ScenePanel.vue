@@ -660,18 +660,12 @@
     <GenerateDialog
       v-model="genStageAssetDialog"
       :project="props.project"
-      workflow-id="text-to-image"
-      workflow-name="场景设定图生成（文生图）"
-      :vars="{
-        promptPath: `prompt/stage/${refGenDialog.name}/${refGenDialog.label}.md`,
-        purpose: 'stage-image',
-        stageName: refGenDialog.name,
-        label: refGenDialog.label,
-        name: refGenDialog.name,
-      }"
-      :output-path="`assert/stage/${refGenDialog.name}/${refGenDialog.label}.jpg`"
+      :workflow-id="stageAssetWorkflowId"
+      :workflow-name="stageAssetWorkflowName"
+      :vars="stageAssetVars"
+      :output-path="stageAssetOutputPath"
       :prompt-paths="[`prompt/stage/${refGenDialog.name}/${refGenDialog.label}.md`]"
-      :existing-asset="stageAssetUrls[`${refGenDialog.name}/${refGenDialog.label}`] ? '已有图片' : undefined"
+      :existing-asset="stageAssetExisting"
       @refresh="load"
     />
     <GenerateDialog
@@ -885,7 +879,7 @@ const scriptDialog = ref<{
 })
 const characterNames = ref<string[]>([])
 const genDialog = ref<{ show: boolean; type: 'image' | 'voice' | 'video'; index: number }>({ show: false, type: 'image', index: 0 })
-const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: string; label: string }>({
+const refGenDialog = ref<{ show: boolean; type: 'character' | 'stage'; name: string; label: string; variantId?: string }>({
   show: false,
   type: 'character',
   name: '',
@@ -912,6 +906,63 @@ const overviewDurationError = computed(() => {
     return '时长必须是大于 0 的整数秒'
   }
   return ''
+})
+
+/** 场景设定图输出路径，支持变体 */
+const stageAssetOutputPath = computed(() => {
+  const { name, label, variantId } = refGenDialog.value
+  if (variantId) {
+    return `assert/stage/${name}/variants/${label}/${variantId}.jpg`
+  }
+  return `assert/stage/${name}/${label}.jpg`
+})
+
+/** 场景设定图 workflow id，变体使用图片编辑工作流 */
+const stageAssetWorkflowId = computed(() => {
+  return refGenDialog.value.variantId ? 'image-edit' : 'text-to-image'
+})
+
+/** 场景设定图 workflow 名称 */
+const stageAssetWorkflowName = computed(() => {
+  return refGenDialog.value.variantId ? '场景变体图生成（图片编辑）' : '场景设定图生成（文生图）'
+})
+
+/** 场景设定图 workflow vars，变体时使用图片编辑参数 */
+const stageAssetVars = computed((): Record<string, string> => {
+  const { name, label, variantId } = refGenDialog.value
+  if (variantId) {
+    return {
+      promptPath: `prompt/stage/${name}/${label}.md`,
+      desc: '',
+      imagePaths: JSON.stringify([`assert/stage/${name}/${label}.jpg`]),
+      purpose: 'stage-variant',
+      stageName: name,
+      label,
+      name,
+      variantId,
+    }
+  }
+  return {
+    promptPath: `prompt/stage/${name}/${label}.md`,
+    purpose: 'stage-image',
+    stageName: name,
+    label,
+    name,
+  }
+})
+
+/** 场景设定图在 stageAssetUrls 中的查询 key */
+const stageAssetUrlKey = computed(() => {
+  const { name, label, variantId } = refGenDialog.value
+  if (variantId) {
+    return `${name}/${label}@${variantId}`
+  }
+  return `${name}/${label}`
+})
+
+/** 场景设定图是否已有图片 */
+const stageAssetExisting = computed(() => {
+  return stageAssetUrls.value[stageAssetUrlKey.value] ? '已有图片' : undefined
 })
 
 async function moveStage(from: number, to: number) {
@@ -1115,9 +1166,7 @@ function characterRefToAssertPath(ref: string): string | null {
 function openStageAssetGen(stageRef: string) {
   const parsed = parseStageRef(stageRef)
   if (!parsed) return
-  // 变体图在场景详情中生成；此处仅为基础场景设定图快捷入口
-  if (parsed.variantId) return
-  refGenDialog.value = { show: true, type: 'stage', name: parsed.name, label: parsed.label }
+  refGenDialog.value = { show: true, type: 'stage', name: parsed.name, label: parsed.label, variantId: parsed.variantId }
 }
 
 /**
