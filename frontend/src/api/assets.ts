@@ -312,6 +312,8 @@ export async function uploadAssetImage(
 export interface VariantInfo {
   id: string
   desc: string
+  parentId?: string
+  refs: string[]
   baseImage?: string
   createdAt?: string
   updatedAt?: string
@@ -334,7 +336,7 @@ export async function listCharacterVariants(project: string, name: string) {
 export async function createCharacterVariant(
   project: string,
   name: string,
-  body: { id: string; desc: string },
+  body: { id: string; desc: string; parentId?: string; refs?: string[] },
 ) {
   try {
     const { data } = await client.post(
@@ -349,7 +351,7 @@ export async function updateCharacterVariant(
   project: string,
   name: string,
   variantId: string,
-  body: { desc?: string },
+  body: { desc?: string; parentId?: string; refs?: string[] },
 ) {
   try {
     const { data } = await client.put(
@@ -364,10 +366,12 @@ export async function deleteCharacterVariant(
   project: string,
   name: string,
   variantId: string,
+  cascade?: boolean,
 ) {
   try {
+    const params = cascade ? '?cascade=true' : ''
     const { data } = await client.delete(
-      `/assets/${project}/character/${encodeURIComponent(name)}/variants/${encodeURIComponent(variantId)}`,
+      `/assets/${project}/character/${encodeURIComponent(name)}/variants/${encodeURIComponent(variantId)}${params}`,
     )
     return data as { success: boolean }
   } catch (e) { rethrow(e) }
@@ -386,7 +390,7 @@ export async function createStageVariant(
   project: string,
   stage: string,
   label: string,
-  body: { id: string; desc: string },
+  body: { id: string; desc: string; parentId?: string; refs?: string[] },
 ) {
   try {
     const { data } = await client.post(
@@ -402,7 +406,7 @@ export async function updateStageVariant(
   stage: string,
   label: string,
   variantId: string,
-  body: { desc?: string },
+  body: { desc?: string; parentId?: string; refs?: string[] },
 ) {
   try {
     const { data } = await client.put(
@@ -418,10 +422,12 @@ export async function deleteStageVariant(
   stage: string,
   label: string,
   variantId: string,
+  cascade?: boolean,
 ) {
   try {
+    const params = cascade ? '?cascade=true' : ''
     const { data } = await client.delete(
-      `/assets/${project}/stage/${encodeURIComponent(stage)}/${encodeURIComponent(label)}/variants/${encodeURIComponent(variantId)}`,
+      `/assets/${project}/stage/${encodeURIComponent(stage)}/${encodeURIComponent(label)}/variants/${encodeURIComponent(variantId)}${params}`,
     )
     return data as { success: boolean }
   } catch (e) { rethrow(e) }
