@@ -84,18 +84,43 @@
             class="mb-3"
           />
 
-          <v-select
-            v-if="formDialog.mode === 'create' || formDialog.parentIdEditable"
-            v-model="formDialog.parentId"
-            :items="parentOptions"
-            label="父变体（可选）"
-            hint="选择上级变体，将基于其图像继续衍生"
-            persistent-hint
-            variant="outlined"
-            class="mb-3"
-            clearable
-          />
+          <div v-if="formDialog.mode === 'create' || formDialog.parentIdEditable">
+            <div class="d-flex align-center ga-2 mb-2">
+              <span class="text-body-2">父变体（可选）</span>
+              <v-btn
+                size="small"
+                variant="tonal"
+                prepend-icon="mdi-file-tree"
+                @click="openParentPicker"
+              >
+                {{ formDialog.parentId ? formDialog.parentId : '选择父变体' }}
+              </v-btn>
+              <v-btn
+                v-if="formDialog.parentId"
+                size="x-small"
+                variant="text"
+                icon="mdi-close"
+                @click="formDialog.parentId = undefined"
+              />
+            </div>
+            <div
+              v-if="formDialog.parentId && parentPreviewUrl"
+              class="mb-3 d-inline-flex flex-column"
+              style="width: 128px;"
+            >
+              <v-img
+                :src="parentPreviewUrl"
+                aspect-ratio="1"
+                cover
+                class="rounded border"
+              />
+              <p style="text-align: center;font-size: 12px;">
+                {{ formDialog.parentId }}
+              </p>
+            </div>
+          </div>
 
+          <VDivider class="mt-3 mb-6" />
           <v-textarea
             v-model="formDialog.desc"
             label="衍生描述（图片编辑提示词）"
@@ -120,16 +145,50 @@
 
           <div
             v-if="formDialog.refs.length"
-            class="d-flex flex-wrap ga-1 mb-2"
+            class="d-flex flex-column ga-1 mb-2"
           >
-            <v-chip
-              v-for="(ref, idx) in formDialog.refs"
-              :key="ref"
-              closable
-              @click:close="formDialog.refs.splice(idx, 1)"
+            <div
+              v-for="(refPath, idx) in formDialog.refs"
+              :key="refPath"
+              class="d-flex align-center ga-2 pa-1 rounded"
+              style="background: rgba(var(--v-theme-on-surface), 0.04);"
             >
-              {{ getRefLabel(ref) }}
-            </v-chip>
+              <v-img
+                :src="getRefThumbnail(refPath)"
+                max-width="40"
+                max-height="40"
+                aspect-ratio="1"
+                cover
+                class="rounded"
+              />
+              <span class="text-caption flex-grow-1 text-truncate">{{ getRefLabel(refPath) }}</span>
+              <div class="d-flex ga-0 flex-shrink-0">
+                <v-btn
+                  icon="mdi-chevron-up"
+                  size="x-small"
+                  variant="text"
+                  density="compact"
+                  :disabled="idx === 0"
+                  @click="moveRef(idx, -1)"
+                />
+                <v-btn
+                  icon="mdi-chevron-down"
+                  size="x-small"
+                  variant="text"
+                  density="compact"
+                  :disabled="idx === formDialog.refs.length - 1"
+                  @click="moveRef(idx, 1)"
+                />
+                <v-btn
+                  icon="mdi-close"
+                  size="x-small"
+                  variant="text"
+                  color="error"
+                  density="compact"
+                  @click="formDialog.refs.splice(idx, 1)"
+                />
+              </div>
+            </div>
           </div>
           <div
             v-else
@@ -163,6 +222,16 @@
       :project="project"
       :selected="assetPicker.selected"
       @update:selected="onAssetPickerConfirm"
+    />
+
+    <AssetPickerDialog
+      v-model="parentPicker.show"
+      :project="project"
+      mode="parent"
+      :context-kind="kind"
+      :context-owner="owner"
+      :context-base-label="kind === 'stage' ? baseLabel : undefined"
+      @update:selected="onParentPickerConfirm"
     />
 
     <GenerateDialog
@@ -284,6 +353,10 @@ const assetPicker = reactive({
   selected: [] as string[],
 })
 
+const parentPicker = reactive({
+  show: false,
+})
+
 const genDialog = reactive({
   show: false,
   vars: {} as Record<string, string>,
@@ -381,9 +454,62 @@ function onAssetPickerConfirm(paths: string[]) {
   formDialog.refs = paths
 }
 
+function openParentPicker() {
+  parentPicker.show = true
+}
+
+function onParentPickerConfirm(ids: string[]) {
+  if (ids.length > 0) {
+    formDialog.parentId = ids[0]
+  }
+}
+
+/** 根据路径生成显示标签，格式：{资产类别}/{文件名} */
 function getRefLabel(path: string): string {
+  // assert/character/{name}/appearance.jpg → 小明/外观
+  // assert/character/{name}/variants/{id}.jpg → 小明/门已打开
+  // assert/stage/{name}/{label}.jpg → 商场/白天
+  // assert/stage/{name}/variants/{label}/{id}.jpg → 商场/白天/雨天
+  // assert/custom/xxx/yyy.jpg → 自定义/xxx/yyy
+  if (path.startsWith('assert/custom/')) {
+    return '自定义/' + path.slice('assert/custom/'.length)
+  }
+  if (path.startsWith('assert/character/')) {
+    const rest = path.slice('assert/character/'.length)
+    return rest.replace('/appearance.jpg', '/外观')
+      .replace('/variants/', '/')
+      .replace(/\.jpg$/, '')
+  }
+  if (path.startsWith('assert/stage/')) {
+    const rest = path.slice('assert/stage/'.length)
+    return rest.replace('/variants/', '/')
+      .replace(/\.jpg$/, '')
+  }
   return path.split('/').pop() ?? path
 }
+
+/** 获取引用资产的缩略图 URL */
+function getRefThumbnail(path: string): string {
+  return `/api/fs/${props.project}/${path}?t=${Date.now()}`
+}
+
+/** 在表单内移动引用资产的顺序 */
+function moveRef(idx: number, direction: -1 | 1) {
+  const target = idx + direction
+  if (target < 0 || target >= formDialog.refs.length) return
+  const arr = [...formDialog.refs]
+  const [item] = arr.splice(idx, 1)
+  arr.splice(target, 0, item)
+  formDialog.refs = arr
+}
+
+/** 用户选择的父变体图像预览 URL */
+const parentPreviewUrl = computed(() => {
+  if (!formDialog.parentId) return undefined
+  const parent = variantMap.value.get(formDialog.parentId)
+  if (!parent?.hasImage) return undefined
+  return `/api/fs/${props.project}/${parent.imagePath}?t=${Date.now()}`
+})
 
 async function submitForm() {
   formDialog.error = ''

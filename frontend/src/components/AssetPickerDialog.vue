@@ -8,10 +8,10 @@
     <v-card>
       <!-- 标题栏 -->
       <v-card-title class="d-flex align-center">
-        <span>选择引用资产</span>
+        <span>{{ mode === 'parent' ? '选择父变体' : '选择引用资产' }}</span>
         <v-spacer />
         <v-chip
-          v-if="localSelected.length"
+          v-if="!parentMode && localSelected.length"
           size="small"
           variant="tonal"
           color="primary"
@@ -26,24 +26,19 @@
         />
       </v-card-title>
 
-      <!-- 分类标签 -->
+      <!-- 分类标签（parent 模式不显示） -->
       <v-tabs
+        v-if="!parentMode"
         v-model="activeTab"
         grow
         density="compact"
         @update:model-value="onTabChange"
       >
         <v-tab value="character">
-          角色外观
-        </v-tab>
-        <v-tab value="characterVariant">
-          角色变体
+          角色
         </v-tab>
         <v-tab value="stage">
-          场景设定
-        </v-tab>
-        <v-tab value="stageVariant">
-          场景变体
+          场景
         </v-tab>
         <v-tab value="custom">
           自定义资产
@@ -52,50 +47,44 @@
 
       <v-divider />
 
-      <!-- 资产网格 -->
-      <v-card-text style="min-height: 280px; max-height: 400px; overflow-y: auto;">
-        <!-- 加载中 -->
-        <div
-          v-if="tabLoading"
-          class="d-flex align-center justify-center py-8"
-        >
-          <v-progress-circular
-            indeterminate
-            size="28"
-          />
-        </div>
-
-        <!-- 空状态 -->
-        <div
-          v-else-if="!tabItems.length"
-          class="text-grey text-body-2 text-center py-8"
-        >
-          暂无可用资产
-        </div>
-
-        <!-- 缩略图网格 -->
-        <v-row
-          v-else
-          dense
-        >
-          <v-col
-            v-for="item in tabItems"
-            :key="item.path"
-            cols="4"
-            sm="3"
-            md="2"
+      <!-- 资产区域 -->
+      <v-card-text style="min-height: 360px; max-height: 480px; overflow-y: auto;">
+        <!-- Parent 模式：变体卡片网格 -->
+        <template v-if="parentMode">
+          <div
+            v-if="tabLoading"
+            class="d-flex align-center justify-center py-8"
           >
-            <v-card
-              variant="outlined"
-              :class="{ 'asset-card--selected': isSelected(item.path) }"
-              class="asset-card"
-              ripple
-              @click="toggle(item)"
+            <v-progress-circular
+              indeterminate
+              size="28"
+            />
+          </div>
+          <div
+            v-else-if="!parentVariants.length"
+            class="text-grey text-body-2 text-center py-8"
+          >
+            暂无可用变体
+          </div>
+          <v-row
+            v-else
+            dense
+          >
+            <v-col
+              v-for="v in parentVariants"
+              :key="v.id"
+              cols="4"
+              sm="3"
+              md="2"
             >
-              <div class="asset-thumb-wrap">
+              <v-card
+                variant="outlined"
+                class="asset-card"
+                @click="selectParent(v)"
+              >
                 <v-img
-                  :src="item.thumbnail"
-                  aspect-ratio="1"
+                  :src="parentVariantThumb(v)"
+                  height="140"
                   cover
                   class="bg-grey-lighten-3"
                 >
@@ -105,31 +94,193 @@
                     </div>
                   </template>
                 </v-img>
-                <v-icon
-                  v-if="isSelected(item.path)"
-                  class="asset-check-icon"
-                  color="primary"
-                  size="28"
-                >
-                  mdi-check-circle
-                </v-icon>
+                <div class="pa-1">
+                  <div class="text-caption text-truncate font-weight-medium">
+                    {{ v.id }}
+                  </div>
+                  <div class="text-caption text-truncate text-grey">
+                    {{ v.desc }}
+                  </div>
+                  <v-chip
+                    size="x-small"
+                    :color="v.hasImage ? 'success' : 'grey'"
+                    variant="tonal"
+                  >
+                    {{ v.hasImage ? '有图' : '未生成' }}
+                  </v-chip>
+                </div>
+              </v-card>
+            </v-col>
+          </v-row>
+        </template>
+
+        <!-- 加载中（refs 模式） -->
+        <div
+          v-else-if="tabLoading"
+          class="d-flex align-center justify-center py-8"
+        >
+          <v-progress-circular
+            indeterminate
+            size="28"
+          />
+        </div>
+
+        <!-- 角色 / 场景：左右分栏（refs 模式） -->
+        <template v-else-if="activeTab === 'character' || activeTab === 'stage'">
+          <div
+            class="d-flex"
+            style="min-height: 300px;"
+          >
+            <!-- 左侧：实体列表 -->
+            <div
+              class="entity-list"
+              style="width: 140px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid rgba(0,0,0,0.08);"
+            >
+              <div
+                v-for="ent in entityList"
+                :key="ent.key"
+                class="entity-item pa-2 text-caption cursor-pointer"
+                :class="{ 'entity-item--active': selectedEntity === ent.key }"
+                @click="selectEntity(ent.key)"
+              >
+                {{ ent.name }}
               </div>
               <div
-                class="pa-1 text-caption text-truncate text-center"
-                :title="item.label"
+                v-if="!entityList.length"
+                class="text-grey text-caption pa-2 text-center"
               >
-                {{ item.label }}
+                暂无
               </div>
-            </v-card>
-          </v-col>
-        </v-row>
+            </div>
+
+            <!-- 右侧：树形资产列表 -->
+            <div
+              class="flex-grow-1"
+              style="overflow-y: auto; padding-left: 8px;"
+            >
+              <div
+                v-if="treeLoading"
+                class="d-flex align-center justify-center py-8"
+              >
+                <v-progress-circular
+                  indeterminate
+                  size="20"
+                />
+              </div>
+              <div
+                v-else-if="!selectedEntity"
+                class="text-grey text-caption pa-4 text-center"
+              >
+                请从左侧选择
+              </div>
+              <div
+                v-else-if="!currentTree.length"
+                class="text-grey text-caption pa-4 text-center"
+              >
+                该{{ activeTab === 'character' ? '角色' : '场景' }}暂无可用资产
+              </div>
+              <template v-else>
+                <div
+                  v-for="item in currentTree"
+                  :key="item.path"
+                  class="asset-tree-item ma-1 pa-2 rounded cursor-pointer"
+                  :class="{ 'asset-tree-item--selected': isSelected(item.path) }"
+                  :title="item.label"
+                  @click="toggle(item)"
+                >
+                  <v-img
+                    :src="item.thumbnail"
+                    width="128"
+                    height="128"
+                    cover
+                    class="rounded flex-shrink-0"
+                  />
+                  <div class="d-flex">
+                    <v-icon
+                      :color="isSelected(item.path) ? 'primary' : 'grey'"
+                      size="small"
+                    >
+                      {{ isSelected(item.path) ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                    </v-icon>
+                    <span class="text-caption text-truncate ml-1">{{ item.label }}</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <!-- 自定义资产：平铺网格 -->
+        <template v-else>
+          <v-row
+            v-if="tabItems.length"
+            dense
+          >
+            <v-col
+              v-for="item in tabItems"
+              :key="item.path"
+              cols="4"
+              sm="3"
+              md="2"
+            >
+              <v-card
+                variant="outlined"
+                :class="{ 'asset-card--selected': isSelected(item.path) }"
+                class="asset-card"
+                ripple
+                @click="toggle(item)"
+              >
+                <div class="asset-thumb-wrap">
+                  <v-img
+                    :src="item.thumbnail"
+                    height="120"
+                    cover
+                    class="bg-grey-lighten-3"
+                  >
+                    <template #placeholder>
+                      <div class="d-flex align-center justify-center fill-height text-caption text-grey">
+                        加载中
+                      </div>
+                    </template>
+                  </v-img>
+                  <v-icon
+                    v-if="isSelected(item.path)"
+                    class="asset-check-icon"
+                    color="primary"
+                    size="28"
+                  >
+                    mdi-check-circle
+                  </v-icon>
+                </div>
+                <div
+                  class="pa-1 text-caption text-truncate text-center"
+                  :title="item.label"
+                >
+                  {{ item.label }}
+                </div>
+              </v-card>
+            </v-col>
+          </v-row>
+          <div
+            v-else
+            class="text-grey text-body-2 text-center py-8"
+          >
+            暂无可用资产
+          </div>
+        </template>
       </v-card-text>
 
-      <v-divider />
+      <v-divider v-if="!parentMode" />
 
-      <!-- 已选资产排序栏 -->
-      <div class="pa-3">
-        <div class="text-caption text-medium-emphasis mb-2">
+      <!-- 已选资产排序栏（parent 模式不显示） -->
+      <div
+        v-if="!parentMode"
+        class="pa-3"
+        style="min-height: 84px;"
+      >
+        <div
+          class="text-caption text-medium-emphasis mb-2"
+        >
           已选资产（按序）：
         </div>
         <div
@@ -199,6 +350,7 @@
           取消
         </v-btn>
         <v-btn
+          v-if="!parentMode"
           color="primary"
           @click="onConfirm"
         >
@@ -215,15 +367,19 @@
  *
  * 提供按分类浏览、多选、拖拽排序的资产选择能力。
  * 用于 VariantPanel 等需要引用图片资产的场景。
+ *
+ * 角色和场景标签采用左右分栏布局：
+ * 左侧列出实体（角色名/场景名），右侧以树形展示该实体的资产及变体。
+ * 自定义资产标签保留原来的平铺网格布局。
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import client, { readFs, type DirEntry, type DirResponse } from '../api/client'
-import { listCharacterVariants, listStageVariants } from '../api/assets'
+import { listCharacterVariants, listStageVariants, type VariantInfo } from '../api/assets'
 
 /** 资产分类标签 */
-type AssetTab = 'character' | 'characterVariant' | 'stage' | 'stageVariant' | 'custom'
+type AssetTab = 'character' | 'stage' | 'custom'
 
-/** 网格中的资产条目 */
+/** 树形资产条目 */
 interface AssetItem {
   /** 资产相对路径（project 根） */
   path: string
@@ -231,6 +387,14 @@ interface AssetItem {
   label: string
   /** 缩略图直链 */
   thumbnail: string
+  /** 缩进层级（0 = 根） */
+  depth: number
+}
+
+/** 左侧实体列表条目 */
+interface EntityItem {
+  key: string
+  name: string
 }
 
 const props = withDefaults(defineProps<{
@@ -238,9 +402,17 @@ const props = withDefaults(defineProps<{
   project: string
   selected?: string[]
   exclude?: string[]
+  mode?: 'refs' | 'parent'
+  contextKind?: 'character' | 'stage'
+  contextOwner?: string
+  contextBaseLabel?: string
 }>(), {
   selected: () => [],
   exclude: () => [],
+  mode: 'refs',
+  contextKind: undefined,
+  contextOwner: undefined,
+  contextBaseLabel: undefined,
 })
 
 const emit = defineEmits<{
@@ -248,19 +420,20 @@ const emit = defineEmits<{
   'update:selected': [paths: string[]]
 }>()
 
+/** 是否为父变体选择模式 */
+const parentMode = computed(() => props.mode === 'parent')
+
 // ── 状态 ───────────────────────────────────────────────
 
 const activeTab = ref<AssetTab>('character')
 const tabLoading = ref(false)
+const treeLoading = ref(false)
+const entityList = ref<EntityItem[]>([])
+const selectedEntity = ref('')
+const currentTree = ref<AssetItem[]>([])
 const tabItems = ref<AssetItem[]>([])
 const localSelected = ref<AssetItem[]>([])
-const allItems = ref<Record<AssetTab, AssetItem[]>>({
-  character: [],
-  characterVariant: [],
-  stage: [],
-  stageVariant: [],
-  custom: [],
-})
+const parentVariants = ref<VariantInfo[]>([])
 
 // ── 拖动排序 ───────────────────────────────────────────
 
@@ -275,7 +448,6 @@ function onDragStart(e: DragEvent, idx: number) {
 
 function onDragOver(e: DragEvent, idx: number) {
   if (dragIdx === null || dragIdx === idx) return
-  // 视觉反馈：可加 hover 样式
 }
 
 function onDrop(e: DragEvent, idx: number) {
@@ -328,9 +500,194 @@ function onUpdate(open: boolean) {
   if (!open) emit('update:modelValue', false)
 }
 
-// ── 数据加载 ───────────────────────────────────────────
+// ── 工具函数 ───────────────────────────────────────────
 
 const ts = () => Date.now()
+
+/**
+ * 根据路径生成可读的显示标签，用于初始化 selected 条目的显示。
+ */
+function getPathLabel(path: string): string {
+  if (path.startsWith('assert/custom/')) {
+    return '自定义/' + path.slice('assert/custom/'.length)
+  }
+  if (path.startsWith('assert/character/')) {
+    const rest = path.slice('assert/character/'.length)
+    return rest.replace('/appearance.jpg', '/外观').replace('/variants/', '/').replace(/\.jpg$/, '')
+  }
+  if (path.startsWith('assert/stage/')) {
+    const rest = path.slice('assert/stage/'.length)
+    return rest.replace('/variants/', '/').replace(/\.jpg$/, '')
+  }
+  return path.split('/').pop() ?? path
+}
+
+/**
+ * 递归将 VariantInfo 列表拍平为带缩进层级的树形 AssetItem 数组。
+ */
+function flattenVariantTree(
+  variants: VariantInfo[],
+  project: string,
+  parentId?: string,
+  startDepth: number = 1,
+): AssetItem[] {
+  const items: AssetItem[] = []
+  const children = variants.filter(
+    (v) => (v.parentId ?? undefined) === (parentId ?? undefined) && v.hasImage && !props.exclude.includes(v.imagePath),
+  )
+  for (const v of children) {
+    items.push({
+      path: v.imagePath,
+      label: v.id,
+      thumbnail: `/api/fs/${project}/${v.imagePath}?t=${ts()}`,
+      depth: startDepth,
+    })
+    items.push(...flattenVariantTree(variants, project, v.id, startDepth + 1))
+  }
+  return items
+}
+
+// ── Parent 模式 ──────────────────────────────────────
+
+/** 获取父变体缩略图 URL（无图时返回空白占位符） */
+function parentVariantThumb(v: VariantInfo): string | undefined {
+  if (!v.hasImage) return undefined
+  return `/api/fs/${props.project}/${v.imagePath}?t=${Date.now()}`
+}
+
+/** 选择父变体（立即确认） */
+function selectParent(v: VariantInfo) {
+  emit('update:selected', [v.id])
+  emit('update:modelValue', false)
+}
+
+/** 加载父变体列表 */
+async function loadParentVariants() {
+  if (!props.contextKind || !props.contextOwner) return
+  tabLoading.value = true
+  parentVariants.value = []
+  try {
+    if (props.contextKind === 'character') {
+      const res = await listCharacterVariants(props.project, props.contextOwner)
+      parentVariants.value = res.variants
+    } else if (props.contextKind === 'stage' && props.contextBaseLabel) {
+      const res = await listStageVariants(props.project, props.contextOwner, props.contextBaseLabel)
+      parentVariants.value = res.variants
+    }
+  } catch {
+    // ignore
+  } finally {
+    tabLoading.value = false
+  }
+}
+
+// ── 数据加载 ───────────────────────────────────────────
+
+/**
+ * 根据当前标签加载左侧实体列表。
+ */
+async function loadEntityList() {
+  selectedEntity.value = ''
+  currentTree.value = []
+  const project = props.project
+  const prefix = activeTab.value === 'character' ? 'prompt/character/' : 'prompt/stage/'
+  try {
+    const res = await readFs(project, prefix) as DirResponse
+    entityList.value = (res.entries ?? [])
+      .filter((e: DirEntry) => e.type === 'dir')
+      .map((e: DirEntry) => ({ key: e.name, name: e.name }))
+  } catch {
+    entityList.value = []
+  }
+}
+
+/**
+ * 选中左侧实体后，构建右侧树形资产列表。
+ */
+async function selectEntity(key: string) {
+  selectedEntity.value = key
+  treeLoading.value = true
+  try {
+    const project = props.project
+    if (activeTab.value === 'character') {
+      currentTree.value = await buildCharacterTree(project, key)
+    } else {
+      currentTree.value = await buildStageTree(project, key)
+    }
+  } finally {
+    treeLoading.value = false
+  }
+}
+
+/**
+ * 构建角色的树形资产列表：外观图片为根，变体按 parentId 递归嵌套。
+ */
+async function buildCharacterTree(project: string, name: string): Promise<AssetItem[]> {
+  const tree: AssetItem[] = []
+
+  const appearancePath = `assert/character/${name}/appearance.jpg`
+  if (!props.exclude.includes(appearancePath)) {
+    tree.push({
+      path: appearancePath,
+      label: `${name}/外观`,
+      thumbnail: `/api/fs/${project}/${appearancePath}?t=${ts()}`,
+      depth: 0,
+    })
+  }
+
+  try {
+    const { variants } = await listCharacterVariants(project, name)
+    tree.push(...flattenVariantTree(variants, project, undefined, 1))
+  } catch {
+    // 单个角色加载失败不影响
+  }
+
+  return tree
+}
+
+/**
+ * 构建场景的树形资产列表：每个子场景为一棵子树，变体递归嵌套。
+ */
+async function buildStageTree(project: string, stage: string): Promise<AssetItem[]> {
+  const tree: AssetItem[] = []
+  const labels = await listStageLabels(project, stage)
+
+  for (const label of labels) {
+    const stagePath = `assert/stage/${stage}/${label}.jpg`
+    if (!props.exclude.includes(stagePath)) {
+      tree.push({
+        path: stagePath,
+        label: `${stage}/${label}`,
+        thumbnail: `/api/fs/${project}/${stagePath}?t=${ts()}`,
+        depth: 0,
+      })
+    }
+
+    try {
+      const { variants } = await listStageVariants(project, stage, label)
+      tree.push(...flattenVariantTree(variants, project, undefined, 1))
+    } catch {
+      // 单个子场景加载失败不影响
+    }
+  }
+
+  return tree
+}
+
+/**
+ * 列出 prompt/stage/{stage}/ 下作为场景标签的 .md 文件（排除 overview.md）。
+ */
+async function listStageLabels(project: string, stage: string): Promise<string[]> {
+  try {
+    const res = await readFs(project, `prompt/stage/${stage}`) as DirResponse
+    const entries = res.entries ?? []
+    return entries
+      .filter((e: DirEntry) => e.type === 'file' && e.name.endsWith('.md') && e.name !== 'overview.md')
+      .map((e: DirEntry) => e.name.replace(/\.md$/, ''))
+  } catch {
+    return []
+  }
+}
 
 /**
  * 递归列出目录下的所有图片文件路径。
@@ -365,194 +722,64 @@ async function listImageFilesRecursive(project: string, dirRelPath: string): Pro
 }
 
 /**
- * 列出 prompt/stage/{stage}/ 下作为场景标签的 .md 文件（排除 overview.md）。
+ * 加载「自定义资产」标签数据（平铺网格）。
  */
-async function listStageLabels(project: string, stage: string): Promise<string[]> {
-  try {
-    const res = await readFs(project, `prompt/stage/${stage}`) as DirResponse
-    const entries = res.entries ?? []
-    return entries
-      .filter((e) => e.type === 'file' && e.name.endsWith('.md') && e.name !== 'overview.md')
-      .map((e) => e.name.replace(/\.md$/, ''))
-  } catch {
-    return []
-  }
-}
-
-/** 加载「角色外观」标签数据 */
-async function loadCharacterTab(project: string): Promise<AssetItem[]> {
-  const items: AssetItem[] = []
-  try {
-    const res = await readFs(project, 'prompt/character/') as DirResponse
-    const dirs = (res.entries ?? []).filter((e) => e.type === 'dir')
-    for (const dir of dirs) {
-      const name = dir.name
-      const path = `assert/character/${name}/appearance.jpg`
-      // 排除已选择或排除列表中的路径
-      if (props.exclude.includes(path)) continue
-      items.push({
-        path,
-        label: name,
-        thumbnail: `/api/fs/${project}/${path}?t=${ts()}`,
-      })
-    }
-  } catch {
-    // ignore
-  }
-  return items
-}
-
-/** 加载「角色变体」标签数据 */
-async function loadCharacterVariantTab(project: string): Promise<AssetItem[]> {
-  const items: AssetItem[] = []
-  try {
-    const res = await readFs(project, 'prompt/character/') as DirResponse
-    const dirs = (res.entries ?? []).filter((e) => e.type === 'dir')
-    for (const dir of dirs) {
-      try {
-        const { variants } = await listCharacterVariants(project, dir.name)
-        for (const v of variants) {
-          if (!v.hasImage) continue
-          if (props.exclude.includes(v.imagePath)) continue
-          items.push({
-            path: v.imagePath,
-            label: `${dir.name} / ${v.id}`,
-            thumbnail: `/api/fs/${project}/${v.imagePath}?t=${ts()}`,
-          })
-        }
-      } catch {
-        // 单个角色加载失败不影响其他角色
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return items
-}
-
-/** 加载「场景设定」标签数据 */
-async function loadStageTab(project: string): Promise<AssetItem[]> {
-  const items: AssetItem[] = []
-  try {
-    const res = await readFs(project, 'prompt/stage/') as DirResponse
-    const dirs = (res.entries ?? []).filter((e) => e.type === 'dir')
-    for (const dir of dirs) {
-      const labels = await listStageLabels(project, dir.name)
-      for (const label of labels) {
-        const path = `assert/stage/${dir.name}/${label}.jpg`
-        if (props.exclude.includes(path)) continue
-        items.push({
-          path,
-          label: `${dir.name} / ${label}`,
-          thumbnail: `/api/fs/${project}/${path}?t=${ts()}`,
-        })
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return items
-}
-
-/** 加载「场景变体」标签数据 */
-async function loadStageVariantTab(project: string): Promise<AssetItem[]> {
-  const items: AssetItem[] = []
-  try {
-    const res = await readFs(project, 'prompt/stage/') as DirResponse
-    const dirs = (res.entries ?? []).filter((e) => e.type === 'dir')
-    for (const dir of dirs) {
-      const labels = await listStageLabels(project, dir.name)
-      for (const label of labels) {
-        try {
-          const { variants } = await listStageVariants(project, dir.name, label)
-          for (const v of variants) {
-            if (!v.hasImage) continue
-            if (props.exclude.includes(v.imagePath)) continue
-            items.push({
-              path: v.imagePath,
-              label: `${dir.name} / ${label} / ${v.id}`,
-              thumbnail: `/api/fs/${project}/${v.imagePath}?t=${ts()}`,
-            })
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return items
-}
-
-/** 加载「自定义资产」标签数据 */
-async function loadCustomTab(project: string): Promise<AssetItem[]> {
-  const items: AssetItem[] = []
-  const imagePaths = await listImageFilesRecursive(project, 'assert/custom/')
-  for (const p of imagePaths) {
-    if (props.exclude.includes(p)) continue
-    // 从路径中提取相对 assert/custom/ 的显示名
-    const relPath = p.replace(/^assert\/custom\//, '')
-    items.push({
-      path: p,
-      label: relPath,
-      thumbnail: `/api/fs/${project}/${p}?t=${ts()}`,
-    })
-  }
-  return items
-}
-
-/** 切换标签页时加载数据 */
-async function onTabChange() {
-  const tab = activeTab.value
-  // 如果该标签数据已缓存，直接使用
-  if (allItems.value[tab]?.length) {
-    tabItems.value = allItems.value[tab]
-    return
-  }
-
+async function loadCustomTabInternal() {
   tabLoading.value = true
   tabItems.value = []
   try {
     const project = props.project
-    let items: AssetItem[] = []
-    switch (tab) {
-      case 'character':
-        items = await loadCharacterTab(project)
-        break
-      case 'characterVariant':
-        items = await loadCharacterVariantTab(project)
-        break
-      case 'stage':
-        items = await loadStageTab(project)
-        break
-      case 'stageVariant':
-        items = await loadStageVariantTab(project)
-        break
-      case 'custom':
-        items = await loadCustomTab(project)
-        break
+    const imagePaths = await listImageFilesRecursive(project, 'assert/custom/')
+    for (const p of imagePaths) {
+      if (props.exclude.includes(p)) continue
+      const relPath = p.replace(/^assert\/custom\//, '')
+      tabItems.value.push({
+        path: p,
+        label: relPath,
+        thumbnail: `/api/fs/${project}/${p}?t=${ts()}`,
+        depth: 0,
+      })
     }
-    allItems.value[tab] = items
-    tabItems.value = items
   } finally {
     tabLoading.value = false
   }
 }
 
+/** 切换标签页时加载数据 */
+async function onTabChange() {
+  if (activeTab.value === 'custom') {
+    await loadCustomTabInternal()
+  } else {
+    tabLoading.value = true
+    try {
+      await loadEntityList()
+    } finally {
+      tabLoading.value = false
+    }
+  }
+}
+
 // ── 生命周期 ───────────────────────────────────────────
 
-/** 对话框打开时重置状态并加载首个标签 */
+/** 对话框打开时重置状态并加载数据 */
 watch(
   () => props.modelValue,
   (open) => {
     if (open) {
-      // 重置内部选择
-      localSelected.value = []
-      // 清除缓存以便重新加载
-      allItems.value = { character: [], characterVariant: [], stage: [], stageVariant: [], custom: [] }
-      activeTab.value = 'character'
-      void onTabChange()
+      if (parentMode.value) {
+        void loadParentVariants()
+      } else {
+        // 从 props.selected 初始化已选列表
+        localSelected.value = props.selected.map((path) => ({
+          path,
+          label: getPathLabel(path),
+          thumbnail: `/api/fs/${props.project}/${path}?t=${ts()}`,
+          depth: 0,
+        }))
+        selectedEntity.value = ''
+        activeTab.value = 'character'
+        void onTabChange()
+      }
     }
   },
 )
@@ -587,5 +814,35 @@ watch(
 
 .selected-item {
   position: relative;
+}
+
+.entity-item {
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.entity-item:hover {
+  background: rgba(var(--v-theme-primary), 0.06);
+}
+
+.entity-item--active {
+  background: rgba(var(--v-theme-primary), 0.12);
+  color: rgb(var(--v-theme-primary));
+}
+
+.asset-tree-item {
+  border-radius: 4px;
+  width: 128px;
+  height: 164px;
+  overflow: hidden;
+  display: inline-block;
+}
+
+.asset-tree-item:hover {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+
+.asset-tree-item--selected {
+  background: rgba(var(--v-theme-primary), 0.06);
 }
 </style>
