@@ -163,6 +163,11 @@ export interface ImageToVideoVars extends WorkflowVarsBase {
    * 顺序与 stage.json 数组下标一致。
    */
   stageImages?: string;
+  /**
+   * 用户编辑并合并的音频文件相对路径（引擎从 audio-edit.json + merged.flac 注入）
+   * 例：`assert/scene/1/1/audio/merged.flac`
+   */
+  audioPath?: string;
 }
 
 // ── 兼容别名（旧代码迁移期可选） ────────────────────────────────────

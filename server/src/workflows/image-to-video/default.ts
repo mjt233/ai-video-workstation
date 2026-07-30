@@ -1,5 +1,11 @@
 import { register } from '../registry.js';
-import { createComfyuiBridgeWorkflow, submitImageToVideo } from '../bridge-client.js';
+import {
+  createComfyuiBridgeWorkflow,
+  submitImageToVideo,
+  submitComfyuiBridge,
+  pollTask,
+  buildDownloadRequest,
+} from '../bridge-client.js';
 import type { ImageToVideoVars } from '../types.js';
 
 /**
@@ -8,7 +14,11 @@ import type { ImageToVideoVars } from '../types.js';
  * 根据分镜场景图数量自动选择工作流：
  * - 2 张 → FL2V（首尾帧插值）
  * - 3 张 → FML2V（首中尾帧插值，中间帧位置 0.5）
- * 自动生成音频。
+ *
+ * 音频处理策略：
+ * 1. 用户已进行【分镜音频编辑】并合并 → 使用 merged.flac
+ * 2. 有台词但未编辑音频 → 拼接所有台词文本，调用 TTS 生成音频
+ * 3. 无台词 → 不提交音频
  */
 register(
   createComfyuiBridgeWorkflow<ImageToVideoVars>({
@@ -20,8 +30,10 @@ register(
     },
 
     async submit(params) {
+      const episode = params.vars.episode;
+      const shot = params.vars.shot;
       const prompt = await params.readFile(
-        `prompt/scene/${params.vars.episode}/${params.vars.shot}/prompt.md`,
+        `prompt/scene/${episode}/${shot}/prompt.md`,
       );
       const durationSec = Number(params.vars.duration);
       const width = params.projectConfig.width;
@@ -58,6 +70,96 @@ register(
         stageImagePaths.map((p) => params.readAssertFile(p)),
       );
 
+      // ── 处理音频 ──
+      let audio: File | undefined;
+
+      // 策略 1：优先使用用户编辑并合并的音频
+      if (params.vars.audioPath) {
+        audio = await params.readAssertFile(params.vars.audioPath);
+      } else {
+        // 策略 2：有台词但未编辑音频 → 拼接台词文本后调用 TTS 生成
+        try {
+          const scriptRaw = await params.readFile(
+            `prompt/scene/${episode}/${shot}/script.json`,
+          );
+          const script = JSON.parse(scriptRaw) as Array<{
+            角色名?: string;
+            台词?: string;
+          }>;
+          if (Array.isArray(script) && script.length > 0) {
+            const texts = script
+              .map((l) => (l.台词 ?? '').trim())
+              .filter(Boolean);
+            if (texts.length > 0) {
+              const combinedText = texts.join('。') + '。';
+
+              // 尝试取第一个角色的声线描述，否则使用默认描述
+              const firstChar = script.find(
+                (l) => (l.角色名 ?? '').trim(),
+              );
+              let desc: string;
+              if (firstChar?.角色名) {
+                try {
+                  const voiceMd = await params.readFile(
+                    `prompt/character/${firstChar.角色名.trim()}/voice.md`,
+                  );
+                  desc =
+                    voiceMd.trim() ||
+                    '自然、清晰的中文女声，语速适中，情感平和。';
+                } catch {
+                  desc = '自然、清晰的中文女声，语速适中，情感平和。';
+                }
+              } else {
+                desc = '自然、清晰的中文女声，语速适中，情感平和。';
+              }
+
+              // 调用桥接 TTS 生成音频
+              const ttsResult = await submitComfyuiBridge({
+                workflowId: 'tts_voice_design',
+                params: { desc, text: combinedText },
+              });
+
+              // 轮询等待 TTS 完成
+              let ttsOk = false;
+              while (true) {
+                await new Promise((r) => setTimeout(r, 1000));
+                const ttsStatus = await pollTask(ttsResult.taskId);
+                if (ttsStatus.status === 'completed') {
+                  ttsOk = true;
+                  break;
+                }
+                if (ttsStatus.status === 'failed') {
+                  console.warn(
+                    `TTS 生成失败，跳过音频: ${ttsStatus.errorMessage}`,
+                  );
+                  break;
+                }
+              }
+
+              // 下载生成的音频
+              if (ttsOk) {
+                const download = await buildDownloadRequest(
+                  ttsResult.taskId,
+                );
+                if (download) {
+                  const resp = await fetch(download.url, {
+                    headers: download.headers,
+                  });
+                  const blob = await resp.blob();
+                  audio = new File(
+                    [blob],
+                    'voice-combined.flac',
+                    { type: 'audio/flac' },
+                  );
+                }
+              }
+            }
+          }
+        } catch {
+          // script.json 不存在或无效 → 没有台词，不生成音频
+        }
+      }
+
       const result = await submitImageToVideo({
         prompt,
         width,
@@ -66,6 +168,7 @@ register(
         fps,
         seed: params.vars.seed ? Number(params.vars.seed) : undefined,
         frames,
+        ...(audio ? { audio } : {}),
       });
 
       return { taskId: result.taskId };
