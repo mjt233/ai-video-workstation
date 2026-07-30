@@ -75,7 +75,7 @@
           </v-alert>
 
           <v-text-field
-            v-if="formDialog.mode === 'create'"
+            v-if="formDialog.mode === 'create' || formDialog.mode === 'edit'"
             v-model="formDialog.id"
             label="变体名称"
             hint="如：门已打开、雨天、侧身"
@@ -300,6 +300,8 @@ import {
   deleteStageVariant,
   listCharacterVariants,
   listStageVariants,
+  renameCharacterVariant,
+  renameStageVariant,
   updateCharacterVariant,
   updateStageVariant,
   type VariantInfo,
@@ -340,6 +342,7 @@ const formDialog = reactive({
   show: false,
   mode: 'create' as 'create' | 'edit',
   id: '',
+  originalId: '',
   desc: '',
   parentId: '' as string | undefined,
   parentIdEditable: false,
@@ -444,6 +447,7 @@ function openCreateWithParent(v: VariantInfo) {
 function openEdit(v: VariantInfo) {
   formDialog.mode = 'edit'
   formDialog.id = v.id
+  formDialog.originalId = v.id
   formDialog.desc = v.desc
   formDialog.parentId = v.parentId
   formDialog.parentIdEditable = true
@@ -538,9 +542,15 @@ async function submitForm() {
       if (!desc) { formDialog.error = '衍生描述不能为空'; return }
       if (props.kind === 'character') {
         await updateCharacterVariant(props.project, props.owner, formDialog.id, { desc, parentId: formDialog.parentId || undefined, refs: formDialog.refs })
+        if (formDialog.id !== formDialog.originalId) {
+          await renameCharacterVariant(props.project, props.owner, formDialog.originalId, formDialog.id)
+        }
       } else {
         if (!props.baseLabel) throw new Error('缺少 baseLabel')
         await updateStageVariant(props.project, props.owner, props.baseLabel, formDialog.id, { desc, parentId: formDialog.parentId || undefined, refs: formDialog.refs })
+        if (formDialog.id !== formDialog.originalId) {
+          await renameStageVariant(props.project, props.owner, props.baseLabel, formDialog.originalId, formDialog.id)
+        }
       }
     }
     formDialog.show = false
