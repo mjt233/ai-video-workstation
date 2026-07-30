@@ -173,7 +173,11 @@ watch(show, async (val) => {
       const wf = workflows.find(w => w.id === props.workflowId)
       if (wf) {
         implementations.value = wf.implementations
-        if (props.defaultImpl) selectedImpl.value = props.defaultImpl
+        if (props.defaultImpl) {
+          selectedImpl.value = props.defaultImpl
+        } else {
+          selectedImpl.value = implementations.value[0].impl
+        }
       }
     } catch {
       // Ignore errors

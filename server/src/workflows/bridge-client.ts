@@ -63,7 +63,7 @@ export interface BridgeSubmitResult {
 
 export interface ComfyuiBridgeExecuteParams {
   /**
-   * 工作流id
+   * ComfyUI Easy Bridge 中配置的工作流id
    */
   workflowId: string
 
@@ -166,6 +166,84 @@ export async function submitTextToImage(params: SubmitTextToImageParams): Promis
     workflowId: 'text_to_image',
     params: body
   })
+}
+
+// ── 图生视频统一封装 ──────────────────────────────────────────────────
+
+export interface ImageToVideoSubmitParams {
+  /** 视频描述提示词 */
+  prompt: string;
+  /** 视频宽度（像素） */
+  width: number;
+  /** 视频高度（像素） */
+  height: number;
+  /** 视频时长（秒） */
+  duration: number;
+  /** 帧率 */
+  fps: number;
+  /** 随机种子（可选） */
+  seed?: number;
+  /** 背景音频文件（可选） */
+  audio?: File;
+  /**
+   * 参考帧图片，按时间顺序排列。
+   * - 1 张：仅首帧 → 调用 I2V
+   * - 2 张：首帧 + 尾帧 → 调用 FL2V
+   * - 3 张：首帧 + 中间帧 + 尾帧 → 调用 FML2V（mid_frame_cursor=0.5）
+   */
+  frames: File[];
+}
+
+/**
+ * 根据 frames 数量自动选择合适的图生视频工作流。
+ *
+ * - 1 帧 → I2V（单帧生成）
+ * - 2 帧 → FL2V（首尾帧插值）
+ * - 3 帧 → FML2V（首中尾帧插值，中间帧位置固定 0.5）
+ */
+export async function submitImageToVideo(params: ImageToVideoSubmitParams): Promise<BridgeSubmitResult> {
+  const body: Record<string, unknown> = {
+    prompt: params.prompt,
+    width: params.width,
+    height: params.height,
+    duration: params.duration,
+    fps: params.fps,
+    auto_generate_audio: true,
+  };
+  if (params.seed != null) {
+    body.seed = params.seed;
+  }
+
+  const files: Record<string, File> = {};
+  if (params.audio) {
+    files.audio = params.audio;
+    body.auto_generate_audio = false
+  }
+
+  const frameCount = params.frames.length;
+
+  if (frameCount === 1) {
+    files.first_frame = params.frames[0];
+    return submitComfyuiBridge({ workflowId: 'I2V', params: body, files });
+  }
+
+  if (frameCount === 2) {
+    files.first_frame = params.frames[0];
+    files.last_frame = params.frames[1];
+    return submitComfyuiBridge({ workflowId: 'FL2V', params: body, files });
+  }
+
+  if (frameCount === 3) {
+    body.mid_frame_cursor = 0.5;
+    files.first_frame = params.frames[0];
+    files.mid_frame = params.frames[1];
+    files.last_frame = params.frames[2];
+    return submitComfyuiBridge({ workflowId: 'FML2V', params: body, files });
+  }
+
+  throw new Error(
+    `image-to-video 仅支持 1~3 帧参考图，当前 ${frameCount} 帧`,
+  );
 }
 
 export interface BridgeTaskStatus {
