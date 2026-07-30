@@ -562,11 +562,16 @@ assetsRouter.post('/assets/:project/character/:name/variants', async (req: Reque
   try {
     const project = req.params.project as string;
     const name = req.params.name as string;
-    const body = req.body as { id?: string; desc?: string };
+    const body = req.body as { id?: string; desc?: string; parentId?: string; refs?: string[] };
     if (!body.id || !body.desc) {
       throw Object.assign(new Error('id 与 desc 必填'), { code: 'INVALID' });
     }
-    const variant = await createCharacterVariant(project, name, { id: body.id, desc: body.desc });
+    const variant = await createCharacterVariant(project, name, {
+      id: body.id,
+      desc: body.desc,
+      parentId: body.parentId,
+      refs: body.refs,
+    });
     res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
@@ -579,8 +584,12 @@ assetsRouter.put('/assets/:project/character/:name/variants/:variantId', async (
     const project = req.params.project as string;
     const name = req.params.name as string;
     const variantId = req.params.variantId as string;
-    const body = req.body as { desc?: string };
-    const variant = await updateCharacterVariant(project, name, variantId, body);
+    const body = req.body as { desc?: string; parentId?: string; refs?: string[] };
+    const variant = await updateCharacterVariant(project, name, variantId, {
+      desc: body.desc,
+      parentId: body.parentId,
+      refs: body.refs,
+    });
     res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
@@ -593,7 +602,8 @@ assetsRouter.delete('/assets/:project/character/:name/variants/:variantId', asyn
     const project = req.params.project as string;
     const name = req.params.name as string;
     const variantId = req.params.variantId as string;
-    await deleteCharacterVariant(project, name, variantId);
+    const cascade = req.query.cascade === 'true';
+    await deleteCharacterVariant(project, name, variantId, cascade ? { cascade: true } : undefined);
     res.json({ success: true });
   } catch (err) {
     httpError(res, err);
@@ -619,11 +629,16 @@ assetsRouter.post('/assets/:project/stage/:stage/:label/variants', async (req: R
     const project = req.params.project as string;
     const stage = req.params.stage as string;
     const label = req.params.label as string;
-    const body = req.body as { id?: string; desc?: string };
+    const body = req.body as { id?: string; desc?: string; parentId?: string; refs?: string[] };
     if (!body.id || !body.desc) {
       throw Object.assign(new Error('id 与 desc 必填'), { code: 'INVALID' });
     }
-    const variant = await createStageVariant(project, stage, label, { id: body.id, desc: body.desc });
+    const variant = await createStageVariant(project, stage, label, {
+      id: body.id,
+      desc: body.desc,
+      parentId: body.parentId,
+      refs: body.refs,
+    });
     res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
@@ -637,8 +652,12 @@ assetsRouter.put('/assets/:project/stage/:stage/:label/variants/:variantId', asy
     const stage = req.params.stage as string;
     const label = req.params.label as string;
     const variantId = req.params.variantId as string;
-    const body = req.body as { desc?: string };
-    const variant = await updateStageVariant(project, stage, label, variantId, body);
+    const body = req.body as { desc?: string; parentId?: string; refs?: string[] };
+    const variant = await updateStageVariant(project, stage, label, variantId, {
+      desc: body.desc,
+      parentId: body.parentId,
+      refs: body.refs,
+    });
     res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
@@ -652,7 +671,8 @@ assetsRouter.delete('/assets/:project/stage/:stage/:label/variants/:variantId', 
     const stage = req.params.stage as string;
     const label = req.params.label as string;
     const variantId = req.params.variantId as string;
-    await deleteStageVariant(project, stage, label, variantId);
+    const cascade = req.query.cascade === 'true';
+    await deleteStageVariant(project, stage, label, variantId, cascade ? { cascade: true } : undefined);
     res.json({ success: true });
   } catch (err) {
     httpError(res, err);
