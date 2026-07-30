@@ -39,6 +39,8 @@ import {
   deleteStageVariant,
   listCharacterVariants,
   listStageVariants,
+  renameCharacterVariant,
+  renameStageVariant,
   updateCharacterVariant,
   updateStageVariant,
 } from '../assets/variants.js';
@@ -610,6 +612,21 @@ assetsRouter.delete('/assets/:project/character/:name/variants/:variantId', asyn
   }
 });
 
+// PUT /assets/:project/character/:name/variants/:variantId/rename
+assetsRouter.put('/assets/:project/character/:name/variants/:variantId/rename', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const variantId = req.params.variantId as string;
+    const { newId } = req.body as { newId?: string };
+    if (!newId) throw Object.assign(new Error('newId 必填'), { code: 'INVALID' });
+    const variant = await renameCharacterVariant(project, name, variantId, newId);
+    res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
 // GET 场景子场景衍生变体列表
 assetsRouter.get('/assets/:project/stage/:stage/:label/variants', async (req: Request, res: Response) => {
   try {
@@ -674,6 +691,22 @@ assetsRouter.delete('/assets/:project/stage/:stage/:label/variants/:variantId', 
     const cascade = req.query.cascade === 'true';
     await deleteStageVariant(project, stage, label, variantId, cascade ? { cascade: true } : undefined);
     res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT /assets/:project/stage/:stage/:label/variants/:variantId/rename
+assetsRouter.put('/assets/:project/stage/:stage/:label/variants/:variantId/rename', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const stage = req.params.stage as string;
+    const label = req.params.label as string;
+    const variantId = req.params.variantId as string;
+    const { newId } = req.body as { newId?: string };
+    if (!newId) throw Object.assign(new Error('newId 必填'), { code: 'INVALID' });
+    const variant = await renameStageVariant(project, stage, label, variantId, newId);
+    res.json({ success: true, variant });
   } catch (err) {
     httpError(res, err);
   }
