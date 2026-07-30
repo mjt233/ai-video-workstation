@@ -171,11 +171,12 @@
       </v-card-actions>
     </v-card>
 
-    <StagePicker
+    <AssetPickerDialog
       v-model="stagePickerOpen"
       :project="project"
-      :model-selected="form.基础场景"
-      @confirm="onStagePicked"
+      :tabs="['stage', 'custom']"
+      title="选择基础场景"
+      @update:selected="onStageAssetPicked"
     />
     <CharacterPicker
       v-model="characterPickerOpen"
@@ -195,7 +196,7 @@ import {
   createSceneStageFrame,
   updateSceneStageFrame,
 } from '../api/assets'
-import StagePicker from './StagePicker.vue'
+import AssetPickerDialog from './AssetPickerDialog.vue'
 import CharacterPicker from './CharacterPicker.vue'
 
 /** 引用同集上一分镜最后场景图的固定关键字。 */
@@ -224,6 +225,41 @@ const saving = ref(false)
 const error = ref('')
 const stagePickerOpen = ref(false)
 const characterPickerOpen = ref(false)
+
+/**
+ * 将 AssetPickerDialog 返回的 assert 路径转换为场景引用格式。
+ * - assert/stage/{stage}/{label}.jpg → {stage}/{label}
+ * - assert/stage/{stage}/variants/{label}/{id}.jpg → {stage}/{label}@{id}
+ * - assert/custom/... → custom/...（作为路径引用）
+ */
+function assertPathToStageRef(apath: string): string | null {
+  if (apath.startsWith('assert/stage/')) {
+    const rest = apath.slice('assert/stage/'.length)
+    // 检查是否为衍生变体：路径含 /variants/
+    const variantsIdx = rest.indexOf('/variants/')
+    if (variantsIdx >= 0) {
+      const stage = rest.slice(0, variantsIdx)
+      const afterVariants = rest.slice(variantsIdx + '/variants/'.length)
+      const slash = afterVariants.indexOf('/')
+      if (slash >= 0) {
+        const label = afterVariants.slice(0, slash)
+        const variantId = afterVariants.slice(slash + 1).replace(/\.jpg$/i, '')
+        return `${stage}/${label}@${variantId}`
+      }
+    }
+    // 普通场景
+    const withoutJpg = rest.replace(/\.jpg$/i, '')
+    const slash = withoutJpg.indexOf('/')
+    if (slash >= 0) {
+      return withoutJpg
+    }
+  }
+  if (apath.startsWith('assert/custom/')) {
+    const customPath = apath.slice('assert/custom/'.length).replace(/\.jpg$/i, '')
+    return `custom/${customPath}`
+  }
+  return null
+}
 const stagePreviewUrl = ref('')
 const characterPreviewUrls = ref<Record<string, string>>({})
 
@@ -388,18 +424,15 @@ function selectPrevStage() {
 }
 
 /**
- * 选择器确认基础场景。
- * @param payload 引用与可选已有图 URL
+ * AssetPickerDialog 确认选择基础场景。
+ * 将 assert 路径转换为场景引用格式。
  */
-function onStagePicked(payload: { ref: string; imageUrl: string } | string) {
-  // 兼容旧签名（仅 string）
-  if (typeof payload === 'string') {
-    form.基础场景 = payload
-    void refreshStagePreview(payload)
-    return
-  }
-  form.基础场景 = payload.ref
-  void refreshStagePreview(payload.ref, payload.imageUrl || undefined)
+function onStageAssetPicked(paths: string[]) {
+  if (paths.length === 0) return
+  const ref = assertPathToStageRef(paths[0])
+  if (!ref) return
+  form.基础场景 = ref
+  void refreshStagePreview(ref)
 }
 
 /**

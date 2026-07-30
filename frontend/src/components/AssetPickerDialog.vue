@@ -8,7 +8,7 @@
     <v-card>
       <!-- 标题栏 -->
       <v-card-title class="d-flex align-center">
-        <span>{{ mode === 'parent' ? '选择父变体' : '选择引用资产' }}</span>
+        <span>{{ title || (mode === 'parent' ? '选择父变体' : '选择引用资产') }}</span>
         <v-spacer />
         <v-chip
           v-if="!parentMode && localSelected.length"
@@ -26,21 +26,30 @@
         />
       </v-card-title>
 
-      <!-- 分类标签（parent 模式不显示） -->
+      <!-- 分类标签（parent 模式不显示；仅一个可见页签时隐藏） -->
       <v-tabs
-        v-if="!parentMode"
+        v-if="!parentMode && visibleTabs.length > 1"
         v-model="activeTab"
         grow
         density="compact"
         @update:model-value="onTabChange"
       >
-        <v-tab value="character">
+        <v-tab
+          v-if="visibleTabs.includes('character')"
+          value="character"
+        >
           角色
         </v-tab>
-        <v-tab value="stage">
+        <v-tab
+          v-if="visibleTabs.includes('stage')"
+          value="stage"
+        >
           场景
         </v-tab>
-        <v-tab value="custom">
+        <v-tab
+          v-if="visibleTabs.includes('custom')"
+          value="custom"
+        >
           自定义资产
         </v-tab>
       </v-tabs>
@@ -125,8 +134,8 @@
           />
         </div>
 
-        <!-- 角色 / 场景：左右分栏（refs 模式） -->
-        <template v-else-if="activeTab === 'character' || activeTab === 'stage'">
+        <!-- 角色 / 场景：左右分栏（refs 模式，仅当该页签可见时渲染） -->
+        <template v-else-if="(activeTab === 'character' || activeTab === 'stage') && visibleTabs.includes(activeTab)">
           <div
             class="d-flex"
             style="min-height: 300px;"
@@ -189,12 +198,26 @@
                   @click="toggle(item)"
                 >
                   <v-img
+                    v-if="!imgErrors.has(item.path)"
                     :src="item.thumbnail"
                     width="128"
                     height="128"
                     cover
                     class="rounded flex-shrink-0"
+                    @error="onImgError(item.path)"
                   />
+                  <div
+                    v-else
+                    class="d-flex align-center justify-center bg-grey-lighten-3 rounded flex-shrink-0"
+                    style="width:128px;height:128px;"
+                  >
+                    <v-icon
+                      color="grey"
+                      size="40"
+                    >
+                      mdi-image-off-outline
+                    </v-icon>
+                  </div>
                   <div class="d-flex">
                     <v-icon
                       :color="isSelected(item.path) ? 'primary' : 'grey'"
@@ -210,8 +233,8 @@
           </div>
         </template>
 
-        <!-- 自定义资产：平铺网格 -->
-        <template v-else>
+        <!-- 自定义资产：平铺网格（仅当该页签可见时渲染） -->
+        <template v-else-if="activeTab === 'custom' && visibleTabs.includes('custom')">
           <v-row
             v-if="tabItems.length"
             dense
@@ -232,10 +255,12 @@
               >
                 <div class="asset-thumb-wrap">
                   <v-img
+                    v-if="!imgErrors.has(item.path)"
                     :src="item.thumbnail"
                     height="120"
                     cover
                     class="bg-grey-lighten-3"
+                    @error="onImgError(item.path)"
                   >
                     <template #placeholder>
                       <div class="d-flex align-center justify-center fill-height text-caption text-grey">
@@ -243,6 +268,18 @@
                       </div>
                     </template>
                   </v-img>
+                  <div
+                    v-else
+                    class="d-flex align-center justify-center bg-grey-lighten-3"
+                    style="height:120px;"
+                  >
+                    <v-icon
+                      color="grey"
+                      size="40"
+                    >
+                      mdi-image-off-outline
+                    </v-icon>
+                  </div>
                   <v-icon
                     v-if="isSelected(item.path)"
                     class="asset-check-icon"
@@ -403,6 +440,10 @@ const props = withDefaults(defineProps<{
   selected?: string[]
   exclude?: string[]
   mode?: 'refs' | 'parent'
+  /** 自定义标题，未指定时根据 mode 自动生成 */
+  title?: string
+  /** 可见的资产分类页签，未指定时显示全部；parent 模式忽略此 prop */
+  tabs?: AssetTab[]
   contextKind?: 'character' | 'stage'
   contextOwner?: string
   contextBaseLabel?: string
@@ -410,6 +451,8 @@ const props = withDefaults(defineProps<{
   selected: () => [],
   exclude: () => [],
   mode: 'refs',
+  title: undefined,
+  tabs: () => ['character', 'stage', 'custom'],
   contextKind: undefined,
   contextOwner: undefined,
   contextBaseLabel: undefined,
@@ -423,6 +466,9 @@ const emit = defineEmits<{
 /** 是否为父变体选择模式 */
 const parentMode = computed(() => props.mode === 'parent')
 
+/** 当前可见的页签列表 */
+const visibleTabs = computed(() => props.tabs)
+
 // ── 状态 ───────────────────────────────────────────────
 
 const activeTab = ref<AssetTab>('character')
@@ -434,6 +480,13 @@ const currentTree = ref<AssetItem[]>([])
 const tabItems = ref<AssetItem[]>([])
 const localSelected = ref<AssetItem[]>([])
 const parentVariants = ref<VariantInfo[]>([])
+
+/** 记录缩略图加载失败的路径，用于显示 fallback 图标 */
+const imgErrors = ref(new Set<string>())
+
+function onImgError(path: string) {
+  imgErrors.value.add(path)
+}
 
 // ── 拖动排序 ───────────────────────────────────────────
 
@@ -533,7 +586,7 @@ function flattenVariantTree(
 ): AssetItem[] {
   const items: AssetItem[] = []
   const children = variants.filter(
-    (v) => (v.parentId ?? undefined) === (parentId ?? undefined) && v.hasImage && !props.exclude.includes(v.imagePath),
+    (v) => (v.parentId ?? undefined) === (parentId ?? undefined) && !props.exclude.includes(v.imagePath),
   )
   for (const v of children) {
     items.push({
@@ -761,6 +814,13 @@ async function onTabChange() {
 
 // ── 生命周期 ───────────────────────────────────────────
 
+/** 当 visibleTabs 变化时，确保 activeTab 处于可见范围 */
+watch(visibleTabs, (tabs) => {
+  if (!parentMode.value && tabs.length > 0 && !tabs.includes(activeTab.value)) {
+    activeTab.value = tabs[0]
+  }
+})
+
 /** 对话框打开时重置状态并加载数据 */
 watch(
   () => props.modelValue,
@@ -769,6 +829,10 @@ watch(
       if (parentMode.value) {
         void loadParentVariants()
       } else {
+        // 确保 activeTab 是可见页签
+        if (!visibleTabs.value.includes(activeTab.value)) {
+          activeTab.value = visibleTabs.value[0] || 'character'
+        }
         // 从 props.selected 初始化已选列表
         localSelected.value = props.selected.map((path) => ({
           path,
@@ -777,7 +841,6 @@ watch(
           depth: 0,
         }))
         selectedEntity.value = ''
-        activeTab.value = 'character'
         void onTabChange()
       }
     }
