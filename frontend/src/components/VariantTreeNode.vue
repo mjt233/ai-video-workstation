@@ -12,7 +12,7 @@
           <v-img
             v-if="imageUrls[node.id]"
             :src="imageUrls[node.id]"
-            aspect-ratio="1"
+            :aspect-ratio="props.aspectRatio ?? 1"
             contain
             class="variant-image variant-image--clickable"
             title="点击放大查看"
@@ -21,6 +21,7 @@
           <div
             v-else
             class="variant-placeholder text-grey text-caption"
+            :style="{ aspectRatio: props.aspectRatio ?? 1 }"
           >
             暂无图片
           </div>
@@ -60,6 +61,14 @@
               icon="mdi-pencil"
               title="编辑描述"
               @click.stop="$emit('edit', node)"
+            />
+            <v-btn
+              size="x-small"
+              variant="flat"
+              icon="mdi-plus-circle-outline"
+              color="primary"
+              title="创建下级变体"
+              @click.stop="$emit('createChild', node)"
             />
             <v-btn
               size="x-small"
@@ -109,11 +118,13 @@
         :node="child"
         :depth="depth + 1"
         :image-urls="imageUrls"
+        :aspect-ratio="props.aspectRatio ?? 1"
         @preview="$emit('preview', $event)"
         @generate="$emit('generate', $event)"
         @history="$emit('history', $event)"
         @edit="$emit('edit', $event)"
         @delete="$emit('delete', $event)"
+        @create-child="$emit('createChild', $event)"
       />
     </div>
   </div>
@@ -124,10 +135,11 @@ import type { VariantTreeNode as TreeNode } from '../composables/useVariantTree'
 
 defineOptions({ name: 'VariantTreeNode' })
 
-defineProps<{
+const props = defineProps<{
   node: TreeNode
   depth: number
   imageUrls: Record<string, string>
+  aspectRatio?: number
 }>()
 
 defineEmits<{
@@ -136,10 +148,19 @@ defineEmits<{
   history: [node: TreeNode]
   edit: [node: TreeNode]
   delete: [node: TreeNode]
+  createChild: [node: TreeNode]
 }>()
 </script>
 
 <style scoped>
+.variant-tree-node-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+.variant-node-card {
+  width: 200px;
+  flex-shrink: 0;
+}
 .variant-card {
   overflow: hidden;
 }
@@ -155,7 +176,6 @@ defineEmits<{
   display: flex;
   align-items: center;
   justify-content: center;
-  aspect-ratio: 1;
   min-height: 100px;
 }
 .variant-actions {
@@ -189,8 +209,9 @@ defineEmits<{
 .variant-tree-children {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  gap: 16px;
-  margin-top: 16px;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding-left: 12px;
 }
 </style>

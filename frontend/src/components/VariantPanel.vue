@@ -1,15 +1,33 @@
 <template>
   <div class="mt-4">
     <div class="d-flex align-center ga-2 mb-2">
-      <div class="text-subtitle-2">衍生变体</div>
-      <v-btn size="small" color="primary" variant="tonal" icon="mdi-plus" title="创建衍生变体" @click="openCreate" />
+      <div class="text-subtitle-2">
+        衍生变体
+      </div>
+      <v-btn
+        size="small"
+        color="primary"
+        variant="tonal"
+        icon="mdi-plus"
+        title="创建衍生变体"
+        @click="openCreate"
+      />
     </div>
 
-    <div v-if="loading" class="text-center py-4">
-      <v-progress-circular indeterminate size="24" />
+    <div
+      v-if="loading"
+      class="text-center py-4"
+    >
+      <v-progress-circular
+        indeterminate
+        size="24"
+      />
     </div>
 
-    <div v-else-if="!variants.length" class="text-grey text-body-2 mb-2">
+    <div
+      v-else-if="!variants.length"
+      class="text-grey text-body-2 mb-2"
+    >
       暂无衍生变体。可为当前{{ kindLabel }}创建变体（如图片编辑描述「门已打开」），生成时使用图片编辑工作流。
     </div>
 
@@ -17,83 +35,184 @@
       v-else
       :roots="tree"
       :image-urls="imageUrls"
+      :aspect-ratio="aspectRatioNum"
       @preview="openPreview"
       @generate="openGenerate"
       @history="openHistory"
       @edit="openEdit"
       @delete="onDelete"
+      @create-child="openCreateWithParent"
     >
       <template #upload-btn="{ node }">
         <AssetImageUploadButton
           :project="project"
           :asset-path="node.imagePath"
-          icon-only size="x-small" variant="flat" icon="mdi-upload" label="上传图片"
+          icon-only
+          size="x-small"
+          variant="flat"
+          icon="mdi-upload"
+          label="上传图片"
           @uploaded="reload"
         />
       </template>
     </VariantTreeView>
 
     <!-- Create/Edit Dialog -->
-    <v-dialog v-model="formDialog.show" max-width="600">
+    <v-dialog
+      v-model="formDialog.show"
+      max-width="600"
+    >
       <v-card>
         <v-card-title>{{ formDialog.mode === 'create' ? '创建衍生变体' : '编辑衍生描述' }}</v-card-title>
         <v-card-text>
-          <v-alert v-if="formDialog.error" type="error" density="compact" class="mb-3">{{ formDialog.error }}</v-alert>
+          <v-alert
+            v-if="formDialog.error"
+            type="error"
+            density="compact"
+            class="mb-3"
+          >
+            {{ formDialog.error }}
+          </v-alert>
 
-          <v-text-field v-if="formDialog.mode === 'create'" v-model="formDialog.id"
-            label="变体名称" hint="如：门已打开、雨天、侧身" persistent-hint variant="outlined" class="mb-3" />
+          <v-text-field
+            v-if="formDialog.mode === 'create'"
+            v-model="formDialog.id"
+            label="变体名称"
+            hint="如：门已打开、雨天、侧身"
+            persistent-hint
+            variant="outlined"
+            class="mb-3"
+          />
 
-          <v-select v-if="formDialog.mode === 'create' || formDialog.parentIdEditable"
-            v-model="formDialog.parentId" :items="parentOptions"
-            label="父变体（可选）" hint="选择上级变体，将基于其图像继续衍生"
-            persistent-hint variant="outlined" class="mb-3" clearable />
+          <v-select
+            v-if="formDialog.mode === 'create' || formDialog.parentIdEditable"
+            v-model="formDialog.parentId"
+            :items="parentOptions"
+            label="父变体（可选）"
+            hint="选择上级变体，将基于其图像继续衍生"
+            persistent-hint
+            variant="outlined"
+            class="mb-3"
+            clearable
+          />
 
-          <v-textarea v-model="formDialog.desc" label="衍生描述（图片编辑提示词）"
-            rows="5" auto-grow variant="outlined" hint="描述相对父图的变化" persistent-hint />
+          <v-textarea
+            v-model="formDialog.desc"
+            label="衍生描述（图片编辑提示词）"
+            rows="5"
+            auto-grow
+            variant="outlined"
+            hint="描述相对父图的变化"
+            persistent-hint
+          />
 
           <div class="d-flex align-center ga-2 mb-2">
             <span class="text-body-2">引用资产（可选）</span>
-            <v-btn size="small" variant="tonal" prepend-icon="mdi-image-multiple" @click="openAssetPicker">
+            <v-btn
+              size="small"
+              variant="tonal"
+              prepend-icon="mdi-image-multiple"
+              @click="openAssetPicker"
+            >
               选择引用资产
             </v-btn>
           </div>
 
-          <div v-if="formDialog.refs.length" class="d-flex flex-wrap ga-1 mb-2">
-            <v-chip v-for="(ref, idx) in formDialog.refs" :key="ref" closable
-              @click:close="formDialog.refs.splice(idx, 1)">{{ getRefLabel(ref) }}</v-chip>
+          <div
+            v-if="formDialog.refs.length"
+            class="d-flex flex-wrap ga-1 mb-2"
+          >
+            <v-chip
+              v-for="(ref, idx) in formDialog.refs"
+              :key="ref"
+              closable
+              @click:close="formDialog.refs.splice(idx, 1)"
+            >
+              {{ getRefLabel(ref) }}
+            </v-chip>
           </div>
-          <div v-else class="text-caption text-grey">未选择引用资产</div>
+          <div
+            v-else
+            class="text-caption text-grey"
+          >
+            未选择引用资产
+          </div>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" :disabled="formDialog.saving" @click="formDialog.show = false">取消</v-btn>
-          <v-btn color="primary" :loading="formDialog.saving" @click="submitForm">保存</v-btn>
+          <v-btn
+            variant="text"
+            :disabled="formDialog.saving"
+            @click="formDialog.show = false"
+          >
+            取消
+          </v-btn>
+          <v-btn
+            color="primary"
+            :loading="formDialog.saving"
+            @click="submitForm"
+          >
+            保存
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
 
-    <AssetPickerDialog v-model="assetPicker.show" :project="project"
-      :selected="assetPicker.selected" @update:selected="onAssetPickerConfirm" />
+    <AssetPickerDialog
+      v-model="assetPicker.show"
+      :project="project"
+      :selected="assetPicker.selected"
+      @update:selected="onAssetPickerConfirm"
+    />
 
-    <GenerateDialog v-model="genDialog.show" :project="project" workflow-id="image-edit"
-      workflow-name="衍生变体生成（图片编辑）" :vars="genDialog.vars" :output-path="genDialog.outputPath"
-      :prompt-paths="genDialog.promptPaths" :existing-asset="genDialog.existingAsset" @refresh="reload" />
+    <GenerateDialog
+      v-model="genDialog.show"
+      :project="project"
+      workflow-id="image-edit"
+      workflow-name="衍生变体生成（图片编辑）"
+      :vars="genDialog.vars"
+      :output-path="genDialog.outputPath"
+      :prompt-paths="genDialog.promptPaths"
+      :existing-asset="genDialog.existingAsset"
+      @refresh="reload"
+    />
 
-    <AssetHistoryDialog v-model="historyDialog.show" :project="project"
-      :asset-path="historyDialog.path" @activated="reload" />
+    <AssetHistoryDialog
+      v-model="historyDialog.show"
+      :project="project"
+      :asset-path="historyDialog.path"
+      @activated="reload"
+    />
 
-    <v-dialog v-model="previewDialog.show" max-width="960">
+    <v-dialog
+      v-model="previewDialog.show"
+      max-width="960"
+    >
       <v-card>
         <v-card-title class="d-flex align-center">
           <span class="text-truncate">{{ previewDialog.title }}</span>
           <v-spacer />
-          <v-btn icon="mdi-close" variant="text" size="small" @click="previewDialog.show = false" />
+          <v-btn
+            icon="mdi-close"
+            variant="text"
+            size="small"
+            @click="previewDialog.show = false"
+          />
         </v-card-title>
         <v-card-text class="pt-0">
           <div class="variant-preview-wrap d-flex justify-center align-center">
-            <v-img v-if="previewDialog.url" :src="previewDialog.url" max-height="80vh" contain />
+            <v-img
+              v-if="previewDialog.url"
+              :src="previewDialog.url"
+              max-height="80vh"
+              contain
+            />
           </div>
-          <div v-if="previewDialog.desc" class="text-body-2 text-medium-emphasis mt-3" style="white-space: pre-wrap;">
+          <div
+            v-if="previewDialog.desc"
+            class="text-body-2 text-medium-emphasis mt-3"
+            style="white-space: pre-wrap;"
+          >
             {{ previewDialog.desc }}
           </div>
         </v-card-text>
@@ -117,6 +236,7 @@ import {
   type VariantInfo,
 } from '../api/assets'
 import { confirm } from '../utils/confirm'
+import { readFs } from '../api/client'
 import { useVariantTree, type VariantTreeNode } from '../composables/useVariantTree'
 import VariantTreeView from './VariantTreeView.vue'
 import AssetPickerDialog from './AssetPickerDialog.vue'
@@ -136,6 +256,7 @@ const emit = defineEmits<{ refresh: [] }>()
 const loading = ref(false)
 const variants = ref<VariantInfo[]>([])
 const imageUrls = ref<Record<string, string>>({})
+const aspectRatioNum = ref(1)
 const { tree, variantMap } = useVariantTree(variants)
 
 const kindLabel = computed(() => (props.kind === 'character' ? '角色' : '场景'))
@@ -186,6 +307,16 @@ const previewDialog = reactive({
 async function reload() {
   loading.value = true
   try {
+    // 加载项目宽高比
+    try {
+      const config = (await readFs(props.project, 'project.json')) as unknown as Record<string, unknown>
+      if (config && typeof config === 'object') {
+        const w = Number(config.width ?? 0)
+        const h = Number(config.height ?? 0)
+        if (w > 0 && h > 0) aspectRatioNum.value = w / h
+      }
+    } catch { /* 使用默认 1 */ }
+
     if (props.kind === 'character') {
       const res = await listCharacterVariants(props.project, props.owner)
       variants.value = res.variants
@@ -213,6 +344,17 @@ function openCreate() {
   formDialog.id = ''
   formDialog.desc = ''
   formDialog.parentId = undefined
+  formDialog.parentIdEditable = true
+  formDialog.refs = []
+  formDialog.error = ''
+  formDialog.show = true
+}
+
+function openCreateWithParent(v: VariantInfo) {
+  formDialog.mode = 'create'
+  formDialog.id = ''
+  formDialog.desc = ''
+  formDialog.parentId = v.id
   formDialog.parentIdEditable = true
   formDialog.refs = []
   formDialog.error = ''

@@ -13,7 +13,7 @@
         v-for="(d, i) in linePaths"
         :key="i"
         :d="d"
-        stroke="rgba(var(--v-theme-on-surface), 0.2)"
+        stroke="#999"
         stroke-width="1.5"
         fill="none"
       />
@@ -28,11 +28,13 @@
           :node="root"
           :depth="0"
           :image-urls="imageUrls"
+          :aspect-ratio="aspectRatio ?? 1"
           @preview="$emit('preview', $event)"
           @generate="$emit('generate', $event)"
           @history="$emit('history', $event)"
           @edit="$emit('edit', $event)"
           @delete="$emit('delete', $event)"
+          @create-child="$emit('createChild', $event)"
         >
           <template #upload-btn="{ node }">
             <slot
@@ -56,6 +58,7 @@ defineOptions({ name: 'VariantTreeView' })
 const props = defineProps<{
   roots: TreeNode[]
   imageUrls: Record<string, string>
+  aspectRatio?: number
 }>()
 
 defineEmits<{
@@ -64,6 +67,7 @@ defineEmits<{
   history: [node: TreeNode]
   edit: [node: TreeNode]
   delete: [node: TreeNode]
+  createChild: [node: TreeNode]
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -150,8 +154,8 @@ onMounted(() => {
 .variant-tree-container {
   position: relative;
   width: 100%;
-  overflow-x: auto;
 }
+
 .variant-tree-svg {
   position: absolute;
   top: 0;
@@ -164,6 +168,6 @@ onMounted(() => {
   z-index: 1;
 }
 .variant-tree-root-wrapper {
-  margin-bottom: 24px;
+  margin-bottom: 8px;
 }
 </style>
