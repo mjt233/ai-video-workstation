@@ -16,7 +16,7 @@
           variant="tonal"
           color="primary"
         >
-          已选 {{ localSelected.length }}
+          已选 {{ localSelected.length }}{{ max >= 0 ? ` / ${max}` : '' }}
         </v-chip>
         <v-btn
           icon="mdi-close"
@@ -195,7 +195,7 @@
                   class="asset-tree-item ma-1 pa-2 rounded cursor-pointer"
                   :class="{ 'asset-tree-item--selected': isSelected(item.path) }"
                   :title="item.label"
-                  @click="toggle(item)"
+                  @click="selectItem(item)"
                 >
                   <v-img
                     v-if="!imgErrors.has(item.path)"
@@ -251,7 +251,7 @@
                 :class="{ 'asset-card--selected': isSelected(item.path) }"
                 class="asset-card"
                 ripple
-                @click="toggle(item)"
+                @click="selectItem(item)"
               >
                 <div class="asset-thumb-wrap">
                   <v-img
@@ -444,6 +444,10 @@ const props = withDefaults(defineProps<{
   title?: string
   /** 可见的资产分类页签，未指定时显示全部；parent 模式忽略此 prop */
   tabs?: AssetTab[]
+  /** 是否允许多选（默认 true）。false 时替换选中项，仍需确认提交 */
+  multiple?: boolean
+  /** 最大可选数量，默认 -1 无限制。仅在 multiple=true 时生效 */
+  max?: number
   contextKind?: 'character' | 'stage'
   contextOwner?: string
   contextBaseLabel?: string
@@ -453,6 +457,8 @@ const props = withDefaults(defineProps<{
   mode: 'refs',
   title: undefined,
   tabs: () => ['character', 'stage', 'custom'],
+  multiple: true,
+  max: -1,
   contextKind: undefined,
   contextOwner: undefined,
   contextBaseLabel: undefined,
@@ -535,18 +541,28 @@ function isSelected(path: string): boolean {
   return localSelected.value.some((item) => item.path === path)
 }
 
-function toggle(item: AssetItem) {
-  const idx = localSelected.value.findIndex((i) => i.path === item.path)
-  if (idx >= 0) {
-    localSelected.value = localSelected.value.filter((_, i) => i !== idx)
-  } else {
-    localSelected.value = [...localSelected.value, item]
-  }
-}
-
 function onConfirm() {
   emit('update:selected', localSelected.value.map((item) => item.path))
   emit('update:modelValue', false)
+}
+
+/**
+ * 点击资产条目：单选模式直接确认，多选模式切换选中。
+ */
+function selectItem(item: AssetItem) {
+  if (props.multiple) {
+    const idx = localSelected.value.findIndex((i) => i.path === item.path)
+    if (idx >= 0) {
+      localSelected.value = localSelected.value.filter((_, i) => i !== idx)
+    } else {
+      // 达到上限时不再增加
+      if (props.max >= 0 && localSelected.value.length >= props.max) return
+      localSelected.value = [...localSelected.value, item]
+    }
+  } else {
+    // 单选：替换选中项，仍需用户点击确认按钮提交
+    localSelected.value = [item]
+  }
 }
 
 function onUpdate(open: boolean) {
@@ -798,7 +814,7 @@ async function loadCustomTabInternal() {
   }
 }
 
-/** 切换标签页时加载数据 */
+/** 切换标签页时加载数据，并自动展开第一个实体 */
 async function onTabChange() {
   if (activeTab.value === 'custom') {
     await loadCustomTabInternal()
@@ -806,6 +822,11 @@ async function onTabChange() {
     tabLoading.value = true
     try {
       await loadEntityList()
+      // 自动选中左侧第一个实体，直接展示其资产树
+      if (entityList.value.length > 0 && !selectedEntity.value) {
+        selectedEntity.value = entityList.value[0].key
+        await selectEntity(selectedEntity.value)
+      }
     } finally {
       tabLoading.value = false
     }

@@ -175,15 +175,20 @@
       v-model="stagePickerOpen"
       :project="project"
       :tabs="['stage', 'custom']"
+      :multiple="false"
+      :selected="selectedStagePaths"
       title="选择基础场景"
       @update:selected="onStageAssetPicked"
     />
-    <CharacterPicker
+    <AssetPickerDialog
       v-model="characterPickerOpen"
       :project="project"
-      :model-selected="form.登场角色"
-      multiple
-      @confirm="onCharactersPicked"
+      :tabs="['character', 'custom']"
+      :multiple="true"
+      :max="2"
+      :selected="selectedCharacterPaths"
+      title="选择登场角色"
+      @update:selected="onCharacterAssetPicked"
     />
   </v-dialog>
 </template>
@@ -197,7 +202,6 @@ import {
   updateSceneStageFrame,
 } from '../api/assets'
 import AssetPickerDialog from './AssetPickerDialog.vue'
-import CharacterPicker from './CharacterPicker.vue'
 
 /** 引用同集上一分镜最后场景图的固定关键字。 */
 const PREV_STAGE_REF = 'prev'
@@ -225,6 +229,64 @@ const saving = ref(false)
 const error = ref('')
 const stagePickerOpen = ref(false)
 const characterPickerOpen = ref(false)
+
+/** 将已有基础场景引用转换为 assert 路径数组，传递给 AssetPickerDialog 的 selected */
+const selectedStagePaths = computed(() => {
+  const ref = form.基础场景.trim()
+  if (!ref || ref === PREV_STAGE_REF) return []
+  // 尝试按 stage 格式解析
+  const stagePath = stageRefToAssertPath(ref)
+  if (stagePath) return [stagePath]
+  // 尝试按 custom/xxx 格式解析
+  if (ref.startsWith('custom/')) {
+    return [`assert/custom/${ref.slice('custom/'.length)}.jpg`]
+  }
+  return []
+})
+
+/** 将已有角色引用列表转换为 assert 路径数组，传递给 AssetPickerDialog 的 selected */
+const selectedCharacterPaths = computed(() => {
+  return form.登场角色
+    .map((ref) => {
+      const p = characterRefToAssertPath(ref)
+      if (p) return p
+      // custom/xxx 格式
+      if (ref.startsWith('custom/')) {
+        return `assert/custom/${ref.slice('custom/'.length)}.jpg`
+      }
+      return null
+    })
+    .filter(Boolean) as string[]
+})
+
+/**
+ * 将 assert 路径转换回角色引用格式。
+ * - assert/character/{name}/appearance.jpg → {name}
+ * - assert/character/{name}/variants/{id}.jpg → {name}@{id}
+ * - assert/custom/... → custom/...
+ */
+function assertPathToCharacterRef(apath: string): string | null {
+  if (apath.startsWith('assert/character/')) {
+    const rest = apath.slice('assert/character/'.length)
+    // 外观图
+    if (rest.endsWith('/appearance.jpg')) {
+      return rest.slice(0, -'/appearance.jpg'.length)
+    }
+    // 衍生变体
+    const variantsIdx = rest.indexOf('/variants/')
+    if (variantsIdx >= 0) {
+      const name = rest.slice(0, variantsIdx)
+      const variantId = rest.slice(variantsIdx + '/variants/'.length).replace(/\.jpg$/i, '')
+      return `${name}@${variantId}`
+    }
+    return null
+  }
+  if (apath.startsWith('assert/custom/')) {
+    const customPath = apath.slice('assert/custom/'.length).replace(/\.jpg$/i, '')
+    return `custom/${customPath}`
+  }
+  return null
+}
 
 /**
  * 将 AssetPickerDialog 返回的 assert 路径转换为场景引用格式。
@@ -436,14 +498,14 @@ function onStageAssetPicked(paths: string[]) {
 }
 
 /**
- * 选择器确认登场角色。
- * @param names 角色引用列表
- * @param imageUrls 可选：引用 → 图片 URL
+ * AssetPickerDialog 确认选择登场角色。
+ * 将 assert 路径转换为角色引用格式。
  */
-function onCharactersPicked(names: string[], imageUrls?: Record<string, string>) {
+function onCharacterAssetPicked(paths: string[]) {
   if (isPrevRef.value) return
-  form.登场角色 = names
-  void refreshCharacterPreviews(names, imageUrls)
+  const refs = paths.map((p) => assertPathToCharacterRef(p)).filter(Boolean) as string[]
+  form.登场角色 = refs
+  void refreshCharacterPreviews(refs)
 }
 
 /**
