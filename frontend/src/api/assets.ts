@@ -432,3 +432,34 @@ export async function deleteStageVariant(
     return data as { success: boolean }
   } catch (e) { rethrow(e) }
 }
+
+export async function renameCharacterVariant(
+  project: string,
+  name: string,
+  variantId: string,
+  newId: string,
+) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/character/${encodeURIComponent(name)}/variants/${encodeURIComponent(variantId)}/rename`,
+      { newId },
+    )
+    return data as { success: boolean; variant: VariantInfo }
+  } catch (e) { rethrow(e) }
+}
+
+export async function renameStageVariant(
+  project: string,
+  stage: string,
+  label: string,
+  variantId: string,
+  newId: string,
+) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/stage/${encodeURIComponent(stage)}/${encodeURIComponent(label)}/variants/${encodeURIComponent(variantId)}/rename`,
+      { newId },
+    )
+    return data as { success: boolean; variant: VariantInfo }
+  } catch (e) { rethrow(e) }
+}
