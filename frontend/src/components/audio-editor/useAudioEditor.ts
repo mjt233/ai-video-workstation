@@ -1,15 +1,35 @@
 /**
  * 音频编辑状态管理 composable。
  * 管理波形数据加载、编辑状态的 CRUD、保存/加载。
+ *
+ * 通过 getTarget 回调获取当前目标分镜：当调用方切换分镜后，
+ * 内部会自动清空旧分镜的编辑状态，避免展示过期数据。
  */
 
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { readFs, writeFs, existsFs } from '../../api/client'
 import { extractWaveform } from './waveform'
 import { PlaybackEngine, type PlaybackClip } from './PlaybackEngine'
 import type { AudioClipState, AudioEditProject, WaveformData, PlayState } from './types'
 
-export function useAudioEditor(project: string, episode: string, shot: string) {
+/**
+ * 音频编辑目标（定位到某个分镜）。
+ */
+export interface AudioEditTarget {
+  /** 项目名 */
+  project: string
+  /** 集数 */
+  episode: string
+  /** 分镜号 */
+  shot: string
+}
+
+/**
+ * 创建音频编辑状态管理器。
+ *
+ * @param getTarget 返回当前目标分镜的回调（需保持响应式，如读取 props）
+ */
+export function useAudioEditor(getTarget: () => AudioEditTarget) {
   const clips = ref<AudioClipState[]>([])
   const waveforms = ref<Map<number, WaveformData>>(new Map())
   const audioBuffers = ref<Map<number, AudioBuffer>>(new Map())
@@ -20,6 +40,9 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
   const zoom = ref(80) // 像素/秒
   const hasEdit = ref(false)
 
+  /** 加载序号：防止旧分镜的异步加载结果覆盖新分镜数据 */
+  let loadSeq = 0
+
   const engine = new PlaybackEngine()
 
   engine.onStateChange = (s) => {
@@ -29,6 +52,16 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
     currentTime.value = t
   }
 
+  // 目标分镜变化时清空状态，避免残留上一个分镜的数据
+  watch(getTarget, () => {
+    engine.stop()
+    clips.value = []
+    waveforms.value = new Map()
+    audioBuffers.value = new Map()
+    currentTime.value = 0
+    hasEdit.value = false
+  })
+
   const totalDuration = computed(() => {
     return PlaybackEngine.computeDuration(clips.value)
   })
@@ -37,6 +70,8 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
    * 加载该分镜的所有台词音频及已有编辑状态。
    */
   async function load(): Promise<void> {
+    const seq = ++loadSeq
+    const { project, episode, shot } = getTarget()
     loading.value = true
     try {
       // 1) 读 script.json
@@ -48,9 +83,9 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
         script = scriptRaw as { 角色名: string; 台词: string }[]
       }
 
+      if (seq !== loadSeq) return
       if (!script.length) {
         clips.value = []
-        loading.value = false
         return
       }
 
@@ -62,9 +97,9 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
       )
 
       const allHaveVoice = voiceChecks.every(Boolean)
+      if (seq !== loadSeq) return
       if (!allHaveVoice) {
         clips.value = []
-        loading.value = false
         return
       }
 
@@ -72,8 +107,17 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
       let savedProject: AudioEditProject | null = null
       try {
         const savedRaw = await readFs(project, `prompt/scene/${episode}/${shot}/audio-edit.json`)
+        // axios 默认会对字符串响应尝试 JSON.parse，.json 文件通常直接返回反序列化对象；
+        // 这里两种形态都兼容处理，避免保存的编辑状态（如 startOffset）丢失。
         if (typeof savedRaw === 'string' && savedRaw.trim()) {
           savedProject = JSON.parse(savedRaw) as AudioEditProject
+        } else if (
+          savedRaw
+          && typeof savedRaw === 'object'
+          && !Array.isArray(savedRaw)
+          && Array.isArray((savedRaw as { tracks?: unknown }).tracks)
+        ) {
+          savedProject = savedRaw as unknown as AudioEditProject
         }
       } catch {
         // 没有保存的编辑状态
@@ -122,16 +166,20 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
       }
 
       // 一次性替换 ref 值以触发响应式更新
+      if (seq !== loadSeq) return
       waveforms.value = newWaveforms
       audioBuffers.value = newBuffers
 
       clips.value = newClips
       hasEdit.value = !!savedProject
     } catch (e) {
+      if (seq !== loadSeq) return
       console.error('加载音频编辑失败', e)
       clips.value = []
     } finally {
-      loading.value = false
+      if (seq === loadSeq) {
+        loading.value = false
+      }
     }
   }
 
@@ -145,9 +193,10 @@ export function useAudioEditor(project: string, episode: string, shot: string) {
   }
 
   /**
-   * 保存编辑状态到 JSON。
+   * 保存编辑状态到 JSON（保存到当前目标分镜的 audio-edit.json）。
    */
   async function save(): Promise<void> {
+    const { project, episode, shot } = getTarget()
     saving.value = true
     try {
       const editProject: AudioEditProject = {

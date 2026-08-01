@@ -165,8 +165,8 @@ onMounted(() => {
   width: 100%;
   height: 300px;
   overflow: auto;
-  background: #1e1e1e;
-  border: 1px solid #333;
+  background: #fafbfd;
+  border: 1px solid #d0d7e0;
   border-radius: 4px;
   outline: none;
 }
@@ -176,8 +176,8 @@ onMounted(() => {
   top: 0;
   z-index: 10;
   height: 24px;
-  background: #252525;
-  border-bottom: 1px solid #333;
+  background: #f0f4fa;
+  border-bottom: 1px solid #d0d7e0;
 }
 
 .ruler-mark {
@@ -189,13 +189,13 @@ onMounted(() => {
 .ruler-tick {
   width: 1px;
   height: 8px;
-  background: #555;
+  background: #aeb6c2;
   margin: 0 auto;
 }
 
 .ruler-label {
   font-size: 9px;
-  color: #888;
+  color: #64748b;
   padding-left: 2px;
   white-space: nowrap;
 }

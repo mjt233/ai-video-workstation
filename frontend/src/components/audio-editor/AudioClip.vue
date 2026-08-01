@@ -178,7 +178,7 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #e0e0e0;
+  color: #1f2937;
   pointer-events: none;
 }
 
@@ -187,7 +187,7 @@ onMounted(() => {
   top: 2px;
   right: 4px;
   font-size: 9px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(15, 23, 42, 0.55);
   pointer-events: none;
 }
 
@@ -207,7 +207,7 @@ onMounted(() => {
   bottom: 4px;
   left: 3px;
   width: 2px;
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(15, 23, 42, 0.4);
   border-radius: 1px;
 }
 

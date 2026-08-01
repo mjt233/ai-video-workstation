@@ -95,17 +95,8 @@
             重置
           </v-btn>
           <v-btn
-            variant="tonal"
-            color="secondary"
-            prepend-icon="mdi-merge"
-            :loading="merging"
-            :disabled="loading || !clips.length"
-            @click="doMerge"
-          >
-            合并音频
-          </v-btn>
-          <v-btn
             color="primary"
+            prepend-icon="mdi-content-save-check"
             :loading="saving"
             :disabled="loading || !clips.length"
             @click="doSave"
@@ -151,6 +142,34 @@
       </v-card-text>
     </v-card>
   </v-dialog>
+
+  <!-- 保存/合并结果反馈对话框 -->
+  <v-dialog
+    v-model="saveFeedback.show"
+    max-width="420"
+  >
+    <v-card>
+      <v-card-title class="d-flex align-center ga-2">
+        <v-icon :color="saveFeedback.success ? 'success' : 'error'">
+          {{ saveFeedback.success ? 'mdi-check-circle' : 'mdi-alert-circle' }}
+        </v-icon>
+        {{ saveFeedback.success ? '保存成功' : '保存失败' }}
+      </v-card-title>
+      <v-card-text>
+        {{ saveFeedback.message }}
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn
+          color="primary"
+          variant="text"
+          @click="saveFeedback.show = false"
+        >
+          确定
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script setup lang="ts">
@@ -188,13 +207,24 @@ const {
   stopPlay,
   setZoom,
   seek,
-} = useAudioEditor(props.project, props.episode, props.shot)
-
-const merging = ref(false)
+} = useAudioEditor(() => ({
+  project: props.project,
+  episode: props.episode,
+  shot: props.shot,
+}))
 
 const zoomLocal = ref(80)
 const errorMsg = ref('')
 const timelineRef = ref<InstanceType<typeof AudioTimeline> | null>(null)
+
+/**
+ * 保存/合并结果反馈（Vuetify 对话框状态）。
+ */
+const saveFeedback = ref<{ show: boolean; success: boolean; message: string }>({
+  show: false,
+  success: true,
+  message: '',
+})
 
 const canPlay = computed(() => clips.value.length > 0)
 
@@ -244,29 +274,38 @@ function resetToDefaults() {
   clips.value = [...clips.value]
 }
 
+/**
+ * 保存编辑状态并合并生成分镜音频。
+ * 成功后通过 Vuetify 对话框提示用户，并通知父组件刷新。
+ */
 async function doSave() {
-  await save()
-}
-
-async function doMerge() {
-  merging.value = true
+  if (!clips.value.length) return
+  saving.value = true
   try {
-    await doSave()
-    const result = await mergeSceneAudio(props.project, props.episode, props.shot)
-    alert('音频合并成功：' + result.path)
+    await save()
+    await mergeSceneAudio(props.project, props.episode, props.shot)
+    saveFeedback.value = {
+      show: true,
+      success: true,
+      message: '音频编辑已保存，并已合并生成分镜音频。',
+    }
     emit('refresh')
   } catch (e: unknown) {
-    alert('合并失败：' + (e instanceof Error ? e.message : String(e)))
+    saveFeedback.value = {
+      show: true,
+      success: false,
+      message: '保存失败：' + (e instanceof Error ? e.message : String(e)),
+    }
   } finally {
-    merging.value = false
+    saving.value = false
   }
 }
 
-// 打开时加载
+// 打开时加载；切换分镜后重新加载当前分镜的音频
 watch(
-  () => props.modelValue,
-  async (open) => {
-    if (open) {
+  [() => props.modelValue, () => props.project, () => props.episode, () => props.shot],
+  async () => {
+    if (props.modelValue) {
       errorMsg.value = ''
       await load()
       if (!clips.value.length) {
@@ -283,7 +322,6 @@ watch(
       stopPlay()
     }
   },
-  { immediate: false },
 )
 </script>
 
@@ -293,8 +331,8 @@ watch(
 }
 
 .toolbar {
-  background: #1a1a1a;
-  border-bottom: 1px solid #333;
+  background: #f0f4fa;
+  border-bottom: 1px solid #d0d7e0;
   flex-shrink: 0;
 }
 

@@ -128,6 +128,30 @@ export async function mergeSceneAudio(
   } catch (e) { rethrow(e) }
 }
 
+/**
+ * 删除分镜已合并的音频（merged.flac）。
+ *
+ * 分镜台词发生新增/修改/删除/排序后，已合并音频与最新台词不再匹配，
+ * 调用本接口使其失效（文件不存在时也返回成功，幂等）。
+ *
+ * @param project 项目名
+ * @param episode 集数
+ * @param shot 分镜号
+ * @returns 请求结果
+ */
+export async function deleteSceneMergedAudio(
+  project: string,
+  episode: string,
+  shot: string,
+) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/scene/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/audio/merged`,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
 export async function reorderSceneScript(
   project: string,
   episode: string,

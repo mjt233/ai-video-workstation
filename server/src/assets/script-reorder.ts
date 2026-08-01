@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { pathExists, resolveProjectPath } from './paths.js';
+import { deleteMergedAudio } from './audio-merge.js';
 
 function moveItem<T>(arr: T[], from: number, to: number): T[] {
   const next = arr.slice();
@@ -42,6 +43,9 @@ export async function deleteScriptEntry(
 
   data.splice(index, 1);
   await fs.writeFile(jsonPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+
+  // 台词变化 → 删除已合并音频，避免残留过期音频
+  await deleteMergedAudio(project, episode, shot);
 
   // ── 同步语音文件 ──
   const vDir = resolveProjectPath(project, `assert/scene/${episode}/${shot}/voice`);
@@ -117,6 +121,9 @@ export async function updateScriptEntry(
 
   data[index] = entry;
   await fs.writeFile(jsonPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+
+  // 台词变化 → 删除已合并音频，避免残留过期音频
+  await deleteMergedAudio(project, episode, shot);
 }
 
 /**
@@ -150,6 +157,9 @@ export async function reorderScriptEntries(
 
   const reordered = moveItem(data, from, to);
   await fs.writeFile(jsonPath, JSON.stringify(reordered, null, 2) + '\n', 'utf-8');
+
+  // 台词顺序变化 → 删除已合并音频，避免残留过期音频
+  await deleteMergedAudio(project, episode, shot);
 
   // ── 同步语音文件 ──
   const voiceDir = resolveProjectPath(project, `assert/scene/${episode}/${shot}/voice`);

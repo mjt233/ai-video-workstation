@@ -24,7 +24,7 @@ import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/re
 import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
 import { reorderStageFrames } from '../assets/stage-reorder.js';
 import { reorderScriptEntries, deleteScriptEntry, updateScriptEntry } from '../assets/script-reorder.js';
-import { mergeSceneAudio } from '../assets/audio-merge.js';
+import { mergeSceneAudio, deleteMergedAudio } from '../assets/audio-merge.js';
 import { addStageFrame, deleteStageFrame, updateStageFrame, type StageFrameInput } from '../assets/stage-frames.js';
 import {
   activateHistoryVersion,
@@ -407,6 +407,21 @@ assetsRouter.post('/assets/:project/scene/:episode/:shot/audio/merge', async (re
     assertPositiveIntId(shot, '分镜');
     const outputPath = await mergeSceneAudio(project, episode, shot);
     res.json({ success: true, path: outputPath });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE 删除分镜已合并音频（台词变化后使合并结果失效；文件不存在也返回成功）
+assetsRouter.delete('/assets/:project/scene/:episode/:shot/audio/merged', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    assertPositiveIntId(episode, '集数');
+    assertPositiveIntId(shot, '分镜');
+    await deleteMergedAudio(project, episode, shot);
+    res.json({ success: true });
   } catch (err) {
     httpError(res, err);
   }

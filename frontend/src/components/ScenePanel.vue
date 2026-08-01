@@ -111,6 +111,28 @@
             分镜音频编辑
           </v-btn>
         </div>
+        <!-- 已编辑保存的分镜合并音频预览 -->
+        <v-card
+          v-if="hasMergedAudio"
+          class="mx-2 mb-2"
+          variant="tonal"
+          color="secondary"
+        >
+          <v-card-text class="d-flex align-center ga-3 py-2 flex-wrap">
+            <v-icon color="secondary">
+              mdi-waveform
+            </v-icon>
+            <span class="text-body-2">已保存的分镜合并音频：</span>
+            <audio
+              :src="mergedAudioUrl"
+              controls
+              preload="metadata"
+              style="max-width: 460px;"
+            >
+              您的浏览器不支持音频预览
+            </audio>
+          </v-card-text>
+        </v-card>
         <v-list
           v-if="data.script.length"
           lines="two"
@@ -756,6 +778,7 @@ import {
   deleteSceneStageFrame,
   deleteSceneScriptEntry,
   updateSceneScriptEntry,
+  deleteSceneMergedAudio,
   AssetApiError,
 } from '../api/assets'
 import { confirm } from '../utils/confirm'
@@ -874,6 +897,10 @@ const data = ref<SceneData | null>(null)
 const stageDefs = ref<StageDefinition[]>([])
 /** 每条台词对应的语音 URL；无资产时为空字符串 */
 const voiceAssets = ref<string[]>([])
+/** 是否存在用户编辑保存的分镜合并音频（merged.flac） */
+const hasMergedAudio = ref(false)
+/** 分镜合并音频的预览 URL */
+const mergedAudioUrl = ref('')
 const hasVideo = ref(false)
 const stageAssetUrls = ref<Record<string, string>>({})
 const characterAssetUrls = ref<Record<string, string>>({})
@@ -1291,6 +1318,8 @@ async function onScriptSave(form: ScriptForm) {
     arr.push(form)
     const path = `${basePath.value}/script.json`
     await writeFs(props.project, path, JSON.stringify(arr, null, 2))
+    // 台词变化 → 使已合并音频失效（尽力而为，失败不阻塞保存）
+    await deleteSceneMergedAudio(props.project, props.episode, props.shot).catch(() => {})
   } else {
     await updateSceneScriptEntry(
       props.project,
@@ -1398,6 +1427,16 @@ async function load() {
 
   // Check video asset
   hasVideo.value = await existsFs(props.project, `assert/scene/${ep}/${shot}/video/0.mp4`)
+
+  // 检查是否存在用户编辑保存的分镜合并音频
+  const mergedRel = `assert/scene/${ep}/${shot}/audio/merged.flac`
+  if (await existsFs(props.project, mergedRel)) {
+    hasMergedAudio.value = true
+    mergedAudioUrl.value = `/api/fs/${props.project}/${mergedRel}?t=${Date.now()}`
+  } else {
+    hasMergedAudio.value = false
+    mergedAudioUrl.value = ''
+  }
 }
 
 function edit(field: string) {
@@ -1487,8 +1526,15 @@ async function save() {
     try { JSON.parse(content) } catch (e: unknown) { alert('JSON 格式错误: ' + (e as Error).message); return }
   }
   await writeFs(props.project, `${basePath.value}/${file}`, content)
-  if (field === 'script' && data.value) data.value.script = JSON.parse(content)
-  else if (data.value && field === 'prompt') data.value.prompt = content
+  if (field === 'script') {
+    if (data.value) data.value.script = JSON.parse(content)
+    // 台词变化 → 使已合并音频失效（尽力而为，失败不阻塞保存）
+    await deleteSceneMergedAudio(props.project, props.episode, props.shot).catch(() => {})
+    hasMergedAudio.value = false
+    mergedAudioUrl.value = ''
+  } else if (data.value && field === 'prompt') {
+    data.value.prompt = content
+  }
   dialog.value.show = false
 }
 
