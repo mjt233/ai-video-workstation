@@ -189,45 +189,61 @@
                 该{{ activeTab === 'character' ? '角色' : '场景' }}暂无可用资产
               </div>
               <template v-else>
-                <div
+                <template
                   v-for="item in currentTree"
-                  :key="item.path"
-                  class="asset-tree-item ma-1 pa-2 rounded cursor-pointer"
-                  :class="{ 'asset-tree-item--selected': isSelected(item.path) }"
-                  :title="item.label"
-                  @click="selectItem(item)"
+                  :key="item.header ? `header-${item.section}` : item.path"
                 >
-                  <v-img
-                    v-if="!imgErrors.has(item.path)"
-                    :src="item.thumbnail"
-                    width="128"
-                    height="128"
-                    cover
-                    class="rounded flex-shrink-0"
-                    @error="onImgError(item.path)"
-                  />
+                  <!-- 分区标题：单独换行显示 -->
                   <div
-                    v-else
-                    class="d-flex align-center justify-center bg-grey-lighten-3 rounded flex-shrink-0"
-                    style="width:128px;height:128px;"
+                    v-if="item.header"
+                    class="tree-section-header"
                   >
                     <v-icon
-                      color="grey"
-                      size="40"
-                    >
-                      mdi-image-off-outline
-                    </v-icon>
-                  </div>
-                  <div class="d-flex">
-                    <v-icon
-                      :color="isSelected(item.path) ? 'primary' : 'grey'"
+                      icon="mdi-folder-star-outline"
                       size="small"
-                    >
-                      {{ isSelected(item.path) ? 'mdi-check-circle' : 'mdi-circle-outline' }}
-                    </v-icon>
-                    <span class="text-caption text-truncate ml-1">{{ item.label }}</span>
+                      class="mr-1"
+                    />
+                    {{ item.section }}
                   </div>
-                </div>
+                  <div
+                    v-else
+                    class="asset-tree-item ma-1 pa-2 rounded cursor-pointer"
+                    :class="{ 'asset-tree-item--selected': isSelected(item.path) }"
+                    :title="item.label"
+                    @click="selectItem(item)"
+                  >
+                    <v-img
+                      v-if="!imgErrors.has(item.path)"
+                      :src="item.thumbnail"
+                      width="128"
+                      height="128"
+                      cover
+                      class="rounded flex-shrink-0"
+                      @error="onImgError(item.path)"
+                    />
+                    <div
+                      v-else
+                      class="d-flex align-center justify-center bg-grey-lighten-3 rounded flex-shrink-0"
+                      style="width:128px;height:128px;"
+                    >
+                      <v-icon
+                        color="grey"
+                        size="40"
+                      >
+                        mdi-image-off-outline
+                      </v-icon>
+                    </div>
+                    <div class="d-flex">
+                      <v-icon
+                        :color="isSelected(item.path) ? 'primary' : 'grey'"
+                        size="small"
+                      >
+                        {{ isSelected(item.path) ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                      </v-icon>
+                      <span class="text-caption text-truncate ml-1">{{ item.label }}</span>
+                    </div>
+                  </div>
+                </template>
               </template>
             </div>
           </div>
@@ -426,6 +442,10 @@ interface AssetItem {
   thumbnail: string
   /** 缩进层级（0 = 根） */
   depth: number
+  /** 分区标题（如「自定义资产」）；仅 header 条目使用 */
+  section?: string
+  /** 是否为分区标题条目（不可选择、不渲染缩略图） */
+  header?: boolean
 }
 
 /** 左侧实体列表条目 */
@@ -689,7 +709,8 @@ async function selectEntity(key: string) {
 }
 
 /**
- * 构建角色的树形资产列表：外观图片为根，变体按 parentId 递归嵌套。
+ * 构建角色的树形资产列表：外观图片为根，变体按 parentId 递归嵌套，
+ * 自定义资产（assert/custom/character/{name}/）单独分区显示。
  */
 async function buildCharacterTree(project: string, name: string): Promise<AssetItem[]> {
   const tree: AssetItem[] = []
@@ -711,11 +732,15 @@ async function buildCharacterTree(project: string, name: string): Promise<AssetI
     // 单个角色加载失败不影响
   }
 
+  // 自定义资产分区：在普通资产与衍生变体之下单独换行显示
+  tree.push(...(await buildCustomSection(project, `assert/custom/character/${name}`)))
+
   return tree
 }
 
 /**
- * 构建场景的树形资产列表：每个子场景为一棵子树，变体递归嵌套。
+ * 构建场景的树形资产列表：每个子场景为一棵子树，变体递归嵌套，
+ * 自定义资产（assert/custom/stage/{stage}/）单独分区显示。
  */
 async function buildStageTree(project: string, stage: string): Promise<AssetItem[]> {
   const tree: AssetItem[] = []
@@ -740,7 +765,43 @@ async function buildStageTree(project: string, stage: string): Promise<AssetItem
     }
   }
 
+  // 自定义资产分区：在普通资产与衍生变体之下单独换行显示
+  tree.push(...(await buildCustomSection(project, `assert/custom/stage/${stage}`)))
+
   return tree
+}
+
+/**
+ * 构建自定义资产分区条目。
+ * 仅在目录存在且包含图片时返回分区标题 + 资产条目，否则返回空数组。
+ *
+ * @param project 项目名
+ * @param customRootDir assert/custom/ 下的实体映射目录（如 assert/custom/character/陈书文）
+ */
+async function buildCustomSection(project: string, customRootDir: string): Promise<AssetItem[]> {
+  const items: AssetItem[] = []
+  const imagePaths = await listImageFilesRecursive(project, customRootDir)
+  const visible = imagePaths.filter((p) => !props.exclude.includes(p))
+  if (!visible.length) return items
+
+  // 分区标题（不可选择，单独换行）
+  items.push({
+    path: '',
+    label: '',
+    thumbnail: '',
+    depth: 0,
+    section: '自定义资产',
+    header: true,
+  })
+  for (const p of visible) {
+    items.push({
+      path: p,
+      label: `自定义/${p.replace(/^assert\/custom\//, '')}`,
+      thumbnail: `/api/fs/${project}/${p}?t=${ts()}`,
+      depth: 1,
+    })
+  }
+  return items
 }
 
 /**
@@ -928,5 +989,18 @@ watch(
 
 .asset-tree-item--selected {
   background: rgba(var(--v-theme-primary), 0.06);
+}
+
+/* 分区标题：在普通资产与衍生变体之下单独换行显示 */
+.tree-section-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+  padding: 10px 4px 6px;
+  margin-top: 10px;
+  border-top: 1px dashed rgba(var(--v-theme-primary), 0.35);
 }
 </style>

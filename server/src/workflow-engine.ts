@@ -305,6 +305,7 @@ async function enrichSceneTtsParams(
  * 支持：
  * - `场景名/标签` → assert/stage/{场景名}/{标签}.jpg
  * - `场景名/标签@变体id` → assert/stage/{场景名}/variants/{标签}/{变体id}.jpg
+ * - `custom/{路径}` → assert/custom/{路径}（自定义资产引用，路径含扩展名）
  * @param baseStage 基础场景引用
  * @returns assert 相对路径
  */
@@ -313,6 +314,10 @@ function resolveStageAssetPath(baseStage: string): string {
   if (!trimmed) throw new Error('基础场景不能为空');
   if (trimmed === 'prev') {
     throw new Error('基础场景 prev 需结合分镜上下文解析，不能单独解析为 stage 资产路径');
+  }
+  // 自定义资产引用：custom/{相对 assert/custom 的完整路径（含扩展名）}
+  if (trimmed.startsWith('custom/')) {
+    return `assert/custom/${trimmed.slice('custom/'.length)}`;
   }
   const at = trimmed.indexOf('@');
   const main = at >= 0 ? trimmed.slice(0, at) : trimmed;
@@ -372,10 +377,15 @@ async function resolvePrevStageAssetPath(
  * 支持：
  * - `角色名` → assert/character/{角色名}/appearance.jpg
  * - `角色名@变体id` → assert/character/{角色名}/variants/{变体id}.jpg
+ * - `custom/{路径}` → assert/custom/{路径}（自定义资产引用，路径含扩展名）
  */
 function resolveCharacterAssetPath(character: string): string {
   const trimmed = character.trim();
   if (!trimmed) throw new Error('角色名不能为空');
+  // 自定义资产引用：custom/{相对 assert/custom 的完整路径（含扩展名）}
+  if (trimmed.startsWith('custom/')) {
+    return `assert/custom/${trimmed.slice('custom/'.length)}`;
+  }
   const at = trimmed.indexOf('@');
   if (at < 0) {
     return `assert/character/${trimmed}/appearance.jpg`;

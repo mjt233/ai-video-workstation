@@ -255,6 +255,23 @@ assert/.../history/{stem}/{YYYYMMDD-HHmmss}.ext
 - 允许 MIME：`image/jpeg`、`image/png`、`image/webp`；落盘路径扩展名固定为 `.jpg`
 - 若目标路径已有当前资产，**先归档历史**再写入上传内容
 
+### 3.0.2 自定义资产（实体映射）
+
+角色、场景、分镜详情页均提供「自定义资产」上传与管理入口，资产**直接映射到 `assert/custom/` 下的实体目录**存储读写：
+
+```
+assert/custom/
+├── character/{角色名}/      # 角色自定义资产
+├── stage/{场景名}/          # 场景自定义资产
+└── scene/{集数}/{分镜}/     # 分镜自定义资产
+```
+
+- 支持任意类型多文件上传、子目录导航、预览、下载与删除（删除需二次确认）
+- API：`GET /api/fs/:project/assert/custom/...` 列目录/读文件；`POST /api/fs/:project/upload` 上传；`POST /api/fs/:project/mkdir` 建目录；`DELETE /api/fs/:project/assert/custom/...` 删除
+- 上传/建目录/删除仅限 `assert/custom/` 前缀下
+- 分镜 `stage.json` 可引用自定义资产：`基础场景` / `登场角色` 填 `custom/{相对 assert/custom 的完整路径}`（**含扩展名**，如 `custom/stage/商场门外/门已打开.png`），引擎按 `assert/custom/{路径}` 精确定位
+- 资产选择器（角色 / 场景页签）中，选中实体后会在其普通资产与衍生变体**之下单独分区**展示该实体的自定义资产图片，支持直接选择
+
 ### 3.1 角色产物
 
 | 路径 | 来源工作流 | 输入 prompt |

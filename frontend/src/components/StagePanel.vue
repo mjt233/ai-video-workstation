@@ -102,6 +102,25 @@
         >
           {{ loadError }}
         </div>
+
+        <!-- 场景自定义资产：映射到 assert/custom/stage/{name}/（置于滚动容器内，可随内容滚动查看） -->
+        <v-divider class="my-4" />
+        <div class="text-subtitle-1 font-weight-medium mb-2 d-flex align-center">
+          <v-icon
+            icon="mdi-folder-star-outline"
+            size="small"
+            color="primary"
+            class="mr-2"
+          />
+          自定义资产
+        </div>
+        <div class="text-body-2 text-medium-emphasis mb-2">
+          该场景的自定义资产存储在 <code>assert/custom/stage/{{ props.name }}/</code> 下，支持上传、预览与删除。
+        </div>
+        <CustomAssetSection
+          :project="props.project"
+          :dir-rel-path="`stage/${props.name}`"
+        />
       </div>
     </template>
 
@@ -172,6 +191,7 @@ import GenerateDialog from './GenerateDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
 import AssetImageUploadButton from './AssetImageUploadButton.vue'
 import VariantPanel from './VariantPanel.vue'
+import CustomAssetSection from './CustomAssetSection.vue'
 
 interface SubScene {
   label: string

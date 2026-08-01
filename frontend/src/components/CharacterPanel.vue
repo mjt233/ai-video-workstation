@@ -85,6 +85,25 @@
           kind="character"
           :owner="props.name"
         />
+
+        <!-- 角色自定义资产：映射到 assert/custom/character/{name}/（置于衍生变体之下） -->
+        <v-divider class="my-4" />
+        <div class="text-subtitle-1 font-weight-medium mb-2 d-flex align-center">
+          <v-icon
+            icon="mdi-folder-star-outline"
+            size="small"
+            color="primary"
+            class="mr-2"
+          />
+          自定义资产
+        </div>
+        <div class="text-body-2 text-medium-emphasis mb-2">
+          该角色的自定义资产存储在 <code>assert/custom/character/{{ props.name }}/</code> 下，支持上传、预览与删除。
+        </div>
+        <CustomAssetSection
+          :project="props.project"
+          :dir-rel-path="`character/${props.name}`"
+        />
       </v-tabs-window-item>
 
       <v-tabs-window-item value="voice">
@@ -197,6 +216,7 @@ import GenerateDialog from './GenerateDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
 import AssetImageUploadButton from './AssetImageUploadButton.vue'
 import VariantPanel from './VariantPanel.vue'
+import CustomAssetSection from './CustomAssetSection.vue'
 
 interface DialogState {
   show: boolean

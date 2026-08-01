@@ -237,9 +237,9 @@ const selectedStagePaths = computed(() => {
   // 尝试按 stage 格式解析
   const stagePath = stageRefToAssertPath(ref)
   if (stagePath) return [stagePath]
-  // 尝试按 custom/xxx 格式解析
+  // 尝试按 custom/xxx 格式解析（引用含扩展名，直接映射）
   if (ref.startsWith('custom/')) {
-    return [`assert/custom/${ref.slice('custom/'.length)}.jpg`]
+    return [`assert/custom/${ref.slice('custom/'.length)}`]
   }
   return []
 })
@@ -250,9 +250,9 @@ const selectedCharacterPaths = computed(() => {
     .map((ref) => {
       const p = characterRefToAssertPath(ref)
       if (p) return p
-      // custom/xxx 格式
+      // custom/xxx 格式（引用含扩展名，直接映射）
       if (ref.startsWith('custom/')) {
-        return `assert/custom/${ref.slice('custom/'.length)}.jpg`
+        return `assert/custom/${ref.slice('custom/'.length)}`
       }
       return null
     })
@@ -282,8 +282,8 @@ function assertPathToCharacterRef(apath: string): string | null {
     return null
   }
   if (apath.startsWith('assert/custom/')) {
-    const customPath = apath.slice('assert/custom/'.length).replace(/\.jpg$/i, '')
-    return `custom/${customPath}`
+    // 自定义资产引用保留完整路径（含扩展名），便于引擎精确定位
+    return `custom/${apath.slice('assert/custom/'.length)}`
   }
   return null
 }
@@ -317,8 +317,8 @@ function assertPathToStageRef(apath: string): string | null {
     }
   }
   if (apath.startsWith('assert/custom/')) {
-    const customPath = apath.slice('assert/custom/'.length).replace(/\.jpg$/i, '')
-    return `custom/${customPath}`
+    // 自定义资产引用保留完整路径（含扩展名），便于引擎精确定位
+    return `custom/${apath.slice('assert/custom/'.length)}`
   }
   return null
 }
@@ -362,6 +362,10 @@ function removeCharacter(name: string) {
 function stageRefToAssertPath(ref: string): string | null {
   const trimmed = ref.trim()
   if (!trimmed || trimmed === PREV_STAGE_REF) return null
+  // 自定义资产引用：custom/{完整路径含扩展名}
+  if (trimmed.startsWith('custom/')) {
+    return `assert/custom/${trimmed.slice('custom/'.length)}`
+  }
   const at = trimmed.indexOf('@')
   const main = at >= 0 ? trimmed.slice(0, at) : trimmed
   const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : ''
@@ -384,6 +388,10 @@ function stageRefToAssertPath(ref: string): string | null {
 function characterRefToAssertPath(ref: string): string | null {
   const trimmed = ref.trim()
   if (!trimmed) return null
+  // 自定义资产引用：custom/{完整路径含扩展名}
+  if (trimmed.startsWith('custom/')) {
+    return `assert/custom/${trimmed.slice('custom/'.length)}`
+  }
   const at = trimmed.indexOf('@')
   if (at < 0) return `assert/character/${trimmed}/appearance.jpg`
   const name = trimmed.slice(0, at).trim()

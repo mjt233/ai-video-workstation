@@ -16,6 +16,9 @@
       <v-tab value="video">
         视频生成
       </v-tab>
+      <v-tab value="custom">
+        自定义资产
+      </v-tab>
     </v-tabs>
 
     <v-tabs-window v-model="tab">
@@ -316,7 +319,7 @@
                             color="primary"
                             variant="tonal"
                             prepend-icon="mdi-auto-fix"
-                            :disabled="!parseStageRef(stage.基础场景)"
+                            :disabled="!parseStageRef(stage.基础场景)?.name"
                             @click="openStageAssetGen(stage.基础场景)"
                           >
                             生成场景设定图
@@ -508,6 +511,18 @@
           >
             历史版本
           </v-btn>
+        </div>
+      </v-tabs-window-item>
+
+      <v-tabs-window-item value="custom">
+        <div class="pa-2">
+          <div class="text-body-2 text-medium-emphasis mb-2">
+            该分镜的自定义资产存储在 <code>assert/custom/scene/{{ props.episode }}/{{ props.shot }}/</code> 下，支持上传、预览与删除。
+          </div>
+          <CustomAssetSection
+            :project="props.project"
+            :dir-rel-path="`scene/${props.episode}/${props.shot}`"
+          />
         </div>
       </v-tabs-window-item>
     </v-tabs-window>
@@ -751,6 +766,7 @@ import AssetHistoryDialog from './AssetHistoryDialog.vue'
 import AssetImageUploadButton from './AssetImageUploadButton.vue'
 import ScriptEditDialog from './ScriptEditDialog.vue'
 import AudioEditor from './audio-editor/AudioEditor.vue'
+import CustomAssetSection from './CustomAssetSection.vue'
 
 interface ScriptEntry {
   角色名: string
@@ -1110,6 +1126,14 @@ function parseStageRef(ref: string): {
   if (!ref) return null
   const trimmed = ref.trim()
   if (trimmed === PREV_STAGE_REF) return null
+  // 自定义资产引用：custom/{完整路径含扩展名}，仅用于预览定位，不可作为场景设定图生成目标
+  if (trimmed.startsWith('custom/')) {
+    return {
+      name: '',
+      label: '',
+      assertPath: `assert/custom/${trimmed.slice('custom/'.length)}`,
+    }
+  }
   const at = trimmed.indexOf('@')
   const main = at >= 0 ? trimmed.slice(0, at) : trimmed
   const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : ''
@@ -1161,6 +1185,10 @@ async function resolvePrevAssertPath(): Promise<string | null> {
 function characterRefToAssertPath(ref: string): string | null {
   const trimmed = (ref ?? '').trim()
   if (!trimmed) return null
+  // 自定义资产引用：custom/{完整路径含扩展名}
+  if (trimmed.startsWith('custom/')) {
+    return `assert/custom/${trimmed.slice('custom/'.length)}`
+  }
   const at = trimmed.indexOf('@')
   if (at < 0) return `assert/character/${trimmed}/appearance.jpg`
   const name = trimmed.slice(0, at).trim()
@@ -1175,7 +1203,7 @@ function characterRefToAssertPath(ref: string): string | null {
  */
 function openStageAssetGen(stageRef: string) {
   const parsed = parseStageRef(stageRef)
-  if (!parsed) return
+  if (!parsed || !parsed.name) return
   refGenDialog.value = { show: true, type: 'stage', name: parsed.name, label: parsed.label, variantId: parsed.variantId }
 }
 
@@ -1185,8 +1213,8 @@ function openStageAssetGen(stageRef: string) {
  */
 function openCharacterAssetGen(charName: string) {
   if (!charName) return
-  // 变体图在角色详情中生成
-  if (charName.includes('@')) return
+  // 变体图在角色详情中生成；自定义资产无需生成设定图
+  if (charName.includes('@') || charName.startsWith('custom/')) return
   refGenDialog.value = { show: true, type: 'character', name: charName, label: '' }
 }
 
