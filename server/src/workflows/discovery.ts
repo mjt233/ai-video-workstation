@@ -353,6 +353,23 @@ export async function discoverTasks(
               } else if (assetType === 'video-generate') {
                 const outputPath = `assert/scene/${episode}/${shot}/video.mp4`;
                 if (await shouldSkipOutput(outputPath)) continue;
+                // 所有场景帧均被禁用时不生成视频任务（禁用的场景帧不参与视频生成）
+                try {
+                  const stageContent = await fs.readFile(
+                    path.join(episodePath, shot, 'stage.json'),
+                    'utf-8',
+                  );
+                  const stages = JSON.parse(stageContent) as Array<{ disabled?: unknown }>;
+                  if (
+                    Array.isArray(stages)
+                    && stages.length > 0
+                    && stages.every((s) => s?.disabled === true)
+                  ) {
+                    continue;
+                  }
+                } catch {
+                  // stage.json 缺失或无效时交由任务执行阶段报错
+                }
                 tasks.push({
                   workflowId: 'image-to-video',
                   impl: 'default',

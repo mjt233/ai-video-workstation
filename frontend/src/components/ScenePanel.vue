@@ -258,9 +258,21 @@
           :key="i"
           class="mb-4"
         >
-          <v-card variant="outlined">
+          <v-card
+            variant="outlined"
+            :class="{ 'stage-disabled-card': stage.disabled }"
+          >
             <v-card-title class="text-subtitle-1 d-flex align-center">
               <span>场景{{ i }}</span>
+              <v-chip
+                v-if="stage.disabled"
+                class="ml-2"
+                size="x-small"
+                color="warning"
+                variant="tonal"
+              >
+                已禁用
+              </v-chip>
               <v-spacer />
               <v-btn
                 icon="mdi-pencil"
@@ -277,6 +289,14 @@
                 title="删除"
                 :disabled="stageDefs.length <= 1 || deletingStageIndex === i"
                 @click="removeStageFrame(i)"
+              />
+              <v-btn
+                :icon="stage.disabled ? 'mdi-eye-off' : 'mdi-eye'"
+                size="x-small"
+                variant="text"
+                :color="stage.disabled ? 'warning' : ''"
+                :title="stage.disabled ? '已禁用（视频生成跳过），点击启用' : '禁用（视频生成跳过）'"
+                @click="toggleStageDisabled(i)"
               />
               <v-btn
                 icon="mdi-arrow-up"
@@ -503,6 +523,15 @@
             编辑
           </v-btn>
         </div>
+        <v-alert
+          v-if="disabledStageCount > 0"
+          type="warning"
+          density="compact"
+          variant="tonal"
+          class="mx-2 mb-2"
+        >
+          有 {{ disabledStageCount }} 个场景帧已禁用，视频生成将跳过它们，仅使用 {{ stageDefs.length - disabledStageCount }} 个场景帧。
+        </v-alert>
         <MarkdownView :content="data.prompt" />
         <div
           v-if="hasVideo"
@@ -521,7 +550,7 @@
             color="primary"
             variant="tonal"
             prepend-icon="mdi-video"
-            @click="genDialog = { show: true, type: 'video', index: 0 }"
+            @click="openVideoGen"
           >
             生成视频
           </v-btn>
@@ -778,6 +807,7 @@ import {
   deleteSceneStageFrame,
   deleteSceneScriptEntry,
   updateSceneScriptEntry,
+  updateSceneStageFrame,
   deleteSceneMergedAudio,
   AssetApiError,
 } from '../api/assets'
@@ -810,6 +840,8 @@ interface StageDefinition {
   基础场景: string
   登场角色?: string[]
   prompt: string
+  /** 该场景帧是否被禁用（视频生成时跳过） */
+  disabled: boolean
   imageUrl: string
 }
 
@@ -953,6 +985,9 @@ const hasFullVoice = computed(() => {
   return voiceAssets.value.length > 0 && voiceAssets.value.every(v => v !== '')
 })
 
+/** 被禁用的场景帧数量（视频生成时跳过） */
+const disabledStageCount = computed(() => stageDefs.value.filter((s) => s.disabled).length)
+
 const overviewDurationError = computed(() => {
   const duration = overviewDialog.value.form.duration
   if (!isPositiveInt(duration)) {
@@ -1075,6 +1110,36 @@ async function removeStageFrame(index: number) {
   } finally {
     deletingStageIndex.value = null
   }
+}
+
+/**
+ * 切换指定场景帧的禁用状态。
+ * 禁用的场景帧在视频生成（image-to-video）时被跳过，不参与首尾帧/中间帧。
+ * @param index 场景帧索引
+ */
+async function toggleStageDisabled(index: number) {
+  const stage = stageDefs.value[index]
+  if (!stage) return
+  try {
+    await updateSceneStageFrame(props.project, props.episode, props.shot, index, {
+      基础场景: stage.基础场景,
+      登场角色: stage.登场角色,
+      prompt: stage.prompt,
+      disabled: !stage.disabled,
+    })
+    await load()
+  } catch (e) {
+    alert(e instanceof AssetApiError ? e.message : '操作失败')
+  }
+}
+
+/** 打开视频生成对话框；所有场景帧均禁用时阻止并提示。 */
+function openVideoGen() {
+  if (stageDefs.value.length > 0 && disabledStageCount.value === stageDefs.value.length) {
+    alert('所有场景帧均已禁用，无法生成视频（请至少启用一个场景帧）')
+    return
+  }
+  genDialog.value = { show: true, type: 'video', index: 0 }
 }
 
 function openStageImageHistory(index: number) {
@@ -1394,6 +1459,7 @@ async function load() {
         基础场景: item.基础场景 ?? '',
         登场角色: item.登场角色 ?? [],
         prompt: item.prompt ?? '',
+        disabled: (item as { disabled?: unknown }).disabled === true,
         imageUrl: checks[i] ? `${assertBase.value}/${i}.jpg?t=${Date.now()}` : '',
       }))
       await loadRefAssets(stageDefs.value)
@@ -1460,7 +1526,12 @@ function editStageJson() {
     show: true,
     field: 'stage',
     content: JSON.stringify(
-      stageDefs.value.map(({ 基础场景, 登场角色, prompt }) => ({ 基础场景, 登场角色, prompt })),
+      stageDefs.value.map(({ 基础场景, 登场角色, prompt, disabled }) => ({
+        基础场景,
+        登场角色,
+        prompt,
+        ...(disabled ? { disabled: true } : {}),
+      })),
       null,
       2,
     ),
@@ -1549,5 +1620,11 @@ watch(() => props.project, loadCharacters, { immediate: true })
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
+}
+
+/* 禁用的场景帧：整体淡化并高亮边框，提示视频生成时将跳过 */
+.stage-disabled-card {
+  opacity: 0.7;
+  border-color: rgb(var(--v-theme-warning)) !important;
 }
 </style>

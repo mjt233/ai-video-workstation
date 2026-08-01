@@ -188,6 +188,8 @@ export interface StageFrameBody {
   基础场景: string
   登场角色?: string[]
   prompt?: string
+  /** 是否禁用该场景帧：true 时视频生成（image-to-video）跳过此帧 */
+  disabled?: boolean
   index?: number
 }
 

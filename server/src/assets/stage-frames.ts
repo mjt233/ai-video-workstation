@@ -7,11 +7,13 @@ import { pathExists, resolveProjectPath } from './paths.js';
  * @property 基础场景 场景引用：`场景名/标签`、`场景名/标签@变体id`，或关键字 `prev`（同集上一分镜最后一帧）
  * @property 登场角色 可选角色引用列表；`prev` 时必须为空
  * @property prompt 合成提示词；`prev` 时必须为空
+ * @property disabled 是否禁用该关键帧：true 时视频生成（image-to-video）会跳过此帧
  */
 export interface StageFrameInput {
   基础场景: string;
   登场角色?: string[];
   prompt?: string;
+  disabled?: boolean;
 }
 
 /** 引用同集上一分镜最后一个场景图的固定关键字。 */
@@ -90,6 +92,7 @@ export function normalizeStageFrame(input: StageFrameInput): StageFrameInput {
       基础场景: PREV_STAGE_REF,
       登场角色: [],
       prompt: '',
+      ...(input.disabled === true ? { disabled: true } : {}),
     };
   }
 
@@ -109,6 +112,7 @@ export function normalizeStageFrame(input: StageFrameInput): StageFrameInput {
     基础场景: base,
     登场角色: characters,
     prompt,
+    ...(input.disabled === true ? { disabled: true } : {}),
   };
 }
 
@@ -284,7 +288,10 @@ export async function updateStageFrame(
   if (!Number.isInteger(index) || index < 0 || index >= data.length) {
     throw Object.assign(new Error('索引越界'), { code: 'CONFLICT' });
   }
-  data[index] = frame;
+  // 客户端未显式传递 disabled 时，保留原帧的禁用状态（避免编辑场景帧后禁用标记丢失）
+  const existing = data[index] as { disabled?: unknown } | undefined;
+  const disabled = input.disabled === true || (input.disabled == null && existing?.disabled === true);
+  data[index] = disabled ? { ...frame, disabled: true } : frame;
   await writeStageJson(project, episode, shot, data);
 }
 

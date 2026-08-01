@@ -67,6 +67,8 @@ interface SceneStageDefinition {
   基础场景?: string;
   登场角色?: string[];
   prompt?: string;
+  /** 是否禁用该场景帧：true 时视频生成（image-to-video）会跳过此帧 */
+  disabled?: boolean;
 }
 
 function resolveProjectAssertPath(project: string, relPath: string): string {
@@ -155,6 +157,9 @@ async function enrichImageToVideoParams(
   const stageImages: string[] = [];
   const missing: string[] = [];
   for (let i = 0; i < stageDefs.length; i++) {
+    // 禁用的场景帧不参与视频生成，其图片也不要求存在
+    const def = stageDefs[i] as SceneStageDefinition | undefined;
+    if (def && def.disabled === true) continue;
     const rel = `assert/scene/${episode}/${shot}/stage/${i}.jpg`;
     const full = resolveUnderProject(rel);
     try {
