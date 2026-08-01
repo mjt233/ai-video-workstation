@@ -135,11 +135,13 @@ workflowRouter.post('/workflow/retry/:taskId', (req: Request, res: Response) => 
 
 // POST /api/workflow/batch-run — submit batch generation tasks
 workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) => {
-  const { project, assetTypes, concurrency, overwrite } = req.body as {
+  const { project, assetTypes, concurrency, overwrite, implByAssetType } = req.body as {
     project: string;
     assetTypes: string[];
     concurrency?: number;
     overwrite?: boolean;
+    /** 资产类型 → 工作流实现（如 character-appearance → default/flux） */
+    implByAssetType?: Record<string, string>;
   };
 
   if (!project || !Array.isArray(assetTypes) || assetTypes.length === 0) {
@@ -148,7 +150,7 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
   }
 
   try {
-    const discovered = await discoverTasks(project, assetTypes, overwrite ?? false);
+    const discovered = await discoverTasks(project, assetTypes, overwrite ?? false, implByAssetType);
 
     // No eligible assets — do not create an empty batch
     if (discovered.length === 0) {

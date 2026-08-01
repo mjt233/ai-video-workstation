@@ -54,12 +54,14 @@ async function fileExists(filePath: string): Promise<boolean> {
  * @param project   – project name (subdirectory under design/)
  * @param assetTypes – array of asset type identifiers to discover
  * @param overwrite  – if true, include tasks even if the output file already exists
+ * @param implByAssetType – 按资产类型覆盖工作流实现（前端勾选资产类型后手动选择，默认取第一个实现）
  * @returns an array of discovered tasks
  */
 export async function discoverTasks(
   project: string,
   assetTypes: string[],
   overwrite: boolean,
+  implByAssetType?: Record<string, string>,
 ): Promise<DiscoveredTask[]> {
   const tasks: DiscoveredTask[] = [];
   const projectDir = path.resolve(DESIGN_DIR, project);
@@ -421,6 +423,13 @@ export async function discoverTasks(
         break;
       }
     }
+  }
+
+  // 按资产类型覆盖工作流实现（前端勾选资产类型后手动选择，默认取第一个实现）
+  const implOverride = implByAssetType ?? {};
+  for (const task of tasks) {
+    const override = task.assetType ? implOverride[task.assetType] : undefined;
+    if (override) task.impl = override;
   }
 
   return tasks;

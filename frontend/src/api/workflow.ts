@@ -52,6 +52,8 @@ export interface BatchRunParams {
   assetTypes: string[]
   concurrency?: number
   overwrite?: boolean
+  /** 资产类型 → 工作流实现（前端勾选资产类型后手动选择） */
+  implByAssetType?: Record<string, string>
 }
 
 export interface BatchSummary {

@@ -48,7 +48,7 @@
           </v-alert>
 
           <div class="text-body-2 mb-2 font-weight-medium">
-            选择要生成的资产类型
+            选择要生成的资产类型与工作流实现
           </div>
           <v-row dense>
             <v-col
@@ -63,6 +63,18 @@
                 density="compact"
                 hide-details
                 color="primary"
+              />
+              <v-select
+                v-if="selectedTypes.includes(at.id)"
+                v-model="implSelections[at.id]"
+                :items="implOptionsFor(at.id)"
+                item-title="name"
+                item-value="impl"
+                :label="`${at.label}工作流`"
+                density="compact"
+                variant="outlined"
+                hide-details
+                class="mt-1"
               />
             </v-col>
           </v-row>
@@ -194,8 +206,10 @@ import { ref, computed, watch } from 'vue'
 import {
   runBatch,
   retryTask as apiRetryTask,
+  getWorkflows,
   type BatchSummary,
   type TaskResponse,
+  type WorkflowInfo,
 } from '../api/workflow'
 
 const props = defineProps<{
@@ -228,6 +242,17 @@ const assetTypes = [
   { id: 'video-generate', label: '🎥 视频' },
 ]
 
+/** 资产类型 → 工作流类型 ID（用于查询可选实现） */
+const ASSET_TYPE_WORKFLOW: Record<string, string> = {
+  'character-appearance': 'text-to-image',
+  'character-voice': 'tts-voice-design',
+  'stage-image': 'text-to-image',
+  'variant-edit': 'image-edit',
+  'scene-stage-image': 'image-edit',
+  'scene-tts': 'tts-voice-design',
+  'video-generate': 'image-to-video',
+}
+
 const mode = ref<'config' | 'progress'>('config')
 const selectedTypes = ref<string[]>([])
 const concurrency = ref(1)
@@ -235,6 +260,61 @@ const overwrite = ref(false)
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const configWarning = ref<string | null>(null)
+
+/** 已加载的工作流定义列表（含各类型可用实现） */
+const workflows = ref<WorkflowInfo[]>([])
+const workflowMap = computed(() => {
+  const m: Record<string, WorkflowInfo> = {}
+  for (const w of workflows.value) m[w.id] = w
+  return m
+})
+
+/** 资产类型 → 选定的工作流实现（默认第一个） */
+const implSelections = ref<Record<string, string>>({})
+
+/**
+ * 获取指定资产类型可用的工作流实现列表。
+ * @param assetTypeId 资产类型 ID
+ * @returns 实现列表；工作流未加载或类型未知时返回空数组
+ */
+function implOptionsFor(assetTypeId: string): { impl: string; name: string; description?: string }[] {
+  const wid = ASSET_TYPE_WORKFLOW[assetTypeId]
+  const wf = wid ? workflowMap.value[wid] : undefined
+  return wf?.implementations ?? []
+}
+
+/**
+ * 加载工作流定义，并为已勾选的资产类型补齐默认实现（取第一个）。
+ */
+async function loadWorkflows() {
+  try {
+    workflows.value = await getWorkflows()
+  } catch {
+    workflows.value = []
+  }
+  syncImplDefaults()
+}
+
+/**
+ * 为已勾选的资产类型补齐默认实现（第一个），并清除未勾选类型的记录。
+ */
+function syncImplDefaults() {
+  const next = { ...implSelections.value }
+  for (const at of assetTypes) {
+    const opts = implOptionsFor(at.id)
+    if (selectedTypes.value.includes(at.id)) {
+      if (!opts.some((o) => o.impl === next[at.id])) {
+        if (opts.length > 0) next[at.id] = opts[0].impl
+        else delete next[at.id]
+      }
+    } else {
+      delete next[at.id]
+    }
+  }
+  implSelections.value = next
+}
+
+watch(selectedTypes, () => syncImplDefaults())
 
 const progressPercent = computed(() => {
   if (props.summary.total === 0) return 0
@@ -379,6 +459,7 @@ function resetConfig() {
   submitting.value = false
   submitError.value = null
   configWarning.value = null
+  implSelections.value = {}
 }
 
 // When dialog opens: resume progress if batch is active, otherwise config
@@ -391,6 +472,7 @@ watch(show, (val) => {
   } else {
     mode.value = 'config'
     resetConfig()
+    loadWorkflows()
   }
 })
 
@@ -407,11 +489,18 @@ async function startGenerate() {
   submitError.value = null
   configWarning.value = null
   try {
+    // 组装每个资产类型选定的工作流实现（默认取第一个可用实现）
+    const implByAssetType: Record<string, string> = {}
+    for (const id of selectedTypes.value) {
+      const impl = implSelections.value[id] ?? implOptionsFor(id)[0]?.impl
+      if (impl) implByAssetType[id] = impl
+    }
     const result = await runBatch({
       project: props.project,
       assetTypes: selectedTypes.value,
       concurrency: concurrency.value,
       overwrite: overwrite.value,
+      implByAssetType,
     })
 
     if (!result.batchId || result.totalTasks === 0) {
