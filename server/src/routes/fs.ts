@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
+import { FsRouteError, isUnderAssert, validateCopyRequest } from './fs-path.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../../design');
@@ -111,8 +112,8 @@ fsRouter.post('/fs/:project/mkdir', async (req: Request, res: Response) => {
       return;
     }
     const normalized = dirRelPath.replace(/\\/g, '/');
-    if (!normalized.startsWith('assert/custom/')) {
-      res.status(403).json({ error: '仅支持 assert/custom/ 下创建目录' });
+    if (!isUnderAssert(normalized)) {
+      res.status(403).json({ error: '仅支持 assert/ 下创建目录' });
       return;
     }
     const fullPath = path.resolve(DESIGN_DIR, project, normalized);
@@ -141,8 +142,8 @@ fsRouter.post('/fs/:project/rename', async (req: Request, res: Response) => {
     }
     const fromNorm = from.replace(/\\/g, '/');
     const toNorm = to.replace(/\\/g, '/');
-    if (!fromNorm.startsWith('assert/custom/') || !toNorm.startsWith('assert/custom/')) {
-      res.status(403).json({ error: '仅支持 assert/custom/ 下的重命名' });
+    if (!isUnderAssert(fromNorm) || !isUnderAssert(toNorm)) {
+      res.status(403).json({ error: '仅支持 assert/ 下的重命名' });
       return;
     }
     const fromFull = path.resolve(DESIGN_DIR, project, fromNorm);
@@ -184,8 +185,8 @@ fsRouter.post(
         return;
       }
       const normalized = destRelPath.replace(/\\/g, '/');
-      if (!normalized.startsWith('assert/custom/')) {
-        res.status(403).json({ error: '仅支持上传到 assert/custom/ 下' });
+      if (!isUnderAssert(normalized)) {
+        res.status(403).json({ error: '仅支持上传到 assert/ 下' });
         return;
       }
       const file = req.file;
@@ -208,6 +209,32 @@ fsRouter.post(
     }
   },
 );
+
+// ── 文件系统：复制文件/目录（须在 /* 路由前注册） ────────────────
+
+fsRouter.post('/fs/:project/copy', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const { from, to } = req.body as { from?: string; to?: string };
+    const projectRoot = path.resolve(DESIGN_DIR, project);
+    const { fromNorm, toNorm, fromFull, toFull } = validateCopyRequest(projectRoot, from ?? '', to ?? '');
+    await fs.mkdir(path.dirname(toFull), { recursive: true });
+    await fs.cp(fromFull, toFull, { recursive: true });
+    res.json({ success: true, from: fromNorm, to: toNorm });
+  } catch (err) {
+    const e = err as ErrorWithCode;
+    if (e instanceof FsRouteError) {
+      res.status(e.status).json({ error: e.message });
+      return;
+    }
+    if (e.code === 'ENOENT') {
+      res.status(404).json({ error: '源路径不存在' });
+    } else {
+      console.error('Failed to copy fs:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+});
 
 // ── 文件系统：写入文本内容（通配路由，放在具体路由之后） ─────────
 
@@ -252,8 +279,8 @@ fsRouter.delete('/fs/:project/*', async (req: Request, res: Response) => {
     const project = req.params.project as string;
     const relPath = req.params[0] || '';
     const normalized = relPath.replace(/\\/g, '/');
-    if (!normalized.startsWith('assert/custom/')) {
-      res.status(403).json({ error: '仅支持删除 assert/custom/ 下的内容' });
+    if (!isUnderAssert(normalized)) {
+      res.status(403).json({ error: '仅支持删除 assert/ 下的内容' });
       return;
     }
     const fullPath = path.resolve(DESIGN_DIR, project, normalized);

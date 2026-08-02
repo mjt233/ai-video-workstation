@@ -54,6 +54,12 @@ export async function renameFs(project: string, from: string, to: string): Promi
   return data
 }
 
+/** 复制文件或目录（源/目标均须在 assert/ 下，用于画布资产复制、设为分镜场景图等） */
+export async function copyFs(project: string, from: string, to: string): Promise<{ success: boolean; from: string; to: string }> {
+  const { data } = await client.post<{ success: boolean; from: string; to: string }>(`/fs/${project}/copy`, { from, to })
+  return data
+}
+
 /** 删除文件或目录递归（用于 assert/custom/ 下） */
 export async function deleteFs(project: string, relPath: string): Promise<{ success: boolean }> {
   const { data } = await client.delete<{ success: boolean }>(`/fs/${project}/${relPath}`)
