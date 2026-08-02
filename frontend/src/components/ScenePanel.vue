@@ -19,6 +19,9 @@
       <v-tab value="custom">
         自定义资产
       </v-tab>
+      <v-tab value="canvas">
+        资产画布
+      </v-tab>
     </v-tabs>
 
     <v-tabs-window v-model="tab">
@@ -576,6 +579,17 @@
           />
         </div>
       </v-tabs-window-item>
+
+      <v-tabs-window-item value="canvas">
+        <div style="height: 60vh">
+          <AssetCanvas
+            :project="props.project"
+            kind="scene"
+            :episode="props.episode"
+            :shot="props.shot"
+          />
+        </div>
+      </v-tabs-window-item>
     </v-tabs-window>
 
     <v-dialog
@@ -820,6 +834,7 @@ import AssetImageUploadButton from './AssetImageUploadButton.vue'
 import ScriptEditDialog from './ScriptEditDialog.vue'
 import AudioEditor from './audio-editor/AudioEditor.vue'
 import CustomAssetSection from './CustomAssetSection.vue'
+import AssetCanvas from './canvas/AssetCanvas.vue'
 
 interface ScriptEntry {
   角色名: string
