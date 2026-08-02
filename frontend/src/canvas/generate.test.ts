@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { collectInputPaths, getHistory, getNodeCurrentAssetPath, type HistoryEntry } from './generate'
+import { collectInputPaths, getHistory, getNodeCurrentAssetPath } from './generate'
 
 const loader: CanvasNodeData = {
   id: 'l1', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,

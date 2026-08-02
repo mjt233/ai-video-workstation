@@ -1,6 +1,4 @@
 import { newId, type CanvasConnection, type CanvasData, type CanvasNodeData } from './types'
-import { nextVersion } from './types'
-import { getHistory } from './generate'
 
 /**
  * 自动搭画布纯函数：根据资产引用列表生成/合并画布结构。
