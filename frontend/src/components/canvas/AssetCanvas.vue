@@ -99,6 +99,7 @@
         @edges-change="onEdgesChange"
         @node-click="onNodeClick"
         @edge-click="onEdgeClick"
+        @node-drag-start="onNodeDragStart"
         @node-drag-stop="onNodeDragStop"
         @pane-click="onPaneClick"
       >
@@ -107,49 +108,62 @@
           <div
             v-if="nodeMap[id]"
             class="canvas-node"
+            :class="{ 'canvas-node--selected': selected }"
             @contextmenu.prevent="openContextMenu($event, id)"
           >
+            <!-- 节点名称头部 -->
+            <div class="canvas-node__header">
+              <span class="text-caption font-weight-medium canvas-node__name">
+                {{ nodeMap[id].name }}
+              </span>
+            </div>
             <Handle
               v-if="protoOf(id)?.inputPorts.length"
+              :id="protoOf(id)?.inputPorts[0]?.id"
               type="target"
               :position="Position.Left"
             />
-            <component
-              :is="protoOf(id)?.bodyComponent"
-              :project="props.project"
-              :node="nodeMap[id]"
-              :status="statusByNode[id]"
-              :upstream-updated="isUpstreamUpdated(id)"
-              @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
-              @open-picker="openAssetPicker"
-              @retry="(nid: string) => generateNode(nid)"
-            />
+            <div class="canvas-node__body">
+              <component
+                :is="protoOf(id)?.bodyComponent"
+                :project="props.project"
+                :node="nodeMap[id]"
+                :status="statusByNode[id]"
+                :upstream-updated="isUpstreamUpdated(id)"
+                @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
+                @open-picker="openAssetPicker"
+                @retry="(nid: string) => generateNode(nid)"
+              />
+            </div>
             <Handle
               v-if="protoOf(id)?.outputPorts.length"
+              :id="protoOf(id)?.outputPorts[0]?.id"
               type="source"
               :position="Position.Right"
             />
-            <!-- 选中节点时在主体下方渲染配置编辑器 -->
-            <div
-              v-if="selected && protoOf(id)?.editorComponent"
-              class="canvas-node__editor"
-            >
-              <component
-                :is="protoOf(id)?.editorComponent"
-                :project="props.project"
-                :node="nodeMap[id]"
-                :input-paths="inputPathsOf(id)"
-                :is-running="isNodeRunning(id)"
-                @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
-                @generate="generateNode"
-                @interrupt="onInterrupt"
-                @open-history="openHistory"
-                @set-as-scene="setAsScene"
-              />
-            </div>
           </div>
         </template>
       </VueFlow>
+
+      <!-- 节点配置悬浮面板（独立于节点，位于节点正下方，随视图联动） -->
+      <div
+        v-if="editorPanel && !suppressEditor"
+        class="canvas-node-editor-panel"
+        :style="editorPanelStyle"
+      >
+        <component
+          :is="editorPanel?.editorComponent"
+          :project="props.project"
+          :node="editorPanel?.node"
+          :input-paths="editorPanel ? inputPathsOf(editorPanel.node.id) : []"
+          :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
+          @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
+          @generate="generateNode"
+          @interrupt="onInterrupt"
+          @open-history="openHistory"
+          @set-as-scene="setAsScene"
+        />
+      </div>
 
       <!-- 右键菜单 -->
       <div
@@ -428,7 +442,7 @@ const { statusByNode } = gen
 const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo } = store
 
 /** Vue Flow 视图控制：适应/缩放/屏幕坐标换算 */
-const { fitView, zoomIn, zoomOut, screenToFlowCoordinate } = useVueFlow()
+const { fitView, zoomIn, zoomOut, screenToFlowCoordinate, viewport } = useVueFlow()
 
 /** 画布容器 DOM（用于右键菜单定位） */
 const flowEl = ref<HTMLDivElement | null>(null)
@@ -537,11 +551,41 @@ function onEdgeClick({ edge }: EdgeMouseEvent) {
 const selectedNodeId = ref('')
 /** 当前选中连线 id（驱动 Delete 键删除连线） */
 const selectedEdgeId = ref('')
+/** 拖拽进行中：抑制配置面板显示（拖拽不触发配置） */
+const suppressEditor = ref(false)
 
-/** 点击节点：选中并关闭右键菜单 */
+/** 当前选中的节点数据 */
+const selectedNode = computed(() => store.nodes.value.find((n) => n.id === selectedNodeId.value) ?? null)
+
+/** 当前选中节点的编辑器组件（无配置组件时为空） */
+const editorPanel = computed(() => {
+  const node = selectedNode.value
+  if (!node) return null
+  const proto = getPrototype(node.prototypeId)
+  return proto?.editorComponent ? { node, editorComponent: proto.editorComponent } : null
+})
+
+/** 配置面板定位：节点正下方（随平移/缩放联动） */
+const editorPanelStyle = computed(() => {
+  const node = selectedNode.value
+  if (!node) return null
+  const vp = viewport.value
+  const left = node.x * vp.zoom + vp.x
+  const top = (node.y + node.height) * vp.zoom + vp.y
+  const width = Math.max(node.width * vp.zoom, 240)
+  return { left: `${left}px`, top: `${top}px`, width: `${width}px` }
+})
+
+/** 点击节点：选中并关闭右键菜单（允许显示配置面板） */
 function onNodeClick({ node }: NodeMouseEvent) {
+  suppressEditor.value = false
   selectedNodeId.value = node.id
   contextMenu.show = false
+}
+
+/** 节点开始拖拽：抑制配置面板显示（仅点击节点才显示配置） */
+function onNodeDragStart(_event: NodeDragEvent) {
+  suppressEditor.value = true
 }
 
 /**
@@ -694,6 +738,7 @@ function addNodeAt(prototypeId: string) {
 /** 空白处点击：单击关闭右键菜单，双击打开添加节点对话框 */
 function onPaneClick(event: MouseEvent) {
   contextMenu.show = false
+  suppressEditor.value = false
   selectedNodeId.value = ''
   selectedEdgeId.value = ''
   if (event.detail >= 2) {
@@ -1005,15 +1050,46 @@ onUnmounted(() => {
   background: #fff;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
 }
 
-.canvas-node__editor {
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
+.canvas-node--selected {
+  border-color: rgb(25, 118, 210);
+  box-shadow: 0 0 0 1px rgb(25, 118, 210);
+}
+
+.canvas-node__header {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.canvas-node__name {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-node__body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.canvas-node-editor-panel {
+  position: absolute;
+  z-index: 15;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
   padding: 8px;
-  background: rgba(0, 0, 0, 0.02);
-  max-height: 320px;
+  box-sizing: border-box;
+  max-height: 45vh;
   overflow-y: auto;
 }
 
