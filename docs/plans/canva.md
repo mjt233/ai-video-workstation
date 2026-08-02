@@ -19,6 +19,7 @@
 3. 自动搭画布：用户**手动点击触发**，当前只做图生图节点的自动创建。
 4. 节点范围：v1 只做图片链路；【生成图片】只接受图片类型输入；连接按**数据类型**校验（ComfyUI 思路），而非固定按节点类型。
 5. 不做一键重跑：上游更新只**提示**，由用户手动触发重新生成。
+6. 底层存储：`mkdir / rename / delete / upload` 的路径限制从仅 `assert/custom/` 放宽到整个 `assert/` 前缀，以支持画布资产区；另新增 `copy` 端点（详见 §10.4）。
 
 ## 2. 入口
 
@@ -298,14 +299,112 @@ interface NodeMetadata {
 - **桥接现有流程**：节点结果图可一键「设为分镜场景图 / 设为场景图」，直接进入现有「视频生成」流程（详见 §6.2）；
 - **画布复制 / 复用**：支持将当前画布**复制到其他分镜**，或**从上一分镜复制画布**（同一场景反复出镜时复用，无需重搭）。
 
-## 10. 数据与持久化
+## 10. 数据持久化与资源引用（实现要点）
 
-- 画布定义（节点、连线、坐标、配置）保存为 JSON：
-  - 场景画布：`prompt/stage/{场景名}/canvas.json`
-  - 分镜画布：`prompt/scene/{集数}/{分镜}/canvas.json`
-- 生成资产：存入 `assert/` 对应目录的画布子目录（如 `assert/scene/{集数}/{分镜}/canvas/`）
-- 画布变更自动保存（防抖）+ 脏标记（切换面板时提示未保存变更）
-- 写入范围遵循现有 `prompt/`、`assert/` 前缀约定
+### 10.1 核心原则：统一项目相对路径引用
+
+- 所有节点引用的资产一律存**项目相对路径**（如 `assert/character/张三/appearance.jpg`），**不存 URL**；
+- 预览 URL 由前端运行时拼接：`/api/fs/${project}/${relPath}?t=${Date.now()}`（沿用现有约定，时间戳防缓存）；
+- 服务端解析路径时统一校验，防止 `..` 逃逸（沿用 `resolveProjectAssertPath` 模式）。
+
+### 10.2 持久化模型：定义与产物分离
+
+`canvas.json`（画布定义，前端写）与生成产物（磁盘文件，引擎写）**分开保存、分开写入**：
+
+```
+prompt/stage/{场景名}/canvas.json        ← 场景画布定义
+prompt/scene/{集数}/{分镜}/canvas.json    ← 分镜画布定义
+assert/{scope}/canvas/{nodeId}/          ← 生成产物（scope = stage/{场景名} 或 scene/{集数}/{分镜}）
+  v1.jpg  v2.jpg  v3.jpg
+```
+
+**版本号客户端预计算**：工作流 run 接口要求先给 `outputPath`，因此前端在发起生成前按「历史长度 + 1」算出 `v{n}`，把 `assert/{scope}/canvas/{nodeId}/v{n}.jpg` 传给引擎；成功后把该路径追加进 canvas.json 的历史。引擎保持“傻瓜写盘”，canvas.json 是唯一索引：
+
+- 每次生成 = 新文件，**天然不覆盖**、无缓存问题；
+- 失败时仅索引未更新，残留文件可清理。
+
+**canvas.json schema**（节点只存数据；`generateAssert` 等是前端运行时行为，不持久化）：
+
+```ts
+interface CanvasData {
+  version: 1                    // schema 版本，读取时迁移
+  kind: 'stage' | 'scene'       // 场景画布 / 分镜画布
+  nodes: CanvasNodeData[]
+  connections: CanvasConnection[]   // 见 §4.4
+  createdAt: string
+  updatedAt: string
+}
+
+interface CanvasNodeData {
+  id: string
+  prototypeId: 'image-loader' | 'image-generate' | 'text'
+  name: string
+  x: number
+  y: number
+  width: number
+  height: number
+  config: Record<string, unknown>
+}
+
+// 加载图片 config: { assetPath: 'assert/character/张三/appearance.jpg' }
+// 生成图片 config: {
+//   prompt: string
+//   workflowId: string
+//   workflowImpl?: string
+//   workflowParams: Record<string, unknown>
+//   current: { version: number; path: string; date: string } | null
+//   history: { version: number; path: string; date: string }[]
+// }
+```
+
+canvas.json 读写**复用现有 `/fs` API**（`prompt/` 前缀可写；读 .json 自动反序列化），无需新端点。
+
+### 10.3 不同来源资源的引用与预览
+
+| 来源 | 引用（存 config） | 预览 | 生成时 |
+|------|------------------|------|--------|
+| 资产库（角色/场景/自定义） | `assert/...` 相对路径 | `/api/fs/:project/{path}?t=` | 相对路径作为输入参数传给引擎 |
+| 画布生成产物 | `assert/{scope}/canvas/{nodeId}/v{n}.jpg` | 同上 | 预计算 outputPath |
+| 用户上传 | 先落盘再按路径引用 | 同上 | 走路径 |
+| 跨画布引用（场景画布产物 → 分镜画布） | 场景画布产物路径（普通文件） | 同上 | 走路径 |
+
+- 前端统一封装预览工具 `useCanvasAssetUrl(relPath, version)`，版本切换时 `t` 变化即刷新缓存；
+- 所有 `<img>` 加 `@error` 兜底显示占位（无资产 / 生成中 / 文件失效）；
+- **节点从不直接持有 File/Blob，只持有路径**——上传先落盘到自定义资产区（`assert/custom/`，沿用规格 §6.1），再被节点引用。
+
+### 10.4 后端 API 变更
+
+**决策（已确认）：放宽 `fs.ts` 的 `mkdir / rename / delete / upload` 限制**，从仅 `assert/custom/` 放开到整个 `assert/` 前缀，以支持画布资产区（`assert/{scope}/canvas/`）的创建 / 删除 / 上传。校验规则不变：路径必须位于 `assert/` 且不逃逸项目根。
+
+| 操作 | 现状 | 变更 |
+|------|------|------|
+| 读写 canvas.json | `/fs` 通用读写（prompt/ 可写）✓ | 复用，无需改动 |
+| 生成产物落盘 | 引擎直接写 assert/ 任意路径 ✓ | 无需改动 |
+| 上传 | 仅 `assert/custom/` | **放宽到 `assert/`**（决策） |
+| mkdir / rename / delete | 仅 `assert/custom/` | **放宽到 `assert/`**（决策） |
+| **copy（新增，必需）** | 无 | **新增 `POST /api/fs/:project/copy`**（源 / 目标均在 `assert/` 下） |
+
+> **为何仍需要 copy**：`rename` 是移动，而「设为分镜场景图」（产物复制到场景图位置，原文件保留）和「复制画布到其他分镜」（复制整个 canvas 资产目录）都需要**复制**。copy 端点放在 `fs.ts` 与 rename / delete / upload 并列，校验规则一致。
+
+### 10.5 生成调用链（前端）
+
+```
+generateAssert()
+  → 解析输入节点 → 相对路径数组 inputImages
+  → 计算 outputPath = assert/{scope}/canvas/{nodeId}/v{n}.jpg
+  → POST /api/workflow/run
+      { project, workflowId, impl, params: { vars, userParams: { prompt, inputImages, ... }, outputPath } }
+  → 轮询 GET /api/workflow/tasks/:taskId 与 /log（进度 + 最后一条日志）
+  → 成功后更新 canvas.json 的 history
+```
+
+### 10.6 健壮性
+
+- 失效引用：资产被删 / 生成失败 → 前端 `<img @error>` 占位 + 生成前 `existsFs` 预检并给出明确报错；
+- 幂等：版本号递增保证不覆盖；
+- 防逃逸：所有路径服务端校验（沿用现有模式）；
+- 迁移：`canvas.json.version`，读取时按版本迁移；
+- 保存：canvas.json 防抖自动保存 + 脏标记（切换面板时提示未保存变更）。
 
 ## 11. 范围与后续扩展
 
