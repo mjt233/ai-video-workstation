@@ -1,10 +1,10 @@
 import type { Port } from './types'
+import type { Component } from 'vue'
+import ImageLoaderNode from '../components/canvas/nodes/ImageLoaderNode.vue'
+import ImageGenerateNode from '../components/canvas/nodes/ImageGenerateNode.vue'
+import TextNode from '../components/canvas/nodes/TextNode.vue'
 
-/**
- * 节点原型：定义节点类型的端口与能力。
- *
- * bodyComponent / editorComponent（Vue 组件）由 Phase 3 接入，此处只定义数据。
- */
+/** 节点原型：定义节点类型的端口、能力与渲染组件 */
 export interface NodePrototype {
   /** 该节点类型的唯一标识，代码中硬编码 */
   id: string
@@ -16,6 +16,10 @@ export interface NodePrototype {
   outputPorts: Port[]
   /** 该类型节点是否允许用户自由缩放大小 */
   resizeable: boolean
+  /** 渲染节点卡片主体的 Vue 组件（可拿到 node/project 等 props） */
+  bodyComponent?: Component
+  /** 节点被选中后渲染在节点下方的配置组件 */
+  editorComponent?: Component
 }
 
 /** 内置节点原型注册表 */
@@ -26,6 +30,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     inputPorts: [],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: false,
+    bodyComponent: ImageLoaderNode,
   },
   {
     id: 'image-generate',
@@ -33,6 +38,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     inputPorts: [{ id: 'in', type: 'image', label: '参考图' }],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: true,
+    bodyComponent: ImageGenerateNode,
   },
   {
     id: 'text',
@@ -40,6 +46,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     inputPorts: [],
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,
+    bodyComponent: TextNode,
   },
 ]
 
