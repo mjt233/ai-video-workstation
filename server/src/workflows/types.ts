@@ -62,6 +62,28 @@ export interface WorkflowParams<TVars extends WorkflowVarsBase = WorkflowVarsBas
   projectConfig: ProjectConfig;
 }
 
+/** 工作流用户可手动传入的参数类型 */
+export type WorkflowUserParamType = 'boolean' | 'integer' | 'float' | 'string';
+
+/**
+ * 工作流用户参数声明。
+ *
+ * 注册工作流时声明哪些参数可由用户手动传入；
+ * 前端据此渲染参数输入表单，用户填写值最终写入任务 vars 的对应 key。
+ */
+export interface WorkflowUserParamDeclaration {
+  /** 参数名称（供阅读），如 "图片宽度" */
+  name: string;
+  /** 参数字段 key（写入 vars 的字段名），如 width */
+  key: string;
+  /** 参数类型：boolean / integer / float / string */
+  type: WorkflowUserParamType;
+  /** 默认值（表单初始值）；空字符串表示“不传”，由工作流/项目配置决定 */
+  defaultValue: boolean | number | string;
+  /** 可选说明文案（表单 hint） */
+  description?: string;
+}
+
 /** 工作流基础元信息 */
 export interface WorkflowBaseDefinition {
   /** 工作流类型 ID，如 text-to-image */
@@ -72,6 +94,8 @@ export interface WorkflowBaseDefinition {
   impl: string;
   /** 可选描述 */
   description?: string;
+  /** 可由用户手动传入的参数声明（前端据此渲染输入表单，并写入 vars） */
+  params?: WorkflowUserParamDeclaration[];
 }
 
 /**

@@ -11,7 +11,7 @@
  * 首次调用 status/output-files 时自动登录获取 token 并缓存。
  */
 
-import type { WorkflowDefinition, WorkflowParams, WorkflowBaseDefinition, WorkflowVarsBase } from './types.js';
+import type { WorkflowDefinition, WorkflowParams, WorkflowBaseDefinition, WorkflowUserParamDeclaration, WorkflowVarsBase } from './types.js';
 
 const BRIDGE_URL = (process.env.COMFYUI_BRIDGE_URL || 'http://localhost:10721').replace(/\/+$/, '');
 const BRIDGE_PASSWORD = process.env.COMFYUI_BRIDGE_PASSWORD || '0d000721';
@@ -54,6 +54,8 @@ export interface SubmitTextToImageParams {
   height: number;
   /** 随机种子（可选） */
   seed?: number;
+  /** 提示词强化开关（布尔值，直接提交给 ComfyUI 工作流；可选） */
+  enhance_prompt?: boolean;
 }
 
 export interface BridgeSubmitResult {
@@ -161,6 +163,9 @@ export async function submitTextToImage(params: SubmitTextToImageParams): Promis
   };
   if (params.seed != null) {
     body.seed = params.seed;
+  }
+  if (params.enhance_prompt !== undefined) {
+    body.enhance_prompt = params.enhance_prompt;
   }
   return submitComfyuiBridge({
     workflowId: 'text_to_image',
@@ -356,6 +361,8 @@ export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = Work
   name: string;
   impl: string;
   description?: string;
+  /** 可由用户手动传入的参数声明（可选，前端据此渲染输入表单） */
+  params?: WorkflowUserParamDeclaration[];
   /** 返回文生图的提示词（imd_desc） */
   getPrompt(params: WorkflowParams<TVars>): Promise<string> | string;
   /** 返回图片宽度，默认 1080 */
@@ -411,13 +418,16 @@ export function createTextToImageWorkflow<TVars extends WorkflowVarsBase = Workf
       name: config.name,
       impl: config.impl,
       description: config.description,
+      params: config.params,
     },
     async submit(params) {
       const prompt = await config.getPrompt(params);
       const width = config.getWidth ? config.getWidth(params) : WIDTH_DEFAULT;
       const height = config.getHeight ? config.getHeight(params) : HEIGHT_DEFAULT;
       const seed = params.vars.seed ? Number(params.vars.seed) : undefined;
-      const result = await submitTextToImage({ imd_desc: prompt, width, height, seed });
+      // enhance_prompt 仅作为布尔值提交给 ComfyUI 工作流，不修改提示词内容
+      const enhancePrompt = (params.vars as Record<string, unknown>).enhance_prompt === 'true';
+      const result = await submitTextToImage({ imd_desc: prompt, width, height, seed, enhance_prompt: enhancePrompt });
       return { taskId: result.taskId };
     },
   })
@@ -430,6 +440,8 @@ export interface ImageEditWorkflowConfig<TVars extends WorkflowVarsBase = Workfl
   name: string;
   impl: string;
   description?: string;
+  /** 可由用户手动传入的参数声明（可选，前端据此渲染输入表单） */
+  params?: WorkflowUserParamDeclaration[];
   getParams(params: WorkflowParams<TVars>): Promise<{
     desc: string,
     imgs: File[],
@@ -453,6 +465,7 @@ export function createImageEditWorkflow<TVars extends WorkflowVarsBase = Workflo
       name: config.name,
       impl: config.impl,
       description: config.description,
+      params: config.params,
     },
     async submit(params) {
       const { desc, imgs, seed } = await config.getParams(params)

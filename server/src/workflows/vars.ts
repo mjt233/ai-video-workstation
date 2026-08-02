@@ -33,6 +33,11 @@ export interface TextToImageVars extends WorkflowVarsBase {
    */
   promptPath: string;
   /**
+   * 可选：提示词强化开关（"true"/"false"）。
+   * 由用户通过工作流参数声明传入；引擎将其以布尔值提交给 ComfyUI 工作流，不修改提示词内容。
+   */
+  enhance_prompt?: string;
+  /**
    * 可选：覆盖默认宽度（像素，字符串形式）。
    * 角色外观通常固定 1280；场景图默认使用 projectConfig.width。
    */

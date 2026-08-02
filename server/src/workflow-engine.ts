@@ -678,9 +678,11 @@ async function runTask(taskId: string): Promise<void> {
   }
 
   // vars 仅含业务字段 + 引擎注入的 seed；尺寸/帧率等走 projectConfig
+  // 用户可通过工作流参数声明手动传入 seed；未提供时引擎注入随机种子
+  const userSeed = (paramsObj.vars?.seed ?? '').trim();
   const vars: WorkflowVarsBase & Record<string, string> = {
     ...(paramsObj.vars ?? {}),
-    seed: String(Date.now()),
+    seed: userSeed !== '' ? userSeed : String(Date.now()),
   };
 
   const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;

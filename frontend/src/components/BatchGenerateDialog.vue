@@ -76,6 +76,15 @@
                 hide-details
                 class="mt-1"
               />
+              <!-- 所选工作流的用户参数输入表单（按实现切换自动重置） -->
+              <WorkflowParamsForm
+                v-if="selectedTypes.includes(at.id)"
+                :key="`params-${at.id}-${implSelections[at.id] ?? 'none'}`"
+                :declarations="paramsDeclarationsMap[at.id]"
+                :model-value="userParamsByAssetType[at.id] ?? {}"
+                class="mt-1"
+                @update:model-value="(v) => setUserParams(at.id, v)"
+              />
             </v-col>
           </v-row>
 
@@ -210,7 +219,10 @@ import {
   type BatchSummary,
   type TaskResponse,
   type WorkflowInfo,
+  type WorkflowUserParamDeclaration,
+  type WorkflowUserParamValue,
 } from '../api/workflow'
+import WorkflowParamsForm from './WorkflowParamsForm.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -271,6 +283,37 @@ const workflowMap = computed(() => {
 
 /** 资产类型 → 选定的工作流实现（默认第一个） */
 const implSelections = ref<Record<string, string>>({})
+
+/** 资产类型 → 用户手动传入的工作流参数值（key → 值） */
+const userParamsByAssetType = ref<Record<string, Record<string, WorkflowUserParamValue>>>({})
+
+/**
+ * 资产类型 → 所选工作流实现声明的用户参数（供表单渲染）。
+ *
+ * 注意：必须返回稳定引用（computed 缓存），避免每次渲染生成新数组
+ * 导致 WorkflowParamsForm 的内部 watch 反复触发重置。
+ */
+const paramsDeclarationsMap = computed<Record<string, WorkflowUserParamDeclaration[]>>(() => {
+  const m: Record<string, WorkflowUserParamDeclaration[]> = {}
+  for (const at of assetTypes) {
+    const wid = ASSET_TYPE_WORKFLOW[at.id]
+    const wf = wid ? workflowMap.value[wid] : undefined
+    const impl = implSelections.value[at.id]
+    const implDef = wf?.implementations.find((i) => i.impl === impl)
+    m[at.id] = implDef?.params ?? []
+  }
+  return m
+})
+
+/**
+ * 更新指定资产类型的用户参数值。
+ *
+ * @param assetTypeId 资产类型 ID
+ * @param v 用户填写的参数值（key → 值）
+ */
+function setUserParams(assetTypeId: string, v: Record<string, WorkflowUserParamValue>) {
+  userParamsByAssetType.value = { ...userParamsByAssetType.value, [assetTypeId]: v }
+}
 
 /**
  * 获取指定资产类型可用的工作流实现列表。
@@ -460,6 +503,7 @@ function resetConfig() {
   submitError.value = null
   configWarning.value = null
   implSelections.value = {}
+  userParamsByAssetType.value = {}
 }
 
 // When dialog opens: resume progress if batch is active, otherwise config
@@ -495,12 +539,19 @@ async function startGenerate() {
       const impl = implSelections.value[id] ?? implOptionsFor(id)[0]?.impl
       if (impl) implByAssetType[id] = impl
     }
+    // 组装每个资产类型用户手动传入的工作流参数（仅发送有值的类型）
+    const userParamsPayload: Record<string, Record<string, WorkflowUserParamValue>> = {}
+    for (const id of selectedTypes.value) {
+      const vals = userParamsByAssetType.value[id]
+      if (vals && Object.keys(vals).length > 0) userParamsPayload[id] = vals
+    }
     const result = await runBatch({
       project: props.project,
       assetTypes: selectedTypes.value,
       concurrency: concurrency.value,
       overwrite: overwrite.value,
       implByAssetType,
+      userParamsByAssetType: userParamsPayload,
     })
 
     if (!result.batchId || result.totalTasks === 0) {

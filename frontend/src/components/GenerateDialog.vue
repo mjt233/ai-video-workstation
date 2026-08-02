@@ -27,6 +27,15 @@
           hide-details
         />
 
+        <!-- User-settable workflow params -->
+        <WorkflowParamsForm
+          v-if="selectedDeclarations.length"
+          ref="paramsFormRef"
+          v-model="userValues"
+          :declarations="selectedDeclarations"
+          class="mb-3"
+        />
+
         <!-- Existing asset info -->
         <div
           v-if="existingAsset"
@@ -127,8 +136,9 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, reactive } from 'vue'
-import { runWorkflow, getWorkflows, type WorkflowInfo } from '../api/workflow'
+import { runWorkflow, getWorkflows, type WorkflowInfo, type WorkflowUserParamDeclaration, type WorkflowUserParamValue } from '../api/workflow'
 import { useWorkflowTask } from '../composables/useWorkflowTask'
+import WorkflowParamsForm from './WorkflowParamsForm.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -153,12 +163,23 @@ const show = computed({
 })
 
 const selectedImpl = ref(props.defaultImpl ?? 'default')
-const implementations = ref<{ impl: string; name: string; description?: string }[]>([])
+const implementations = ref<WorkflowInfo['implementations']>([])
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const taskId = ref<string | null>(null)
 const polling = reactive(useWorkflowTask(taskId))
 const logRef = ref<HTMLElement | null>(null)
+
+/** 用户手动传入的工作流参数值（key → 值） */
+const userValues = ref<Record<string, WorkflowUserParamValue>>({})
+/** 参数输入表单引用（用于打开时重置为默认值） */
+const paramsFormRef = ref<InstanceType<typeof WorkflowParamsForm> | null>(null)
+
+/** 当前选中实现声明的用户参数（供表单渲染；随实现切换自动重置） */
+const selectedDeclarations = computed<WorkflowUserParamDeclaration[]>(() => {
+  const implDef = implementations.value.find((i) => i.impl === selectedImpl.value)
+  return implDef?.params ?? []
+})
 
 // Load implementations when dialog opens
 watch(show, async (val) => {
@@ -182,10 +203,14 @@ watch(show, async (val) => {
     } catch {
       // Ignore errors
     }
+    // 打开对话框时，用户参数表单重置为默认值
+    await nextTick()
+    paramsFormRef.value?.reset()
   } else {
     // Reset on close
     taskId.value = null
     selectedImpl.value = props.defaultImpl ?? 'default'
+    userValues.value = {}
   }
 })
 
@@ -220,6 +245,7 @@ async function submit() {
         vars: props.vars,
         promptPaths: props.promptPaths ?? [],
         outputPath: props.outputPath,
+        userParams: userValues.value,
       },
     })
     taskId.value = result.taskId

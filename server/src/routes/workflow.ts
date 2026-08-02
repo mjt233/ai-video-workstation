@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import * as db from '../db.js';
 import { getAllWorkflows } from '../workflow-engine.js';
+import { getImpl } from '../workflows/registry.js';
+import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
 
 export const workflowRouter = Router();
@@ -21,6 +23,8 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
       vars?: Record<string, string>;
       promptPaths?: string[];
       outputPath: string;
+      /** 用户手动传入的工作流参数（key → 值，仅保留所选实现声明的 key） */
+      userParams?: Record<string, unknown>;
     };
   };
 
@@ -29,6 +33,10 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     return;
   }
 
+  // 用户手动传入的参数：仅保留所选实现声明的 key，按类型规范化后合并进 vars
+  const implDef = getImpl(workflowId, impl ?? 'default');
+  const userVars = normalizeUserParams(implDef?.params, params.userParams);
+
   const taskId = uuidv4();
   db.createTask({
     id: taskId,
@@ -36,7 +44,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     workflow_id: workflowId,
     impl: impl ?? 'default',
     params: {
-      vars: params.vars ?? {},
+      vars: { ...(params.vars ?? {}), ...userVars },
       promptPaths: params.promptPaths ?? [],
       outputPath: params.outputPath,
     },
@@ -135,13 +143,15 @@ workflowRouter.post('/workflow/retry/:taskId', (req: Request, res: Response) => 
 
 // POST /api/workflow/batch-run — submit batch generation tasks
 workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) => {
-  const { project, assetTypes, concurrency, overwrite, implByAssetType } = req.body as {
+  const { project, assetTypes, concurrency, overwrite, implByAssetType, userParamsByAssetType } = req.body as {
     project: string;
     assetTypes: string[];
     concurrency?: number;
     overwrite?: boolean;
     /** 资产类型 → 工作流实现（如 character-appearance → default/flux） */
     implByAssetType?: Record<string, string>;
+    /** 资产类型 → 用户手动传入的工作流参数（key → 值，仅保留该资产类型所选实现声明的 key） */
+    userParamsByAssetType?: Record<string, Record<string, unknown>>;
   };
 
   if (!project || !Array.isArray(assetTypes) || assetTypes.length === 0) {
@@ -176,13 +186,19 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
 
     for (const task of discovered) {
       const phase = ASSET_PHASE[task.assetType ?? ''] ?? 0;
+      // 用户手动传入的参数：按该任务实际实现（workflowId + impl）的声明规范化后合并进 vars
+      const implDef = getImpl(task.workflowId, task.impl);
+      const userVars = normalizeUserParams(
+        implDef?.params,
+        task.assetType ? userParamsByAssetType?.[task.assetType] : undefined,
+      );
       db.createTask({
         id: uuidv4(),
         project,
         workflow_id: task.workflowId,
         impl: task.impl,
         params: {
-          vars: task.vars,
+          vars: { ...task.vars, ...userVars },
           promptPaths: task.promptPaths,
           outputPath: task.outputPath,
         },

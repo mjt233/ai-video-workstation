@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, WorkflowVarsBase } from './types.js';
+import type { WorkflowDefinition, WorkflowUserParamDeclaration, WorkflowVarsBase } from './types.js';
 
 /** 注册表擦除具体 TVars，统一按基类存储异构实现 */
 const registry = new Map<string, WorkflowDefinition[]>();
@@ -22,10 +22,24 @@ export function getAllWorkflowIds(): string[] {
   return [...registry.keys()];
 }
 
-export function getAllWorkflows(): { id: string; name: string; implementations: { impl: string; name: string; description?: string }[] }[] {
+export function getAllWorkflows(): {
+  id: string;
+  name: string;
+  implementations: {
+    impl: string;
+    name: string;
+    description?: string;
+    params?: WorkflowUserParamDeclaration[];
+  }[];
+}[] {
   return [...registry.entries()].map(([id, impls]) => ({
     id,
     name: impls[0]?.name ?? id,
-    implementations: impls.map(w => ({ impl: w.impl, name: w.name, description: w.description }))
+    implementations: impls.map(w => ({
+      impl: w.impl,
+      name: w.name,
+      description: w.description,
+      params: w.params,
+    }))
   }));
 }

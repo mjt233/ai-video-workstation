@@ -8,12 +8,22 @@ import type { TextToImageVars } from '../types.js';
  * 角色外观、场景图等均通过本工作流生成：
  * - vars.promptPath：提示词文件路径
  * - vars.width / height：可选覆盖分辨率
+ * - vars.enhance_prompt："true"/"false"，以布尔值提交给 ComfyUI 工作流（提示词强化开关，不修改提示词内容）
  */
 register(createTextToImageWorkflow<TextToImageVars>({
   id: 'text-to-image',
   name: '文生图 (Krea2)',
   impl: 'default',
   description: '使用 ComfyUI 文生图工作流，根据提示词生成图片（角色外观 / 场景图等）',
+  params: [
+    {
+      name: '提示词强化',
+      key: 'enhance_prompt',
+      type: 'boolean',
+      defaultValue: false,
+      description: '以布尔值提交给 ComfyUI 工作流的提示词强化开关',
+    },
+  ],
   getPrompt: (params) => {
     const promptPath = params.vars.promptPath?.trim();
     if (!promptPath) {

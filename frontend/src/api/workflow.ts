@@ -1,9 +1,40 @@
 import client from './client'
 
+/** 工作流用户可手动传入的参数类型 */
+export type WorkflowUserParamType = 'boolean' | 'integer' | 'float' | 'string'
+
+/** 工作流用户参数的值类型（表单提交时保持原生类型） */
+export type WorkflowUserParamValue = boolean | number | string
+
+/**
+ * 工作流用户参数声明（注册工作流时声明，前端据此渲染输入表单）。
+ */
+export interface WorkflowUserParamDeclaration {
+  /** 参数名称（供阅读），如 "图片宽度" */
+  name: string
+  /** 参数字段 key（写入 vars 的字段名），如 width */
+  key: string
+  /** 参数类型：boolean / integer / float / string */
+  type: WorkflowUserParamType
+  /** 默认值（表单初始值）；空字符串表示"不传"，由工作流/项目配置决定 */
+  defaultValue: WorkflowUserParamValue
+  /** 可选说明文案（表单 hint） */
+  description?: string
+}
+
+/** 工作流实现信息 */
+export interface WorkflowImplementation {
+  impl: string
+  name: string
+  description?: string
+  /** 可由用户手动传入的参数声明 */
+  params?: WorkflowUserParamDeclaration[]
+}
+
 export interface WorkflowInfo {
   id: string
   name: string
-  implementations: { impl: string; name: string; description?: string }[]
+  implementations: WorkflowImplementation[]
 }
 
 export interface TaskParams {
@@ -39,6 +70,8 @@ export interface WorkflowRunParams {
     vars: Record<string, string>
     promptPaths?: string[]
     outputPath: string
+    /** 用户手动传入的工作流参数（按所选实现的声明 key） */
+    userParams?: Record<string, WorkflowUserParamValue>
   }
 }
 
@@ -54,6 +87,8 @@ export interface BatchRunParams {
   overwrite?: boolean
   /** 资产类型 → 工作流实现（前端勾选资产类型后手动选择） */
   implByAssetType?: Record<string, string>
+  /** 资产类型 → 用户手动传入的工作流参数（按该资产类型所选实现的声明 key） */
+  userParamsByAssetType?: Record<string, Record<string, WorkflowUserParamValue>>
 }
 
 export interface BatchSummary {
