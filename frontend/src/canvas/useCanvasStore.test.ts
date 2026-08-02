@@ -101,4 +101,24 @@ describe('useCanvasStore', () => {
     store.updateNode(node.id, { name: '改名' })
     expect(store.nodes.value[0].name).toBe('改名')
   })
+
+  it('undo/redo：恢复结构变更', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.addNode('text', 0, 0)
+    expect(store.nodes.value).toHaveLength(1)
+    store.undo()
+    expect(store.nodes.value).toHaveLength(0)
+    store.redo()
+    expect(store.nodes.value).toHaveLength(1)
+  })
+
+  it('copyNode/pasteNode：复制后粘贴为独立节点', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('text', 0, 0)
+    store.copyNode(a.id)
+    const b = store.pasteNode()
+    expect(b).toBeTruthy()
+    expect(b!.id).not.toBe(a.id)
+    expect(store.nodes.value).toHaveLength(2)
+  })
 })
