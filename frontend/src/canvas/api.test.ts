@@ -54,6 +54,13 @@ describe('loadCanvas', () => {
     const data = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
     expect(data).toBeNull()
   })
+
+  it('readFs 返回已解析对象时直接使用（axios 自动 JSON.parse 的真实行为）', async () => {
+    (readFs as Mock).mockResolvedValue(JSON.parse(validRaw))
+    const data = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
+    expect(data?.kind).toBe('scene')
+    expect(data?.nodes).toEqual([])
+  })
 })
 
 describe('saveCanvas', () => {

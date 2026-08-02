@@ -131,14 +131,17 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
         const task = await getTaskStatus(taskId)
         const logs = await getTaskLogs(taskId).catch(() => [])
         const lastLog = logs.length > 0 ? String(logs[logs.length - 1].message) : undefined
+        // 服务端终态为 completed/failed（TaskStatus = pending | running | completed | failed）
+        const done = task.status === 'completed'
+        const isError = task.status === 'failed' || task.status === 'error' || task.status === 'cancelled'
         statusByNode.value[node.id] = {
-          status: task.status === 'running' || task.status === 'pending' ? 'running' : task.status === 'success' ? 'success' : 'error',
+          status: task.status === 'running' || task.status === 'pending' ? 'running' : done ? 'success' : 'error',
           lastLog,
           taskId,
           errorMsg: task.errorMsg,
         }
 
-        if (task.status === 'success') {
+        if (done) {
           clearInterval(pollTimers[node.id])
           delete pollTimers[node.id]
           const history: HistoryEntry[] = [...getHistory(node.config), { version: nextVersion(getHistory(node.config)), path: outputPath, date: new Date().toISOString() }]
@@ -147,7 +150,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
             current: { version: nextVersion(getHistory(node.config)), path: outputPath, date: new Date().toISOString() },
             history,
           })
-        } else if (task.status === 'error' || task.status === 'failed' || task.status === 'cancelled') {
+        } else if (isError) {
           clearInterval(pollTimers[node.id])
           delete pollTimers[node.id]
           statusByNode.value[node.id] = { status: 'error', errorMsg: task.errorMsg, taskId }

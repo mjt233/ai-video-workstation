@@ -155,9 +155,16 @@ watch(
   { immediate: true, deep: true },
 )
 
-watch(workflowParams, (v) => {
-  emit('update:config', { workflowParams: v })
-})
+watch(
+  workflowParams,
+  (v) => {
+    // 相等性守卫：config.workflowParams 与本地值一致时不再回写，
+    // 避免「config → 本地 → emit → config」无限循环。
+    const cur = props.node.config.workflowParams
+    const same = cur != null && typeof cur === 'object' && JSON.stringify(cur) === JSON.stringify(v)
+    if (!same) emit('update:config', { workflowParams: v })
+  },
+)
 
 // 加载工作流列表（初始化一次）
 getWorkflows()

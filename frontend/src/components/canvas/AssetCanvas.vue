@@ -86,8 +86,8 @@
       class="asset-canvas__flow"
     >
       <VueFlow
-        v-model:nodes="flowNodes"
-        v-model:edges="flowEdges"
+        :nodes="flowNodes"
+        :edges="flowEdges"
         :fit-view-on-init="true"
         :min-zoom="0.2"
         :max-zoom="3"

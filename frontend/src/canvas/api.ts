@@ -40,8 +40,14 @@ export async function loadCanvas(project: string, target: CanvasTarget): Promise
   const rel = canvasRelPath(target)
   try {
     const raw = await readFs(project, rel)
-    if (typeof raw !== 'string' || raw.trim() === '') return null
-    return migrateCanvasData(JSON.parse(raw) as unknown)
+    if (raw == null) return null
+    // axios 会尝试对字符串响应做 JSON.parse，因此 .json 文件可能直接返回对象；
+    // 同时兼容仍为字符串的情况（如空文件或代理差异）
+    if (typeof raw === 'string') {
+      if (raw.trim() === '') return null
+      return migrateCanvasData(JSON.parse(raw) as unknown)
+    }
+    return migrateCanvasData(raw)
   } catch {
     return null
   }

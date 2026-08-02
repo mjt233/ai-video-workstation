@@ -26,7 +26,7 @@ describe('useCanvasGeneration', () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     ;(runWorkflow as Mock).mockResolvedValue({ taskId: 'task-1', status: 'running' })
-    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'success', result: { path: 'x' }, errorMsg: undefined, workflowId: 'image-edit', impl: 'default', createdAt: '', updatedAt: '' })
+    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'completed', result: { path: 'x' }, errorMsg: undefined, workflowId: 'image-edit', impl: 'default', createdAt: '', updatedAt: '' })
     ;(getTaskLogs as Mock).mockResolvedValue([])
   })
 
@@ -68,7 +68,7 @@ describe('useCanvasGeneration', () => {
   })
 
   it('生成失败进入 error 状态', async () => {
-    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'error', result: null, errorMsg: '失败', workflowId: 'image-edit', impl: 'default', createdAt: '', updatedAt: '' })
+    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'failed', result: null, errorMsg: '失败', workflowId: 'image-edit', impl: 'default', createdAt: '', updatedAt: '' })
     const gen = useCanvasGeneration('p', TARGET)
     const node = makeNode('x', 'image-edit')
     gen.setInputPaths('n1', ['assert/a.jpg'])
