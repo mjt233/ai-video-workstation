@@ -13,9 +13,18 @@ import type { ImageEditVars } from '../types.js';
  */
 register(createImageEditWorkflow<ImageEditVars>({
   id: 'image-edit',
-  name: '图片编辑',
+  name: 'Qwen Image Edit 2509',
   impl: 'default',
   description: '基于输入图片与编辑描述进行图像编辑/合成（分镜场景图、衍生变体等）',
+  params: [
+    {
+      key: 'enable_multiple_angles_lora',
+      name: '启用多机位旋转LoRA模型',
+      defaultValue: true,
+      type: 'boolean',
+      description: '启用后可在提示词中使用“摄像机向左/右移动90度，摄像机向上/下移动，拉近/推远”等方式精准控制视角变换'
+    }
+  ],
   async getParams(params) {
     const desc = (params.vars.desc ?? '').trim();
     if (!desc) {

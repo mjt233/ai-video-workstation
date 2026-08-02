@@ -132,20 +132,23 @@ export async function submitComfyuiBridge(executeParams: ComfyuiBridgeExecutePar
 interface SubmitImageEditParams {
   imgs: File[],
   desc: string,
-  seed?: string | number
+  seed?: string | number,
+  enable_multiple_angles_lora?: boolean
 }
 
 export async function submitImageEdit(params: SubmitImageEditParams): Promise<BridgeSubmitResult> {
   const files: Record<string, File> = {};
+
+  // 多个图片时，直接以 img${图片序号} 命名，触发动态构建工作流实现多图参考编辑
   params.imgs.forEach((f, idx) => {
     files[`img${idx + 1}`] = f;
   });
-  const textParams: Record<string, unknown> = { desc: params.desc };
+  const textParams: Record<string, unknown> = { desc: params.desc, enable_multiple_angles_lora: params.enable_multiple_angles_lora ?? true };
   if (params.seed != null) {
     textParams.seed = params.seed;
   }
   return submitComfyuiBridge({
-    workflowId: `img_edit_${params.imgs.length}`,
+    workflowId: 'qwen-edit-2509',
     params: textParams,
     files,
   });
