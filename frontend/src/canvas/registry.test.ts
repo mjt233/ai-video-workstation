@@ -1,0 +1,24 @@
+import { describe, expect, it } from 'vitest'
+import { getPrototype, NODE_PROTOTYPES } from './registry'
+
+describe('NODE_PROTOTYPES', () => {
+  it('包含三个内置节点', () => {
+    expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual(['image-generate', 'image-loader', 'text'])
+  })
+
+  it('生成图片只接受 image 输入，输出 image', () => {
+    const p = getPrototype('image-generate')!
+    expect(p.inputPorts.every((port) => port.type === 'image')).toBe(true)
+    expect(p.outputPorts[0].type).toBe('image')
+  })
+
+  it('文本输出 text 类型', () => {
+    expect(getPrototype('text')!.outputPorts[0].type).toBe('text')
+  })
+})
+
+describe('getPrototype', () => {
+  it('未知原型返回 undefined', () => {
+    expect(getPrototype('unknown')).toBeUndefined()
+  })
+})
