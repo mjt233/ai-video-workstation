@@ -225,6 +225,21 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     return copy
   }
 
+  /**
+   * 批量应用新增节点与连线（自动搭画布结果）。
+   * 一次性压入撤销快照并置脏保存。
+   *
+   * @param newNodes 新增节点列表
+   * @param newConnections 新增连线列表
+   */
+  function applyNodes(newNodes: CanvasNodeData[], newConnections: CanvasConnection[]): void {
+    if (newNodes.length === 0 && newConnections.length === 0) return
+    pushHistory()
+    data.value.nodes.push(...newNodes)
+    data.value.connections.push(...newConnections)
+    markDirty()
+  }
+
   return {
     data,
     loaded,
@@ -250,5 +265,6 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     canPaste,
     copyNode,
     pasteNode,
+    applyNodes,
   }
 }
