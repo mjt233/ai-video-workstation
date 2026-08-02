@@ -1,13 +1,42 @@
 <template>
   <div class="asset-canvas">
     <div class="asset-canvas__toolbar">
-      <v-btn size="small" variant="text" icon="mdi-fit-to-screen-outline" title="适应视图" @click="fitView" />
-      <v-btn size="small" variant="text" icon="mdi-plus" title="放大" @click="zoomIn" />
-      <v-btn size="small" variant="text" icon="mdi-minus" title="缩小" @click="zoomOut" />
+      <v-btn
+        size="small"
+        variant="text"
+        icon="mdi-fit-to-screen-outline"
+        title="适应视图"
+        @click="fitView"
+      />
+      <v-btn
+        size="small"
+        variant="text"
+        icon="mdi-plus"
+        title="放大"
+        @click="zoomIn"
+      />
+      <v-btn
+        size="small"
+        variant="text"
+        icon="mdi-minus"
+        title="缩小"
+        @click="zoomOut"
+      />
       <v-spacer />
-      <v-progress-circular v-if="saving" size="18" indeterminate color="primary" />
-      <span v-else-if="dirty" class="text-caption text-medium-emphasis">未保存</span>
-      <span v-else class="text-caption text-disabled">已保存</span>
+      <v-progress-circular
+        v-if="saving"
+        size="18"
+        indeterminate
+        color="primary"
+      />
+      <span
+        v-else-if="dirty"
+        class="text-caption text-medium-emphasis"
+      >未保存</span>
+      <span
+        v-else
+        class="text-caption text-disabled"
+      >已保存</span>
     </div>
 
     <div class="asset-canvas__flow">
@@ -35,10 +64,22 @@
       </VueFlow>
     </div>
 
-    <div v-if="!loaded" class="asset-canvas__overlay">加载中…</div>
-    <div v-else-if="nodes.length === 0" class="asset-canvas__overlay asset-canvas__empty">
-      <div class="text-body-2">画布为空</div>
-      <div class="text-caption text-medium-emphasis">双击空白处添加节点</div>
+    <div
+      v-if="!loaded"
+      class="asset-canvas__overlay"
+    >
+      加载中…
+    </div>
+    <div
+      v-else-if="nodes.length === 0"
+      class="asset-canvas__overlay asset-canvas__empty"
+    >
+      <div class="text-body-2">
+        画布为空
+      </div>
+      <div class="text-caption text-medium-emphasis">
+        双击空白处添加节点
+      </div>
     </div>
   </div>
 </template>
