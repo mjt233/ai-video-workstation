@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, WorkflowUserParamDeclaration, WorkflowVarsBase } from './types.js';
+import type { WorkflowCapabilities, WorkflowDefinition, WorkflowUserParamDeclaration, WorkflowVarsBase } from './types.js';
 
 /** 注册表擦除具体 TVars，统一按基类存储异构实现 */
 const registry = new Map<string, WorkflowDefinition[]>();
@@ -30,6 +30,8 @@ export function getAllWorkflows(): {
     name: string;
     description?: string;
     params?: WorkflowUserParamDeclaration[];
+    /** 工作流能力声明（前端据此展示导演台等能力入口） */
+    capabilities?: WorkflowCapabilities;
   }[];
 }[] {
   return [...registry.entries()].map(([id, impls]) => ({
@@ -40,6 +42,7 @@ export function getAllWorkflows(): {
       name: w.name,
       description: w.description,
       params: w.params,
+      capabilities: w.capabilities,
     }))
   }));
 }
