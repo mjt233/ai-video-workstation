@@ -33,6 +33,7 @@
           ref="paramsFormRef"
           v-model="userValues"
           :declarations="selectedDeclarations"
+          :project="props.project"
           class="mb-3"
         />
 

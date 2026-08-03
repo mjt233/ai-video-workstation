@@ -88,6 +88,7 @@
     <WorkflowParamsForm
       v-model="workflowParams"
       :declarations="currentDeclarations"
+      :project="props.project"
     />
 
     <div class="d-flex align-center ga-2 mb-2">

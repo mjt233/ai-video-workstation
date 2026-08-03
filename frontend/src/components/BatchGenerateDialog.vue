@@ -82,6 +82,7 @@
                 :key="`params-${at.id}-${implSelections[at.id] ?? 'none'}`"
                 :declarations="paramsDeclarationsMap[at.id]"
                 :model-value="userParamsByAssetType[at.id] ?? {}"
+                :project="props.project"
                 class="mt-1"
                 @update:model-value="(v) => setUserParams(at.id, v)"
               />
