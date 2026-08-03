@@ -137,13 +137,11 @@
       </v-tabs-window-item>
 
       <v-tabs-window-item value="canvas">
-        <div style="height: 60vh">
-          <AssetCanvas
-            :project="props.project"
-            kind="stage"
-            :stage="props.name"
-          />
-        </div>
+        <AssetCanvas
+          :project="props.project"
+          kind="stage"
+          :stage="props.name"
+        />
       </v-tabs-window-item>
     </v-tabs-window>
 

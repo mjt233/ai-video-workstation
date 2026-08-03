@@ -581,14 +581,12 @@
       </v-tabs-window-item>
 
       <v-tabs-window-item value="canvas">
-        <div style="height: 60vh">
-          <AssetCanvas
-            :project="props.project"
-            kind="scene"
-            :episode="props.episode"
-            :shot="props.shot"
-          />
-        </div>
+        <AssetCanvas
+          :project="props.project"
+          kind="scene"
+          :episode="props.episode"
+          :shot="props.shot"
+        />
       </v-tabs-window-item>
     </v-tabs-window>
 

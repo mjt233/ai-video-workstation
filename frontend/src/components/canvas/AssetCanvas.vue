@@ -1,5 +1,9 @@
 <template>
-  <div class="asset-canvas">
+  <div
+    ref="canvasRef"
+    class="asset-canvas"
+    :style="{ height: `${targetHeight}px` }"
+  >
     <!-- 工具栏 -->
     <div class="asset-canvas__toolbar">
       <v-btn
@@ -148,6 +152,7 @@
       <!-- 节点配置悬浮面板（独立于节点，位于节点正下方，随视图联动） -->
       <div
         v-if="editorPanel && !suppressEditor"
+        ref="panelEl"
         class="canvas-node-editor-panel"
         :style="editorPanelStyle"
       >
@@ -413,6 +418,7 @@ import { canConnectNodes } from '../../canvas/connection'
 import { collectInputPaths, getHistory, getNodeCurrentAssetPath } from '../../canvas/generate'
 import { buildAutoCanvas, buildShotRefsFromStage, type AutoBuildRef } from '../../canvas/autobuild'
 import { copyFs, readFs, type DirResponse } from '../../api/client'
+import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { confirm } from '../../utils/confirm'
 import AssetPickerDialog from '../AssetPickerDialog.vue'
@@ -443,6 +449,17 @@ const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo } = store
 
 /** Vue Flow 视图控制：适应/缩放/屏幕坐标换算 */
 const { fitView, zoomIn, zoomOut, screenToFlowCoordinate, viewport } = useVueFlow()
+
+/** 画布根节点 DOM（用于自动计算高度铺满页面） */
+const canvasRef = ref<HTMLElement | null>(null)
+
+/** 画布高度自适应：铺满页面剩余空间（随窗口/布局变化自动更新） */
+const { targetHeight, updateHeight } = useAutoComputeHeight({
+  autoComputeHeight: true,
+  computeTarget: () => canvasRef.value,
+  observeTarget: () => canvasRef.value ?? document.body,
+  offset: 0,
+})
 
 /** 画布容器 DOM（用于右键菜单定位） */
 const flowEl = ref<HTMLDivElement | null>(null)
@@ -565,15 +582,43 @@ const editorPanel = computed(() => {
   return proto?.editorComponent ? { node, editorComponent: proto.editorComponent } : null
 })
 
-/** 配置面板定位：节点正下方（随平移/缩放联动） */
+/** 配置面板固定宽度（像素，按画布坐标系，随缩放缩放），窄节点时也保持足够宽度 */
+const EDITOR_PANEL_WIDTH = 400
+/** 配置面板与节点底部之间的垂直间距（像素，按画布坐标系） */
+const EDITOR_PANEL_GAP = 12
+
+/** 配置面板 DOM（用于测量实际高度以做边界钳制） */
+const panelEl = ref<HTMLDivElement | null>(null)
+/** 配置面板当前实际高度（像素，屏幕坐标） */
+const panelHeight = ref(0)
+/** 画布可视区当前尺寸（像素） */
+const flowHeight = ref(0)
+const flowWidth = ref(0)
+let panelResizeObserver: ResizeObserver | null = null
+
+/** 配置面板定位：节点正下方（随平移/缩放联动）；若超出画布可视区底部则翻转到节点上方 */
 const editorPanelStyle = computed(() => {
   const node = selectedNode.value
   if (!node) return null
   const vp = viewport.value
   const left = node.x * vp.zoom + vp.x
-  const top = (node.y + node.height) * vp.zoom + vp.y
-  const width = Math.max(node.width * vp.zoom, 240)
-  return { left: `${left}px`, top: `${top}px`, width: `${width}px` }
+  const width = Math.max(EDITOR_PANEL_WIDTH * vp.zoom, node.width * vp.zoom)
+  const gap = EDITOR_PANEL_GAP * vp.zoom
+  const belowTop = (node.y + node.height) * vp.zoom + vp.y + gap
+  // 优先放在节点下方；若底部超出可视区（且面板高度已知），则放到节点上方
+  let top = belowTop
+  if (panelHeight.value > 0 && belowTop + panelHeight.value > flowHeight.value) {
+    const aboveTop = node.y * vp.zoom + vp.y - gap - panelHeight.value
+    if (aboveTop >= 0) top = aboveTop
+  }
+  // 最终钳制：面板底部不超出画布可视区（必要时与节点重叠），顶部不小于留白
+  if (panelHeight.value > 0 && flowHeight.value > 0) {
+    top = Math.min(top, Math.max(flowHeight.value - panelHeight.value - 8, 8))
+    top = Math.max(top, 8)
+  }
+  // 水平方向：左侧不超出画布，右侧不超出画布（按可视区钳制）
+  const clampedLeft = Math.min(Math.max(left, 8), Math.max(flowWidth.value - width - 8, 8))
+  return { left: `${clampedLeft}px`, top: `${top}px`, width: `${width}px` }
 })
 
 /** 点击节点：选中并关闭右键菜单（允许显示配置面板） */
@@ -996,11 +1041,33 @@ function showSnackbar(text: string, color: 'success' | 'error' | 'primary' = 'pr
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('resize', updateHeight)
   void store.load()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', updateHeight)
+  panelResizeObserver?.disconnect()
+  panelResizeObserver = null
+})
+
+// 配置面板为条件渲染、画布容器可能变化尺寸：动态监听两者尺寸用于边界钳制
+watch([panelEl, flowEl], ([panel, flow]) => {
+  panelResizeObserver?.disconnect()
+  if (panel || flow) {
+    panelResizeObserver ??= new ResizeObserver(() => {
+      panelHeight.value = panelEl.value?.offsetHeight ?? 0
+      flowHeight.value = flowEl.value?.clientHeight ?? 0
+      flowWidth.value = flowEl.value?.clientWidth ?? 0
+    })
+    if (panel) panelResizeObserver.observe(panel)
+    if (flow) panelResizeObserver.observe(flow)
+  } else {
+    panelHeight.value = 0
+  }
+  flowHeight.value = flowEl.value?.clientHeight ?? 0
+  flowWidth.value = flowEl.value?.clientWidth ?? 0
 })
 </script>
 
