@@ -4,6 +4,7 @@ import ImageLoaderNode from '../components/canvas/nodes/ImageLoaderNode.vue'
 import ImageGenerateNode from '../components/canvas/nodes/ImageGenerateNode.vue'
 import TextNode from '../components/canvas/nodes/TextNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
+import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
 export interface NodePrototype {
@@ -32,6 +33,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: false,
     bodyComponent: ImageLoaderNode,
+    editorComponent: ImageLoaderEditor,
   },
   {
     id: 'image-generate',

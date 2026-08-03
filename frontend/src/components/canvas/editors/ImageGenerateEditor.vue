@@ -41,7 +41,10 @@
               :alt="input.label"
               draggable="false"
             >
-            <span class="canvas-input-item__label">{{ input.label }}</span>
+            <span
+              class="canvas-input-item__label"
+              :title="input.label"
+            >图像{{ i + 1 }}</span>
           </div>
         </template>
         <img

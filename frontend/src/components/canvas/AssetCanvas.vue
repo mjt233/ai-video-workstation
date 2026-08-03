@@ -166,26 +166,29 @@
         </template>
       </VueFlow>
 
-      <!-- 节点配置悬浮面板（独立于节点，位于节点正下方，随视图联动） -->
-      <div
-        v-if="editorPanel && !suppressEditor"
-        ref="panelEl"
-        class="canvas-node-editor-panel"
-        :style="editorPanelStyle"
-      >
-        <component
-          :is="editorPanel?.editorComponent"
-          :project="props.project"
-          :node="editorPanel?.node"
-          :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
-          :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
-          @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
-          @generate="generateNode"
-          @interrupt="onInterrupt"
-          @open-history="openHistory"
-          @set-as-scene="setAsScene"
-        />
-      </div>
+      <!-- 节点配置悬浮面板（独立于节点，位于节点正下方，随视图联动；带淡入淡出） -->
+      <Transition name="editor-panel">
+        <div
+          v-if="editorPanel && !suppressEditor"
+          ref="panelEl"
+          class="canvas-node-editor-panel"
+          :style="editorPanelStyle"
+        >
+          <component
+            :is="editorPanel?.editorComponent"
+            :project="props.project"
+            :node="editorPanel?.node"
+            :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
+            :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
+            @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
+            @generate="generateNode"
+            @interrupt="onInterrupt"
+            @open-history="openHistory"
+            @set-as-scene="setAsScene"
+            @open-picker="openAssetPicker"
+          />
+        </div>
+      </Transition>
 
       <!-- 右键菜单 -->
       <div
@@ -632,6 +635,8 @@ const EDITOR_PANEL_GAP = 12
 
 /** 配置面板 DOM（用于测量实际高度以做边界钳制） */
 const panelEl = ref<HTMLDivElement | null>(null)
+/** 配置面板最近一次定位样式（离开动画期间沿用，避免跳位） */
+const lastPanelStyle = ref<Record<string, string> | null>(null)
 /** 配置面板当前实际高度（像素，屏幕坐标） */
 const panelHeight = ref(0)
 /** 画布可视区当前尺寸（像素） */
@@ -642,7 +647,7 @@ let panelResizeObserver: ResizeObserver | null = null
 /** 配置面板定位：与节点水平居中对称（节点本体位于面板上方中间），随平移/缩放联动 */
 const editorPanelStyle = computed(() => {
   const node = selectedNode.value
-  if (!node) return null
+  if (!node) return lastPanelStyle.value
   const vp = viewport.value
   const width = Math.max(EDITOR_PANEL_WIDTH * vp.zoom, node.width * vp.zoom)
   // 面板水平中心 = 节点水平中心，保证节点在面板上方正中
@@ -664,6 +669,11 @@ const editorPanelStyle = computed(() => {
   // 水平方向：左侧不超出画布，右侧不超出画布（按可视区钳制）
   const clampedLeft = Math.min(Math.max(left, 8), Math.max(flowWidth.value - width - 8, 8))
   return { left: `${clampedLeft}px`, top: `${top}px`, width: `${width}px` }
+})
+
+// 缓存最近一次面板定位（离开动画期间沿用，避免跳位）
+watch(editorPanelStyle, (style) => {
+  if (style) lastPanelStyle.value = style
 })
 
 /** 点击节点：选中并关闭右键菜单（允许显示配置面板） */
@@ -1268,6 +1278,18 @@ watch([panelEl, flowEl], ([panel, flow]) => {
   box-sizing: border-box;
   max-height: 45vh;
   overflow-y: auto;
+}
+
+/* 配置面板淡入淡出：透明度 + Y 轴位移 */
+.editor-panel-enter-active,
+.editor-panel-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.editor-panel-enter-from,
+.editor-panel-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 .canvas-context-menu {
