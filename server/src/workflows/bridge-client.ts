@@ -339,6 +339,8 @@ export interface LtxDirectorImageToVideoSubmitParams {
   fps: number;
   /** 随机种子（可选） */
   seed?: number;
+  /** 背景音频文件（可选），存在时自动生成音频关闭 */
+  audio?: File;
   /**
    * 关键帧列表，按时间顺序排列。每帧携带文件与游标位置，
    * 关键帧序号由提交函数按数组顺序自动生成（0、1、2…），
@@ -359,7 +361,9 @@ export interface LtxDirectorImageToVideoSubmitParams {
  * - body 中 `frame_define` 为 JSON.stringify(FrameDefine[]) 字符串，
  *   描述每个关键帧的序号与游标位置；
  * - 文件以动态键 `frame_{frameSeq}` 上传（如 frame_0、frame_1、frame_2），
- *   走 multipart/form-data（方式 B）。
+ *   走 multipart/form-data（方式 B）；
+ * - 提供 `params.audio` 时以 `audio` 键上传背景音频文件，
+ *   并将 `auto_generate_audio` 置为 false（不自动生成音频）。
  *
  * @param params 导演模式图生视频提交参数
  * @returns Bridge 提交结果（含 taskId）
@@ -390,6 +394,10 @@ export async function submitLtxDirectorImageToVideo(
   params.frames.forEach((f, idx) => {
     files[`frame_${idx}`] = f.file;
   });
+  if (params.audio) {
+    files.audio = params.audio;
+    body.auto_generate_audio = false;
+  }
 
   return submitComfyuiBridge({
     workflowId: 'ltx-2.3-director',

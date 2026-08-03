@@ -141,6 +141,43 @@ describe('submitLtxDirectorImageToVideo', () => {
     );
   });
 
+  it('提供音频时 auto_generate_audio=false 且上传 audio 文件', async () => {
+    const file = makeFile('f0.png');
+    const audio = makeFile('bg.flac');
+
+    await submitLtxDirectorImageToVideo({
+      prompt: 'p',
+      width: 1280,
+      height: 720,
+      duration: 3,
+      fps: 24,
+      audio,
+      frames: [{ file, cursor: 0 }],
+    });
+
+    const form = lastForm();
+    const params = JSON.parse(form.get('params') as string) as Record<string, unknown>;
+    expect(params.auto_generate_audio).toBe(false);
+    expect(form.get('audio')).toBe(audio);
+    expect(form.get('frame_0')).toBe(file);
+  });
+
+  it('未提供音频时 auto_generate_audio=true 且无 audio 字段', async () => {
+    await submitLtxDirectorImageToVideo({
+      prompt: 'p',
+      width: 1280,
+      height: 720,
+      duration: 3,
+      fps: 24,
+      frames: [{ file: makeFile('f0.png'), cursor: 0 }],
+    });
+
+    const form = lastForm();
+    const params = JSON.parse(form.get('params') as string) as Record<string, unknown>;
+    expect(params.auto_generate_audio).toBe(true);
+    expect(form.get('audio')).toBeNull();
+  });
+
   it('Bridge 返回非 2xx 时抛出错误', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
