@@ -3,8 +3,17 @@
     v-if="declarations.length"
     class="workflow-params-form"
   >
+    <!-- 尺寸参数（width/height）→ 通用尺寸选择组件 -->
+    <WorkflowSizePicker
+      v-if="sizeKeys"
+      :project="project"
+      :model-value="sizeModelValue"
+      class="mb-2"
+      @update:model-value="onSizeChange"
+    />
+
     <template
-      v-for="d in declarations"
+      v-for="d in sizeFilteredDeclarations"
       :key="d.key"
     >
       <!-- 布尔参数：开关 -->
@@ -55,7 +64,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import WorkflowSizePicker from './WorkflowSizePicker.vue'
+import { findSizeParamKeys } from '../utils/workflowSize'
 import type {
   WorkflowUserParamDeclaration,
   WorkflowUserParamValue,
@@ -66,6 +77,8 @@ const props = defineProps<{
   declarations: WorkflowUserParamDeclaration[]
   /** 当前参数值（key → 值），仅用于外部初始化/回显 */
   modelValue: Record<string, WorkflowUserParamValue>
+  /** 项目名（用于尺寸组件「使用项目尺寸」读取 project.json） */
+  project?: string
 }>()
 
 const emit = defineEmits<{
@@ -74,6 +87,45 @@ const emit = defineEmits<{
 
 /** 表单内部值（key → 值） */
 const values = ref<Record<string, WorkflowUserParamValue>>({})
+
+/** 尺寸相关 key（检测到 width + height 声明时非 null） */
+const sizeKeys = computed(() => findSizeParamKeys(props.declarations))
+
+/** 剔除尺寸相关 key 后的声明列表（其余参数仍走通用渲染） */
+const sizeFilteredDeclarations = computed(() => {
+  if (!sizeKeys.value) return props.declarations
+  const excluded = new Set([sizeKeys.value.widthKey, sizeKeys.value.heightKey])
+  if (sizeKeys.value.enableKey) excluded.add(sizeKeys.value.enableKey)
+  return props.declarations.filter((d) => !excluded.has(d.key))
+})
+
+/** 尺寸组件的外部值（仅含 width/height/enable_specified_size 三个 key 的现值） */
+const sizeModelValue = computed(() => {
+  if (!sizeKeys.value) return {}
+  const out: Record<string, WorkflowUserParamValue> = {}
+  for (const k of [sizeKeys.value.widthKey, sizeKeys.value.heightKey, sizeKeys.value.enableKey]) {
+    if (k && values.value[k] !== undefined) out[k] = values.value[k]
+  }
+  return out
+})
+
+/**
+ * 尺寸组件值变化时合并进表单值。
+ * 先清除旧的尺寸相关值，再并入组件输出的新值。
+ *
+ * @param v 组件输出的尺寸值（enable_specified_size/width/height）
+ */
+function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
+  const next = { ...values.value }
+  if (sizeKeys.value) {
+    for (const k of [sizeKeys.value.widthKey, sizeKeys.value.heightKey, sizeKeys.value.enableKey]) {
+      if (k) delete next[k]
+    }
+  }
+  Object.assign(next, v)
+  values.value = next
+  emit('update:modelValue', { ...next })
+}
 
 /**
  * 根据声明重新初始化表单值（取各参数默认值），并通知父组件。
