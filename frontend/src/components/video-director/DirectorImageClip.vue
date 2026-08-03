@@ -163,8 +163,10 @@ function onPointerMove(e: PointerEvent): void {
     // 左缘拉伸：右边缘保持固定，左边缘跟随指针
     const rightEdge = dragStartOffset + dragStartDuration
     const newStart = round1(clamp(dragStartOffset + deltaSec, 0, rightEdge - 0.5))
-    emit('move', props.clip.id, newStart)
+    // 先上报 resize（更新时长），再上报 move（起始偏移）：
+    // 父级 moveClip 会按“新时长”钳制起始偏移，避免右边缘向左漂移
     emit('resize', props.clip.id, round1(rightEdge - newStart))
+    emit('move', props.clip.id, newStart)
   }
 }
 
