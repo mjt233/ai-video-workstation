@@ -105,6 +105,21 @@ export interface ImageEditVars extends WorkflowVarsBase {
   variantId?: string;
   /** 可选：基础场景标签（stage 衍生时） */
   baseLabel?: string;
+  /**
+   * 可选：是否启用指定输出尺寸（"true"/"false"）。
+   * 由用户通过工作流参数声明传入；仅当为 "true" 时 width/height 生效。
+   */
+  enable_specified_size?: string;
+  /**
+   * 可选：输出宽度（像素，字符串形式）。
+   * enable_specified_size 为 "true" 时提交给 Bridge。
+   */
+  width?: string;
+  /**
+   * 可选：输出高度（像素，字符串形式）。
+   * enable_specified_size 为 "true" 时提交给 Bridge。
+   */
+  height?: string;
 }
 
 // ── 音色设计 tts-voice-design ───────────────────────────────────────

@@ -23,6 +23,27 @@ register(createImageEditWorkflow<ImageEditVars>({
       defaultValue: true,
       type: 'boolean',
       description: '启用后可在提示词中使用“摄像机向左/右移动90度，摄像机向上/下移动，拉近/推远”等方式精准控制视角变换'
+    },
+    {
+      key: 'enable_specified_size',
+      name: '指定输出尺寸',
+      defaultValue: false,
+      type: 'boolean',
+      description: '启用后按下方选定的宽高输出图片'
+    },
+    {
+      key: 'width',
+      name: '输出宽度',
+      defaultValue: '',
+      type: 'integer',
+      description: '输出图片宽度（像素）'
+    },
+    {
+      key: 'height',
+      name: '输出高度',
+      defaultValue: '',
+      type: 'integer',
+      description: '输出图片高度（像素）'
     }
   ],
   async getParams(params) {
