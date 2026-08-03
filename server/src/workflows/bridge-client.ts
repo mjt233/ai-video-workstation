@@ -302,6 +302,102 @@ export async function submitImageToVideo(params: ImageToVideoSubmitParams): Prom
   );
 }
 
+// ── 导演模式图生视频封装（ltx-2.3-director）──────────────────────────
+
+/**
+ * 关键帧定义。
+ *
+ * 描述一张参考帧图像在目标视频中的出现位置与顺序，
+ * 与上传的 `frame_{frameSeq}` 文件一一对应。
+ */
+export interface FrameDefine {
+  /**
+   * 关键帧图像序号，对应上传文件的动态键 `frame_{frameSeq}`（如 frame_0、frame_1）。
+   */
+  frameSeq: number;
+
+  /**
+   * 该帧图像在视频长度中的出现位置游标比值，取值范围 0~1。
+   * 0 表示首帧，1 表示尾帧（视频开头/结尾瞬间帧），0.5 表示视频中间。
+   */
+  cursor: number;
+}
+
+/**
+ * ltx-2.3-director 导演模式图生视频的提交参数。
+ */
+export interface LtxDirectorImageToVideoSubmitParams {
+  /** 视频描述提示词 */
+  prompt: string;
+  /** 视频宽度（像素） */
+  width: number;
+  /** 视频高度（像素） */
+  height: number;
+  /** 视频时长（秒） */
+  duration: number;
+  /** 帧率 */
+  fps: number;
+  /** 随机种子（可选） */
+  seed?: number;
+  /**
+   * 关键帧列表，按时间顺序排列。每帧携带文件与游标位置，
+   * 关键帧序号由提交函数按数组顺序自动生成（0、1、2…），
+   * 内部会生成 frame_define（JSON 字符串）并以 `frame_{frameSeq}` 为键上传文件。
+   */
+  frames: Array<{
+    /** 关键帧图像文件 */
+    file: File;
+    /** 该帧在视频长度中的出现位置游标比值（0~1） */
+    cursor: number;
+  }>;
+}
+
+/**
+ * 提交导演模式图生视频任务到 ComfyUI Bridge（ltx-2.3-director 工作流）。
+ *
+ * - 关键帧序号由内部按数组顺序自动生成（0、1、2…）；
+ * - body 中 `frame_define` 为 JSON.stringify(FrameDefine[]) 字符串，
+ *   描述每个关键帧的序号与游标位置；
+ * - 文件以动态键 `frame_{frameSeq}` 上传（如 frame_0、frame_1、frame_2），
+ *   走 multipart/form-data（方式 B）。
+ *
+ * @param params 导演模式图生视频提交参数
+ * @returns Bridge 提交结果（含 taskId）
+ */
+export async function submitLtxDirectorImageToVideo(
+  params: LtxDirectorImageToVideoSubmitParams,
+): Promise<BridgeSubmitResult> {
+  // 关键帧序号按数组顺序自动生成：0、1、2…
+  const frameDefines: FrameDefine[] = params.frames.map((f, idx) => ({
+    frameSeq: idx,
+    cursor: f.cursor,
+  }));
+
+  const body: Record<string, unknown> = {
+    prompt: params.prompt,
+    width: params.width,
+    height: params.height,
+    duration: params.duration,
+    fps: params.fps,
+    auto_generate_audio: true,
+    frame_define: JSON.stringify(frameDefines),
+  };
+  if (params.seed != null) {
+    body.seed = params.seed;
+  }
+
+  const files: Record<string, File> = {};
+  params.frames.forEach((f, idx) => {
+    files[`frame_${idx}`] = f.file;
+  });
+
+  return submitComfyuiBridge({
+    workflowId: 'ltx-2.3-director',
+    params: body,
+    files,
+  });
+}
+
 export interface BridgeTaskStatus {
   status: string;
   progress: number;
