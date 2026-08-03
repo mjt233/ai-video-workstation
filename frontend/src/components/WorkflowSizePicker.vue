@@ -54,6 +54,7 @@
         :model-value="manualWidth"
         label="宽度 (px)"
         type="number"
+        min="1"
         density="compact"
         variant="outlined"
         hide-details
@@ -64,6 +65,7 @@
         :model-value="manualHeight"
         label="高度 (px)"
         type="number"
+        min="1"
         density="compact"
         variant="outlined"
         hide-details
@@ -113,16 +115,18 @@ const manualHeight = ref<number | null>(null)
 const projectSize = ref<{ width: number; height: number } | null>(null)
 /** 自触发标记：组件 emit 后跳过下一次回显，避免反馈循环 */
 const skipNextEcho = ref(false)
+/** 用户是否已手动操作过组件（此后不再因项目尺寸加载完成而重推断模式） */
+const hasInteracted = ref(false)
 
-/** 模式选项（无 project 时隐藏「使用项目尺寸」） */
+/** 模式选项（无 project 时隐藏「使用项目尺寸」；项目尺寸未就绪时禁用） */
 const modeOptions = computed(() => {
-  const options: Array<{ label: string; value: SizeMode }> = [
+  const options: Array<{ label: string; value: SizeMode; disabled?: boolean }> = [
     { label: '不指定', value: 'none' },
     { label: '比例 + 分辨率', value: 'preset' },
     { label: '手动填写', value: 'manual' },
   ]
   if (props.project) {
-    options.push({ label: '使用项目尺寸', value: 'project' })
+    options.push({ label: '使用项目尺寸', value: 'project', disabled: !projectSize.value })
   }
   return options
 })
@@ -143,8 +147,8 @@ function emitSize() {
       out.width = s.width
       out.height = s.height
     } else if (mode.value === 'manual') {
-      if (manualWidth.value != null) out.width = manualWidth.value
-      if (manualHeight.value != null) out.height = manualHeight.value
+      if (manualWidth.value != null && manualWidth.value > 0) out.width = manualWidth.value
+      if (manualHeight.value != null && manualHeight.value > 0) out.height = manualHeight.value
     } else if (mode.value === 'project') {
       if (projectSize.value) {
         out.width = projectSize.value.width
@@ -159,40 +163,48 @@ function emitSize() {
 /** 切换模式 */
 function setMode(v: unknown) {
   mode.value = v as SizeMode
+  hasInteracted.value = true
   emitSize()
 }
 
 /** 切换比例档 */
 function setRatio(v: SizeRatioKey) {
   ratio.value = v
+  hasInteracted.value = true
   emitSize()
 }
 
 /** 切换分辨率档 */
 function setResolution(v: SizeResolutionKey) {
   resolution.value = v
+  hasInteracted.value = true
   emitSize()
 }
 
 /** 更新手动宽度 */
 function setManualWidth(v: unknown) {
   manualWidth.value = v === '' || v === null || v === undefined ? null : Number(v)
+  hasInteracted.value = true
   emitSize()
 }
 
 /** 更新手动高度 */
 function setManualHeight(v: unknown) {
   manualHeight.value = v === '' || v === null || v === undefined ? null : Number(v)
+  hasInteracted.value = true
   emitSize()
 }
 
 /**
  * 读取项目尺寸（project.json 的 width/height，取整）。
  * 读取失败或无效时置 null（「使用项目尺寸」模式将无法输出尺寸）。
+ * 加载完成后若用户尚未手动操作，重跑一次回显推断，
+ * 使「保存值等于项目尺寸」的初始场景能正确显示为 project 模式。
  */
 async function loadProjectSize() {
   if (!props.project) {
     projectSize.value = null
+    applyEcho()
     return
   }
   try {
@@ -202,6 +214,7 @@ async function loadProjectSize() {
       const h = Math.round(Number((data as { height: unknown }).height))
       if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
         projectSize.value = { width: w, height: h }
+        applyEcho()
         return
       }
     }
@@ -209,40 +222,51 @@ async function loadProjectSize() {
     // project.json 缺失或无效
   }
   projectSize.value = null
+  applyEcho()
 }
 
-// 项目变化时重新读取项目尺寸
-watch(() => props.project, loadProjectSize, { immediate: true })
+// 项目变化时重新读取项目尺寸（新项目视为全新的尺寸上下文，重置交互标记）
+watch(() => props.project, () => {
+  hasInteracted.value = false
+  loadProjectSize()
+}, { immediate: true })
+
+/**
+ * 依据外部 modelValue 推断并应用内部状态（模式/比例/分辨率/手动值）。
+ * 仅在外部值变化或项目尺寸加载完成后调用；不触发 emit，不会造成反馈循环。
+ */
+function applyEcho() {
+  if (skipNextEcho.value) {
+    skipNextEcho.value = false
+    return
+  }
+  const v = props.modelValue
+  const inferred = resolveSizeMode({
+    enableSpecifiedSize: v.enable_specified_size,
+    width: v.width as number | string | undefined,
+    height: v.height as number | string | undefined,
+    projectSize: projectSize.value,
+  })
+  mode.value = inferred
+  if (inferred === 'preset') {
+    const w = Number(v.width)
+    const h = Number(v.height)
+    const r = SIZE_RATIOS.find((x) => Math.abs(x.ratio - w / h) < 0.01)
+    const res = SIZE_RESOLUTIONS.find(
+      (x) => x.base === w || x.base === h,
+    )
+    if (r) ratio.value = r.key
+    if (res) resolution.value = res.key
+  } else if (inferred === 'manual') {
+    manualWidth.value = v.width !== undefined && v.width !== '' ? Number(v.width) : null
+    manualHeight.value = v.height !== undefined && v.height !== '' ? Number(v.height) : null
+  }
+}
 
 // 外部值变化（如表单重置/回显）时推断模式
 watch(
   () => props.modelValue,
-  (v) => {
-    if (skipNextEcho.value) {
-      skipNextEcho.value = false
-      return
-    }
-    const inferred = resolveSizeMode({
-      enableSpecifiedSize: v.enable_specified_size,
-      width: v.width as number | string | undefined,
-      height: v.height as number | string | undefined,
-      projectSize: projectSize.value,
-    })
-    mode.value = inferred
-    if (inferred === 'preset') {
-      const w = Number(v.width)
-      const h = Number(v.height)
-      const r = SIZE_RATIOS.find((x) => Math.abs(x.ratio - w / h) < 0.01)
-      const res = SIZE_RESOLUTIONS.find(
-        (x) => x.base === w || x.base === h,
-      )
-      if (r) ratio.value = r.key
-      if (res) resolution.value = res.key
-    } else if (inferred === 'manual') {
-      manualWidth.value = v.width !== undefined && v.width !== '' ? Number(v.width) : null
-      manualHeight.value = v.height !== undefined && v.height !== '' ? Number(v.height) : null
-    }
-  },
+  applyEcho,
   { immediate: true, deep: true },
 )
 </script>
