@@ -14,9 +14,9 @@ register(createTtsDesignWorkflow<TtsVoiceDesignVars>({
   name: '音色设计 (qwen3-tts)',
   impl: 'default',
   description: '根据声线描述与文本生成语音（角色声音 / 分镜台词）',
-}, (params) => {
-  const desc = (params.vars.desc ?? '').trim();
-  const text = (params.vars.text ?? '').trim();
+}, (ctx) => {
+  const desc = (ctx.vars.desc ?? '').trim();
+  const text = (ctx.vars.text ?? '').trim();
   if (!desc) {
     throw new Error('tts-voice-design 需要 vars.desc（声线描述）');
   }
@@ -25,10 +25,10 @@ register(createTtsDesignWorkflow<TtsVoiceDesignVars>({
   }
 
   // 分镜台词使用固定 seed 稳定音色；角色声音可用引擎注入的 seed
-  const isSceneTts = params.vars.purpose === 'scene-tts';
+  const isSceneTts = ctx.vars.purpose === 'scene-tts';
   return {
     desc,
     text,
-    seed: isSceneTts ? '114514' : params.vars.seed,
+    seed: isSceneTts ? '114514' : ctx.vars.seed,
   };
 }));

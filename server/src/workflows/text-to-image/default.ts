@@ -24,25 +24,25 @@ register(createTextToImageWorkflow<TextToImageVars>({
       description: '以布尔值提交给 ComfyUI 工作流的提示词强化开关',
     },
   ],
-  getPrompt: (params) => {
-    const promptPath = params.vars.promptPath?.trim();
+  getPrompt: (ctx) => {
+    const promptPath = ctx.vars.promptPath?.trim();
     if (!promptPath) {
       throw new Error('text-to-image 需要 vars.promptPath');
     }
-    return params.readFile(promptPath);
+    return ctx.readFile(promptPath);
   },
-  getWidth: (params) => {
-    if (params.vars.width != null && params.vars.width !== '') {
-      const n = Number(params.vars.width);
+  getWidth: (ctx) => {
+    if (ctx.vars.width != null && ctx.vars.width !== '') {
+      const n = Number(ctx.vars.width);
       if (Number.isFinite(n) && n > 0) return n;
     }
-    return params.projectConfig.width || 1080;
+    return ctx.projectConfig.width || 1080;
   },
-  getHeight: (params) => {
-    if (params.vars.height != null && params.vars.height !== '') {
-      const n = Number(params.vars.height);
+  getHeight: (ctx) => {
+    if (ctx.vars.height != null && ctx.vars.height !== '') {
+      const n = Number(ctx.vars.height);
       if (Number.isFinite(n) && n > 0) return n;
     }
-    return params.projectConfig.height || 1920;
+    return ctx.projectConfig.height || 1920;
   },
 }));

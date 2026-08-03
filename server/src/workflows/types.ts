@@ -174,7 +174,7 @@ export interface WorkflowDefinition<
   capabilities?: WorkflowCapabilities;
 
   /** Submit task to AI API, return remote task ID */
-  submit(params: WorkflowParams<TVars>): Promise<{ taskId: string }>;
+  submit(ctx: WorkflowRunContext<TVars>): Promise<{ taskId: string }>;
 
   /** Optional: poll task status. Not implementing = synchronous task */
   poll?(taskId: string): Promise<{ status: string; done: boolean } & TPollResult>;

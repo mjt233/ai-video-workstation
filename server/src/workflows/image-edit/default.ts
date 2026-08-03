@@ -46,22 +46,22 @@ register(createImageEditWorkflow<ImageEditVars>({
       description: '输出图片高度（像素）'
     }
   ],
-  async getParams(params) {
-    const desc = (params.vars.desc ?? '').trim();
+  async getParams(ctx) {
+    const desc = (ctx.vars.desc ?? '').trim();
     if (!desc) {
       throw new Error('image-edit 需要 vars.desc（编辑描述）');
     }
 
     let paths: string[] = [];
     try {
-      const parsed = JSON.parse(params.vars.imagePaths ?? '[]') as unknown;
+      const parsed = JSON.parse(ctx.vars.imagePaths ?? '[]') as unknown;
       if (!Array.isArray(parsed) || !parsed.every((p) => typeof p === 'string')) {
         throw new Error('imagePaths 须为字符串数组');
       }
       paths = parsed.map((p) => p.trim()).filter(Boolean);
     } catch (e) {
       throw new Error(
-        `image-edit imagePaths 无效: ${params.vars.imagePaths}; ${e instanceof Error ? e.message : String(e)}`,
+        `image-edit imagePaths 无效: ${ctx.vars.imagePaths}; ${e instanceof Error ? e.message : String(e)}`,
       );
     }
     if (paths.length === 0) {
@@ -70,13 +70,13 @@ register(createImageEditWorkflow<ImageEditVars>({
 
     const imgs: File[] = [];
     for (const rel of paths) {
-      imgs.push(await params.readAssertFile(rel));
+      imgs.push(await ctx.readAssertFile(rel));
     }
 
     return {
       desc,
       imgs,
-      seed: params.vars.seed,
+      seed: ctx.vars.seed,
     };
   },
 }));
