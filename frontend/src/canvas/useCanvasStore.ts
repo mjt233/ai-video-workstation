@@ -17,7 +17,9 @@ const HISTORY_LIMIT = 50
  * @param target 画布目标
  */
 export function useCanvasStore(project: string, target: CanvasTarget) {
-  const data = ref<CanvasData>(createCanvasData(target.kind))
+  /** 当前画布目标（切换分镜/场景时通过 switchTarget 更新） */
+  const targetRef = ref<CanvasTarget>({ ...target })
+  const data = ref<CanvasData>(createCanvasData(targetRef.value.kind))
   const loaded = ref(false)
   const dirty = ref(false)
   const saving = ref(false)
@@ -35,7 +37,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
 
   /** 加载画布；不存在时保持空画布 */
   async function load(): Promise<void> {
-    const existing = await loadCanvas(project, target)
+    const existing = await loadCanvas(project, targetRef.value)
     if (existing) {
       data.value = existing
     }
@@ -70,7 +72,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     }
     saving.value = true
     try {
-      await saveCanvas(project, target, data.value)
+      await saveCanvas(project, targetRef.value, data.value)
       dirty.value = false
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -240,6 +242,36 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     markDirty()
   }
 
+  /**
+   * 切换画布目标（如切换分镜/场景）：先落盘当前未保存修改，再重置全部状态并加载新画布。
+   *
+   * @param newTarget 新画布目标
+   */
+  async function switchTarget(newTarget: CanvasTarget): Promise<void> {
+    // 先取消待执行的防抖保存，并把当前画布未保存的修改落盘（此刻仍指向旧目标）
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    if (dirty.value) {
+      try {
+        await save()
+      } catch {
+        // 保存失败不阻塞切换
+      }
+    }
+    targetRef.value = { ...newTarget }
+    data.value = createCanvasData(targetRef.value.kind)
+    historyPast.value = []
+    historyFuture.value = []
+    clipboard.value = null
+    dirty.value = false
+    saving.value = false
+    error.value = null
+    loaded.value = false
+    await load()
+  }
+
   return {
     data,
     loaded,
@@ -266,5 +298,6 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     copyNode,
     pasteNode,
     applyNodes,
+    switchTarget,
   }
 }

@@ -1122,6 +1122,18 @@ function showSnackbar(text: string, color: 'success' | 'error' | 'primary' = 'pr
 
 // ── 生命周期 ────────────────────────────────────────────
 
+/** 切换分镜/场景时：重置选中与菜单状态，并让 store/生成组合式切换到新目标加载 */
+watch(target, async (newTarget) => {
+  suppressEditor.value = false
+  selectedNodeId.value = ''
+  selectedEdgeId.value = ''
+  renamingNodeId.value = ''
+  contextMenu.show = false
+  edgeMenu.show = false
+  gen.switchTarget(newTarget)
+  await store.switchTarget(newTarget)
+})
+
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('resize', updateHeight)

@@ -121,4 +121,35 @@ describe('useCanvasStore', () => {
     expect(b!.id).not.toBe(a.id)
     expect(store.nodes.value).toHaveLength(2)
   })
+
+  it('switchTarget：切换分镜后重置状态并加载新画布', async () => {
+    const raw2 = {
+      version: 1,
+      kind: 'scene',
+      nodes: [{ id: 'x', prototypeId: 'text', name: 'n2', x: 0, y: 0, width: 10, height: 10, config: {} }],
+      connections: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    ;(loadCanvas as Mock).mockResolvedValue(raw2)
+    const store = useCanvasStore('p', TARGET)
+    store.addNode('text', 0, 0)
+    expect(store.nodes.value).toHaveLength(1)
+    // 切换前先落盘未保存修改
+    await store.switchTarget({ kind: 'scene', episode: '1', shot: '2' })
+    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    expect(loadCanvas).toHaveBeenCalledWith('p', { kind: 'scene', episode: '1', shot: '2' })
+    expect(store.nodes.value).toHaveLength(1)
+    expect(store.nodes.value[0].id).toBe('x')
+    expect(store.canUndo.value).toBe(false)
+    expect(store.canRedo.value).toBe(false)
+    expect(store.dirty.value).toBe(false)
+  })
+
+  it('switchTarget：无未保存修改时不触发落盘', async () => {
+    const store = useCanvasStore('p', TARGET)
+    await store.switchTarget({ kind: 'scene', episode: '1', shot: '2' })
+    expect(saveCanvas).not.toHaveBeenCalled()
+    expect(loadCanvas).toHaveBeenCalledWith('p', { kind: 'scene', episode: '1', shot: '2' })
+  })
 })

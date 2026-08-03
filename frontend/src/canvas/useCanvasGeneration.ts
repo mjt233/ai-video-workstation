@@ -30,6 +30,8 @@ export interface GenTarget {
  * @param target 画布目标（决定产物目录与 prompt 文件位置）
  */
 export function useCanvasGeneration(project: string, target: GenTarget) {
+  /** 当前生成目标（切换分镜/场景时通过 switchTarget 更新） */
+  const targetRef = ref<GenTarget>({ ...target })
   /** nodeId → 生成状态 */
   const statusByNode = ref<Record<string, GenerateStatus>>({})
   /** nodeId → 轮询句柄 */
@@ -54,20 +56,20 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
   function computeOutputPath(node: CanvasNodeData): string {
     const version = nextVersion(getHistory(node.config))
     const scope =
-      target.kind === 'stage'
-        ? { kind: 'stage' as const, primary: target.stage ?? '' }
-        : { kind: 'scene' as const, primary: target.episode ?? '', secondary: target.shot }
+      targetRef.value.kind === 'stage'
+        ? { kind: 'stage' as const, primary: targetRef.value.stage ?? '' }
+        : { kind: 'scene' as const, primary: targetRef.value.episode ?? '', secondary: targetRef.value.shot }
     return canvasNodeAssetPath(scope, node.id, version)
   }
 
   /** 计算生成节点 prompt 文件相对路径（文生图工作流需要） */
   function computePromptPath(nodeId: string): string {
-    if (target.kind === 'stage') {
-      const rel = stageCanvasRelPath(target.stage ?? '')
+    if (targetRef.value.kind === 'stage') {
+      const rel = stageCanvasRelPath(targetRef.value.stage ?? '')
       const dir = rel.replace(/canvas\.json$/, '')
       return `${dir}canvas/${nodeId}/prompt.md`
     }
-    const rel = sceneCanvasRelPath(target.episode ?? '', target.shot ?? '')
+    const rel = sceneCanvasRelPath(targetRef.value.episode ?? '', targetRef.value.shot ?? '')
     const dir = rel.replace(/canvas\.json$/, '')
     return `${dir}canvas/${nodeId}/prompt.md`
   }
@@ -178,5 +180,26 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     delete statusByNode.value[nodeId]
   }
 
-  return { statusByNode, setInputPaths, generate, interrupt, clearStatus, computeOutputPath }
+  /** 重置全部生成状态与轮询（切换画布目标时调用） */
+  function reset(): void {
+    for (const id of Object.keys(pollTimers)) {
+      clearInterval(pollTimers[id])
+      delete pollTimers[id]
+    }
+    statusByNode.value = {}
+    inputPathsRef.value = {}
+    taskIdByNode.value = {}
+  }
+
+  /**
+   * 切换生成目标（如切换分镜/场景）并重置全部生成状态。
+   *
+   * @param newTarget 新生成目标
+   */
+  function switchTarget(newTarget: GenTarget): void {
+    targetRef.value = { ...newTarget }
+    reset()
+  }
+
+  return { statusByNode, setInputPaths, generate, interrupt, clearStatus, computeOutputPath, switchTarget }
 }
