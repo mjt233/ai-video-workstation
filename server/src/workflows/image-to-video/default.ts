@@ -3,6 +3,7 @@ import {
   createComfyuiBridgeWorkflow,
   submitImageToVideo,
   submitComfyuiBridge,
+  submitLtxDirectorImageToVideo,
   pollTask,
   buildDownloadRequest,
 } from '../bridge-client.js';
@@ -19,6 +20,10 @@ import type { ImageToVideoVars } from '../types.js';
  * 1. 用户已进行【分镜音频编辑】并合并 → 使用 merged.flac
  * 2. 有台词但未编辑音频 → 拼接所有台词文本，调用 TTS 生成音频
  * 3. 无台词 → 不提交音频
+ *
+ * 导演台模式（声明 capabilities.director + audio）：
+ * - 引擎注入 director 负载时 → 走 ltx-2.3-director 工作流（关键帧 + 混音音频）
+ * - 否则走普通模式（FL2V / FML2V + TTS 音频策略）
  */
 register(
   createComfyuiBridgeWorkflow<ImageToVideoVars>({
@@ -27,11 +32,36 @@ register(
       name: 'LTX-2.3',
       impl: 'ltx',
       description: '使用 FL2V / FML2V 模型基于参考帧图生成视频',
+      capabilities: { director: true, audio: true },
     },
 
     async submit(ctx) {
       const episode = ctx.vars.episode;
       const shot = ctx.vars.shot;
+
+      // ── 导演台模式：引擎已注入 director 负载，直接走 ltx-2.3-director 工作流 ──
+      if (ctx.director) {
+        const prompt = await ctx.readFile(
+          `prompt/scene/${episode}/${shot}/prompt.md`,
+        );
+        const { duration, width, height, fps, frames, audio } = ctx.director;
+        if (!prompt.trim()) {
+          throw new Error('image-to-video 导演台模式 prompt.md 为空');
+        }
+        const result = await submitLtxDirectorImageToVideo({
+          prompt,
+          width,
+          height,
+          duration,
+          fps,
+          seed: ctx.vars.seed ? Number(ctx.vars.seed) : undefined,
+          frames,
+          ...(audio ? { audio } : {}),
+        });
+        return { taskId: result.taskId };
+      }
+
+      // ── 普通模式：现有逻辑 ──
       const prompt = await ctx.readFile(
         `prompt/scene/${episode}/${shot}/prompt.md`,
       );

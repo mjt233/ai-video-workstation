@@ -11,7 +11,7 @@
  * 首次调用 status/output-files 时自动登录获取 token 并缓存。
  */
 
-import type { WorkflowDefinition, WorkflowRunContext, WorkflowBaseDefinition, WorkflowUserParamDeclaration, WorkflowVarsBase } from './types.js';
+import type { WorkflowDefinition, WorkflowRunContext, WorkflowBaseDefinition, WorkflowUserParamDeclaration, WorkflowVarsBase, WorkflowCapabilities } from './types.js';
 
 const BRIDGE_URL = (process.env.COMFYUI_BRIDGE_URL || 'http://localhost:10721').replace(/\/+$/, '');
 const BRIDGE_PASSWORD = process.env.COMFYUI_BRIDGE_PASSWORD || '0d000721';
@@ -534,12 +534,12 @@ export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = Work
  * - poll：轮询 Bridge 任务状态，completed / failed 视为结束
  * - parseOutput：通过 buildDownloadRequest 解析首个输出文件的下载请求
  *
- * @param args.baseDefinition 工作流基础元信息（id / name / impl / description / params）
+ * @param args.baseDefinition 工作流基础元信息（id / name / impl / description / params / capabilities）
  * @param args.submit 提交函数，接收 WorkflowRunContext，返回远端任务 ID
  * @returns 完整的工作流定义（WorkflowDefinition<TVars>）
  */
 export function createComfyuiBridgeWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>({ baseDefinition, submit }: {
-  baseDefinition: WorkflowBaseDefinition,
+  baseDefinition: WorkflowBaseDefinition & { capabilities?: WorkflowCapabilities },
   submit: (ctx: WorkflowRunContext<TVars>) => Promise<{ taskId: string }>
 }): WorkflowDefinition<TVars> {
   return {
