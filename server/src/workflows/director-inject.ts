@@ -29,6 +29,15 @@ export interface DirectorInjectDeps {
   mixAudioTracks(tracks: MixTrack[], out: string): Promise<void>;
   /** 读取混音产物临时文件为二进制内容（Uint8Array） */
   readTempAudio(p: string): Promise<Uint8Array>;
+  /**
+   * 删除混音产物临时文件（尽力而为）。
+   *
+   * 在 `readTempAudio` 读取完成后由本模块调用，用于清理 `os.tmpdir()` 下的
+   * 混音中间产物；清理失败应静默忽略，不得影响任务结果。
+   *
+   * @param p 混音结果输出文件路径（绝对路径，位于 os.tmpdir()）
+   */
+  removeTempAudio(p: string): Promise<void>;
 }
 
 /**
@@ -46,7 +55,8 @@ export interface DirectorInjectDeps {
  *    `readAssertFile` 读取图片得到 `frames`（frameSeq 从 0 递增，cursor 钳制 0~1）；
  * 4. `audioClips` 非空时：在 `os.tmpdir()` 生成临时输出路径 → 组装 MixTrack
  *    列表（filePath 为项目相对路径）→ `mixAudioTracks` 混音 → `readTempAudio`
- *    读取产物 → 包装为 `File('director-audio.flac')` 注入 `audio`；
+ *    读取产物 → 包装为 `File('director-audio.flac')` 注入 `audio`，随后
+ *    `removeTempAudio` 尽力删除临时文件（失败静默忽略）；
  * 5. 返回 `{ duration, width, height, fps, frames, audio? }`，其中
  *    duration/width/height/fps 以 director.json 为准（覆盖 overview.json / projectConfig）。
  *
@@ -102,6 +112,8 @@ export async function buildDirectorPayload(
     await deps.mixAudioTracks(tracks, tmpOut);
     const buf = await deps.readTempAudio(tmpOut);
     audio = new File([buf], 'director-audio.flac', { type: 'audio/flac' });
+    // 尽力清理混音临时文件；清理失败仅静默忽略，不影响任务结果
+    await deps.removeTempAudio(tmpOut).catch(() => undefined);
   }
 
   return {
