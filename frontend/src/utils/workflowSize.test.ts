@@ -30,7 +30,7 @@ describe('computePresetSize', () => {
   })
 
   it('9:16 + 4K → 宽度 3840，高度按比例取整', () => {
-    expect(computePresetSize('9:16', '4K')).toEqual({ width: 3840, height: Math.round(3840 / (9 / 16)) })
+    expect(computePresetSize('9:16', '4K')).toEqual({ width: 3840, height: 6827 })
   })
 
   it('1:1 + 8K → 7680×7680', () => {
@@ -76,6 +76,10 @@ describe('resolveSizeMode', () => {
 
   it('启用但不匹配任何预设 → manual', () => {
     expect(resolveSizeMode({ enableSpecifiedSize: true, width: 1234, height: 567 })).toBe('manual')
+  })
+
+  it('基准落在错误一侧（1080×810 无任何预设产出）→ manual', () => {
+    expect(resolveSizeMode({ enableSpecifiedSize: true, width: 1080, height: 810 })).toBe('manual')
   })
 })
 

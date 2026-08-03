@@ -1,5 +1,15 @@
 import type { WorkflowUserParamDeclaration } from '../api/workflow'
 
+/**
+ * 工作流输出尺寸换算与回显工具。
+ *
+ * 纯函数模块（无 Vue/DOM 依赖），供通用尺寸选择组件 `WorkflowSizePicker`
+ * 与参数表单 `WorkflowParamsForm` 使用：
+ * - `computePresetSize`：比例 × 分辨率档 → 具体宽高
+ * - `resolveSizeMode`：根据已保存的宽高推断组件应处于的模式
+ * - `findSizeParamKeys`：约定式检测声明中是否含 width/height 用户参数
+ */
+
 /** 尺寸选择模式 */
 export type SizeMode = 'preset' | 'manual' | 'project' | 'none'
 
@@ -10,6 +20,7 @@ export type SizeRatioKey = '1:1' | '16:9' | '9:16' | '4:3' | '3:4'
 export type SizeResolutionKey = '360P' | '720P' | '1080P' | '2K' | '4K' | '8K'
 
 export interface SizeRatio {
+  /** 比例档 key（展示用） */
   key: SizeRatioKey
   /** 宽高比（width / height） */
   ratio: number
@@ -43,7 +54,9 @@ export const SIZE_RESOLUTIONS: SizeResolution[] = [
 ]
 
 export interface SizeValue {
+  /** 宽度（像素） */
   width: number
+  /** 高度（像素） */
   height: number
 }
 
@@ -98,7 +111,8 @@ export function resolveSizeMode(input: SizeEchoInput): SizeMode {
   const enabled =
     input.enableSpecifiedSize === true ||
     input.enableSpecifiedSize === 'true' ||
-    input.enableSpecifiedSize === 1
+    input.enableSpecifiedSize === 1 ||
+    input.enableSpecifiedSize === '1'
   const w = Number(input.width)
   const h = Number(input.height)
   const hasSize =
@@ -112,11 +126,20 @@ export function resolveSizeMode(input: SizeEchoInput): SizeMode {
   const ratio = w / h
   const matchedRatio = SIZE_RATIOS.find((r) => Math.abs(r.ratio - ratio) < 0.01)
   // 分辨率档基准可落在宽或高：P 档横屏基准为高度、竖屏基准为宽度；K 档基准恒为宽度。
-  // 各档 base 值唯一（360/720/1080/2560/3840/7680），用“任一维等于 base”即可无歧义匹配。
+  // 各档 base 值唯一（360/720/1080/2560/3840/7680），用“任一维等于 base”即可初步匹配；
+  // 最终以 computePresetSize 计算结果反查确认，避免“基准落在错误一侧”的误判
+  // （如 1080×810 会被误认为预设，但没有任何预设产出该尺寸）。
   const matchedRes = SIZE_RESOLUTIONS.find(
     (res) => res.base === w || res.base === h,
   )
-  if (matchedRatio && matchedRes) return 'preset'
+  if (
+    matchedRatio &&
+    matchedRes &&
+    computePresetSize(matchedRatio.key, matchedRes.key).width === w &&
+    computePresetSize(matchedRatio.key, matchedRes.key).height === h
+  ) {
+    return 'preset'
+  }
   return 'manual'
 }
 
