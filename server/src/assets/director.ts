@@ -72,8 +72,10 @@ export interface DirectorConfigFile {
  * 解析并校验导演台配置 JSON 字符串。
  *
  * 对 `JSON.parse` 的结果做防御性校验：duration 必须是正整数，
- * width/height/fps 必须是数字，imageClips/audioClips 必须是数组。
- * 任一校验失败都会抛出带中文说明的 Error，避免脏数据流入后续工作流。
+ * width/height/fps 必须是数字，imageClips/audioClips 必须是数组，
+ * 且每个片段字段也逐项校验（path 非空、startOffset/trimStart/trimEnd >= 0、
+ * duration > 0，均为有限数字）。任一校验失败都会抛出带中文说明的 Error，
+ * 避免脏数据流入后续工作流。
  *
  * @param raw director.json 的原始文本内容
  * @returns 校验通过的导演台配置对象
@@ -108,6 +110,15 @@ export function parseDirectorJson(raw: string): DirectorConfigFile {
   if (!Array.isArray(obj.audioClips)) {
     throw new Error('导演台配置的 audioClips 必须是数组');
   }
+
+  // 逐片段防御性校验：任一字段非法都抛出中文错误，避免脏数据流入工作流
+  for (const [index, clip] of (obj.imageClips as unknown[]).entries()) {
+    validateImageClip(clip, index);
+  }
+  for (const [index, clip] of (obj.audioClips as unknown[]).entries()) {
+    validateAudioClip(clip, index);
+  }
+
   return {
     version: typeof obj.version === 'number' ? obj.version : 1,
     duration: obj.duration,
@@ -117,6 +128,58 @@ export function parseDirectorJson(raw: string): DirectorConfigFile {
     imageClips: obj.imageClips as DirectorImageClipFile[],
     audioClips: obj.audioClips as DirectorAudioClipFile[],
   };
+}
+
+/**
+ * 校验单个图像片段字段。
+ *
+ * 要求：path 为非空字符串、startOffset 为有限数字且 >= 0、
+ * duration 为有限数字且 > 0。任一不满足即抛出中文 Error。
+ *
+ * @param clip 待校验的图像片段（未知类型）
+ * @param index 片段在 imageClips 数组中的下标（用于错误提示）
+ * @throws {Error} 字段不合法时抛出中文错误
+ */
+function validateImageClip(clip: unknown, index: number): void {
+  const c = (clip ?? {}) as Record<string, unknown>;
+  if (typeof c.path !== 'string' || c.path.trim() === '') {
+    throw new Error(`导演台配置 imageClips[${index}] 的 path 必须是非空字符串`);
+  }
+  if (typeof c.startOffset !== 'number' || !Number.isFinite(c.startOffset) || c.startOffset < 0) {
+    throw new Error(`导演台配置 imageClips[${index}] 的 startOffset 必须是 >= 0 的有限数字`);
+  }
+  if (typeof c.duration !== 'number' || !Number.isFinite(c.duration) || c.duration <= 0) {
+    throw new Error(`导演台配置 imageClips[${index}] 的 duration 必须是 > 0 的有限数字`);
+  }
+}
+
+/**
+ * 校验单个音频片段字段。
+ *
+ * 在图像片段要求（path 非空、startOffset/duration 为有限数字且范围合法）基础上，
+ * 额外要求 trimStart/trimEnd 为有限数字且 >= 0。任一不满足即抛出中文 Error。
+ *
+ * @param clip 待校验的音频片段（未知类型）
+ * @param index 片段在 audioClips 数组中的下标（用于错误提示）
+ * @throws {Error} 字段不合法时抛出中文错误
+ */
+function validateAudioClip(clip: unknown, index: number): void {
+  const c = (clip ?? {}) as Record<string, unknown>;
+  if (typeof c.path !== 'string' || c.path.trim() === '') {
+    throw new Error(`导演台配置 audioClips[${index}] 的 path 必须是非空字符串`);
+  }
+  if (typeof c.startOffset !== 'number' || !Number.isFinite(c.startOffset) || c.startOffset < 0) {
+    throw new Error(`导演台配置 audioClips[${index}] 的 startOffset 必须是 >= 0 的有限数字`);
+  }
+  if (typeof c.duration !== 'number' || !Number.isFinite(c.duration) || c.duration <= 0) {
+    throw new Error(`导演台配置 audioClips[${index}] 的 duration 必须是 > 0 的有限数字`);
+  }
+  if (typeof c.trimStart !== 'number' || !Number.isFinite(c.trimStart) || c.trimStart < 0) {
+    throw new Error(`导演台配置 audioClips[${index}] 的 trimStart 必须是 >= 0 的有限数字`);
+  }
+  if (typeof c.trimEnd !== 'number' || !Number.isFinite(c.trimEnd) || c.trimEnd < 0) {
+    throw new Error(`导演台配置 audioClips[${index}] 的 trimEnd 必须是 >= 0 的有限数字`);
+  }
 }
 
 /**

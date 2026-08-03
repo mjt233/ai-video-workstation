@@ -11,12 +11,12 @@ register({
   impl: 'flux',
   description: '使用 Flux 模型根据提示词生成图片（Mock）',
 
-  async submit(params) {
-    const promptPath = params.vars.promptPath?.trim();
+  async submit(ctx) {
+    const promptPath = ctx.vars.promptPath?.trim();
     if (!promptPath) {
       throw new Error('text-to-image 需要 vars.promptPath');
     }
-    await params.readFile(promptPath);
+    await ctx.readFile(promptPath);
     return { taskId: 'flux-mock-' + Date.now() };
   },
 

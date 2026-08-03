@@ -15,6 +15,27 @@ describe('parseDirectorJson', () => {
   it('duration 非正整数抛错', () => {
     expect(() => parseDirectorJson(JSON.stringify({ version: 1, duration: -1, imageClips: [], audioClips: [] }))).toThrow();
   });
+  it('imageClip 缺少 path 抛错', () => {
+    expect(() => parseDirectorJson(JSON.stringify({
+      version: 1, duration: 10, width: 1080, height: 1920, fps: 24,
+      imageClips: [{ startOffset: 0, duration: 2 }],
+      audioClips: [],
+    }))).toThrow(/path/);
+  });
+  it('imageClip startOffset 为负抛错', () => {
+    expect(() => parseDirectorJson(JSON.stringify({
+      version: 1, duration: 10, width: 1080, height: 1920, fps: 24,
+      imageClips: [{ path: 'a.jpg', startOffset: -1, duration: 2 }],
+      audioClips: [],
+    }))).toThrow(/startOffset/);
+  });
+  it('audioClip trimStart 为负抛错', () => {
+    expect(() => parseDirectorJson(JSON.stringify({
+      version: 1, duration: 10, width: 1080, height: 1920, fps: 24,
+      imageClips: [{ path: 'a.jpg', startOffset: 0, duration: 2 }],
+      audioClips: [{ path: 'b.flac', startOffset: 0, duration: 3, trimStart: -1, trimEnd: 0 }],
+    }))).toThrow(/trimStart/);
+  });
 });
 
 describe('computeFrameDefines', () => {
@@ -34,5 +55,13 @@ describe('computeFrameDefines', () => {
   it('startOffset 接近时长时 cursor 正确钳制', () => {
     const defs = computeFrameDefines([{ path: 'a', startOffset: 9, duration: 2 }], 10);
     expect(defs[0].cursor).toBe(0.9);
+  });
+  it('startOffset 超过时长时 cursor 钳制为 1', () => {
+    const defs = computeFrameDefines([{ path: 'a', startOffset: 15, duration: 10 }], 10);
+    expect(defs[0].cursor).toBe(1);
+  });
+  it('startOffset 为负时 cursor 钳制为 0', () => {
+    const defs = computeFrameDefines([{ path: 'a', startOffset: -1, duration: 10 }], 10);
+    expect(defs[0].cursor).toBe(0);
   });
 });
