@@ -133,7 +133,46 @@ interface SubmitImageEditParams {
   imgs: File[],
   desc: string,
   seed?: string | number,
-  enable_multiple_angles_lora?: boolean
+  enable_multiple_angles_lora?: boolean,
+
+  /** 启用指定输出图片尺寸 */
+  enable_specified_size?: boolean
+
+  /** 输出图片宽度（ enable_specified_size 为 true 时生效 ）*/
+  width?: number
+
+  /** 输出图片高度（ enable_specified_size 为 true 时生效 ） */
+  height?: number
+}
+
+export interface ImageEditSizeParams {
+  /** 是否启用指定输出尺寸 */
+  enable_specified_size?: boolean;
+  /** 输出宽度（像素） */
+  width?: number;
+  /** 输出高度（像素） */
+  height?: number;
+}
+
+/**
+ * 从工作流 vars 解析图片编辑尺寸参数。
+ *
+ * 仅当 vars.enable_specified_size === 'true' 时返回启用标记与宽高（数字，取整），
+ * 否则返回空对象（对应「不指定」模式，不向 Bridge 传任何尺寸参数）。
+ *
+ * @param vars 工作流 vars（key → 字符串值）
+ * @returns 可透传给 Bridge 的尺寸参数
+ */
+export function resolveImageEditSizeParams(
+  vars: Record<string, string | undefined>,
+): ImageEditSizeParams {
+  if (vars.enable_specified_size !== 'true') return {};
+  const out: ImageEditSizeParams = { enable_specified_size: true };
+  const width = vars.width ? Number(vars.width) : NaN;
+  const height = vars.height ? Number(vars.height) : NaN;
+  if (Number.isFinite(width)) out.width = Math.round(width);
+  if (Number.isFinite(height)) out.height = Math.round(height);
+  return out;
 }
 
 export async function submitImageEdit(params: SubmitImageEditParams): Promise<BridgeSubmitResult> {
@@ -146,6 +185,15 @@ export async function submitImageEdit(params: SubmitImageEditParams): Promise<Br
   const textParams: Record<string, unknown> = { desc: params.desc, enable_multiple_angles_lora: params.enable_multiple_angles_lora ?? true };
   if (params.seed != null) {
     textParams.seed = params.seed;
+  }
+  if (params.enable_specified_size != null) {
+    textParams.enable_specified_size = params.enable_specified_size;
+  }
+  if (params.width != null) {
+    textParams.width = params.width;
+  }
+  if (params.height != null) {
+    textParams.height = params.height;
   }
   return submitComfyuiBridge({
     workflowId: 'qwen-edit-2509',
@@ -475,7 +523,8 @@ export function createImageEditWorkflow<TVars extends WorkflowVarsBase = Workflo
       if (!imgs.length) {
         throw new Error('Image edit workflow requires at least one input image');
       }
-      const result = await submitImageEdit({ imgs, desc, seed });
+      const size = resolveImageEditSizeParams(params.vars as unknown as Record<string, string | undefined>);
+      const result = await submitImageEdit({ imgs, desc, seed, ...size });
       return { taskId: result.taskId };
     },
   });
