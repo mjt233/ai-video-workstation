@@ -8,6 +8,11 @@
         height="100%"
         @error="imageUrl = ''"
       />
+      <!-- 悬浮操作：放大查看 / 下载图片 -->
+      <ImageNodeActions
+        :image-url="imageUrl"
+        :asset-path="currentPath"
+      />
     </template>
     <template v-else>
       <div class="image-generate-node__empty">
@@ -77,6 +82,7 @@ import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../../canvas/types'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import type { GenerateStatus } from '../../../canvas/useCanvasGeneration'
+import ImageNodeActions from './ImageNodeActions.vue'
 
 const props = defineProps<{
   project: string
@@ -121,6 +127,12 @@ watch(
   flex-direction: column;
   align-items: center;
   gap: 2px;
+}
+
+/* 鼠标悬浮节点时显示右上角操作按钮 */
+.image-generate-node:hover .image-node-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .image-generate-node__mask {

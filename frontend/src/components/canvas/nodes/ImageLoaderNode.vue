@@ -8,6 +8,11 @@
         height="100%"
         @error="imageUrl = ''"
       />
+      <!-- 悬浮操作：放大查看 / 下载图片 -->
+      <ImageNodeActions
+        :image-url="imageUrl"
+        :asset-path="assetPath"
+      />
     </template>
     <template v-else>
       <div class="image-loader-node__empty">
@@ -45,6 +50,7 @@ import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../../canvas/types'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { uploadFs } from '../../../api/client'
+import ImageNodeActions from './ImageNodeActions.vue'
 
 /** 节点 body 组件统一 props：节点数据 + 项目名 */
 const props = defineProps<{
@@ -95,6 +101,7 @@ function openPicker() {
 
 <style scoped>
 .image-loader-node {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
@@ -102,6 +109,12 @@ function openPicker() {
   justify-content: center;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.03);
+}
+
+/* 鼠标悬浮节点时显示右上角操作按钮 */
+.image-loader-node:hover .image-node-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .image-loader-node__empty {
