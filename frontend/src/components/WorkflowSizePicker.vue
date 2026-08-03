@@ -204,7 +204,7 @@ function setManualHeight(v: unknown) {
 async function loadProjectSize() {
   if (!props.project) {
     projectSize.value = null
-    applyEcho()
+    applyEcho(true)
     return
   }
   try {
@@ -214,7 +214,7 @@ async function loadProjectSize() {
       const h = Math.round(Number((data as { height: unknown }).height))
       if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
         projectSize.value = { width: w, height: h }
-        applyEcho()
+        applyEcho(true)
         return
       }
     }
@@ -222,7 +222,7 @@ async function loadProjectSize() {
     // project.json 缺失或无效
   }
   projectSize.value = null
-  applyEcho()
+  applyEcho(true)
 }
 
 // 项目变化时重新读取项目尺寸（新项目视为全新的尺寸上下文，重置交互标记）
@@ -231,16 +231,33 @@ watch(() => props.project, () => {
   loadProjectSize()
 }, { immediate: true })
 
+/** 最近一次回显时的尺寸子集（enable/width/height），用于判断外部是否真的改了尺寸相关值 */
+let lastEchoedSize = ''
+
 /**
  * 依据外部 modelValue 推断并应用内部状态（模式/比例/分辨率/手动值）。
- * 仅在外部值变化或项目尺寸加载完成后调用；不触发 emit，不会造成反馈循环。
+ *
+ * - 组件自身 emit 后（skipNextEcho）跳过下一次回显，避免反馈循环
+ * - 尺寸相关值（enable/width/height）未变化时不重推断，
+ *   避免用户编辑其他非尺寸参数时覆盖当前选择
+ * - force 为 true 时无视尺寸子集比对强制重推断（项目尺寸加载完成后使用）
+ *
+ * @param force 是否强制重推断（忽略尺寸子集比对）
  */
-function applyEcho() {
+function applyEcho(force = false) {
+  const v = props.modelValue
+  const sizeSubset = JSON.stringify({
+    enable: v.enable_specified_size ?? null,
+    width: v.width ?? null,
+    height: v.height ?? null,
+  })
   if (skipNextEcho.value) {
     skipNextEcho.value = false
+    lastEchoedSize = sizeSubset
     return
   }
-  const v = props.modelValue
+  if (!force && sizeSubset === lastEchoedSize) return
+  lastEchoedSize = sizeSubset
   const inferred = resolveSizeMode({
     enableSpecifiedSize: v.enable_specified_size,
     width: v.width as number | string | undefined,
@@ -266,7 +283,7 @@ function applyEcho() {
 // 外部值变化（如表单重置/回显）时推断模式
 watch(
   () => props.modelValue,
-  applyEcho,
+  () => applyEcho(),
   { immediate: true, deep: true },
 )
 </script>

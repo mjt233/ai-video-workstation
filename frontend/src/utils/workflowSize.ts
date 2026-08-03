@@ -1,4 +1,7 @@
-import type { WorkflowUserParamDeclaration } from '../api/workflow'
+import type {
+  WorkflowUserParamDeclaration,
+  WorkflowUserParamValue,
+} from '../api/workflow'
 
 /**
  * 工作流输出尺寸换算与回显工具。
@@ -168,4 +171,34 @@ export function findSizeParamKeys(
     heightKey: height.key,
     enableKey: enable?.key,
   }
+}
+
+/**
+ * 将尺寸组件输出的值合并进表单值。
+ *
+ * - 先清除 values 中旧的尺寸相关 key（width/height/enable）
+ * - 再并入 incoming 中属于已声明尺寸 key 的新值
+ *   （组件固定输出 enable_specified_size，但若工作流未声明该参数则不并入）
+ * - 返回新对象，不修改入参
+ *
+ * @param values 当前表单值（key → 值）
+ * @param sizeKeys 已检测到的尺寸相关 key
+ * @param incoming 尺寸组件输出的新值
+ * @returns 合并后的新表单值
+ */
+export function mergeSizeValues(
+  values: Record<string, WorkflowUserParamValue>,
+  sizeKeys: SizeParamKeys,
+  incoming: Record<string, WorkflowUserParamValue>,
+): Record<string, WorkflowUserParamValue> {
+  const next = { ...values }
+  const allowed = new Set([sizeKeys.widthKey, sizeKeys.heightKey])
+  if (sizeKeys.enableKey) allowed.add(sizeKeys.enableKey)
+  for (const k of Object.keys(next)) {
+    if (allowed.has(k)) delete next[k]
+  }
+  for (const k of Object.keys(incoming)) {
+    if (allowed.has(k)) next[k] = incoming[k]
+  }
+  return next
 }

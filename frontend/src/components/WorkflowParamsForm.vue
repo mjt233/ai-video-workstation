@@ -66,7 +66,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import WorkflowSizePicker from './WorkflowSizePicker.vue'
-import { findSizeParamKeys } from '../utils/workflowSize'
+import { findSizeParamKeys, mergeSizeValues } from '../utils/workflowSize'
 import type {
   WorkflowUserParamDeclaration,
   WorkflowUserParamValue,
@@ -111,20 +111,15 @@ const sizeModelValue = computed(() => {
 
 /**
  * 尺寸组件值变化时合并进表单值。
- * 先清除旧的尺寸相关值，再并入组件输出的新值。
+ * 复用纯函数 `mergeSizeValues`：先清除旧的尺寸相关值，
+ * 再并入组件输出中属于已声明尺寸 key 的新值。
  *
  * @param v 组件输出的尺寸值（enable_specified_size/width/height）
  */
 function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
-  const next = { ...values.value }
-  if (sizeKeys.value) {
-    for (const k of [sizeKeys.value.widthKey, sizeKeys.value.heightKey, sizeKeys.value.enableKey]) {
-      if (k) delete next[k]
-    }
-  }
-  Object.assign(next, v)
-  values.value = next
-  emit('update:modelValue', { ...next })
+  if (!sizeKeys.value) return
+  values.value = mergeSizeValues(values.value, sizeKeys.value, v)
+  emit('update:modelValue', { ...values.value })
 }
 
 /**

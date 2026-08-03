@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   computePresetSize,
   findSizeParamKeys,
+  mergeSizeValues,
   resolveSizeMode,
   SIZE_RATIOS,
   SIZE_RESOLUTIONS,
@@ -106,5 +107,37 @@ describe('findSizeParamKeys', () => {
       heightKey: 'height',
       enableKey: undefined,
     })
+  })
+})
+
+describe('mergeSizeValues', () => {
+  const keys = { widthKey: 'width', heightKey: 'height', enableKey: 'enable_specified_size' }
+
+  it('清除旧的尺寸值并并入新值，保留非尺寸参数', () => {
+    const values = {
+      enable_multiple_angles_lora: false,
+      enable_specified_size: true,
+      width: 1920,
+      height: 1080,
+    }
+    expect(mergeSizeValues(values, keys, { enable_specified_size: false })).toEqual({
+      enable_multiple_angles_lora: false,
+      enable_specified_size: false,
+    })
+  })
+
+  it('无 enable 声明时，组件输出的 enable_specified_size 不被并入', () => {
+    const keysNoEnable = { widthKey: 'width', heightKey: 'height' }
+    const values = { width: '', height: '' }
+    expect(mergeSizeValues(values, keysNoEnable, { enable_specified_size: true, width: 100, height: 200 })).toEqual({
+      width: 100,
+      height: 200,
+    })
+  })
+
+  it('不修改入参对象', () => {
+    const values = { width: '', height: '' }
+    mergeSizeValues(values, keys, { enable_specified_size: true, width: 100, height: 200 })
+    expect(values).toEqual({ width: '', height: '' })
   })
 })
