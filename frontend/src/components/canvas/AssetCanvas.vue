@@ -586,6 +586,8 @@ const edgeMenu = reactive({ show: false, x: 0, y: 0 })
  * @param payload Vue Flow 连线右键事件（含事件与连线）
  */
 function onEdgeContextMenu({ event, edge }: EdgeMouseEvent) {
+  // 阻止浏览器默认右键菜单，避免与自定义菜单叠加遮挡
+  event.preventDefault()
   selectedEdgeId.value = edge.id
   contextMenu.show = false
   edgeMenu.show = true
