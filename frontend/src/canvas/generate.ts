@@ -12,6 +12,16 @@ export interface HistoryEntry {
   date: string
 }
 
+/** 生成图片节点的单个输入资产信息（含来源节点，用于预览与拖拽排序） */
+export interface CanvasInputInfo {
+  /** 来源节点 id（排序持久化用） */
+  nodeId: string
+  /** 资产相对路径（预览用） */
+  path: string
+  /** 展示名（文件名） */
+  label: string
+}
+
 /** 读取节点 config 中的历史版本列表（无则返回空数组） */
 export function getHistory(config: NodeConfig): HistoryEntry[] {
   return Array.isArray(config.history) ? (config.history as HistoryEntry[]) : []
@@ -39,24 +49,52 @@ export function getNodeCurrentAssetPath(node: CanvasNodeData | undefined): strin
 }
 
 /**
- * 收集某节点的输入资产路径（按其所有入边连线的顺序）。
+ * 收集某节点的输入资产信息（图片路径 + 来源节点），顺序遵循节点 config.inputOrder；
+ * inputOrder 中未记录的节点按连接顺序排在末尾。
  *
  * @param nodeId 目标节点 id
  * @param connections 全部连线
  * @param nodes 全部节点
+ * @param config 目标节点配置（可选，用于读取 inputOrder 排序）
+ * @returns 输入资产信息数组（仅包含有资产的输入节点）
+ */
+export function collectInputs(
+  nodeId: string,
+  connections: CanvasConnection[],
+  nodes: CanvasNodeData[],
+  config?: NodeConfig,
+): CanvasInputInfo[] {
+  const order: string[] = Array.isArray(config?.inputOrder) ? (config.inputOrder as string[]) : []
+  const list: CanvasInputInfo[] = []
+  for (const c of connections) {
+    if (c.toNodeId !== nodeId) continue
+    const src = nodes.find((n) => n.id === c.fromNodeId)
+    const p = getNodeCurrentAssetPath(src)
+    if (!src || !p) continue
+    list.push({ nodeId: src.id, path: p, label: p.split('/').pop() ?? p })
+  }
+  list.sort((a, b) => {
+    const ia = order.indexOf(a.nodeId)
+    const ib = order.indexOf(b.nodeId)
+    return (ia === -1 ? Number.MAX_SAFE_INTEGER : ia) - (ib === -1 ? Number.MAX_SAFE_INTEGER : ib)
+  })
+  return list
+}
+
+/**
+ * 收集某节点的输入资产路径（顺序遵循节点 config.inputOrder）。
+ *
+ * @param nodeId 目标节点 id
+ * @param connections 全部连线
+ * @param nodes 全部节点
+ * @param config 目标节点配置（可选，用于读取 inputOrder 排序）
  * @returns 输入资产相对路径数组
  */
 export function collectInputPaths(
   nodeId: string,
   connections: CanvasConnection[],
   nodes: CanvasNodeData[],
+  config?: NodeConfig,
 ): string[] {
-  const incoming = connections.filter((c) => c.toNodeId === nodeId)
-  const paths: string[] = []
-  for (const c of incoming) {
-    const src = nodes.find((n) => n.id === c.fromNodeId)
-    const p = getNodeCurrentAssetPath(src)
-    if (p) paths.push(p)
-  }
-  return paths
+  return collectInputs(nodeId, connections, nodes, config).map((i) => i.path)
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { collectInputPaths, getHistory, getNodeCurrentAssetPath } from './generate'
+import { collectInputs, collectInputPaths, getHistory, getNodeCurrentAssetPath } from './generate'
 
 const loader: CanvasNodeData = {
   id: 'l1', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,
@@ -59,5 +59,36 @@ describe('collectInputPaths', () => {
 
   it('无入边返回空数组', () => {
     expect(collectInputPaths('t1', conns, [loader, gen, text])).toEqual([])
+  })
+})
+
+describe('collectInputs / inputOrder 排序', () => {
+  const g2: CanvasNodeData = {
+    id: 'g2', prototypeId: 'image-generate', name: '生成2', x: 0, y: 0, width: 10, height: 10,
+    config: { current: { version: 1, path: 'assert/scene/1/1/canvas/g2/v1.jpg', date: '2026-01-01T00:00:00.000Z' } },
+  }
+  const conns: CanvasConnection[] = [
+    { id: 'c1', fromNodeId: 'l1', fromPortId: 'out', toNodeId: 'g1', toPortId: 'in' },
+    { id: 'c2', fromNodeId: 'g2', fromPortId: 'out', toNodeId: 'g1', toPortId: 'in' },
+  ]
+
+  it('默认按连接顺序返回', () => {
+    const inputs = collectInputs('g1', conns, [loader, g2])
+    expect(inputs.map((i) => i.nodeId)).toEqual(['l1', 'g2'])
+    expect(inputs[0].label).toBe('appearance.jpg')
+  })
+
+  it('遵循 config.inputOrder 排序', () => {
+    const inputs = collectInputs('g1', conns, [loader, g2], { inputOrder: ['g2', 'l1'] })
+    expect(inputs.map((i) => i.nodeId)).toEqual(['g2', 'l1'])
+    expect(collectInputPaths('g1', conns, [loader, g2], { inputOrder: ['g2', 'l1'] })).toEqual([
+      'assert/scene/1/1/canvas/g2/v1.jpg',
+      'assert/character/张三/appearance.jpg',
+    ])
+  })
+
+  it('inputOrder 未出现的节点排在末尾', () => {
+    const inputs = collectInputs('g1', conns, [loader, g2], { inputOrder: ['g2'] })
+    expect(inputs.map((i) => i.nodeId)).toEqual(['g2', 'l1'])
   })
 })

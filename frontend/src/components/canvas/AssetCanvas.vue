@@ -177,7 +177,7 @@
           :is="editorPanel?.editorComponent"
           :project="props.project"
           :node="editorPanel?.node"
-          :input-paths="editorPanel ? inputPathsOf(editorPanel.node.id) : []"
+          :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
           :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
           @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
           @generate="generateNode"
@@ -430,7 +430,7 @@ import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
 import { canConnectNodes } from '../../canvas/connection'
-import { collectInputPaths, getHistory, getNodeCurrentAssetPath } from '../../canvas/generate'
+import { collectInputPaths, collectInputs, getHistory, getNodeCurrentAssetPath, type CanvasInputInfo } from '../../canvas/generate'
 import { buildAutoCanvas, buildShotRefsFromStage, type AutoBuildRef } from '../../canvas/autobuild'
 import { copyFs, readFs, type DirResponse } from '../../api/client'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
@@ -932,7 +932,7 @@ async function generateNode(nodeId: string) {
   const node = nodeMap.value[nodeId]
   if (!node || node.prototypeId !== 'image-generate') return
   gen.clearStatus(nodeId)
-  const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value)
+  const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config)
   gen.setInputPaths(nodeId, paths)
   await gen.generate(node, (config) => {
     store.updateNode(nodeId, { config })
@@ -949,9 +949,10 @@ function isNodeRunning(nodeId: string): boolean {
   return statusByNode.value[nodeId]?.status === 'running'
 }
 
-/** 节点当前输入资产路径（供编辑器展示） */
-function inputPathsOf(nodeId: string): string[] {
-  return collectInputPaths(nodeId, store.connections.value, store.nodes.value)
+/** 节点当前输入资产信息（含来源节点，供编辑器预览/拖拽排序） */
+function inputsOf(nodeId: string): CanvasInputInfo[] {
+  const node = nodeMap.value[nodeId]
+  return collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config)
 }
 
 /** 上游更新角标：生成节点任一输入节点资产比本节点新（current.date 更大）则显示 */
