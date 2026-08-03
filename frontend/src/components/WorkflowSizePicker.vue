@@ -200,11 +200,12 @@ function setManualHeight(v: unknown) {
  * 读取失败或无效时置 null（「使用项目尺寸」模式将无法输出尺寸）。
  * 加载完成后若用户尚未手动操作，重跑一次回显推断，
  * 使「保存值等于项目尺寸」的初始场景能正确显示为 project 模式。
+ * 用户已手动操作过则不再重推断，避免覆盖其当前选择（hasInteracted 守卫）。
  */
 async function loadProjectSize() {
   if (!props.project) {
     projectSize.value = null
-    applyEcho(true)
+    if (!hasInteracted.value) applyEcho(true)
     return
   }
   try {
@@ -214,7 +215,7 @@ async function loadProjectSize() {
       const h = Math.round(Number((data as { height: unknown }).height))
       if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
         projectSize.value = { width: w, height: h }
-        applyEcho(true)
+        if (!hasInteracted.value) applyEcho(true)
         return
       }
     }
@@ -222,7 +223,7 @@ async function loadProjectSize() {
     // project.json 缺失或无效
   }
   projectSize.value = null
-  applyEcho(true)
+  if (!hasInteracted.value) applyEcho(true)
 }
 
 // 项目变化时重新读取项目尺寸（新项目视为全新的尺寸上下文，重置交互标记）
