@@ -1,15 +1,5 @@
 <template>
   <div class="image-generate-editor">
-    <v-text-field
-      :model-value="nodeName"
-      label="节点名称"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="(v) => emit('update:config', { name: v })"
-    />
-
     <v-textarea
       :model-value="prompt"
       label="提示词 Prompt"
@@ -125,7 +115,6 @@ const emit = defineEmits<{
 
 const workflows = ref<WorkflowInfo[]>([])
 
-const nodeName = computed(() => props.node.name)
 const prompt = computed(() => (typeof props.node.config.prompt === 'string' ? props.node.config.prompt : ''))
 const workflowId = computed(() => {
   const explicit = props.node.config.workflowId

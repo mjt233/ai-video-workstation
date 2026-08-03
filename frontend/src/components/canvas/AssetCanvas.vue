@@ -103,6 +103,7 @@
         @edges-change="onEdgesChange"
         @node-click="onNodeClick"
         @edge-click="onEdgeClick"
+        @edge-context-menu="onEdgeContextMenu"
         @node-drag-start="onNodeDragStart"
         @node-drag-stop="onNodeDragStop"
         @pane-click="onPaneClick"
@@ -115,11 +116,27 @@
             :class="{ 'canvas-node--selected': selected }"
             @contextmenu.prevent="openContextMenu($event, id)"
           >
-            <!-- 节点名称头部 -->
+            <!-- 节点名称头部（双击名称进入内联编辑） -->
             <div class="canvas-node__header">
-              <span class="text-caption font-weight-medium canvas-node__name">
+              <span
+                v-if="renamingNodeId !== id"
+                class="text-caption font-weight-medium canvas-node__name"
+                title="双击重命名"
+                @dblclick.stop="startRename(id)"
+              >
                 {{ nodeMap[id].name }}
               </span>
+              <input
+                v-else
+                ref="nameInputEl"
+                v-model="renameInput"
+                class="canvas-node__name-input"
+                @click.stop
+                @dblclick.stop
+                @keyup.enter="commitRename(id)"
+                @keyup.esc="cancelRename"
+                @blur="commitRename(id)"
+              >
             </div>
             <Handle
               v-if="protoOf(id)?.inputPorts.length"
@@ -203,6 +220,19 @@
           历史
         </div>
         <div
+          v-if="contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
+          class="canvas-context-menu__item"
+          @click="contextDisconnect"
+        >
+          <v-icon
+            size="small"
+            class="mr-2"
+          >
+            mdi-link-off
+          </v-icon>
+          断开连接
+        </div>
+        <div
           class="canvas-context-menu__item"
           @click="contextRename"
         >
@@ -237,6 +267,26 @@
             mdi-delete-outline
           </v-icon>
           删除
+        </div>
+      </div>
+
+      <!-- 连线右键菜单（断开连接） -->
+      <div
+        v-if="edgeMenu.show"
+        class="canvas-context-menu"
+        :style="{ left: `${edgeMenu.x}px`, top: `${edgeMenu.y}px` }"
+      >
+        <div
+          class="canvas-context-menu__item canvas-context-menu__item--danger"
+          @click="disconnectEdge"
+        >
+          <v-icon
+            size="small"
+            class="mr-2"
+          >
+            mdi-link-off
+          </v-icon>
+          断开连接
         </div>
       </div>
     </div>
@@ -285,42 +335,7 @@
       </v-card>
     </v-dialog>
 
-    <!-- 重命名对话框 -->
-    <v-dialog
-      v-model="renameDialog.show"
-      max-width="420"
-    >
-      <v-card>
-        <v-card-title class="text-body-1">
-          重命名节点
-        </v-card-title>
-        <v-card-text>
-          <v-text-field
-            v-model="renameDialog.name"
-            label="节点名称"
-            density="compact"
-            variant="outlined"
-            hide-details
-            @keyup.enter="doRename"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn
-            variant="text"
-            @click="renameDialog.show = false"
-          >
-            取消
-          </v-btn>
-          <v-btn
-            color="primary"
-            @click="doRename"
-          >
-            确定
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <!-- 重命名对话框：已由节点名称双击内联编辑取代 -->
 
     <!-- 版本历史对话框 -->
     <v-dialog
@@ -394,7 +409,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   VueFlow,
   useVueFlow,
@@ -557,9 +572,35 @@ function onEdgesChange(changes: EdgeChange[]) {
   }
 }
 
-/** 记录当前选中的连线（供 Delete 键删除） */
+/** 记录当前选中的连线（供 Delete 键/连线右键菜单断开） */
 function onEdgeClick({ edge }: EdgeMouseEvent) {
   selectedEdgeId.value = edge.id
+}
+
+/** 连线右键菜单状态（断开连接） */
+const edgeMenu = reactive({ show: false, x: 0, y: 0 })
+
+/**
+ * 打开连线右键菜单（相对画布容器定位）。
+ *
+ * @param payload Vue Flow 连线右键事件（含事件与连线）
+ */
+function onEdgeContextMenu({ event, edge }: EdgeMouseEvent) {
+  selectedEdgeId.value = edge.id
+  contextMenu.show = false
+  edgeMenu.show = true
+  const rect = flowEl.value?.getBoundingClientRect()
+  const clientX = 'clientX' in event ? event.clientX : 0
+  const clientY = 'clientY' in event ? event.clientY : 0
+  edgeMenu.x = Math.round(clientX - (rect?.left ?? 0))
+  edgeMenu.y = Math.round(clientY - (rect?.top ?? 0))
+}
+
+/** 菜单：断开选中的连线 */
+function disconnectEdge() {
+  const id = selectedEdgeId.value
+  edgeMenu.show = false
+  if (id) store.disconnect(id)
 }
 
 // ── 选择与删除 ──────────────────────────────────────────
@@ -596,13 +637,15 @@ const flowHeight = ref(0)
 const flowWidth = ref(0)
 let panelResizeObserver: ResizeObserver | null = null
 
-/** 配置面板定位：节点正下方（随平移/缩放联动）；若超出画布可视区底部则翻转到节点上方 */
+/** 配置面板定位：与节点水平居中对称（节点本体位于面板上方中间），随平移/缩放联动 */
 const editorPanelStyle = computed(() => {
   const node = selectedNode.value
   if (!node) return null
   const vp = viewport.value
-  const left = node.x * vp.zoom + vp.x
   const width = Math.max(EDITOR_PANEL_WIDTH * vp.zoom, node.width * vp.zoom)
+  // 面板水平中心 = 节点水平中心，保证节点在面板上方正中
+  const nodeCenterX = (node.x + node.width / 2) * vp.zoom + vp.x
+  const left = nodeCenterX - width / 2
   const gap = EDITOR_PANEL_GAP * vp.zoom
   const belowTop = (node.y + node.height) * vp.zoom + vp.y + gap
   // 优先放在节点下方；若底部超出可视区（且面板高度已知），则放到节点上方
@@ -626,6 +669,7 @@ function onNodeClick({ node }: NodeMouseEvent) {
   suppressEditor.value = false
   selectedNodeId.value = node.id
   contextMenu.show = false
+  edgeMenu.show = false
 }
 
 /** 节点开始拖拽：抑制配置面板显示（仅点击节点才显示配置） */
@@ -668,6 +712,7 @@ const contextMenuNode = computed(() => (contextMenu.nodeId ? nodeMap.value[conte
 function openContextMenu(event: MouseEvent, nodeId: string) {
   selectedNodeId.value = nodeId
   contextMenu.nodeId = nodeId
+  edgeMenu.show = false
   const rect = flowEl.value?.getBoundingClientRect()
   contextMenu.x = Math.round(event.clientX - (rect?.left ?? 0))
   contextMenu.y = Math.round(event.clientY - (rect?.top ?? 0))
@@ -688,11 +733,26 @@ function contextHistory() {
   if (id) openHistory(id)
 }
 
-/** 菜单：重命名 */
+/** 菜单：重命名（双击节点名称也可进入内联编辑） */
 function contextRename() {
   const id = contextMenu.nodeId
   contextMenu.show = false
-  if (id) openRename(id)
+  if (id) startRename(id)
+}
+
+/** 节点是否关联了连线（驱动右键菜单「断开连接」显隐） */
+function nodeHasConnections(nodeId: string): boolean {
+  return store.connections.value.some((c) => c.fromNodeId === nodeId || c.toNodeId === nodeId)
+}
+
+/** 菜单：断开节点的所有连接 */
+function contextDisconnect() {
+  const id = contextMenu.nodeId
+  contextMenu.show = false
+  if (!id) return
+  for (const c of store.connections.value.filter((x) => x.fromNodeId === id || x.toNodeId === id)) {
+    store.disconnect(c.id)
+  }
 }
 
 /** 菜单：复制 */
@@ -751,6 +811,8 @@ function onKeydown(e: KeyboardEvent) {
   }
   if (e.key === 'Escape') {
     contextMenu.show = false
+    edgeMenu.show = false
+    renamingNodeId.value = ''
     return
   }
   if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
@@ -783,6 +845,7 @@ function addNodeAt(prototypeId: string) {
 /** 空白处点击：单击关闭右键菜单，双击打开添加节点对话框 */
 function onPaneClick(event: MouseEvent) {
   contextMenu.show = false
+  edgeMenu.show = false
   suppressEditor.value = false
   selectedNodeId.value = ''
   selectedEdgeId.value = ''
@@ -792,25 +855,43 @@ function onPaneClick(event: MouseEvent) {
   }
 }
 
-// ── 重命名 ──────────────────────────────────────────────
+// ── 节点名称内联重命名（双击节点名称编辑）──────────────────
 
-const renameDialog = reactive({ show: false, nodeId: '', name: '' })
+/** 正在内联编辑名称的节点 id（空表示未在编辑） */
+const renamingNodeId = ref('')
+/** 内联编辑输入框的临时值 */
+const renameInput = ref('')
+/** 内联编辑输入框 DOM（用于聚焦与全选） */
+const nameInputEl = ref<HTMLInputElement | null>(null)
 
-/** 打开重命名对话框 */
-function openRename(nodeId: string) {
-  const node = nodeMap.value[nodeId]
-  if (!node) return
-  renameDialog.nodeId = nodeId
-  renameDialog.name = node.name
-  renameDialog.show = true
+/**
+ * 进入节点名称内联编辑模式（双击节点名称触发）。
+ *
+ * @param nodeId 节点 id
+ */
+async function startRename(nodeId: string) {
+  renamingNodeId.value = nodeId
+  renameInput.value = nodeMap.value[nodeId]?.name ?? ''
+  await nextTick()
+  nameInputEl.value?.focus()
+  nameInputEl.value?.select()
 }
 
-/** 提交重命名 */
-function doRename() {
-  const name = renameDialog.name.trim()
-  if (!name || !renameDialog.nodeId) return
-  store.updateNode(renameDialog.nodeId, { name })
-  renameDialog.show = false
+/**
+ * 提交内联重命名（回车或失焦触发）；空名则放弃修改。
+ *
+ * @param nodeId 节点 id
+ */
+function commitRename(nodeId: string) {
+  if (renamingNodeId.value !== nodeId) return
+  const name = renameInput.value.trim()
+  if (name) store.updateNode(nodeId, { name })
+  renamingNodeId.value = ''
+}
+
+/** 取消内联重命名（Esc 触发） */
+function cancelRename() {
+  renamingNodeId.value = ''
 }
 
 // ── 版本历史 ────────────────────────────────────────────
@@ -1139,6 +1220,20 @@ watch([panelEl, flowEl], ([panel, flow]) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: text;
+}
+
+.canvas-node__name-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  line-height: 1.4;
+  font-family: inherit;
+  color: inherit;
+  border: 1px solid rgb(25, 118, 210);
+  border-radius: 3px;
+  outline: none;
+  padding: 0 2px;
 }
 
 .canvas-node__body {
