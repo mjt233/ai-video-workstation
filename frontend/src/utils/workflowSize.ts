@@ -111,10 +111,10 @@ export function resolveSizeMode(input: SizeEchoInput): SizeMode {
   }
   const ratio = w / h
   const matchedRatio = SIZE_RATIOS.find((r) => Math.abs(r.ratio - ratio) < 0.01)
+  // 分辨率档基准可落在宽或高：P 档横屏基准为高度、竖屏基准为宽度；K 档基准恒为宽度。
+  // 各档 base 值唯一（360/720/1080/2560/3840/7680），用“任一维等于 base”即可无歧义匹配。
   const matchedRes = SIZE_RESOLUTIONS.find(
-    (res) =>
-      (res.baseOn === 'height' && res.base === h) ||
-      (res.baseOn === 'width' && res.base === w),
+    (res) => res.base === w || res.base === h,
   )
   if (matchedRatio && matchedRes) return 'preset'
   return 'manual'

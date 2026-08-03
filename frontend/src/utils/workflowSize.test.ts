@@ -66,6 +66,14 @@ describe('resolveSizeMode', () => {
     expect(resolveSizeMode({ enableSpecifiedSize: true, width: 1920, height: 1080 })).toBe('preset')
   })
 
+  it('启用且竖屏宽高匹配预设（9:16+1080P=1080×1920）→ preset', () => {
+    expect(resolveSizeMode({ enableSpecifiedSize: true, width: 1080, height: 1920 })).toBe('preset')
+  })
+
+  it('启用且 K 档宽高匹配预设（16:9+4K=3840×2160）→ preset', () => {
+    expect(resolveSizeMode({ enableSpecifiedSize: true, width: 3840, height: 2160 })).toBe('preset')
+  })
+
   it('启用但不匹配任何预设 → manual', () => {
     expect(resolveSizeMode({ enableSpecifiedSize: true, width: 1234, height: 567 })).toBe('manual')
   })

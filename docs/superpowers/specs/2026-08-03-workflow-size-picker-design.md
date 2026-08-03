@@ -14,7 +14,7 @@ ComfyUI Easy Bridge 图片编辑工作流 `qwen-edit-2509` 新增了 3 个自定
 
 已确认的产品细节：
 
-- 分辨率换算：P 档（360P/720P/1080P）按**高度**为基准；K 档（2K/4K/8K）按**宽度**为基准；另一维按所选比例换算。
+- 分辨率换算：P 档（360P/720P/1080P）基准落在**短边**（横屏为高度、竖屏为宽度）；K 档（2K/4K/8K）按**宽度**为基准；另一维按所选比例换算（已确认：9:16 + 1080P → 1080×1920）。
 - 「使用项目尺寸」：读取 `design/{project}/project.json` 的 `width`/`height` 作为输出尺寸（`enable_specified_size=true`）。
 - 组件默认模式：**不指定**。
 - 「手动填写」：宽高两个输入框独立填写，互不联动。
@@ -47,7 +47,7 @@ height?: string;
 ```typescript
 params: [
   { key: 'enable_multiple_angles_lora', /* 已有，不变 */ },
-  { key: 'enable_specified_size', name: '启用指定输出尺寸', defaultValue: false, type: 'boolean' },
+  { key: 'enable_specified_size', name: '指定输出尺寸', defaultValue: false, type: 'boolean' },
   { key: 'width', name: '输出宽度', defaultValue: '', type: 'integer' },
   { key: 'height', name: '输出高度', defaultValue: '', type: 'integer' },
 ]
@@ -117,7 +117,7 @@ projectSize: { width: number; height: number } | null
 | `manual`（手动填写） | `{ enable_specified_size: true, width: manualWidth, height: manualHeight }` |
 | `project`（使用项目尺寸） | `{ enable_specified_size: true, width: projectSize.width, height: projectSize.height }` |
 
-**换算规则**（P 档按高度、K 档按宽度）：
+**换算规则**（P 档基准落在短边、K 档按宽度）：
 
 | 分辨率 | 基准 | 值 |
 |---|---|---|
@@ -128,8 +128,9 @@ projectSize: { width: number; height: number } | null
 | 4K | 宽 | 3840 |
 | 8K | 宽 | 7680 |
 
-- 高度基准：`height = 基准`，`width = round(height × ratio)`（如 16:9 + 1080P → 1920×1080）
-- 宽度基准：`width = 基准`，`height = round(width ÷ ratio)`（如 9:16 + 4K → 3840×6832）
+- P 档横屏（比例 ≥ 1）：`height = 基准`，`width = round(height × ratio)`（如 16:9 + 1080P → 1920×1080）
+- P 档竖屏（比例 < 1）：`width = 基准`，`height = round(width ÷ ratio)`（如 9:16 + 1080P → 1080×1920）
+- K 档：`width = 基准`，`height = round(width ÷ ratio)`（如 16:9 + 4K → 3840×2160；9:16 + 4K → 3840×6827）
 
 **「使用项目尺寸」**：组件挂载及 `project` 变化时，用 `readFs(project, 'project.json')` 读取 `width`/`height`，取整后存入 `projectSize`；读取失败时置 `null` 并回退为 `none`（或提示）。
 
