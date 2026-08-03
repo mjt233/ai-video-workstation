@@ -184,7 +184,7 @@
             @generate="generateNode"
             @interrupt="onInterrupt"
             @open-history="openHistory"
-            @set-as-scene="setAsScene"
+            @set-as-scene="openSetAsScene"
             @open-picker="openAssetPicker"
           />
         </div>
@@ -391,6 +391,102 @@
       </v-card>
     </v-dialog>
 
+    <!-- 设为分镜场景图对话框 -->
+    <v-dialog
+      v-model="sceneDialog.show"
+      max-width="620"
+    >
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon
+            class="mr-2"
+            size="small"
+          >
+            mdi-image-multiple
+          </v-icon>
+          <span>设为分镜场景图</span>
+        </v-card-title>
+        <v-card-text>
+          <div
+            v-if="sceneDialog.loading"
+            class="text-grey text-body-2"
+          >
+            加载中…
+          </div>
+          <template v-else>
+            <div class="text-caption text-medium-emphasis mb-2">
+              选择应用到哪个分镜场景（{{ sceneDialog.frames.length }}）：
+            </div>
+            <div
+              v-if="sceneDialog.frames.length"
+              class="d-flex flex-wrap ga-2 mb-2"
+            >
+              <div
+                v-for="f in sceneDialog.frames"
+                :key="f.index"
+                class="scene-frame-option"
+                @click="applySetAsScene(f)"
+              >
+                <div class="scene-frame-option__img-wrap">
+                  <img
+                    v-if="!f.broken"
+                    :src="f.imageUrl"
+                    class="scene-frame-option__img"
+                    @error="f.broken = true"
+                  >
+                  <div
+                    v-else
+                    class="scene-frame-option__img scene-frame-option__img--empty"
+                  >
+                    <v-icon icon="mdi-image-off-outline" />
+                  </div>
+                </div>
+                <div
+                  class="scene-frame-option__label"
+                  :title="f.label"
+                >
+                  场景{{ f.index + 1 }}：{{ f.label }}
+                </div>
+              </div>
+            </div>
+            <div
+              v-else
+              class="text-grey text-body-2 mb-2"
+            >
+              当前分镜还没有场景图定义（stage.json 为空）
+            </div>
+            <div class="d-flex align-center ga-2">
+              <v-btn
+                size="small"
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-plus"
+                :disabled="!sceneDialog.canAdd"
+                @click="applySetAsScene(null)"
+              >
+                新增场景图
+              </v-btn>
+              <span
+                v-if="!sceneDialog.canAdd"
+                class="text-caption text-grey"
+              >
+                无可用的基础场景引用，可先在「场景图片」页签添加场景帧
+              </span>
+            </div>
+          </template>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="sceneDialog.show = false"
+          >
+            取消
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- 资产选择器（加载图片节点绑定资产） -->
     <AssetPickerDialog
       v-model="picker.show"
@@ -436,6 +532,7 @@ import { canConnectNodes } from '../../canvas/connection'
 import { collectInputPaths, collectInputs, getHistory, getNodeCurrentAssetPath, type CanvasInputInfo } from '../../canvas/generate'
 import { buildAutoCanvas, buildShotRefsFromStage, type AutoBuildRef } from '../../canvas/autobuild'
 import { copyFs, readFs, type DirResponse } from '../../api/client'
+import { createSceneStageFrame } from '../../api/assets'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { confirm } from '../../utils/confirm'
@@ -628,9 +725,11 @@ const editorPanel = computed(() => {
   return proto?.editorComponent ? { node, editorComponent: proto.editorComponent } : null
 })
 
-/** 配置面板固定宽度（像素，按画布坐标系，随缩放缩放），窄节点时也保持足够宽度 */
+/** 配置面板固定宽度（像素，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_WIDTH = 400
-/** 配置面板与节点底部之间的垂直间距（像素，按画布坐标系） */
+/** 生成图片节点配置面板固定宽度（更宽，屏幕坐标，不随缩放变化） */
+const EDITOR_PANEL_WIDTH_GENERATE = 500
+/** 配置面板与节点底部之间的垂直间距（像素，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_GAP = 12
 
 /** 配置面板 DOM（用于测量实际高度以做边界钳制） */
@@ -644,16 +743,16 @@ const flowHeight = ref(0)
 const flowWidth = ref(0)
 let panelResizeObserver: ResizeObserver | null = null
 
-/** 配置面板定位：与节点水平居中对称（节点本体位于面板上方中间），随平移/缩放联动 */
+/** 配置面板定位：与节点水平居中对称（节点本体位于面板上方中间）；大小固定，不随缩放变化 */
 const editorPanelStyle = computed(() => {
   const node = selectedNode.value
   if (!node) return lastPanelStyle.value
   const vp = viewport.value
-  const width = Math.max(EDITOR_PANEL_WIDTH * vp.zoom, node.width * vp.zoom)
+  const width = node.prototypeId === 'image-generate' ? EDITOR_PANEL_WIDTH_GENERATE : EDITOR_PANEL_WIDTH
   // 面板水平中心 = 节点水平中心，保证节点在面板上方正中
   const nodeCenterX = (node.x + node.width / 2) * vp.zoom + vp.x
   const left = nodeCenterX - width / 2
-  const gap = EDITOR_PANEL_GAP * vp.zoom
+  const gap = EDITOR_PANEL_GAP
   const belowTop = (node.y + node.height) * vp.zoom + vp.y + gap
   // 优先放在节点下方；若底部超出可视区（且面板高度已知），则放到节点上方
   let top = belowTop
@@ -983,22 +1082,142 @@ function isUpstreamUpdated(nodeId: string): boolean {
 
 // ── 设为分镜场景图 ──────────────────────────────────────
 
+/** 分镜场景帧选项（设为分镜场景图对话框） */
+interface SceneFrameOption {
+  index: number
+  label: string
+  imageUrl: string
+  broken: boolean
+}
+
+/** 设为分镜场景图对话框状态 */
+const sceneDialog = reactive<{
+  show: boolean
+  nodeId: string
+  loading: boolean
+  frames: SceneFrameOption[]
+  canAdd: boolean
+  newFrameBody: { 基础场景: string; 登场角色: string[]; prompt: string } | null
+}>({
+  show: false,
+  nodeId: '',
+  loading: false,
+  frames: [],
+  canAdd: false,
+  newFrameBody: null,
+})
+
 /**
- * 把生成节点的当前产物复制为分镜场景图（assert/scene/{ep}/{shot}/stage/0.jpg）。
+ * 从生成节点的输入推导新场景帧的 stage.json 定义（无可用基础场景时返回 null）。
+ * 基础场景优先取输入图中的 `assert/stage/{场景}/{标签}`，否则复用现有帧的基础场景。
+ *
+ * @param node 生成节点数据
+ * @param stageDefs 现有场景帧定义
+ * @returns 新帧定义或 null
+ */
+function deriveStageFrameBody(
+  node: CanvasNodeData,
+  stageDefs: { 基础场景?: string }[],
+): { 基础场景: string; 登场角色: string[]; prompt: string } | null {
+  const inputs = inputsOf(node.id)
+  let baseScene = ''
+  const characters: string[] = []
+  for (const inp of inputs) {
+    if (inp.path.startsWith('assert/stage/')) {
+      const rest = inp.path.slice('assert/stage/'.length).replace(/\.(jpg|jpeg|png|webp)$/i, '')
+      const idx = rest.lastIndexOf('/')
+      if (idx > 0) {
+        const name = rest.slice(0, idx)
+        const label = rest.slice(idx + 1)
+        if (name && label && !baseScene) baseScene = `${name}/${label}`
+      }
+    } else if (inp.path.startsWith('assert/character/')) {
+      const name = inp.path.slice('assert/character/'.length).split('/')[0]
+      if (name && !characters.includes(name)) characters.push(name)
+    }
+  }
+  if (!baseScene) {
+    const first = stageDefs.find((d) => d.基础场景 && d.基础场景.trim())
+    baseScene = first?.基础场景?.trim() ?? ''
+  }
+  if (!baseScene) return null
+  const prompt = typeof node.config.prompt === 'string' ? node.config.prompt : ''
+  // 有登场角色时必须提供 prompt，否则清空角色（服务端校验约束）
+  const chars = characters.length > 0 && !prompt.trim() ? [] : characters
+  return { 基础场景: baseScene, 登场角色: chars, prompt }
+}
+
+/**
+ * 打开「设为分镜场景图」对话框：列出分镜现有场景帧供选择覆盖，或新增场景图。
  *
  * @param nodeId 生成节点 id
  */
-async function setAsScene(nodeId: string) {
+async function openSetAsScene(nodeId: string) {
   if (target.value.kind !== 'scene') return
   const node = nodeMap.value[nodeId]
-  const cur = node?.config.current as { path?: string } | undefined
-  if (!node || !cur?.path) return
-  const dest = `assert/scene/${target.value.episode}/${target.value.shot}/stage/0.jpg`
+  if (!node) return
+  sceneDialog.nodeId = nodeId
+  sceneDialog.show = true
+  sceneDialog.loading = true
+  sceneDialog.frames = []
+  sceneDialog.canAdd = false
+  sceneDialog.newFrameBody = null
   try {
-    await copyFs(props.project, cur.path, dest)
+    const raw = await readFs(props.project, `prompt/scene/${target.value.episode}/${target.value.shot}/stage.json`)
+    let defs: { 基础场景?: string; prompt?: string }[] = []
+    if (Array.isArray(raw)) {
+      defs = raw as { 基础场景?: string; prompt?: string }[]
+    } else if (typeof raw === 'string' && raw.trim()) {
+      const parsed = JSON.parse(raw) as unknown
+      if (Array.isArray(parsed)) defs = parsed as { 基础场景?: string; prompt?: string }[]
+    }
+    const ts = Date.now()
+    sceneDialog.frames = defs.map((d, i) => {
+      const label = d.基础场景 || (typeof d.prompt === 'string' && d.prompt ? d.prompt : `分镜场景图 ${i + 1}`)
+      return {
+        index: i,
+        label,
+        imageUrl: `/api/fs/${props.project}/assert/scene/${target.value.episode}/${target.value.shot}/stage/${i}.jpg?t=${ts}`,
+        broken: false,
+      }
+    })
+    sceneDialog.newFrameBody = deriveStageFrameBody(node, defs)
+    sceneDialog.canAdd = sceneDialog.newFrameBody !== null
+  } catch {
+    // stage.json 不存在：按空帧处理，仅可新增（若有可用基础场景）
+    sceneDialog.newFrameBody = deriveStageFrameBody(node, [])
+    sceneDialog.canAdd = sceneDialog.newFrameBody !== null
+  } finally {
+    sceneDialog.loading = false
+  }
+}
+
+/**
+ * 应用「设为分镜场景图」：覆盖选中帧，或新增场景图帧并复制当前产物。
+ *
+ * @param frame 要覆盖的帧；null 表示新增场景图
+ */
+async function applySetAsScene(frame: SceneFrameOption | null) {
+  const node = nodeMap.value[sceneDialog.nodeId]
+  const cur = node?.config.current as { path?: string } | undefined
+  if (!node || !cur?.path) {
+    sceneDialog.show = false
+    return
+  }
+  const ep = target.value.episode
+  const shot = target.value.shot
+  try {
+    if (frame) {
+      await copyFs(props.project, cur.path, `assert/scene/${ep}/${shot}/stage/${frame.index}.jpg`)
+    } else if (sceneDialog.newFrameBody) {
+      const res = await createSceneStageFrame(props.project, ep ?? '', shot ?? '', sceneDialog.newFrameBody)
+      await copyFs(props.project, cur.path, `assert/scene/${ep}/${shot}/stage/${res.index}.jpg`)
+    }
     showSnackbar('已设为分镜场景图', 'success')
   } catch (e) {
     showSnackbar(e instanceof Error ? e.message : '设为分镜场景图失败', 'error')
+  } finally {
+    sceneDialog.show = false
   }
 }
 
@@ -1322,5 +1541,47 @@ watch([panelEl, flowEl], ([panel, flow]) => {
 
 .canvas-context-menu__item--danger:hover {
   background: rgba(176, 0, 32, 0.08);
+}
+
+.scene-frame-option {
+  width: 150px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.scene-frame-option:hover {
+  border-color: rgb(25, 118, 210);
+  box-shadow: 0 0 0 1px rgb(25, 118, 210);
+}
+
+.scene-frame-option__img-wrap {
+  height: 100px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.scene-frame-option__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.scene-frame-option__img--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.38);
+}
+
+.scene-frame-option__label {
+  padding: 4px 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: #fff;
 }
 </style>
