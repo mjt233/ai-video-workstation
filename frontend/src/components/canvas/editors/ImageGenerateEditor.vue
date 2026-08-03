@@ -1,29 +1,5 @@
 <template>
   <div class="image-generate-editor">
-    <v-textarea
-      :model-value="prompt"
-      label="提示词 Prompt"
-      rows="3"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="(v) => emit('update:config', { prompt: v })"
-    />
-
-    <v-select
-      :model-value="workflowId"
-      :items="workflowItems"
-      item-title="label"
-      item-value="id"
-      label="工作流"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="(v) => emit('update:config', { workflowId: v, workflowImpl: undefined, workflowParams: {} })"
-    />
-
     <div class="text-caption text-medium-emphasis mb-1">
       输入图（{{ inputs.length }}）
       <span
@@ -43,7 +19,7 @@
       <v-tooltip
         v-for="(input, i) in inputs"
         :key="input.nodeId"
-        location="right"
+        location="top"
         open-delay="250"
       >
         <template #activator="{ props: tp }">
@@ -81,6 +57,30 @@
     >
       无输入图，默认使用文生图工作流
     </div>
+
+    <v-textarea
+      :model-value="prompt"
+      label="提示词 Prompt"
+      rows="3"
+      density="compact"
+      variant="outlined"
+      hide-details
+      class="mb-2"
+      @update:model-value="(v) => emit('update:config', { prompt: v })"
+    />
+
+    <v-select
+      :model-value="workflowId"
+      :items="workflowItems"
+      item-title="label"
+      item-value="id"
+      label="工作流"
+      density="compact"
+      variant="outlined"
+      hide-details
+      class="mb-2"
+      @update:model-value="(v) => emit('update:config', { workflowId: v, workflowImpl: undefined, workflowParams: {} })"
+    />
 
     <WorkflowParamsForm
       v-model="workflowParams"
