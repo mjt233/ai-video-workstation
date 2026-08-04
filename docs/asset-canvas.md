@@ -22,7 +22,7 @@
 | 画布类型 | 定义文件 | 生成产物根目录 |
 |----------|----------|----------------|
 | 分镜画布 | `prompt/scene/{集数}/{分镜}/canvas.json` | `assert/scene/{集数}/{分镜}/canvas/` |
-| 场景画布 | `prompt/stage/{场景名}/canvas.json` | `assert/stage/{场景名}/canvas/` |
+| 场景画布 | `prompt/stage/{场景名}/canvas/{子场景标签}.json` | `assert/stage/{场景名}/canvas/{子场景标签}/` |
 
 ### 2.2 `canvas.json` 结构（`frontend/src/canvas/types.ts`）
 
@@ -150,8 +150,10 @@
 
 ## 9. 自动搭画布（`frontend/src/canvas/autobuild.ts`）
 
-- 工具栏「自动搭画布」：根据分镜 `stage.json`（或场景下子场景 `.md` 列表）收集引用 → 生成「加载图片锚点 + 生成图片」结构 → 幂等应用（不重复添加已有引用）。
-- 生成节点 prompt 初稿：分镜画布取 `overview.json.visual`；场景画布取第一个子场景 md 内容（`mergePrompt` 保留已有内容）。
+- 工具栏「自动搭画布」：
+  - **分镜画布**：根据分镜 `stage.json` 收集引用（场景/角色/变体/custom，`prev` 异步解析为上一分镜最后一帧）→ 生成「加载图片锚点 + 生成图片」结构 → 幂等应用（不重复添加已有引用）。引用解析规则与 `server` 的 `resolveStageAssetPath` / `resolveCharacterAssetPath` 对齐（见 `resolveShotStageRef` / `resolveCharacterRef`）。
+  - **场景画布（按子场景）**：读 `prompt/stage/{场景}/variants/{标签}/` 下全部 `{id}.json` 变体元数据 → `buildSubSceneAutoCanvas` 搭建「基础加载图片（所有根变体共用）+ 每个变体一个生成图片（prompt = desc，`config.autoRef` 幂等）+ 变体 refs 加载图片（同资产共享）」→ 幂等应用（已存在节点只补缺连线）。
+- 生成节点 prompt：分镜画布取 `overview.json.visual`；场景画布各变体取各自 `desc`。
 
 ---
 
@@ -162,6 +164,7 @@
 - 点击某帧 → `copyFs(current.path → assert/scene/{ep}/{shot}/stage/{i}.jpg)` 覆盖该帧。
 - 「新增场景图」→ `createSceneStageFrame`（`api/assets.ts`）追加帧并复制图片到新索引；新帧定义由 `deriveStageFrameBody` 从生成节点输入推导：
   - `assert/stage/{场景}/{标签}` 输入 → `基础场景 = 场景/标签`
+  - `assert/stage/{场景}/variants/{标签}/{变体}.jpg` 输入 → `基础场景 = 场景/标签@变体`
   - `assert/character/{角色}` 输入 → `登场角色 = [角色]`
   - 节点 `config.prompt` → `prompt`
   - 无基础场景时复用现有帧第一个的 `基础场景`，仍无则禁用「新增」并提示。
@@ -192,6 +195,7 @@ frontend/src/
 │   ├── api.ts                    # loadCanvas / saveCanvas
 │   ├── generate.ts               # 输入收集（collectInputs/collectInputPaths）、历史、资产读取
 │   ├── autobuild.ts              # 自动搭画布
+│   │   # 注：autobuild.ts 另含 resolveShotStageRef / resolveCharacterRef / deriveStageRefFromAssetPath / buildSubSceneAutoCanvas
 │   ├── useCanvasStore.ts         # 状态：加载/保存(防抖 800ms)/增删改查/撤销重做/剪贴板/switchTarget
 │   ├── useCanvasGeneration.ts    # 生成：跑工作流/轮询/中断/历史回写/switchTarget
 │   └── *.test.ts                 # 单元测试（共 70+ 用例）

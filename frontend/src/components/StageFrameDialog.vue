@@ -201,7 +201,7 @@ import {
   createSceneStageFrame,
   updateSceneStageFrame,
 } from '../api/assets'
-import AssetPickerDialog from './AssetPickerDialog.vue'
+import AssetPickerDialog from './asset-picker/AssetPickerDialog.vue'
 
 /** 引用同集上一分镜最后场景图的固定关键字。 */
 const PREV_STAGE_REF = 'prev'

@@ -18,8 +18,8 @@ const validRaw = JSON.stringify({
 })
 
 describe('canvasRelPath', () => {
-  it('场景画布路径', () => {
-    expect(canvasRelPath({ kind: 'stage', stage: '街角' })).toBe('prompt/stage/街角/canvas.json')
+  it('场景画布路径（含子场景标签）', () => {
+    expect(canvasRelPath({ kind: 'stage', stage: '街角', label: '白天' })).toBe('prompt/stage/街角/canvas/白天.json')
   })
 
   it('分镜画布路径', () => {
@@ -28,6 +28,10 @@ describe('canvasRelPath', () => {
 
   it('缺少 stage 抛错', () => {
     expect(() => canvasRelPath({ kind: 'stage' })).toThrow()
+  })
+
+  it('场景画布缺少 label 抛错', () => {
+    expect(() => canvasRelPath({ kind: 'stage', stage: '街角' })).toThrow()
   })
 
   it('缺少 episode/shot 抛错', () => {

@@ -8,13 +8,15 @@ export interface CanvasScope {
   kind: 'stage' | 'scene'
   /** stage 时为场景名；scene 时为集数 */
   primary: string
-  /** scene 时为分镜号；stage 时为空 */
+  /** scene 时为分镜号 */
   secondary?: string
+  /** stage 时为子场景标签（场景画布按子场景拆分） */
+  label?: string
 }
 
-/** 场景画布定义文件：prompt/stage/{场景名}/canvas.json */
-export function stageCanvasRelPath(stage: string): string {
-  return `prompt/stage/${stage}/canvas.json`
+/** 场景画布定义文件：prompt/stage/{场景名}/canvas/{子场景标签}.json */
+export function stageCanvasRelPath(stage: string, label: string): string {
+  return `prompt/stage/${stage}/canvas/${label}.json`
 }
 
 /** 分镜画布定义文件：prompt/scene/{集数}/{分镜}/canvas.json */
@@ -25,7 +27,7 @@ export function sceneCanvasRelPath(episode: string, shot: string): string {
 /** 画布生成产物目录：assert/{scope}/canvas/ */
 export function canvasAssetDir(scope: CanvasScope): string {
   if (scope.kind === 'stage') {
-    return `assert/stage/${scope.primary}/canvas`
+    return `assert/stage/${scope.primary}/canvas${scope.label ? `/${scope.label}` : ''}`
   }
   return `assert/scene/${scope.primary}/${scope.secondary ?? ''}/canvas`
 }

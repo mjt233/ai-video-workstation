@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, type WorkflowUserParamValue } from '../api/workflow'
 import type { CanvasNodeData, CanvasKind } from './types'
-import { canvasNodeAssetPath, sceneCanvasRelPath, stageCanvasRelPath } from './paths'
+import { canvasNodeAssetPath, sceneCanvasRelPath } from './paths'
 import { getHistory, type HistoryEntry } from './generate'
 import { nextVersion } from './types'
 
@@ -21,6 +21,8 @@ export interface GenTarget {
   stage?: string
   episode?: string
   shot?: string
+  /** stage 画布时的子场景标签 */
+  label?: string
 }
 
 /**
@@ -57,7 +59,11 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     const version = nextVersion(getHistory(node.config))
     const scope =
       targetRef.value.kind === 'stage'
-        ? { kind: 'stage' as const, primary: targetRef.value.stage ?? '' }
+        ? {
+            kind: 'stage' as const,
+            primary: targetRef.value.stage ?? '',
+            label: targetRef.value.label,
+          }
         : { kind: 'scene' as const, primary: targetRef.value.episode ?? '', secondary: targetRef.value.shot }
     return canvasNodeAssetPath(scope, node.id, version)
   }
@@ -65,9 +71,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
   /** 计算生成节点 prompt 文件相对路径（文生图工作流需要） */
   function computePromptPath(nodeId: string): string {
     if (targetRef.value.kind === 'stage') {
-      const rel = stageCanvasRelPath(targetRef.value.stage ?? '')
-      const dir = rel.replace(/canvas\.json$/, '')
-      return `${dir}canvas/${nodeId}/prompt.md`
+      return `prompt/stage/${targetRef.value.stage ?? ''}/canvas/${targetRef.value.label ?? ''}/${nodeId}/prompt.md`
     }
     const rel = sceneCanvasRelPath(targetRef.value.episode ?? '', targetRef.value.shot ?? '')
     const dir = rel.replace(/canvas\.json$/, '')

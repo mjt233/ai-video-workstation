@@ -7,6 +7,8 @@ export interface CanvasTarget {
   kind: CanvasKind
   /** stage 画布时的场景名 */
   stage?: string
+  /** stage 画布时的子场景标签 */
+  label?: string
   /** scene 画布时的集数 */
   episode?: string
   /** scene 画布时的分镜号 */
@@ -23,7 +25,8 @@ export interface CanvasTarget {
 export function canvasRelPath(target: CanvasTarget): string {
   if (target.kind === 'stage') {
     if (!target.stage) throw new Error('场景画布需要 stage')
-    return stageCanvasRelPath(target.stage)
+    if (!target.label) throw new Error('场景画布需要 label')
+    return stageCanvasRelPath(target.stage, target.label)
   }
   if (!target.episode || !target.shot) throw new Error('分镜画布需要 episode 与 shot')
   return sceneCanvasRelPath(target.episode, target.shot)
@@ -37,8 +40,8 @@ export function canvasRelPath(target: CanvasTarget): string {
  * @returns 画布定义或 null
  */
 export async function loadCanvas(project: string, target: CanvasTarget): Promise<CanvasData | null> {
-  const rel = canvasRelPath(target)
   try {
+    const rel = canvasRelPath(target)
     const raw = await readFs(project, rel)
     if (raw == null) return null
     // axios 会尝试对字符串响应做 JSON.parse，因此 .json 文件可能直接返回对象；

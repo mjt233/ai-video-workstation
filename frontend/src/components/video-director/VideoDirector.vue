@@ -228,7 +228,7 @@ import {
 } from './useVideoDirector'
 import { DEFAULT_IMAGE_CLIP_DURATION, type DirectorProject } from './types'
 import DirectorTimeline from './DirectorTimeline.vue'
-import AssetPickerDialog from '../AssetPickerDialog.vue'
+import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import { buildPreviewUrl } from '../../canvas/preview'
 import { PlaybackEngine, type PlaybackClip } from '../audio-editor/PlaybackEngine'
 

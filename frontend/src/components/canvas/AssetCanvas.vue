@@ -4,506 +4,518 @@
     class="asset-canvas"
     :style="{ height: `${targetHeight}px` }"
   >
-    <!-- 工具栏 -->
-    <div class="asset-canvas__toolbar">
-      <v-btn
-        size="small"
-        variant="text"
-        icon="mdi-fit-to-screen-outline"
-        title="适应视图"
-        @click="fitView"
-      />
-      <v-btn
-        size="small"
-        variant="text"
-        icon="mdi-plus"
-        title="放大"
-        @click="zoomIn"
-      />
-      <v-btn
-        size="small"
-        variant="text"
-        icon="mdi-minus"
-        title="缩小"
-        @click="zoomOut"
-      />
-      <v-divider
-        vertical
-        class="mx-1"
-      />
-      <v-btn
-        size="small"
-        variant="text"
-        icon="mdi-undo"
-        title="撤销 (Ctrl+Z)"
-        :disabled="!canUndo"
-        @click="undo"
-      />
-      <v-btn
-        size="small"
-        variant="text"
-        icon="mdi-redo"
-        title="重做 (Ctrl+Shift+Z)"
-        :disabled="!canRedo"
-        @click="redo"
-      />
-      <v-divider
-        vertical
-        class="mx-1"
-      />
-      <v-btn
-        size="small"
-        prepend-icon="mdi-auto-fix"
-        variant="tonal"
-        :loading="autoBuilding"
-        title="根据分镜/子场景自动搭建画布"
-        @click="autoBuild"
-      >
-        自动搭画布
-      </v-btn>
-      <v-btn
-        size="small"
-        variant="text"
-        icon="mdi-plus-thick"
-        title="添加节点（或双击空白处）"
-        @click="openAddDialogAt(80, 80)"
-      />
-      <v-spacer />
-      <v-progress-circular
-        v-if="saving"
-        size="18"
-        indeterminate
-        color="primary"
-      />
-      <span
-        v-else-if="dirty"
-        class="text-caption text-medium-emphasis"
-      >未保存</span>
-      <span
-        v-else
-        class="text-caption text-disabled"
-      >已保存</span>
-    </div>
-
     <div
-      ref="flowEl"
-      class="asset-canvas__flow"
+      v-if="stageNoLabel"
+      class="d-flex align-center justify-center text-grey"
+      style="min-height: 200px;"
     >
-      <VueFlow
-        :nodes="flowNodes"
-        :edges="flowEdges"
-        :fit-view-on-init="true"
-        :min-zoom="0.2"
-        :max-zoom="3"
-        :nodes-draggable="true"
-        :is-valid-connection="isValidConnection"
-        :delete-key-code="null"
-        :zoom-on-double-click="false"
-        @connect="onConnect"
-        @edges-change="onEdgesChange"
-        @node-click="onNodeClick"
-        @edge-click="onEdgeClick"
-        @edge-context-menu="onEdgeContextMenu"
-        @node-drag-start="onNodeDragStart"
-        @node-drag-stop="onNodeDragStop"
-        @pane-click="onPaneClick"
+      请从左侧资产浏览器选择子场景
+    </div>
+    <template v-else>
+      <!-- 工具栏 -->
+      <div class="asset-canvas__toolbar">
+        <v-btn
+          size="small"
+          variant="text"
+          icon="mdi-fit-to-screen-outline"
+          title="适应视图"
+          @click="fitView"
+        />
+        <v-btn
+          size="small"
+          variant="text"
+          icon="mdi-plus"
+          title="放大"
+          @click="zoomIn"
+        />
+        <v-btn
+          size="small"
+          variant="text"
+          icon="mdi-minus"
+          title="缩小"
+          @click="zoomOut"
+        />
+        <v-divider
+          vertical
+          class="mx-1"
+        />
+        <v-btn
+          size="small"
+          variant="text"
+          icon="mdi-undo"
+          title="撤销 (Ctrl+Z)"
+          :disabled="!canUndo"
+          @click="undo"
+        />
+        <v-btn
+          size="small"
+          variant="text"
+          icon="mdi-redo"
+          title="重做 (Ctrl+Shift+Z)"
+          :disabled="!canRedo"
+          @click="redo"
+        />
+        <v-divider
+          vertical
+          class="mx-1"
+        />
+        <v-btn
+          size="small"
+          prepend-icon="mdi-auto-fix"
+          variant="tonal"
+          :loading="autoBuilding"
+          title="根据分镜/子场景自动搭建画布"
+          @click="autoBuild"
+        >
+          自动搭画布
+        </v-btn>
+        <v-btn
+          size="small"
+          variant="text"
+          icon="mdi-plus-thick"
+          title="添加节点（或双击空白处）"
+          @click="openAddDialogAt(80, 80)"
+        />
+        <v-spacer />
+        <v-progress-circular
+          v-if="saving"
+          size="18"
+          indeterminate
+          color="primary"
+        />
+        <span
+          v-else-if="dirty"
+          class="text-caption text-medium-emphasis"
+        >未保存</span>
+        <span
+          v-else
+          class="text-caption text-disabled"
+        >已保存</span>
+      </div>
+
+      <div
+        ref="flowEl"
+        class="asset-canvas__flow"
       >
-        <Background :gap="16" />
-        <template #node-canvas="{ id, selected }">
-          <div
-            v-if="nodeMap[id]"
-            class="canvas-node"
-            :class="{ 'canvas-node--selected': selected }"
-            @contextmenu.prevent="openContextMenu($event, id)"
-          >
-            <!-- 节点名称头部（双击名称进入内联编辑） -->
-            <div class="canvas-node__header">
-              <span
-                v-if="renamingNodeId !== id"
-                class="text-caption font-weight-medium canvas-node__name"
-                title="双击重命名"
-                @dblclick.stop="startRename(id)"
-              >
-                {{ nodeMap[id].name }}
-              </span>
-              <input
-                v-else
-                ref="nameInputEl"
-                v-model="renameInput"
-                class="canvas-node__name-input"
-                @click.stop
-                @dblclick.stop
-                @keyup.enter="commitRename(id)"
-                @keyup.esc="cancelRename"
-                @blur="commitRename(id)"
-              >
-            </div>
-            <Handle
-              v-if="protoOf(id)?.inputPorts.length"
-              :id="protoOf(id)?.inputPorts[0]?.id"
-              type="target"
-              :position="Position.Left"
-            />
-            <div class="canvas-node__body">
-              <component
-                :is="protoOf(id)?.bodyComponent"
-                :project="props.project"
-                :node="nodeMap[id]"
-                :status="statusByNode[id]"
-                :upstream-updated="isUpstreamUpdated(id)"
-                @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
-                @open-picker="openAssetPicker"
-                @retry="(nid: string) => generateNode(nid)"
+        <VueFlow
+          :nodes="flowNodes"
+          :edges="flowEdges"
+          :fit-view-on-init="true"
+          :min-zoom="0.2"
+          :max-zoom="3"
+          :nodes-draggable="true"
+          :is-valid-connection="isValidConnection"
+          :delete-key-code="null"
+          :zoom-on-double-click="false"
+          @connect="onConnect"
+          @edges-change="onEdgesChange"
+          @node-click="onNodeClick"
+          @edge-click="onEdgeClick"
+          @edge-context-menu="onEdgeContextMenu"
+          @node-drag-start="onNodeDragStart"
+          @node-drag-stop="onNodeDragStop"
+          @pane-click="onPaneClick"
+        >
+          <Background :gap="16" />
+          <template #node-canvas="{ id, selected }">
+            <div
+              v-if="nodeMap[id]"
+              class="canvas-node"
+              :class="{ 'canvas-node--selected': selected }"
+              @contextmenu.prevent="openContextMenu($event, id)"
+            >
+              <!-- 节点名称头部（双击名称进入内联编辑） -->
+              <div class="canvas-node__header">
+                <span
+                  v-if="renamingNodeId !== id"
+                  class="text-caption font-weight-medium canvas-node__name"
+                  title="双击重命名"
+                  @dblclick.stop="startRename(id)"
+                >
+                  {{ nodeMap[id].name }}
+                </span>
+                <input
+                  v-else
+                  ref="nameInputEl"
+                  v-model="renameInput"
+                  class="canvas-node__name-input"
+                  @click.stop
+                  @dblclick.stop
+                  @keyup.enter="commitRename(id)"
+                  @keyup.esc="cancelRename"
+                  @blur="commitRename(id)"
+                >
+              </div>
+              <Handle
+                v-if="protoOf(id)?.inputPorts.length"
+                :id="protoOf(id)?.inputPorts[0]?.id"
+                type="target"
+                :position="Position.Left"
+              />
+              <div class="canvas-node__body">
+                <component
+                  :is="protoOf(id)?.bodyComponent"
+                  :project="props.project"
+                  :node="nodeMap[id]"
+                  :status="statusByNode[id]"
+                  :upstream-updated="isUpstreamUpdated(id)"
+                  @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
+                  @open-picker="openAssetPicker"
+                  @retry="(nid: string) => generateNode(nid)"
+                />
+              </div>
+              <Handle
+                v-if="protoOf(id)?.outputPorts.length"
+                :id="protoOf(id)?.outputPorts[0]?.id"
+                type="source"
+                :position="Position.Right"
               />
             </div>
-            <Handle
-              v-if="protoOf(id)?.outputPorts.length"
-              :id="protoOf(id)?.outputPorts[0]?.id"
-              type="source"
-              :position="Position.Right"
+          </template>
+        </VueFlow>
+
+        <!-- 节点配置悬浮面板（独立于节点，位于节点正下方，随视图联动；带淡入淡出） -->
+        <Transition name="editor-panel">
+          <div
+            v-if="editorPanel && !suppressEditor"
+            ref="panelEl"
+            class="canvas-node-editor-panel"
+            :style="editorPanelStyle"
+          >
+            <component
+              :is="editorPanel?.editorComponent"
+              :project="props.project"
+              :node="editorPanel?.node"
+              :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
+              :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
+              @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
+              @generate="generateNode"
+              @interrupt="onInterrupt"
+              @open-history="openHistory"
+              @set-as-scene="openSetAsScene"
+              @open-picker="openAssetPicker"
             />
           </div>
-        </template>
-      </VueFlow>
+        </Transition>
 
-      <!-- 节点配置悬浮面板（独立于节点，位于节点正下方，随视图联动；带淡入淡出） -->
-      <Transition name="editor-panel">
+        <!-- 右键菜单 -->
         <div
-          v-if="editorPanel && !suppressEditor"
-          ref="panelEl"
-          class="canvas-node-editor-panel"
-          :style="editorPanelStyle"
+          v-if="contextMenu.show"
+          class="canvas-context-menu"
+          :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
         >
-          <component
-            :is="editorPanel?.editorComponent"
-            :project="props.project"
-            :node="editorPanel?.node"
-            :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
-            :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
-            @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
-            @generate="generateNode"
-            @interrupt="onInterrupt"
-            @open-history="openHistory"
-            @set-as-scene="openSetAsScene"
-            @open-picker="openAssetPicker"
-          />
-        </div>
-      </Transition>
-
-      <!-- 右键菜单 -->
-      <div
-        v-if="contextMenu.show"
-        class="canvas-context-menu"
-        :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
-      >
-        <div
-          v-if="contextMenuNode?.prototypeId === 'image-generate'"
-          class="canvas-context-menu__item"
-          @click="contextGenerate"
-        >
-          <v-icon
-            size="small"
-            class="mr-2"
-          >
-            mdi-refresh
-          </v-icon>
-          重新生成
-        </div>
-        <div
-          v-if="contextMenuNode?.prototypeId === 'image-generate'"
-          class="canvas-context-menu__item"
-          @click="contextHistory"
-        >
-          <v-icon
-            size="small"
-            class="mr-2"
-          >
-            mdi-history
-          </v-icon>
-          历史
-        </div>
-        <div
-          v-if="contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
-          class="canvas-context-menu__item"
-          @click="contextDisconnect"
-        >
-          <v-icon
-            size="small"
-            class="mr-2"
-          >
-            mdi-link-off
-          </v-icon>
-          断开连接
-        </div>
-        <div
-          class="canvas-context-menu__item"
-          @click="contextRename"
-        >
-          <v-icon
-            size="small"
-            class="mr-2"
-          >
-            mdi-pencil-outline
-          </v-icon>
-          重命名
-        </div>
-        <div
-          class="canvas-context-menu__item"
-          @click="contextCopy"
-        >
-          <v-icon
-            size="small"
-            class="mr-2"
-          >
-            mdi-content-copy
-          </v-icon>
-          复制
-        </div>
-        <div
-          class="canvas-context-menu__item canvas-context-menu__item--danger"
-          @click="contextDelete"
-        >
-          <v-icon
-            size="small"
-            class="mr-2"
-          >
-            mdi-delete-outline
-          </v-icon>
-          删除
-        </div>
-      </div>
-
-      <!-- 连线右键菜单（断开连接） -->
-      <div
-        v-if="edgeMenu.show"
-        class="canvas-context-menu"
-        :style="{ left: `${edgeMenu.x}px`, top: `${edgeMenu.y}px` }"
-      >
-        <div
-          class="canvas-context-menu__item canvas-context-menu__item--danger"
-          @click="disconnectEdge"
-        >
-          <v-icon
-            size="small"
-            class="mr-2"
-          >
-            mdi-link-off
-          </v-icon>
-          断开连接
-        </div>
-      </div>
-    </div>
-
-    <!-- 加载中 / 空画布引导 -->
-    <div
-      v-if="!loaded"
-      class="asset-canvas__overlay"
-    >
-      加载中…
-    </div>
-    <div
-      v-else-if="nodes.length === 0"
-      class="asset-canvas__overlay asset-canvas__empty"
-    >
-      <div class="text-body-2">
-        画布为空
-      </div>
-      <div class="text-caption text-medium-emphasis">
-        双击空白处或点击工具栏「＋」添加节点
-      </div>
-    </div>
-
-    <!-- 添加节点对话框 -->
-    <v-dialog
-      v-model="addDialog.show"
-      max-width="360"
-    >
-      <v-card>
-        <v-card-title class="text-body-1">
-          添加节点
-        </v-card-title>
-        <v-card-text class="pa-2">
-          <v-list
-            density="compact"
-            nav
-          >
-            <v-list-item
-              v-for="p in NODE_PROTOTYPES"
-              :key="p.id"
-              :title="p.name"
-              @click="addNodeAt(p.id)"
-            />
-          </v-list>
-        </v-card-text>
-      </v-card>
-    </v-dialog>
-
-    <!-- 重命名对话框：已由节点名称双击内联编辑取代 -->
-
-    <!-- 版本历史对话框 -->
-    <v-dialog
-      v-model="historyDialog.show"
-      max-width="640"
-    >
-      <v-card>
-        <v-card-title class="d-flex align-center">
-          <v-icon
-            class="mr-2"
-            size="small"
-          >
-            mdi-history
-          </v-icon>
-          <span>版本历史</span>
-        </v-card-title>
-        <v-card-text>
-          <v-list
-            v-if="historyEntries.length"
-            density="compact"
-          >
-            <v-list-item
-              v-for="h in historyEntries"
-              :key="h.version"
-            >
-              <v-list-item-title class="text-body-2">
-                v{{ h.version }}
-              </v-list-item-title>
-              <v-list-item-subtitle>
-                {{ h.path }} · {{ formatDate(h.date) }}
-              </v-list-item-subtitle>
-            </v-list-item>
-          </v-list>
           <div
-            v-else
-            class="text-grey text-body-2"
+            v-if="contextMenuNode?.prototypeId === 'image-generate'"
+            class="canvas-context-menu__item"
+            @click="contextGenerate"
           >
-            暂无历史版本
-          </div>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn
-            variant="text"
-            @click="historyDialog.show = false"
-          >
-            关闭
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- 设为分镜场景图对话框 -->
-    <v-dialog
-      v-model="sceneDialog.show"
-      max-width="620"
-    >
-      <v-card>
-        <v-card-title class="d-flex align-center">
-          <v-icon
-            class="mr-2"
-            size="small"
-          >
-            mdi-image-multiple
-          </v-icon>
-          <span>设为分镜场景图</span>
-        </v-card-title>
-        <v-card-text>
-          <div
-            v-if="sceneDialog.loading"
-            class="text-grey text-body-2"
-          >
-            加载中…
-          </div>
-          <template v-else>
-            <div class="text-caption text-medium-emphasis mb-2">
-              选择应用到哪个分镜场景（{{ sceneDialog.frames.length }}）：
-            </div>
-            <div
-              v-if="sceneDialog.frames.length"
-              class="d-flex flex-wrap ga-2 mb-2"
+            <v-icon
+              size="small"
+              class="mr-2"
             >
-              <div
-                v-for="f in sceneDialog.frames"
-                :key="f.index"
-                class="scene-frame-option"
-                @click="applySetAsScene(f)"
+              mdi-refresh
+            </v-icon>
+            重新生成
+          </div>
+          <div
+            v-if="contextMenuNode?.prototypeId === 'image-generate'"
+            class="canvas-context-menu__item"
+            @click="contextHistory"
+          >
+            <v-icon
+              size="small"
+              class="mr-2"
+            >
+              mdi-history
+            </v-icon>
+            历史
+          </div>
+          <div
+            v-if="contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
+            class="canvas-context-menu__item"
+            @click="contextDisconnect"
+          >
+            <v-icon
+              size="small"
+              class="mr-2"
+            >
+              mdi-link-off
+            </v-icon>
+            断开连接
+          </div>
+          <div
+            class="canvas-context-menu__item"
+            @click="contextRename"
+          >
+            <v-icon
+              size="small"
+              class="mr-2"
+            >
+              mdi-pencil-outline
+            </v-icon>
+            重命名
+          </div>
+          <div
+            class="canvas-context-menu__item"
+            @click="contextCopy"
+          >
+            <v-icon
+              size="small"
+              class="mr-2"
+            >
+              mdi-content-copy
+            </v-icon>
+            复制
+          </div>
+          <div
+            class="canvas-context-menu__item canvas-context-menu__item--danger"
+            @click="contextDelete"
+          >
+            <v-icon
+              size="small"
+              class="mr-2"
+            >
+              mdi-delete-outline
+            </v-icon>
+            删除
+          </div>
+        </div>
+
+        <!-- 连线右键菜单（断开连接） -->
+        <div
+          v-if="edgeMenu.show"
+          class="canvas-context-menu"
+          :style="{ left: `${edgeMenu.x}px`, top: `${edgeMenu.y}px` }"
+        >
+          <div
+            class="canvas-context-menu__item canvas-context-menu__item--danger"
+            @click="disconnectEdge"
+          >
+            <v-icon
+              size="small"
+              class="mr-2"
+            >
+              mdi-link-off
+            </v-icon>
+            断开连接
+          </div>
+        </div>
+      </div>
+
+      <!-- 加载中 / 空画布引导 -->
+      <div
+        v-if="!loaded"
+        class="asset-canvas__overlay"
+      >
+        加载中…
+      </div>
+      <div
+        v-else-if="nodes.length === 0"
+        class="asset-canvas__overlay asset-canvas__empty"
+      >
+        <div class="text-body-2">
+          画布为空
+        </div>
+        <div class="text-caption text-medium-emphasis">
+          双击空白处或点击工具栏「＋」添加节点
+        </div>
+      </div>
+
+      <!-- 添加节点对话框 -->
+      <v-dialog
+        v-model="addDialog.show"
+        max-width="360"
+      >
+        <v-card>
+          <v-card-title class="text-body-1">
+            添加节点
+          </v-card-title>
+          <v-card-text class="pa-2">
+            <v-list
+              density="compact"
+              nav
+            >
+              <v-list-item
+                v-for="p in NODE_PROTOTYPES"
+                :key="p.id"
+                :title="p.name"
+                @click="addNodeAt(p.id)"
+              />
+            </v-list>
+          </v-card-text>
+        </v-card>
+      </v-dialog>
+
+      <!-- 重命名对话框：已由节点名称双击内联编辑取代 -->
+
+      <!-- 版本历史对话框 -->
+      <v-dialog
+        v-model="historyDialog.show"
+        max-width="640"
+      >
+        <v-card>
+          <v-card-title class="d-flex align-center">
+            <v-icon
+              class="mr-2"
+              size="small"
+            >
+              mdi-history
+            </v-icon>
+            <span>版本历史</span>
+          </v-card-title>
+          <v-card-text>
+            <v-list
+              v-if="historyEntries.length"
+              density="compact"
+            >
+              <v-list-item
+                v-for="h in historyEntries"
+                :key="h.version"
               >
-                <div class="scene-frame-option__img-wrap">
-                  <img
-                    v-if="!f.broken"
-                    :src="f.imageUrl"
-                    class="scene-frame-option__img"
-                    @error="f.broken = true"
-                  >
-                  <div
-                    v-else
-                    class="scene-frame-option__img scene-frame-option__img--empty"
-                  >
-                    <v-icon icon="mdi-image-off-outline" />
-                  </div>
-                </div>
-                <div
-                  class="scene-frame-option__label"
-                  :title="f.label"
-                >
-                  场景{{ f.index + 1 }}：{{ f.label }}
-                </div>
-              </div>
-            </div>
+                <v-list-item-title class="text-body-2">
+                  v{{ h.version }}
+                </v-list-item-title>
+                <v-list-item-subtitle>
+                  {{ h.path }} · {{ formatDate(h.date) }}
+                </v-list-item-subtitle>
+              </v-list-item>
+            </v-list>
             <div
               v-else
-              class="text-grey text-body-2 mb-2"
+              class="text-grey text-body-2"
             >
-              当前分镜还没有场景图定义（stage.json 为空）
+              暂无历史版本
             </div>
-            <div class="d-flex align-center ga-2">
-              <v-btn
-                size="small"
-                color="primary"
-                variant="tonal"
-                prepend-icon="mdi-plus"
-                :disabled="!sceneDialog.canAdd"
-                @click="applySetAsScene(null)"
-              >
-                新增场景图
-              </v-btn>
-              <span
-                v-if="!sceneDialog.canAdd"
-                class="text-caption text-grey"
-              >
-                无可用的基础场景引用，可先在「场景图片」页签添加场景帧
-              </span>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn
+              variant="text"
+              @click="historyDialog.show = false"
+            >
+              关闭
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- 设为分镜场景图对话框 -->
+      <v-dialog
+        v-model="sceneDialog.show"
+        max-width="620"
+      >
+        <v-card>
+          <v-card-title class="d-flex align-center">
+            <v-icon
+              class="mr-2"
+              size="small"
+            >
+              mdi-image-multiple
+            </v-icon>
+            <span>设为分镜场景图</span>
+          </v-card-title>
+          <v-card-text>
+            <div
+              v-if="sceneDialog.loading"
+              class="text-grey text-body-2"
+            >
+              加载中…
             </div>
-          </template>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn
-            variant="text"
-            @click="sceneDialog.show = false"
-          >
-            取消
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+            <template v-else>
+              <div class="text-caption text-medium-emphasis mb-2">
+                选择应用到哪个分镜场景（{{ sceneDialog.frames.length }}）：
+              </div>
+              <div
+                v-if="sceneDialog.frames.length"
+                class="d-flex flex-wrap ga-2 mb-2"
+              >
+                <div
+                  v-for="f in sceneDialog.frames"
+                  :key="f.index"
+                  class="scene-frame-option"
+                  @click="applySetAsScene(f)"
+                >
+                  <div class="scene-frame-option__img-wrap">
+                    <img
+                      v-if="!f.broken"
+                      :src="f.imageUrl"
+                      class="scene-frame-option__img"
+                      @error="f.broken = true"
+                    >
+                    <div
+                      v-else
+                      class="scene-frame-option__img scene-frame-option__img--empty"
+                    >
+                      <v-icon icon="mdi-image-off-outline" />
+                    </div>
+                  </div>
+                  <div
+                    class="scene-frame-option__label"
+                    :title="f.label"
+                  >
+                    场景{{ f.index + 1 }}：{{ f.label }}
+                  </div>
+                </div>
+              </div>
+              <div
+                v-else
+                class="text-grey text-body-2 mb-2"
+              >
+                当前分镜还没有场景图定义（stage.json 为空）
+              </div>
+              <div class="d-flex align-center ga-2">
+                <v-btn
+                  size="small"
+                  color="primary"
+                  variant="tonal"
+                  prepend-icon="mdi-plus"
+                  :disabled="!sceneDialog.canAdd"
+                  @click="applySetAsScene(null)"
+                >
+                  新增场景图
+                </v-btn>
+                <span
+                  v-if="!sceneDialog.canAdd"
+                  class="text-caption text-grey"
+                >
+                  无可用的基础场景引用，可先在「场景图片」页签添加场景帧
+                </span>
+              </div>
+            </template>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn
+              variant="text"
+              @click="sceneDialog.show = false"
+            >
+              取消
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
 
-    <!-- 资产选择器（加载图片节点绑定资产） -->
-    <AssetPickerDialog
-      v-model="picker.show"
-      :project="props.project"
-      :multiple="false"
-      @update:selected="onPickerConfirm"
-    />
+      <!-- 资产选择器（加载图片节点绑定资产） -->
+      <AssetPickerDialog
+        v-model="picker.show"
+        :project="props.project"
+        :multiple="false"
+        :tabs="['stage', 'character', 'custom', 'scene-stage']"
+        :context-episode="target.kind === 'scene' ? target.episode : undefined"
+        :context-shot="target.kind === 'scene' ? target.shot : undefined"
+        @update:selected="onPickerConfirm"
+      />
 
-    <!-- 操作反馈 -->
-    <v-snackbar
-      v-model="snackbar.show"
-      :color="snackbar.color"
-      :timeout="3000"
-      location="bottom"
-    >
-      {{ snackbar.text }}
-    </v-snackbar>
+      <!-- 操作反馈 -->
+      <v-snackbar
+        v-model="snackbar.show"
+        :color="snackbar.color"
+        :timeout="3000"
+        location="bottom"
+      >
+        {{ snackbar.text }}
+      </v-snackbar>
+    </template>
   </div>
 </template>
 
@@ -530,30 +542,44 @@ import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
 import { canConnectNodes } from '../../canvas/connection'
 import { collectInputPaths, collectInputs, getHistory, getNodeCurrentAssetPath, type CanvasInputInfo } from '../../canvas/generate'
-import { buildAutoCanvas, buildShotRefsFromStage, type AutoBuildRef } from '../../canvas/autobuild'
-import { copyFs, readFs, type DirResponse } from '../../api/client'
+import {
+  buildAutoCanvas,
+  buildShotRefsFromStage,
+  buildSubSceneAutoCanvas,
+  deriveStageRefFromAssetPath,
+  normalizeLegacyVariantPath,
+  type AutoBuildRef,
+  type StageVariantRef,
+} from '../../canvas/autobuild'
+import { copyFs, existsFs, readFs, type DirResponse } from '../../api/client'
 import { createSceneStageFrame } from '../../api/assets'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { confirm } from '../../utils/confirm'
-import AssetPickerDialog from '../AssetPickerDialog.vue'
+import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 
 /** 组件 props：定位一张画布 */
 const props = defineProps<{
   project: string
   kind: 'stage' | 'scene'
   stage?: string
+  /** 场景画布时的子场景标签 */
+  label?: string
   episode?: string
   shot?: string
 }>()
 
-/** 画布目标（分镜画布需要 episode+shot，场景画布需要 stage） */
+/** 画布目标（分镜画布需要 episode+shot，场景画布需要 stage+label） */
 const target = computed(() => ({
   kind: props.kind,
   stage: props.stage,
+  label: props.label,
   episode: props.episode,
   shot: props.shot,
 }))
+
+/** 场景画布未选择子场景时显示空状态 */
+const stageNoLabel = computed(() => props.kind === 'stage' && !props.label)
 
 /** 画布数据 store：加载/保存/增删改查/撤销重做 */
 const store = useCanvasStore(props.project, target.value)
@@ -1124,13 +1150,8 @@ function deriveStageFrameBody(
   const characters: string[] = []
   for (const inp of inputs) {
     if (inp.path.startsWith('assert/stage/')) {
-      const rest = inp.path.slice('assert/stage/'.length).replace(/\.(jpg|jpeg|png|webp)$/i, '')
-      const idx = rest.lastIndexOf('/')
-      if (idx > 0) {
-        const name = rest.slice(0, idx)
-        const label = rest.slice(idx + 1)
-        if (name && label && !baseScene) baseScene = `${name}/${label}`
-      }
+      const ref = deriveStageRefFromAssetPath(inp.path)
+      if (ref && !baseScene) baseScene = ref
     } else if (inp.path.startsWith('assert/character/')) {
       const name = inp.path.slice('assert/character/'.length).split('/')[0]
       if (name && !characters.includes(name)) characters.push(name)
@@ -1261,13 +1282,69 @@ function onPickerConfirm(paths: string[]) {
 
 const autoBuilding = ref(false)
 
-/** 触发自动搭画布：收集引用与 prompt → 生成画布结构 → 应用到 store */
+/**
+ * 修复旧版自动搭画布产生的错误变体路径加载节点（历史数据迁移）。
+ * 旧代码把 `场景/标签@变体` 拼成 `assert/stage/{场景}/{标签}@{变体}.jpg`，
+ * 规范路径为 `assert/stage/{场景}/variants/{标签}/{变体}.jpg`。
+ * 仅当规范路径未被其他节点占用时修复，避免重复。
+ */
+function repairLegacyVariantLoaders(): void {
+  for (const node of [...store.nodes.value]) {
+    const ap = typeof node.config.assetPath === 'string' ? node.config.assetPath : ''
+    const legacy = normalizeLegacyVariantPath(ap)
+    if (!legacy) continue
+    const alreadyPresent = store.nodes.value.some(
+      (n) => n.id !== node.id && n.config.assetPath === legacy.canonical,
+    )
+    if (alreadyPresent) continue
+    store.updateNode(node.id, { config: { ...node.config, assetPath: legacy.canonical } })
+  }
+}
+
+/** 触发自动搭画布：分镜画布按 stage.json 引用；场景画布按子场景变体结构 */
 async function autoBuild() {
   if (autoBuilding.value) return
   autoBuilding.value = true
   try {
+    if (target.value.kind === 'stage') {
+      const t = target.value
+      const { baseAssetPath, variants } = await collectStageBuild()
+      const outputBase = `assert/stage/${t.stage ?? ''}/canvas/${t.label ?? ''}`
+      const result = buildSubSceneAutoCanvas(
+        store.data.value,
+        t.label ?? '',
+        baseAssetPath,
+        variants,
+        80,
+        80,
+        outputBase,
+      )
+      // 变体已有生成图：把既有图片复制到节点产物目录（复制失败不阻塞搭画布）
+      for (const node of result.nodes) {
+        if (node.prototypeId !== 'image-generate') continue
+        const autoRef = typeof node.config.autoRef === 'string' ? node.config.autoRef : ''
+        const vId = autoRef.slice(autoRef.lastIndexOf('@') + 1)
+        const cur = node.config.current as { path?: string } | undefined
+        if (!vId || !cur?.path) continue
+        try {
+          await copyFs(
+            props.project,
+            `assert/stage/${t.stage ?? ''}/variants/${t.label ?? ''}/${vId}.jpg`,
+            cur.path,
+          )
+        } catch {
+          // 复制失败忽略（节点仍保留，用户可自行重新生成）
+        }
+      }
+      store.applyNodes(result.nodes, result.connections)
+      const anchorCount = result.nodes.filter((n) => n.prototypeId === 'image-loader').length
+      showSnackbar(`已搭建 ${anchorCount} 个锚点节点`, 'success')
+      return
+    }
     const refs = await collectRefs()
     const prompt = await collectPrompt()
+    // 修复旧版错误路径的加载节点（历史数据），避免与新规范路径重复
+    repairLegacyVariantLoaders()
     const result = buildAutoCanvas(store.data.value, refs, prompt)
     store.applyNodes(result.nodes, result.connections)
     const g = nodeMap.value[result.generateNodeId]
@@ -1285,8 +1362,8 @@ async function autoBuild() {
 
 /**
  * 收集自动搭画布的资产引用：
- * - 分镜画布：读 stage.json 提取角色/场景引用
- * - 场景画布：读 prompt/stage/{stage} 下的 *.md 子场景文件
+ * - 分镜画布：读 stage.json 提取角色/场景引用（含变体/custom），并异步解析 prev
+ * - 场景画布：见 collectStageBuild
  *
  * @returns 锚点引用列表
  */
@@ -1296,44 +1373,91 @@ async function collectRefs(): Promise<AutoBuildRef[]> {
     if (!t.episode || !t.shot) return []
     const raw = await readFs(props.project, `prompt/scene/${t.episode}/${t.shot}/stage.json`)
     const defs = Array.isArray(raw) ? (raw as unknown[]) : []
-    return buildShotRefsFromStage(defs)
+    const refs = buildShotRefsFromStage(defs)
+    // prev：同集上一分镜最后一项 → assert/scene/{ep}/{shot-1}/stage/{last}.jpg
+    const shotNum = Number(t.shot)
+    const hasPrev = defs.some((d) => {
+      const base = (d as { 基础场景?: string })?.基础场景
+      return typeof base === 'string' && base.trim() === 'prev'
+    })
+    if (hasPrev && Number.isInteger(shotNum) && shotNum > 1) {
+      const prevShot = String(shotNum - 1)
+      try {
+        const prevRaw = await readFs(props.project, `prompt/scene/${t.episode}/${prevShot}/stage.json`)
+        if (Array.isArray(prevRaw) && prevRaw.length > 0) {
+          refs.push({
+            assetPath: `assert/scene/${t.episode}/${prevShot}/stage/${prevRaw.length - 1}.jpg`,
+            label: '上一分镜场景图',
+          })
+        }
+      } catch {
+        // 读不到上一分镜定义则跳过 prev
+      }
+    }
+    return refs
   }
-  if (!t.stage) return []
-  const dir = (await readFs(props.project, `prompt/stage/${t.stage}`)) as DirResponse
-  const mdFiles = (dir?.entries ?? []).filter((e) => e.type === 'file' && e.name.endsWith('.md'))
-  return mdFiles.map((f) => ({
-    assetPath: `assert/stage/${t.stage}/${f.name.replace(/\.md$/, '')}.jpg`,
-    label: f.name.replace(/\.md$/, ''),
-  }))
+  return []
 }
 
 /**
- * 收集生成节点 prompt 初稿：
- * - 分镜画布：读 overview.json 的 visual 字段
- * - 场景画布：取第一个子场景 md 文件内容
+ * 收集场景画布自动搭所需数据：子场景基础图路径 + 该子场景全部衍生变体元数据。
+ * 变体元数据：prompt/stage/{stage}/variants/{label}/{id}.json（desc/parentId/refs）。
+ *
+ * @returns 基础图路径与变体列表（variants 目录不存在时为空的变体列表）
+ */
+async function collectStageBuild(): Promise<{ baseAssetPath: string; variants: StageVariantRef[] }> {
+  const t = target.value
+  const stage = t.stage ?? ''
+  const label = t.label ?? ''
+  const baseAssetPath = `assert/stage/${stage}/${label}.jpg`
+  const variants: StageVariantRef[] = []
+  const variantsDir = `prompt/stage/${stage}/variants/${label}`
+  try {
+    const dir = (await readFs(props.project, variantsDir)) as DirResponse
+    const metaFiles = (dir?.entries ?? []).filter((e) => e.type === 'file' && e.name.endsWith('.json'))
+    for (const f of metaFiles) {
+      const id = f.name.replace(/\.json$/, '')
+      try {
+        const meta = (await readFs(props.project, `${variantsDir}/${f.name}`)) as {
+          desc?: string
+          parentId?: string
+          refs?: string[]
+        }
+        // 变体是否已有生成图（决定自动搭画布时是否复制既有图片作为节点当前产物）
+        const hasImage = await existsFs(
+          props.project,
+          `assert/stage/${stage}/variants/${label}/${id}.jpg`,
+        )
+        variants.push({
+          id,
+          desc: String(meta?.desc ?? ''),
+          parentId: typeof meta?.parentId === 'string' ? meta.parentId : undefined,
+          refs: Array.isArray(meta?.refs) ? (meta.refs as string[]) : [],
+          hasImage,
+        })
+      } catch {
+        // 单个变体元数据读取失败则跳过
+      }
+    }
+  } catch {
+    // variants 目录不存在 → 无变体，只搭基础图
+  }
+  return { baseAssetPath, variants }
+}
+
+/**
+ * 收集生成节点 prompt 初稿（仅分镜画布；场景画布由各变体 desc 提供）。
  *
  * @returns prompt 文本
  */
 async function collectPrompt(): Promise<string> {
   const t = target.value
-  if (t.kind === 'scene') {
-    if (!t.episode || !t.shot) return ''
-    try {
-      const raw = (await readFs(props.project, `prompt/scene/${t.episode}/${t.shot}/overview.json`)) as {
-        visual?: unknown
-      }
-      return typeof raw?.visual === 'string' ? raw.visual : ''
-    } catch {
-      return ''
-    }
-  }
-  if (!t.stage) return ''
+  if (t.kind !== 'scene' || !t.episode || !t.shot) return ''
   try {
-    const dir = (await readFs(props.project, `prompt/stage/${t.stage}`)) as DirResponse
-    const mdFiles = (dir?.entries ?? []).filter((e) => e.type === 'file' && e.name.endsWith('.md'))
-    if (mdFiles.length === 0) return ''
-    const content = await readFs(props.project, `prompt/stage/${t.stage}/${mdFiles[0].name}`)
-    return typeof content === 'string' ? content : ''
+    const raw = (await readFs(props.project, `prompt/scene/${t.episode}/${t.shot}/overview.json`)) as {
+      visual?: unknown
+    }
+    return typeof raw?.visual === 'string' ? raw.visual : ''
   } catch {
     return ''
   }

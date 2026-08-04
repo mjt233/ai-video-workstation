@@ -141,6 +141,7 @@
           :project="props.project"
           kind="stage"
           :stage="props.name"
+          :label="props.subscene"
         />
       </v-tabs-window-item>
     </v-tabs-window>
