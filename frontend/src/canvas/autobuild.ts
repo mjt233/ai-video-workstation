@@ -33,7 +33,7 @@ export interface AutoBuildResult {
  */
 export function resolveShotStageRef(baseStage: string): RefResolution | null {
   const trimmed = baseStage.trim()
-  if (!trimmed || trimmed === 'prev' || trimmed.startsWith('prev')) return null
+  if (!trimmed || trimmed === 'prev') return null
   if (trimmed.startsWith('custom/')) {
     return { assetPath: `assert/custom/${trimmed.slice('custom/'.length)}`, label: trimmed }
   }

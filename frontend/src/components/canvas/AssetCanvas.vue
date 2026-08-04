@@ -539,7 +539,13 @@ import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
 import { canConnectNodes } from '../../canvas/connection'
 import { collectInputPaths, collectInputs, getHistory, getNodeCurrentAssetPath, type CanvasInputInfo } from '../../canvas/generate'
-import { buildAutoCanvas, buildShotRefsFromStage, type AutoBuildRef } from '../../canvas/autobuild'
+import {
+  buildAutoCanvas,
+  buildShotRefsFromStage,
+  buildSubSceneAutoCanvas,
+  type AutoBuildRef,
+  type StageVariantRef,
+} from '../../canvas/autobuild'
 import { copyFs, readFs, type DirResponse } from '../../api/client'
 import { createSceneStageFrame } from '../../api/assets'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
@@ -1140,11 +1146,24 @@ function deriveStageFrameBody(
   for (const inp of inputs) {
     if (inp.path.startsWith('assert/stage/')) {
       const rest = inp.path.slice('assert/stage/'.length).replace(/\.(jpg|jpeg|png|webp)$/i, '')
-      const idx = rest.lastIndexOf('/')
-      if (idx > 0) {
-        const name = rest.slice(0, idx)
-        const label = rest.slice(idx + 1)
-        if (name && label && !baseScene) baseScene = `${name}/${label}`
+      // 变体路径：{场景}/variants/{标签}/{变体} → 基础场景 = {场景}/{标签}@{变体}
+      const vIdx = rest.indexOf('/variants/')
+      if (vIdx > 0) {
+        const stageName = rest.slice(0, vIdx)
+        const rest2 = rest.slice(vIdx + '/variants/'.length)
+        const slash = rest2.indexOf('/')
+        if (slash > 0) {
+          const stageLabel = rest2.slice(0, slash)
+          const variantId = rest2.slice(slash + 1)
+          if (stageLabel && variantId && !baseScene) baseScene = `${stageName}/${stageLabel}@${variantId}`
+        }
+      } else {
+        const idx = rest.lastIndexOf('/')
+        if (idx > 0) {
+          const name = rest.slice(0, idx)
+          const label = rest.slice(idx + 1)
+          if (name && label && !baseScene) baseScene = `${name}/${label}`
+        }
       }
     } else if (inp.path.startsWith('assert/character/')) {
       const name = inp.path.slice('assert/character/'.length).split('/')[0]
@@ -1276,11 +1295,19 @@ function onPickerConfirm(paths: string[]) {
 
 const autoBuilding = ref(false)
 
-/** 触发自动搭画布：收集引用与 prompt → 生成画布结构 → 应用到 store */
+/** 触发自动搭画布：分镜画布按 stage.json 引用；场景画布按子场景变体结构 */
 async function autoBuild() {
   if (autoBuilding.value) return
   autoBuilding.value = true
   try {
+    if (target.value.kind === 'stage') {
+      const { baseAssetPath, variants } = await collectStageBuild()
+      const result = buildSubSceneAutoCanvas(store.data.value, target.value.label ?? '', baseAssetPath, variants)
+      store.applyNodes(result.nodes, result.connections)
+      const anchorCount = result.nodes.filter((n) => n.prototypeId === 'image-loader').length
+      showSnackbar(`已搭建 ${anchorCount} 个锚点节点`, 'success')
+      return
+    }
     const refs = await collectRefs()
     const prompt = await collectPrompt()
     const result = buildAutoCanvas(store.data.value, refs, prompt)
@@ -1316,7 +1343,7 @@ async function collectRefs(): Promise<AutoBuildRef[]> {
     const shotNum = Number(t.shot)
     const hasPrev = defs.some((d) => {
       const base = (d as { 基础场景?: string })?.基础场景
-      return typeof base === 'string' && base.startsWith('prev')
+      return typeof base === 'string' && base.trim() === 'prev'
     })
     if (hasPrev && Number.isInteger(shotNum) && shotNum > 1) {
       const prevShot = String(shotNum - 1)
@@ -1338,32 +1365,58 @@ async function collectRefs(): Promise<AutoBuildRef[]> {
 }
 
 /**
- * 收集生成节点 prompt 初稿：
- * - 分镜画布：读 overview.json 的 visual 字段
- * - 场景画布：取第一个子场景 md 文件内容
+ * 收集场景画布自动搭所需数据：子场景基础图路径 + 该子场景全部衍生变体元数据。
+ * 变体元数据：prompt/stage/{stage}/variants/{label}/{id}.json（desc/parentId/refs）。
+ *
+ * @returns 基础图路径与变体列表（variants 目录不存在时为空的变体列表）
+ */
+async function collectStageBuild(): Promise<{ baseAssetPath: string; variants: StageVariantRef[] }> {
+  const t = target.value
+  const stage = t.stage ?? ''
+  const label = t.label ?? ''
+  const baseAssetPath = `assert/stage/${stage}/${label}.jpg`
+  const variants: StageVariantRef[] = []
+  const variantsDir = `prompt/stage/${stage}/variants/${label}`
+  try {
+    const dir = (await readFs(props.project, variantsDir)) as DirResponse
+    const metaFiles = (dir?.entries ?? []).filter((e) => e.type === 'file' && e.name.endsWith('.json'))
+    for (const f of metaFiles) {
+      const id = f.name.replace(/\.json$/, '')
+      try {
+        const meta = (await readFs(props.project, `${variantsDir}/${f.name}`)) as {
+          desc?: string
+          parentId?: string
+          refs?: string[]
+        }
+        variants.push({
+          id,
+          desc: String(meta?.desc ?? ''),
+          parentId: typeof meta?.parentId === 'string' ? meta.parentId : undefined,
+          refs: Array.isArray(meta?.refs) ? (meta.refs as string[]) : [],
+        })
+      } catch {
+        // 单个变体元数据读取失败则跳过
+      }
+    }
+  } catch {
+    // variants 目录不存在 → 无变体，只搭基础图
+  }
+  return { baseAssetPath, variants }
+}
+
+/**
+ * 收集生成节点 prompt 初稿（仅分镜画布；场景画布由各变体 desc 提供）。
  *
  * @returns prompt 文本
  */
 async function collectPrompt(): Promise<string> {
   const t = target.value
-  if (t.kind === 'scene') {
-    if (!t.episode || !t.shot) return ''
-    try {
-      const raw = (await readFs(props.project, `prompt/scene/${t.episode}/${t.shot}/overview.json`)) as {
-        visual?: unknown
-      }
-      return typeof raw?.visual === 'string' ? raw.visual : ''
-    } catch {
-      return ''
-    }
-  }
-  if (!t.stage) return ''
+  if (t.kind !== 'scene' || !t.episode || !t.shot) return ''
   try {
-    const dir = (await readFs(props.project, `prompt/stage/${t.stage}`)) as DirResponse
-    const mdFiles = (dir?.entries ?? []).filter((e) => e.type === 'file' && e.name.endsWith('.md'))
-    if (mdFiles.length === 0) return ''
-    const content = await readFs(props.project, `prompt/stage/${t.stage}/${mdFiles[0].name}`)
-    return typeof content === 'string' ? content : ''
+    const raw = (await readFs(props.project, `prompt/scene/${t.episode}/${t.shot}/overview.json`)) as {
+      visual?: unknown
+    }
+    return typeof raw?.visual === 'string' ? raw.visual : ''
   } catch {
     return ''
   }

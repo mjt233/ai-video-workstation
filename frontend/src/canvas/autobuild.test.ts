@@ -86,6 +86,13 @@ describe('resolveShotStageRef', () => {
     expect(resolveShotStageRef('prev')).toBeNull()
   })
 
+  it('非精确 prev（如 previous/白天）不被当作 prev 跳过', () => {
+    expect(resolveShotStageRef('previous/白天')).toEqual({
+      assetPath: 'assert/stage/previous/白天.jpg',
+      label: 'previous/白天',
+    })
+  })
+
   it('无效格式返回 null', () => {
     expect(resolveShotStageRef('')).toBeNull()
     expect(resolveShotStageRef('只有场景名')).toBeNull()
