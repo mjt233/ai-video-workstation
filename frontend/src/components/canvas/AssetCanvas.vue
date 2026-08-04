@@ -1627,8 +1627,12 @@ watch([panelEl, flowEl], ([panel, flow]) => {
 }
 
 /* 连接点：默认小尺寸；鼠标在附近悬浮时放大（带过渡动画），便于抓取拖拽连接。
-   注：放大通过 width/height 实现，避免覆盖库自带的 translate 居中变换 */
+   注：放大通过 width/height 实现，避免覆盖库自带的 translate 居中变换。
+   需 z-index 提升到节点内容之上：左侧输入连接点在 DOM 中位于 .canvas-node__body
+   之前（同 z-auto 按 DOM 顺序绘制，body 会盖住其 ::before 命中区），
+   加 z-index 后节点卡片内侧（靠近边缘）也能触发附近悬浮放大。 */
 .canvas-node__handle {
+  z-index: 10;
   width: 6px;
   height: 6px;
   min-width: 6px;
@@ -1636,9 +1640,9 @@ watch([panelEl, flowEl], ([panel, flow]) => {
   transition:
     width .1s,
     height .1s,
-    min-width 0.1s,
-    min-height 0.1s,
-    background-color 0.1s;
+    min-width .1s,
+    min-height .1s,
+    background-color .1s;
 }
 
 /* 扩大连接点命中区域：悬浮（或拖动连线靠近）即可触发放大，且该区域可直接抓取 */
