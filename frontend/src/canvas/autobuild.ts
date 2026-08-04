@@ -106,6 +106,23 @@ export function deriveStageRefFromAssetPath(path: string): string {
 }
 
 /**
+ * 识别旧版自动搭画布的错误变体路径（历史数据：`assert/stage/{场景}/{标签}@{变体}.jpg`），
+ * 返回规范路径 `assert/stage/{场景}/variants/{标签}/{变体}.jpg`；非旧版错误格式返回 null。
+ *
+ * @param assetPath 加载节点的资产路径
+ * @returns 旧版路径与规范路径；无法识别时返回 null
+ */
+export function normalizeLegacyVariantPath(assetPath: string): { legacy: string; canonical: string } | null {
+  const m = assetPath.match(/^assert\/stage\/([^/]+)\/([^/@]+)@([^/]+)\.jpg$/)
+  if (!m) return null
+  const [, stage, label, variant] = m
+  return {
+    legacy: assetPath,
+    canonical: `assert/stage/${stage}/variants/${label}/${variant}.jpg`,
+  }
+}
+
+/**
  * 从现有画布 + 引用列表生成自动搭画布结果。
  *
  * @param data 现有画布（用于幂等判断）

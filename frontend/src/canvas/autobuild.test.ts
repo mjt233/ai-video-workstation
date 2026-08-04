@@ -6,6 +6,7 @@ import {
   buildSubSceneAutoCanvas,
   deriveStageRefFromAssetPath,
   mergePrompt,
+  normalizeLegacyVariantPath,
   resolveCharacterRef,
   resolveShotStageRef,
   type StageVariantRef,
@@ -160,6 +161,23 @@ describe('buildShotRefsFromStage', () => {
 
   it('空定义返回空', () => {
     expect(buildShotRefsFromStage([])).toEqual([])
+  })
+})
+
+describe('normalizeLegacyVariantPath', () => {
+  it('识别旧版错误变体路径并返回规范路径', () => {
+    expect(
+      normalizeLegacyVariantPath('assert/stage/商场门外/商场门外-白天-平视-晴-入口外街道@推进贴地视角.jpg'),
+    ).toEqual({
+      legacy: 'assert/stage/商场门外/商场门外-白天-平视-晴-入口外街道@推进贴地视角.jpg',
+      canonical: 'assert/stage/商场门外/variants/商场门外-白天-平视-晴-入口外街道/推进贴地视角.jpg',
+    })
+  })
+
+  it('普通路径返回 null', () => {
+    expect(normalizeLegacyVariantPath('assert/stage/商场门外/白天.jpg')).toBeNull()
+    expect(normalizeLegacyVariantPath('assert/character/陈书文/appearance.jpg')).toBeNull()
+    expect(normalizeLegacyVariantPath('assert/stage/商场门外/variants/白天/门已打开.jpg')).toBeNull()
   })
 })
 

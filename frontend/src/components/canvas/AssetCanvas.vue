@@ -547,6 +547,7 @@ import {
   buildShotRefsFromStage,
   buildSubSceneAutoCanvas,
   deriveStageRefFromAssetPath,
+  normalizeLegacyVariantPath,
   type AutoBuildRef,
   type StageVariantRef,
 } from '../../canvas/autobuild'
@@ -1281,6 +1282,25 @@ function onPickerConfirm(paths: string[]) {
 
 const autoBuilding = ref(false)
 
+/**
+ * 修复旧版自动搭画布产生的错误变体路径加载节点（历史数据迁移）。
+ * 旧代码把 `场景/标签@变体` 拼成 `assert/stage/{场景}/{标签}@{变体}.jpg`，
+ * 规范路径为 `assert/stage/{场景}/variants/{标签}/{变体}.jpg`。
+ * 仅当规范路径未被其他节点占用时修复，避免重复。
+ */
+function repairLegacyVariantLoaders(): void {
+  for (const node of [...store.nodes.value]) {
+    const ap = typeof node.config.assetPath === 'string' ? node.config.assetPath : ''
+    const legacy = normalizeLegacyVariantPath(ap)
+    if (!legacy) continue
+    const alreadyPresent = store.nodes.value.some(
+      (n) => n.id !== node.id && n.config.assetPath === legacy.canonical,
+    )
+    if (alreadyPresent) continue
+    store.updateNode(node.id, { config: { ...node.config, assetPath: legacy.canonical } })
+  }
+}
+
 /** 触发自动搭画布：分镜画布按 stage.json 引用；场景画布按子场景变体结构 */
 async function autoBuild() {
   if (autoBuilding.value) return
@@ -1296,6 +1316,8 @@ async function autoBuild() {
     }
     const refs = await collectRefs()
     const prompt = await collectPrompt()
+    // 修复旧版错误路径的加载节点（历史数据），避免与新规范路径重复
+    repairLegacyVariantLoaders()
     const result = buildAutoCanvas(store.data.value, refs, prompt)
     store.applyNodes(result.nodes, result.connections)
     const g = nodeMap.value[result.generateNodeId]
