@@ -349,56 +349,13 @@
 
       <!-- 重命名对话框：已由节点名称双击内联编辑取代 -->
 
-      <!-- 版本历史对话框 -->
-      <v-dialog
+      <!-- 版本历史对话框（大图预览 + 激活为当前） -->
+      <AssetHistoryDialog
         v-model="historyDialog.show"
-        max-width="640"
-      >
-        <v-card>
-          <v-card-title class="d-flex align-center">
-            <v-icon
-              class="mr-2"
-              size="small"
-            >
-              mdi-history
-            </v-icon>
-            <span>版本历史</span>
-          </v-card-title>
-          <v-card-text>
-            <v-list
-              v-if="historyEntries.length"
-              density="compact"
-            >
-              <v-list-item
-                v-for="h in historyEntries"
-                :key="h.version"
-              >
-                <v-list-item-title class="text-body-2">
-                  v{{ h.version }}
-                </v-list-item-title>
-                <v-list-item-subtitle>
-                  {{ h.path }} · {{ formatDate(h.date) }}
-                </v-list-item-subtitle>
-              </v-list-item>
-            </v-list>
-            <div
-              v-else
-              class="text-grey text-body-2"
-            >
-              暂无历史版本
-            </div>
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn
-              variant="text"
-              @click="historyDialog.show = false"
-            >
-              关闭
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
+        :project="props.project"
+        :node="historyNode"
+        @activate="onActivateHistory"
+      />
 
       <!-- 设为分镜场景图对话框 -->
       <v-dialog
@@ -542,7 +499,7 @@ import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
 import { canConnectNodes } from '../../canvas/connection'
-import { collectInputPaths, collectInputs, getHistory, getNodeCurrentAssetPath, type CanvasInputInfo } from '../../canvas/generate'
+import { activateHistory, collectInputPaths, collectInputs, getNodeCurrentAssetPath, type CanvasInputInfo, type HistoryEntry } from '../../canvas/generate'
 import {
   buildAutoCanvas,
   buildShotRefsFromStage,
@@ -558,6 +515,7 @@ import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { confirm } from '../../utils/confirm'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
+import AssetHistoryDialog from './AssetHistoryDialog.vue'
 
 /** 组件 props：定位一张画布 */
 const props = defineProps<{
@@ -1036,11 +994,8 @@ function cancelRename() {
 
 const historyDialog = reactive({ show: false, nodeId: '' })
 
-/** 历史对话框的版本列表 */
-const historyEntries = computed(() => {
-  const node = nodeMap.value[historyDialog.nodeId]
-  return node ? getHistory(node.config) : []
-})
+/** 历史对话框对应节点（store 更新后自动刷新，激活后「当前」标记随之更新） */
+const historyNode = computed(() => nodeMap.value[historyDialog.nodeId] ?? null)
 
 /** 打开版本历史对话框 */
 function openHistory(nodeId: string) {
@@ -1048,13 +1003,16 @@ function openHistory(nodeId: string) {
   historyDialog.show = true
 }
 
-/** 格式化 ISO 时间为本地可读文本 */
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString('zh-CN')
-  } catch {
-    return iso
-  }
+/**
+ * 历史对话框「设为当前」：把选中历史版本激活为节点当前图片。
+ * 仅改写 current 指针（history 不变），原当前图自动保留在历史中。
+ *
+ * @param entry 要激活的历史条目
+ */
+function onActivateHistory(entry: HistoryEntry) {
+  const node = nodeMap.value[historyDialog.nodeId]
+  if (!node) return
+  store.updateNode(node.id, { config: activateHistory(node.config, entry) })
 }
 
 // ── 生成联动 ────────────────────────────────────────────
