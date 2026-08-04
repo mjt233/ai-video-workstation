@@ -582,7 +582,7 @@
             color="primary"
             variant="tonal"
             prepend-icon="mdi-video"
-            @click="openVideoGen"
+            @click="generateVideo"
           >
             生成视频
           </v-btn>
@@ -1033,6 +1033,8 @@ const showAudioEditor = ref(false)
 const director = ref<DirectorProject>(emptyDirectorProject(5, 0, 0, 0))
 /** 导演台配置是否加载中 */
 const directorLoading = ref(false)
+/** 导演台加载序号：防止快速切换分镜时旧请求覆盖新数据 */
+let directorLoadSeq = 0
 
 /** 视频生成对话框提示：存在导演台图片块时提示将使用导演台参数 */
 const directorHint = computed(() => {
@@ -1207,13 +1209,16 @@ function openVideoGen() {
  * 加载分镜导演台配置。
  *
  * 存在 director.json 时读取；否则依据 overview 时长与项目规格构造空白项目。
+ * 用加载序号防止快速切换分镜时旧请求覆盖新数据。
  */
 async function loadDirector() {
+  const seq = ++directorLoadSeq
   const ep = props.episode
   const shot = props.shot
   directorLoading.value = true
   try {
     const existing = await readDirectorConfig(props.project, ep, shot)
+    if (seq !== directorLoadSeq) return
     if (existing) {
       director.value = existing
       return
@@ -1238,9 +1243,10 @@ async function loadDirector() {
     } catch {
       // 无 overview 时使用默认时长
     }
+    if (seq !== directorLoadSeq) return
     director.value = emptyDirectorProject(duration, width, height, fps)
   } finally {
-    directorLoading.value = false
+    if (seq === directorLoadSeq) directorLoading.value = false
   }
 }
 
