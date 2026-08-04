@@ -3,9 +3,11 @@ import { createCanvasData } from './types'
 import {
   buildAutoCanvas,
   buildShotRefsFromStage,
+  buildSubSceneAutoCanvas,
   mergePrompt,
   resolveCharacterRef,
   resolveShotStageRef,
+  type StageVariantRef,
 } from './autobuild'
 
 describe('buildAutoCanvas', () => {
@@ -132,5 +134,95 @@ describe('buildShotRefsFromStage', () => {
 
   it('空定义返回空', () => {
     expect(buildShotRefsFromStage([])).toEqual([])
+  })
+})
+
+describe('buildSubSceneAutoCanvas', () => {
+  const base = 'assert/stage/街角/白天.jpg'
+
+  it('空画布全搭：基础加载节点 + 每变体生成节点 + 连线', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [
+      { id: '门已打开', desc: '将门打开', refs: [] },
+      { id: '夜间', desc: '改为夜晚', refs: [] },
+    ]
+    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    // 1 基础加载 + 2 生成
+    expect(r.nodes).toHaveLength(3)
+    expect(r.nodes.filter((n) => n.prototypeId === 'image-loader')).toHaveLength(1)
+    expect(r.nodes.filter((n) => n.prototypeId === 'image-generate')).toHaveLength(2)
+    // 根变体都接到基础加载节点
+    expect(r.connections).toHaveLength(2)
+    const baseId = r.nodes.find((n) => n.config.assetPath === base)?.id
+    expect(r.connections.every((c) => c.fromNodeId === baseId)).toBe(true)
+    // 生成节点 prompt = desc，且带 autoRef
+    const gen = r.nodes.find((n) => n.config.autoRef === 'stage:白天@门已打开')
+    expect(gen?.config.prompt).toBe('将门打开')
+  })
+
+  it('嵌套变体接父变体生成节点', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [
+      { id: 'A', desc: 'A', refs: [] },
+      { id: 'A2', desc: 'A 的子', parentId: 'A', refs: [] },
+    ]
+    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    const aId = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A')?.id
+    const a2Id = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A2')?.id
+    const baseId = r.nodes.find((n) => n.config.assetPath === base)?.id
+    expect(aId).toBeTruthy()
+    expect(a2Id).toBeTruthy()
+    // A → A2 连线存在
+    expect(r.connections.some((c) => c.fromNodeId === aId && c.toNodeId === a2Id)).toBe(true)
+    // A 接基础图
+    expect(r.connections.some((c) => c.fromNodeId === baseId && c.toNodeId === aId)).toBe(true)
+  })
+
+  it('变体 refs 使用加载图片节点，同资产共享一个节点', () => {
+    const data = createCanvasData('stage')
+    const shared = 'assert/custom/道具/伞.png'
+    const variants: StageVariantRef[] = [
+      { id: 'A', desc: 'A', refs: [shared] },
+      { id: 'B', desc: 'B', refs: [shared] },
+    ]
+    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    // 基础加载 + 2 生成 + 1 共享 ref 加载
+    expect(r.nodes).toHaveLength(4)
+    const refLoaders = r.nodes.filter((n) => n.config.assetPath === shared)
+    expect(refLoaders).toHaveLength(1)
+    // ref 加载节点同时连到 A、B 两个生成节点
+    const loaderId = refLoaders[0]?.id
+    const aId = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A')?.id
+    const bId = r.nodes.find((n) => n.config.autoRef === 'stage:白天@B')?.id
+    expect(r.connections.some((c) => c.fromNodeId === loaderId && c.toNodeId === aId)).toBe(true)
+    expect(r.connections.some((c) => c.fromNodeId === loaderId && c.toNodeId === bId)).toBe(true)
+  })
+
+  it('幂等：应用一次后再调用不新增节点', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [
+      { id: '门已打开', desc: '开门', refs: [] },
+      { id: 'A2', desc: 'A 的子', parentId: '门已打开', refs: [] },
+    ]
+    const first = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    const merged = createCanvasData('stage')
+    merged.nodes = [...first.nodes]
+    merged.connections = [...first.connections]
+    const second = buildSubSceneAutoCanvas(merged, '白天', base, variants, 80, 80)
+    expect(second.nodes).toHaveLength(0)
+    expect(second.connections).toHaveLength(0)
+  })
+
+  it('已有生成节点但缺连线时补连', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [{ id: 'A', desc: 'A', refs: [] }]
+    const first = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    // 手动删除 first 里的连线，模拟「节点在、连线被删」
+    const merged = createCanvasData('stage')
+    merged.nodes = [...first.nodes]
+    merged.connections = []
+    const second = buildSubSceneAutoCanvas(merged, '白天', base, variants, 80, 80)
+    expect(second.nodes).toHaveLength(0)
+    expect(second.connections).toHaveLength(1)
   })
 })

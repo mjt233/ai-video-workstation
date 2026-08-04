@@ -160,3 +160,133 @@ export function buildShotRefsFromStage(stageDefs: unknown[]): AutoBuildRef[] {
   }
   return refs
 }
+
+/** 子场景衍生变体元数据（读 prompt/stage/{stage}/variants/{label}/{id}.json） */
+export interface StageVariantRef {
+  /** 变体 id */
+  id: string
+  /** 衍生描述（生成节点 prompt） */
+  desc: string
+  /** 父变体 id（同 label 内，可选） */
+  parentId?: string
+  /** 额外引用资产路径（assert/ 开头，可选） */
+  refs: string[]
+}
+
+/**
+ * 自动搭「子场景画布」：基础加载图片节点 + 每个衍生变体一个生成图片节点 + 变体 refs 加载图片节点。
+ * 连线规则：根变体 ← 基础加载节点；嵌套变体 ← 父变体生成节点；变体 refs ← 各自加载节点。
+ * 幂等：加载节点按 config.assetPath、生成节点按 config.autoRef（stage:{label}@{id}）判重；
+ * 已存在节点只补缺连线，不重复创建。
+ *
+ * @param data 现有画布（幂等判断）
+ * @param label 子场景标签
+ * @param baseAssetPath 子场景基础图路径（assert/stage/{stage}/{label}.jpg）
+ * @param variants 变体元数据列表
+ * @param x 基础加载节点 x
+ * @param y 基础加载节点 y
+ * @returns 应新增的节点与连线
+ */
+export function buildSubSceneAutoCanvas(
+  data: CanvasData,
+  label: string,
+  baseAssetPath: string,
+  variants: StageVariantRef[],
+  x = 80,
+  y = 80,
+): AutoBuildResult {
+  const nodes: CanvasNodeData[] = []
+  const connections: CanvasConnection[] = []
+  const existingPaths = new Set(
+    data.nodes.map((n) => (typeof n.config.assetPath === 'string' ? n.config.assetPath : '')),
+  )
+  const hasConnection = (fromId: string, toId: string) =>
+    data.connections.some((c) => c.fromNodeId === fromId && c.toNodeId === toId) ||
+    connections.some((c) => c.fromNodeId === fromId && c.toNodeId === toId)
+  const addConnection = (fromId: string, toId: string) => {
+    if (fromId && toId && !hasConnection(fromId, toId)) {
+      connections.push({ id: newId(), fromNodeId: fromId, fromPortId: 'out', toNodeId: toId, toPortId: 'in' })
+    }
+  }
+
+  // 基础加载图片节点：只建一个，所有根变体共用
+  let baseId = ''
+  if (existingPaths.has(baseAssetPath)) {
+    baseId = data.nodes.find((n) => n.config.assetPath === baseAssetPath)?.id ?? ''
+  } else {
+    const baseNode: CanvasNodeData = {
+      id: newId(),
+      prototypeId: 'image-loader',
+      name: label,
+      x,
+      y,
+      width: 220,
+      height: 150,
+      config: { assetPath: baseAssetPath },
+    }
+    nodes.push(baseNode)
+    existingPaths.add(baseAssetPath)
+    baseId = baseNode.id
+  }
+
+  // 每个变体一个生成图片节点（autoRef 幂等）
+  const genIdByVariant = new Map<string, string>()
+  let row = 0
+  for (const v of variants) {
+    const autoRef = `stage:${label}@${v.id}`
+    const existing = data.nodes.find((n) => n.config.autoRef === autoRef)
+    if (existing) {
+      genIdByVariant.set(v.id, existing.id)
+    } else {
+      const genNode: CanvasNodeData = {
+        id: newId(),
+        prototypeId: 'image-generate',
+        name: v.id,
+        x: x + 320,
+        y: y + row * 160,
+        width: 240,
+        height: 160,
+        config: { prompt: v.desc, autoRef },
+      }
+      nodes.push(genNode)
+      genIdByVariant.set(v.id, genNode.id)
+      row += 1
+    }
+  }
+
+  // 连线 + refs 加载节点（assetPath 共享）
+  const refLoaderIds = new Map<string, string>()
+  for (const v of variants) {
+    const genId = genIdByVariant.get(v.id)
+    if (!genId) continue
+    const inputNodeId = v.parentId ? (genIdByVariant.get(v.parentId) ?? '') : baseId
+    addConnection(inputNodeId, genId)
+    for (const ref of v.refs) {
+      let loaderId = refLoaderIds.get(ref)
+      if (loaderId == null) {
+        if (existingPaths.has(ref)) {
+          loaderId = data.nodes.find((n) => n.config.assetPath === ref)?.id ?? ''
+        } else {
+          const loaderNode: CanvasNodeData = {
+            id: newId(),
+            prototypeId: 'image-loader',
+            name: ref.split('/').pop() ?? ref,
+            x: x + 640,
+            y: y + row * 160,
+            width: 220,
+            height: 150,
+            config: { assetPath: ref },
+          }
+          nodes.push(loaderNode)
+          existingPaths.add(ref)
+          loaderId = loaderNode.id
+        }
+        refLoaderIds.set(ref, loaderId)
+      }
+      addConnection(loaderId, genId)
+    }
+  }
+
+  const firstGenId = genIdByVariant.values().next().value ?? ''
+  return { nodes, connections, generateNodeId: firstGenId, prompt: '' }
+}
