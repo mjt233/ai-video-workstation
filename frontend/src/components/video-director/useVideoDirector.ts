@@ -187,22 +187,35 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
   }
 
   /**
-   * 在图片轨末尾新增一个图片块。
+   * 在图片轨指定起始偏移处新增一个图片块。
    *
-   * 新块起点落在 `max(0, currentTime)` 秒处，占位长度取
-   * `DEFAULT_IMAGE_CLIP_DURATION`，id 由 `crypto.randomUUID()` 生成。
+   * 占位长度取 `DEFAULT_IMAGE_CLIP_DURATION`，id 由 `crypto.randomUUID()` 生成。
+   * 批量添加图片时调用方应递增 offset（例如按默认时长逐段排开），避免多图堆叠。
    *
    * @param path 图像文件路径（相对项目资产路径）
+   * @param startOffset 起始偏移（秒）
    */
-  function addImage(path: string): void {
+  function addImageAt(path: string, startOffset: number): void {
     const clip: DirectorImageClip = {
       id: crypto.randomUUID(),
       path,
-      startOffset: Math.max(0, currentTime.value),
+      startOffset,
       duration: DEFAULT_IMAGE_CLIP_DURATION,
     }
     project.value = { ...project.value, imageClips: [...project.value.imageClips, clip] }
     commit()
+  }
+
+  /**
+   * 在图片轨播放头处新增一个图片块。
+   *
+   * 新块起点落在 `max(0, currentTime)` 秒处；批量添加请使用 `addImageAt`
+   * 以便指定不同起始偏移，避免多图堆叠。
+   *
+   * @param path 图像文件路径（相对项目资产路径）
+   */
+  function addImage(path: string): void {
+    addImageAt(path, Math.max(0, currentTime.value))
   }
 
   /**
@@ -427,6 +440,7 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
     syncFromProject,
     toProject,
     addImage,
+    addImageAt,
     addAudio,
     moveClip,
     resizeClip,

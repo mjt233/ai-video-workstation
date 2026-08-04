@@ -12,8 +12,8 @@
 -->
 <template>
   <div class="video-director d-flex flex-column">
-    <!-- 工具栏 -->
-    <div class="d-flex align-center ga-2 pa-2">
+    <!-- 第一行：播放控制 + 缩放 + 时间信息 -->
+    <div class="d-flex align-center ga-2 pa-2 pb-1">
       <v-btn
         :prepend-icon="playState === 'playing' ? 'mdi-pause' : 'mdi-play'"
         :color="playState === 'playing' ? 'warning' : 'primary'"
@@ -64,9 +64,10 @@
       >
         总长：{{ formatTime(duration) }}s
       </v-chip>
+    </div>
 
-      <v-spacer />
-
+    <!-- 第二行：操作按钮 -->
+    <div class="d-flex align-center ga-2 pa-2 pt-0">
       <template v-if="!readOnly && allowAddAsset">
         <v-btn
           prepend-icon="mdi-image-plus"
@@ -105,6 +106,8 @@
       >
         粘贴
       </v-btn>
+
+      <v-spacer />
 
       <v-btn
         v-if="!readOnly"
@@ -174,11 +177,13 @@
       @update:selected="onImagePicked"
     />
 
-    <!-- 音频资产选择器（自定义资产可存放任意音频文件） -->
+    <!-- 音频资产选择器：支持分镜台词音频、分镜/全局自定义资产 -->
     <AssetPickerDialog
       v-model="audioPickerOpen"
       :project="project"
-      :tabs="['custom']"
+      :tabs="['audio']"
+      :context-episode="episode"
+      :context-shot="shot"
       title="添加音频素材"
       @update:selected="onAudioPicked"
     />
@@ -198,7 +203,7 @@ import {
   useVideoDirector,
   previewImageAt,
 } from './useVideoDirector'
-import type { DirectorProject } from './types'
+import { DEFAULT_IMAGE_CLIP_DURATION, type DirectorProject } from './types'
 import DirectorTimeline from './DirectorTimeline.vue'
 import AssetPickerDialog from '../AssetPickerDialog.vue'
 import { buildPreviewUrl } from '../../canvas/preview'
@@ -212,6 +217,10 @@ const props = defineProps<{
   project: string
   /** 导演台项目数据（由外部持有，如 ScenePanel 从 director.json 加载） */
   director: DirectorProject
+  /** 集数（用于音频选择器定位分镜台词音频与分镜自定义资产；可选） */
+  episode?: string
+  /** 分镜编号（用于音频选择器定位分镜台词音频与分镜自定义资产；可选） */
+  shot?: string
   /** 只读模式：禁止一切编辑（含播放除外）与保存 */
   readOnly?: boolean
   /** 是否允许添加资产；非只读且为 false 时隐藏「添加图片/音频」按钮，其余编辑仍可用 */
@@ -245,7 +254,7 @@ const {
   clipboard,
   syncFromProject,
   toProject,
-  addImage,
+  addImageAt,
   addAudio,
   moveClip,
   resizeClip,
@@ -484,11 +493,16 @@ function onSave(): void {
 /**
  * 图片选择结果：逐个加入图片轨。
  *
+ * 从播放头位置开始，每张图依次间隔 DEFAULT_IMAGE_CLIP_DURATION 排开，
+ * 避免多图堆叠在同一位置。
+ *
  * @param paths 选中图片的相对路径列表
  */
 function onImagePicked(paths: string[]): void {
+  let cursor = Math.max(0, currentTime.value)
   for (const p of paths) {
-    addImage(p)
+    addImageAt(p, cursor)
+    cursor += DEFAULT_IMAGE_CLIP_DURATION
   }
   imagePickerOpen.value = false
 }

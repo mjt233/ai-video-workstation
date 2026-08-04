@@ -52,6 +52,12 @@
         >
           自定义资产
         </v-tab>
+        <v-tab
+          v-if="visibleTabs.includes('audio')"
+          value="audio"
+        >
+          音频
+        </v-tab>
       </v-tabs>
 
       <v-divider />
@@ -321,6 +327,57 @@
             暂无可用资产
           </div>
         </template>
+
+        <!-- 音频：分区列表（分镜台词音频 / 分镜自定义 / 全局自定义） -->
+        <template v-else-if="activeTab === 'audio' && visibleTabs.includes('audio')">
+          <template v-if="tabItems.length">
+            <template
+              v-for="item in tabItems"
+              :key="item.path || item.section"
+            >
+              <div
+                v-if="item.header"
+                class="text-caption text-medium-emphasis text-uppercase px-1 pb-1 mt-2"
+                :class="{ 'mt-0': item === tabItems[0] }"
+              >
+                {{ item.section }}
+              </div>
+              <div
+                v-else
+                class="audio-item d-flex align-center ga-2 px-2 py-1 my-1 rounded"
+                :class="{ 'asset-card--selected': isSelected(item.path) }"
+                @click="selectItem(item)"
+              >
+                <v-icon
+                  color="secondary"
+                  size="20"
+                >
+                  mdi-music-note
+                </v-icon>
+                <span
+                  class="text-caption text-truncate"
+                  :title="item.label"
+                >
+                  {{ item.label }}
+                </span>
+                <v-spacer />
+                <v-icon
+                  v-if="isSelected(item.path)"
+                  color="primary"
+                  size="18"
+                >
+                  mdi-check-circle
+                </v-icon>
+              </div>
+            </template>
+          </template>
+          <div
+            v-else
+            class="text-grey text-body-2 text-center py-8"
+          >
+            暂无可用音频资产
+          </div>
+        </template>
       </v-card-text>
 
       <v-divider v-if="!parentMode" />
@@ -359,9 +416,17 @@
                 size="20"
               >
                 <v-img
+                  v-if="item.thumbnail"
                   :src="item.thumbnail"
                   cover
                 />
+                <v-icon
+                  v-else
+                  size="16"
+                  color="secondary"
+                >
+                  mdi-music-note
+                </v-icon>
               </v-avatar>
               <span class="text-caption">{{ item.label }}</span>
             </v-chip>
@@ -430,7 +495,7 @@ import client, { readFs, type DirEntry, type DirResponse } from '../api/client'
 import { listCharacterVariants, listStageVariants, type VariantInfo } from '../api/assets'
 
 /** 资产分类标签 */
-type AssetTab = 'character' | 'stage' | 'custom'
+type AssetTab = 'character' | 'stage' | 'custom' | 'audio'
 
 /** 树形资产条目 */
 interface AssetItem {
@@ -471,6 +536,10 @@ const props = withDefaults(defineProps<{
   contextKind?: 'character' | 'stage'
   contextOwner?: string
   contextBaseLabel?: string
+  /** 集数（audio 页签：定位分镜台词音频与分镜自定义资产；可选） */
+  contextEpisode?: string
+  /** 分镜编号（audio 页签：定位分镜台词音频与分镜自定义资产；可选） */
+  contextShot?: string
 }>(), {
   selected: () => [],
   exclude: () => [],
@@ -482,6 +551,8 @@ const props = withDefaults(defineProps<{
   contextKind: undefined,
   contextOwner: undefined,
   contextBaseLabel: undefined,
+  contextEpisode: undefined,
+  contextShot: undefined,
 })
 
 const emit = defineEmits<{
@@ -875,10 +946,120 @@ async function loadCustomTabInternal() {
   }
 }
 
+/**
+ * 递归列出目录下的所有音频文件路径。
+ * 服务端目前不支持 recursive 参数，故客户端递归实现。
+ */
+async function listAudioFilesRecursive(project: string, dirRelPath: string): Promise<string[]> {
+  const results: string[] = []
+  const AUDIO_EXTS = new Set(['.flac', '.mp3', '.wav', '.m4a', '.ogg', '.opus'])
+
+  async function walk(relPath: string) {
+    const res = await readFs(project, relPath) as DirResponse
+    const entries = res.entries ?? []
+    for (const entry of entries) {
+      const childRel = relPath.endsWith('/') ? `${relPath}${entry.name}` : `${relPath}/${entry.name}`
+      if (entry.type === 'dir') {
+        await walk(childRel)
+      } else {
+        const ext = entry.name.toLowerCase().split('.').pop()
+        if (ext && AUDIO_EXTS.has(`.${ext}`)) {
+          results.push(childRel)
+        }
+      }
+    }
+  }
+
+  try {
+    await walk(dirRelPath)
+  } catch {
+    // 目录不存在时静默处理
+  }
+  return results
+}
+
+/**
+ * 加载「音频」标签数据。
+ *
+ * 按来源分区（含分区标题 header）：
+ * 1. 分镜台词音频：assert/scene/{ep}/{shot}/voice/ 下的音频文件
+ * 2. 分镜自定义资产：assert/custom/scene/{ep}/{shot}/ 下的音频文件
+ * 3. 全局自定义资产：assert/custom/ 下的音频文件（排除已单列的分镜自定义部分）
+ * 需提供 contextEpisode / contextShot 才显示分镜相关来源，否则仅全局自定义。
+ */
+async function loadAudioTabInternal() {
+  tabLoading.value = true
+  tabItems.value = []
+  try {
+    const project = props.project
+    const items: AssetItem[] = []
+    const { contextEpisode: ep, contextShot: shot } = props
+    const sceneCustomPrefix = ep && shot ? `assert/custom/scene/${ep}/${shot}/` : ''
+
+    // 1) 分镜台词音频
+    if (ep && shot) {
+      const voiceDir = `assert/scene/${ep}/${shot}/voice`
+      const voicePaths = await listAudioFilesRecursive(project, voiceDir)
+      const visible = voicePaths.filter((p) => !props.exclude.includes(p))
+      if (visible.length) {
+        items.push({ path: '', label: '', thumbnail: '', depth: 0, section: '分镜台词音频', header: true })
+        for (const p of visible) {
+          items.push({
+            path: p,
+            label: p.split('/').pop() ?? p,
+            thumbnail: '',
+            depth: 1,
+          })
+        }
+      }
+    }
+
+    // 2) 分镜自定义资产
+    if (sceneCustomPrefix) {
+      const scenePaths = await listAudioFilesRecursive(project, sceneCustomPrefix.replace(/\/$/, ''))
+      const visible = scenePaths.filter((p) => !props.exclude.includes(p))
+      if (visible.length) {
+        items.push({ path: '', label: '', thumbnail: '', depth: 0, section: '分镜自定义资产', header: true })
+        for (const p of visible) {
+          items.push({
+            path: p,
+            label: p.slice(sceneCustomPrefix.length),
+            thumbnail: '',
+            depth: 1,
+          })
+        }
+      }
+    }
+
+    // 3) 全局自定义资产（排除分镜自定义部分避免重复）
+    const globalPaths = await listAudioFilesRecursive(project, 'assert/custom/')
+    const visibleGlobal = globalPaths.filter(
+      (p) => !props.exclude.includes(p) && (!sceneCustomPrefix || !p.startsWith(sceneCustomPrefix)),
+    )
+    if (visibleGlobal.length) {
+      items.push({ path: '', label: '', thumbnail: '', depth: 0, section: '全局自定义资产', header: true })
+      for (const p of visibleGlobal) {
+        items.push({
+          path: p,
+          label: p.slice('assert/custom/'.length),
+          thumbnail: '',
+          depth: 1,
+        })
+      }
+    }
+
+    tabItems.value = items
+  } finally {
+    tabLoading.value = false
+  }
+}
+
 /** 切换标签页时加载数据，并自动展开第一个实体 */
 async function onTabChange() {
   if (activeTab.value === 'custom') {
     await loadCustomTabInternal()
+  } else if (activeTab.value === 'audio') {
+    await loadAudioTabInternal()
   } else {
     tabLoading.value = true
     try {

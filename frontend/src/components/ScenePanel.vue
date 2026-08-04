@@ -556,6 +556,8 @@
               v-else
               :project="props.project"
               :director="director"
+              :episode="props.episode"
+              :shot="props.shot"
               :allow-add-asset="true"
               @update:director="(p) => { director = p }"
               @save="saveDirector"
