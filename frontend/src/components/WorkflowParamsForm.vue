@@ -123,13 +123,30 @@ function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
 }
 
 /**
- * 根据声明重新初始化表单值（取各参数默认值），并通知父组件。
+ * 根据声明初始化表单值（取各参数默认值），并回填外部已保存的值（modelValue），
+ * 然后通知父组件。
+ *
+ * 说明：
+ * - 声明为空（如画布节点的工作流列表尚未异步加载完成）时不初始化也不回写父级，
+ *   避免用空对象覆盖父级已保存的配置（如节点 config.workflowParams 里的输出尺寸）。
+ * - modelValue 仅用于「外部初始化/回显」——挂载或声明变化时，把其中属于已声明
+ *   key 的非空值覆盖到默认值之上。这样画布节点等场景在配置面板重挂载后能正确
+ *   回显已保存的配置组合（如输出尺寸），不会退化为默认值；modelValue 为空对象时
+ *   则与旧行为一致（全部使用默认值）。
  *
  * @param decls 参数声明列表
  */
 function initFromDefaults(decls: WorkflowUserParamDeclaration[]) {
+  if (!decls.length) return
   const next: Record<string, WorkflowUserParamValue> = {}
   for (const d of decls) next[d.key] = d.defaultValue
+  const saved = props.modelValue
+  if (saved && typeof saved === 'object') {
+    for (const d of decls) {
+      const v = saved[d.key]
+      if (v !== undefined && v !== null) next[d.key] = v
+    }
+  }
   values.value = next
   emit('update:modelValue', { ...next })
 }
