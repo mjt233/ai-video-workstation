@@ -40,8 +40,8 @@ export function canvasRelPath(target: CanvasTarget): string {
  * @returns 画布定义或 null
  */
 export async function loadCanvas(project: string, target: CanvasTarget): Promise<CanvasData | null> {
-  const rel = canvasRelPath(target)
   try {
+    const rel = canvasRelPath(target)
     const raw = await readFs(project, rel)
     if (raw == null) return null
     // axios 会尝试对字符串响应做 JSON.parse，因此 .json 文件可能直接返回对象；

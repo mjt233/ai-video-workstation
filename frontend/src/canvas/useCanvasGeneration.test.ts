@@ -67,6 +67,19 @@ describe('useCanvasGeneration', () => {
     )
   })
 
+  it('场景画布（含子场景标签）：prompt 与产物路径包含 label', async () => {
+    const gen = useCanvasGeneration('p', { kind: 'stage', stage: '街角', label: '白天' })
+    const node = makeNode('打开正门')
+    await gen.generate(node, () => {})
+    expect(writeFs).toHaveBeenCalledWith('p', 'prompt/stage/街角/canvas/白天/n1/prompt.md', '打开正门')
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: 'text-to-image',
+        params: expect.objectContaining({ outputPath: 'assert/stage/街角/canvas/白天/n1/v1.jpg' }),
+      }),
+    )
+  })
+
   it('生成失败进入 error 状态', async () => {
     ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'failed', result: null, errorMsg: '失败', workflowId: 'image-edit', impl: 'default', createdAt: '', updatedAt: '' })
     const gen = useCanvasGeneration('p', TARGET)
