@@ -328,25 +328,123 @@
           </div>
         </template>
 
-        <!-- 音频：分区列表（分镜台词音频 / 分镜自定义 / 全局自定义） -->
+        <!-- 音频：3 个子页签（台词音频 / 分镜自定义 / 全局自定义） -->
         <template v-else-if="activeTab === 'audio' && visibleTabs.includes('audio')">
-          <template v-if="tabItems.length">
-            <template
-              v-for="item in tabItems"
-              :key="item.path || item.section"
+          <v-tabs
+            v-model="audioSection"
+            grow
+            density="compact"
+            class="mb-2"
+          >
+            <v-tab value="voice">
+              台词音频
+            </v-tab>
+            <v-tab
+              v-if="hasSceneContext"
+              value="scene"
+            >
+              分镜自定义
+            </v-tab>
+            <v-tab value="global">
+              全局自定义
+            </v-tab>
+          </v-tabs>
+
+          <!-- 台词音频：台词列表（未生成语音的台词禁用） -->
+          <template v-if="audioSection === 'voice'">
+            <div
+              v-if="voiceLines.length"
+              class="d-flex flex-column ga-1"
             >
               <div
-                v-if="item.header"
-                class="text-caption text-medium-emphasis text-uppercase px-1 pb-1 mt-2"
-                :class="{ 'mt-0': item === tabItems[0] }"
+                v-for="line in voiceLines"
+                :key="line.index"
+                class="audio-item d-flex align-center ga-2 px-2 py-1 rounded"
+                :class="{
+                  'audio-item--disabled': !line.hasFile,
+                  'asset-card--selected': line.hasFile && isSelected(line.path),
+                }"
+                @click="line.hasFile && selectItem(line.item)"
               >
-                {{ item.section }}
+                <v-icon
+                  :color="line.hasFile ? 'secondary' : 'grey'"
+                  size="20"
+                >
+                  mdi-account-voice
+                </v-icon>
+                <div
+                  class="flex-grow-1"
+                  style="min-width: 0;"
+                >
+                  <div class="text-caption text-truncate">
+                    <strong>{{ line.index + 1 }}. {{ line.角色名 }}</strong>
+                    <span class="text-grey ml-1">{{ line.台词 }}</span>
+                  </div>
+                </div>
+                <v-chip
+                  v-if="!line.hasFile"
+                  size="x-small"
+                  variant="tonal"
+                  color="grey"
+                >
+                  未生成语音
+                </v-chip>
+                <v-icon
+                  v-else-if="isSelected(line.path)"
+                  color="primary"
+                  size="18"
+                >
+                  mdi-check-circle
+                </v-icon>
+              </div>
+            </div>
+            <div
+              v-else
+              class="text-grey text-body-2 text-center py-8"
+            >
+              该分镜暂无台词
+            </div>
+          </template>
+
+          <!-- 分镜/全局自定义：文件浏览器 -->
+          <template v-else>
+            <div class="d-flex align-center ga-2 mb-1">
+              <v-btn
+                icon="mdi-arrow-up"
+                size="small"
+                variant="text"
+                :disabled="!audioCwd"
+                title="返回上级目录"
+                @click="goUpAudio"
+              />
+              <span class="text-caption text-truncate">
+                {{ audioCwdLabel }}
+              </span>
+            </div>
+            <div
+              v-if="audioDirs.length || audioFiles.length"
+              class="d-flex flex-column ga-1"
+            >
+              <div
+                v-for="dir in audioDirs"
+                :key="dir"
+                class="audio-item d-flex align-center ga-2 px-2 py-1 rounded"
+                @click="enterAudioDir(dir)"
+              >
+                <v-icon
+                  color="primary"
+                  size="20"
+                >
+                  mdi-folder
+                </v-icon>
+                <span class="text-caption">{{ dir }}/</span>
               </div>
               <div
-                v-else
-                class="audio-item d-flex align-center ga-2 px-2 py-1 my-1 rounded"
-                :class="{ 'asset-card--selected': isSelected(item.path) }"
-                @click="selectItem(item)"
+                v-for="file in audioFiles"
+                :key="file.path"
+                class="audio-item d-flex align-center ga-2 px-2 py-1 rounded"
+                :class="{ 'asset-card--selected': isSelected(file.path) }"
+                @click="selectItem(file)"
               >
                 <v-icon
                   color="secondary"
@@ -356,27 +454,27 @@
                 </v-icon>
                 <span
                   class="text-caption text-truncate"
-                  :title="item.label"
+                  :title="file.label"
                 >
-                  {{ item.label }}
+                  {{ file.label }}
                 </span>
                 <v-spacer />
                 <v-icon
-                  v-if="isSelected(item.path)"
+                  v-if="isSelected(file.path)"
                   color="primary"
                   size="18"
                 >
                   mdi-check-circle
                 </v-icon>
               </div>
-            </template>
+            </div>
+            <div
+              v-else
+              class="text-grey text-body-2 text-center py-8"
+            >
+              该目录暂无音频文件
+            </div>
           </template>
-          <div
-            v-else
-            class="text-grey text-body-2 text-center py-8"
-          >
-            暂无可用音频资产
-          </div>
         </template>
       </v-card-text>
 
@@ -491,7 +589,7 @@
  * 自定义资产标签保留原来的平铺网格布局。
  */
 import { computed, ref, watch } from 'vue'
-import client, { readFs, type DirEntry, type DirResponse } from '../api/client'
+import client, { readFs, existsFs, type DirEntry, type DirResponse } from '../api/client'
 import { listCharacterVariants, listStageVariants, type VariantInfo } from '../api/assets'
 
 /** 资产分类标签 */
@@ -575,6 +673,44 @@ const entityList = ref<EntityItem[]>([])
 const selectedEntity = ref('')
 const currentTree = ref<AssetItem[]>([])
 const tabItems = ref<AssetItem[]>([])
+
+// ── 音频页签状态 ─────────────────────────────────────────
+
+/** 音频子页签：台词音频 / 分镜自定义 / 全局自定义 */
+const audioSection = ref<'voice' | 'scene' | 'global'>('voice')
+
+/** 台词音频条目：一条台词 + 其语音文件是否存在 */
+interface VoiceLineItem {
+  /** script.json 中的下标 */
+  index: number
+  /** 角色名 */
+  角色名: string
+  /** 台词内容 */
+  台词: string
+  /** 对应语音文件是否存在（仅存在的可选） */
+  hasFile: boolean
+  /** 语音文件相对路径 */
+  path: string
+  /** 可加入已选列表的资产条目 */
+  item: AssetItem
+}
+
+/** 台词列表（读 script.json，未生成语音的台词禁用） */
+const voiceLines = ref<VoiceLineItem[]>([])
+
+/** 是否有分镜上下文（决定是否显示「分镜自定义」子页签） */
+const hasSceneContext = computed(
+  () => !!(props.contextEpisode && props.contextShot),
+)
+
+/** 文件浏览器：当前目录的子目录名列表 */
+const audioDirs = ref<string[]>([])
+/** 文件浏览器：当前目录的音频文件条目 */
+const audioFiles = ref<AssetItem[]>([])
+/** 文件浏览器：分镜自定义子页签当前相对路径（相对 assert/custom/scene/{ep}/{shot}） */
+const sceneCwd = ref('')
+/** 文件浏览器：全局自定义子页签当前相对路径（相对 assert/custom） */
+const globalCwd = ref('')
 const localSelected = ref<AssetItem[]>([])
 const parentVariants = ref<VariantInfo[]>([])
 
@@ -947,110 +1083,161 @@ async function loadCustomTabInternal() {
 }
 
 /**
- * 递归列出目录下的所有音频文件路径。
- * 服务端目前不支持 recursive 参数，故客户端递归实现。
+ * 判断文件名是否为支持的音频文件。
+ *
+ * @param name 文件名
+ * @returns true 表示音频文件
  */
-async function listAudioFilesRecursive(project: string, dirRelPath: string): Promise<string[]> {
-  const results: string[] = []
-  const AUDIO_EXTS = new Set(['.flac', '.mp3', '.wav', '.m4a', '.ogg', '.opus'])
-
-  async function walk(relPath: string) {
-    const res = await readFs(project, relPath) as DirResponse
-    const entries = res.entries ?? []
-    for (const entry of entries) {
-      const childRel = relPath.endsWith('/') ? `${relPath}${entry.name}` : `${relPath}/${entry.name}`
-      if (entry.type === 'dir') {
-        await walk(childRel)
-      } else {
-        const ext = entry.name.toLowerCase().split('.').pop()
-        if (ext && AUDIO_EXTS.has(`.${ext}`)) {
-          results.push(childRel)
-        }
-      }
-    }
-  }
-
-  try {
-    await walk(dirRelPath)
-  } catch {
-    // 目录不存在时静默处理
-  }
-  return results
+function isAudioFile(name: string): boolean {
+  const ext = name.toLowerCase().split('.').pop()
+  return !!ext && new Set(['flac', 'mp3', 'wav', 'm4a', 'ogg', 'opus']).has(ext)
 }
 
 /**
- * 加载「音频」标签数据。
+ * 加载「台词音频」子页签数据。
  *
- * 按来源分区（含分区标题 header）：
- * 1. 分镜台词音频：assert/scene/{ep}/{shot}/voice/ 下的音频文件
- * 2. 分镜自定义资产：assert/custom/scene/{ep}/{shot}/ 下的音频文件
- * 3. 全局自定义资产：assert/custom/ 下的音频文件（排除已单列的分镜自定义部分）
- * 需提供 contextEpisode / contextShot 才显示分镜相关来源，否则仅全局自定义。
+ * 读取 script.json 的台词列表，逐条探测对应语音文件
+ * （assert/scene/{ep}/{shot}/voice/{index}-{角色名}.flac）是否存在；
+ * 无论是否已生成都展示，仅存在语音文件的台词可选。
  */
-async function loadAudioTabInternal() {
+async function loadVoiceLines() {
+  const { contextEpisode: ep, contextShot: shot } = props
+  if (!ep || !shot) {
+    voiceLines.value = []
+    return
+  }
   tabLoading.value = true
-  tabItems.value = []
   try {
-    const project = props.project
-    const items: AssetItem[] = []
-    const { contextEpisode: ep, contextShot: shot } = props
-    const sceneCustomPrefix = ep && shot ? `assert/custom/scene/${ep}/${shot}/` : ''
-
-    // 1) 分镜台词音频
-    if (ep && shot) {
-      const voiceDir = `assert/scene/${ep}/${shot}/voice`
-      const voicePaths = await listAudioFilesRecursive(project, voiceDir)
-      const visible = voicePaths.filter((p) => !props.exclude.includes(p))
-      if (visible.length) {
-        items.push({ path: '', label: '', thumbnail: '', depth: 0, section: '分镜台词音频', header: true })
-        for (const p of visible) {
-          items.push({
-            path: p,
-            label: p.split('/').pop() ?? p,
-            thumbnail: '',
-            depth: 1,
-          })
-        }
-      }
+    const scriptRaw = await readFs(props.project, `prompt/scene/${ep}/${shot}/script.json`).catch(() => null)
+    let script: Array<{ 角色名?: string; 台词?: string }> = []
+    if (typeof scriptRaw === 'string') {
+      const text = scriptRaw.trim()
+      if (text) script = JSON.parse(text) as Array<{ 角色名?: string; 台词?: string }>
+    } else if (Array.isArray(scriptRaw)) {
+      script = scriptRaw as Array<{ 角色名?: string; 台词?: string }>
     }
 
-    // 2) 分镜自定义资产
-    if (sceneCustomPrefix) {
-      const scenePaths = await listAudioFilesRecursive(project, sceneCustomPrefix.replace(/\/$/, ''))
-      const visible = scenePaths.filter((p) => !props.exclude.includes(p))
-      if (visible.length) {
-        items.push({ path: '', label: '', thumbnail: '', depth: 0, section: '分镜自定义资产', header: true })
-        for (const p of visible) {
-          items.push({
-            path: p,
-            label: p.slice(sceneCustomPrefix.length),
-            thumbnail: '',
-            depth: 1,
-          })
-        }
-      }
-    }
-
-    // 3) 全局自定义资产（排除分镜自定义部分避免重复）
-    const globalPaths = await listAudioFilesRecursive(project, 'assert/custom/')
-    const visibleGlobal = globalPaths.filter(
-      (p) => !props.exclude.includes(p) && (!sceneCustomPrefix || !p.startsWith(sceneCustomPrefix)),
-    )
-    if (visibleGlobal.length) {
-      items.push({ path: '', label: '', thumbnail: '', depth: 0, section: '全局自定义资产', header: true })
-      for (const p of visibleGlobal) {
-        items.push({
-          path: p,
-          label: p.slice('assert/custom/'.length),
+    const lines: VoiceLineItem[] = []
+    for (let i = 0; i < script.length; i++) {
+      const role = (script[i]?.角色名 ?? '').trim()
+      const text = (script[i]?.台词 ?? '').trim()
+      if (!role) continue
+      const path = `assert/scene/${ep}/${shot}/voice/${i}-${role}.flac`
+      const hasFile = await existsFs(props.project, path)
+      lines.push({
+        index: i,
+        角色名: role,
+        台词: text,
+        hasFile,
+        path,
+        item: {
+          path,
+          label: `${i + 1}. ${role}`, // 已选区域用简短标签
           thumbnail: '',
-          depth: 1,
-        })
-      }
+          depth: 0,
+        },
+      })
     }
-
-    tabItems.value = items
+    voiceLines.value = lines
   } finally {
     tabLoading.value = false
+  }
+}
+
+/**
+ * 获取当前文件浏览器子页签的根目录（相对项目路径）。
+ */
+function audioRoot(): string {
+  if (audioSection.value === 'scene' && hasSceneContext.value) {
+    return `assert/custom/scene/${props.contextEpisode}/${props.contextShot}`
+  }
+  return 'assert/custom'
+}
+
+/** 当前文件浏览器子页签的 cwd ref */
+function audioCwdRef(): { value: string } {
+  return audioSection.value === 'scene' ? sceneCwd : globalCwd
+}
+
+/** 文件浏览器当前相对路径（相对各自根目录） */
+const audioCwd = computed(() => audioCwdRef().value)
+
+/** 文件浏览器当前完整相对路径（用于 readFs） */
+const audioFullCwd = computed(() => {
+  const root = audioRoot()
+  const cwd = audioCwd.value
+  return cwd ? `${root}/${cwd}` : root
+})
+
+/** 文件浏览器顶部路径标签（含来源名） */
+const audioCwdLabel = computed(() => {
+  const name = audioSection.value === 'scene' ? '分镜自定义' : '全局自定义'
+  return audioCwd.value ? `${name} / ${audioCwd.value}` : `${name} /`
+})
+
+/**
+ * 加载文件浏览器当前目录：子目录 + 音频文件。
+ */
+async function loadAudioBrowser() {
+  tabLoading.value = true
+  try {
+    let res: DirResponse
+    try {
+      res = await readFs(props.project, audioFullCwd.value) as DirResponse
+    } catch {
+      // 目录不存在（如分镜无自定义资产目录）→ 静默视为空目录
+      audioDirs.value = []
+      audioFiles.value = []
+      return
+    }
+    const entries = res.entries ?? []
+    audioDirs.value = entries
+      .filter((e: DirEntry) => e.type === 'dir')
+      .map((e: DirEntry) => e.name)
+      .sort((a, b) => a.localeCompare(b, 'zh'))
+    audioFiles.value = entries
+      .filter((e: DirEntry) => e.type === 'file' && isAudioFile(e.name))
+      .filter((e: DirEntry) => !props.exclude.includes(`${audioFullCwd.value}/${e.name}`))
+      .map((e: DirEntry) => ({
+        path: `${audioFullCwd.value}/${e.name}`,
+        label: e.name,
+        thumbnail: '',
+        depth: 0,
+      }))
+  } finally {
+    tabLoading.value = false
+  }
+}
+
+/**
+ * 进入文件浏览器的子目录。
+ *
+ * @param dir 子目录名
+ */
+async function enterAudioDir(dir: string): Promise<void> {
+  audioCwdRef().value = audioCwd.value ? `${audioCwd.value}/${dir}` : dir
+  await loadAudioBrowser()
+}
+
+/**
+ * 文件浏览器返回上级目录。
+ */
+async function goUpAudio(): Promise<void> {
+  const cwd = audioCwd.value
+  if (!cwd) return
+  const idx = cwd.lastIndexOf('/')
+  audioCwdRef().value = idx >= 0 ? cwd.slice(0, idx) : ''
+  await loadAudioBrowser()
+}
+
+/**
+ * 音频子页签变化：加载对应内容。
+ */
+async function onAudioSectionChange() {
+  if (audioSection.value === 'voice') {
+    await loadVoiceLines()
+  } else {
+    await loadAudioBrowser()
   }
 }
 
@@ -1059,7 +1246,7 @@ async function onTabChange() {
   if (activeTab.value === 'custom') {
     await loadCustomTabInternal()
   } else if (activeTab.value === 'audio') {
-    await loadAudioTabInternal()
+    await onAudioSectionChange()
   } else {
     tabLoading.value = true
     try {
@@ -1081,6 +1268,13 @@ async function onTabChange() {
 watch(visibleTabs, (tabs) => {
   if (!parentMode.value && tabs.length > 0 && !tabs.includes(activeTab.value)) {
     activeTab.value = tabs[0]
+  }
+})
+
+/** 音频子页签切换时加载对应内容（仅当音频页签激活时） */
+watch(audioSection, () => {
+  if (activeTab.value === 'audio') {
+    void onAudioSectionChange()
   }
 })
 
@@ -1125,6 +1319,22 @@ watch(
 .asset-card--selected {
   box-shadow: 0 0 0 2px rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.06);
+}
+
+/* 音频条目（台词/文件浏览器行） */
+.audio-item {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.audio-item:hover {
+  background: rgba(var(--v-theme-primary), 0.05);
+}
+
+/* 未生成语音的台词：禁用态 */
+.audio-item--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .asset-thumb-wrap {
