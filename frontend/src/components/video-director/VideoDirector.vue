@@ -11,7 +11,10 @@
   播放通过复用 audio-editor 的 PlaybackEngine 实现音频实时播放与时间轴跟随。
 -->
 <template>
-  <div class="video-director d-flex flex-column">
+  <div
+    ref="rootEl"
+    class="video-director d-flex flex-column"
+  >
     <!-- 第一行：播放控制 + 缩放 + 时间信息 -->
     <div class="d-flex align-center ga-2 pa-2 pb-1">
       <v-btn
@@ -165,6 +168,7 @@
         @resize="resizeClip"
         @trim="trimClip"
         @seek="seekTo"
+        @zoom="setZoom"
       />
     </div>
 
@@ -556,16 +560,39 @@ function onAudioPicked(paths: string[]): void {
   audioPickerOpen.value = false
 }
 
-// ── 快捷键（复制/粘贴/删除） ──────────────────────────────────────
+// ── 快捷键（播放/复制/粘贴/删除） ────────────────────────────────
+/** 导演台根元素引用（用于判断用户操作焦点是否在导演台内） */
+const rootEl = ref<HTMLElement | null>(null)
+
+/**
+ * 用户操作焦点是否在导演台内。
+ *
+ * 通过全局 `pointerdown`/`focusin`（捕获阶段）同步：点击或聚焦发生在导演台
+ * 根元素内部置 true、外部置 false。仅在 true 时才响应导演台快捷键
+ * （空格播放、复制/粘贴/删除），避免用户操作页面其他区域时误触发。
+ */
+let directorActive = false
+
+/**
+ * 根据事件目标是否落在导演台根元素内更新 directorActive。
+ *
+ * @param e 全局 pointerdown / focusin 事件
+ */
+function updateDirectorActive(e: Event): void {
+  directorActive = rootEl.value?.contains(e.target as Node) ?? false
+}
+
 /**
  * 全局键盘事件：空格 播放/暂停、Ctrl+C 复制、Ctrl+V 粘贴、Delete/Backspace 删除。
  *
- * 焦点在输入框/文本域时不拦截；只读模式仅允许空格播放/暂停，
- * 编辑类快捷键（复制/粘贴/删除）仍被拦截。
+ * 仅在用户操作焦点位于导演台内时响应；焦点在输入框/文本域时不拦截；
+ * 只读模式仅允许空格播放/暂停，编辑类快捷键（复制/粘贴/删除）仍被拦截。
  *
  * @param e 键盘事件
  */
 function onKeydown(e: KeyboardEvent): void {
+  // 操作焦点不在导演台内时，不响应任何导演台快捷键
+  if (!directorActive) return
   const target = e.target as HTMLElement | null
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) {
     return
@@ -591,8 +618,16 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('pointerdown', updateDirectorActive, true)
+  window.addEventListener('focusin', updateDirectorActive, true)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('pointerdown', updateDirectorActive, true)
+  window.removeEventListener('focusin', updateDirectorActive, true)
+})
 
 /**
  * 格式化时间为 m:ss.d 或 s.d。

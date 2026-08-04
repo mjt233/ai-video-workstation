@@ -9,7 +9,10 @@
   组件不持有任何项目状态，全部通过 props 接收数据、事件向上汇报。
 -->
 <template>
-  <div class="director-timeline">
+  <div
+    ref="containerRef"
+    class="director-timeline"
+  >
     <div
       ref="contentRef"
       class="timeline-content"
@@ -75,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type {
   DirectorAudioClip as DirectorAudioClipData,
   DirectorImageClip as DirectorImageClipData,
@@ -121,10 +124,21 @@ const emit = defineEmits<{
   trim: [id: string, trimStart: number, trimEnd: number]
   /** 跳转播放头（秒，0.1s 步进，钳制在 [0, duration]） */
   seek: [t: number]
+  /** 滚轮缩放：上报缩放后的像素/秒值（由父级 setZoom 应用） */
+  zoom: [zoom: number]
 }>()
 
+/** 时间轴滚动容器引用（用于滚轮缩放锚点换算） */
+const containerRef = ref<HTMLDivElement | null>(null)
 /** 滚动内容区引用（用于按坐标换算时间） */
 const contentRef = ref<HTMLDivElement | null>(null)
+
+/** 滚轮缩放步长（向上滚动放大/向下缩小的倍率） */
+const WHEEL_ZOOM_STEP = 1.2
+/** 缩放最小值（像素/秒，与父级缩放滑块下限一致） */
+const MIN_ZOOM = 10
+/** 缩放最大值（像素/秒，与父级缩放滑块上限一致） */
+const MAX_ZOOM = 500
 
 /**
  * 内容宽度：时长铺满时为 duration * zoom；
@@ -209,6 +223,42 @@ function onSeekEnd(): void {
   document.removeEventListener('pointerup', onSeekEnd)
   document.removeEventListener('pointercancel', onSeekEnd)
 }
+
+/**
+ * 滚轮缩放：以鼠标位置为锚点缩放时间轴。
+ *
+ * 向上滚动放大、向下滚动缩小，倍率 WHEEL_ZOOM_STEP；缩放后保持鼠标下的
+ * 时间点在容器内的像素位置不变（通过调整 scrollLeft 实现）。
+ *
+ * @param e 滚轮事件
+ */
+function onWheel(e: WheelEvent): void {
+  // 横向滚动（shift+滚轮 / 触控板横滑）交给原生横向滚动，不缩放
+  if (e.deltaY === 0) return
+  e.preventDefault()
+  const container = containerRef.value
+  if (!container || props.zoom <= 0) return
+  const factor = e.deltaY < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP
+  const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, props.zoom * factor))
+  if (newZoom === props.zoom) return
+  // 锚点：鼠标在内容区的水平坐标 → 对应的时间点
+  const rect = container.getBoundingClientRect()
+  const mouseXInContent = e.clientX - rect.left + container.scrollLeft
+  const anchorT = mouseXInContent / props.zoom
+  emit('zoom', newZoom)
+  // 缩放（父级更新 zoom prop）后，滚动使锚点时间回到鼠标原位置
+  requestAnimationFrame(() => {
+    container.scrollLeft = Math.max(0, anchorT * newZoom - (e.clientX - rect.left))
+  })
+}
+
+// 滚轮需用非被动监听才能 preventDefault 阻止页面随滚动
+onMounted(() => {
+  containerRef.value?.addEventListener('wheel', onWheel, { passive: false })
+})
+onBeforeUnmount(() => {
+  containerRef.value?.removeEventListener('wheel', onWheel)
+})
 </script>
 
 <style scoped>
