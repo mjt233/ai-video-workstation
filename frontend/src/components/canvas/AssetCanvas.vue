@@ -556,7 +556,7 @@ import { createSceneStageFrame } from '../../api/assets'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { confirm } from '../../utils/confirm'
-import AssetPickerDialog from '../AssetPickerDialog.vue'
+import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 
 /** 组件 props：定位一张画布 */
 const props = defineProps<{
