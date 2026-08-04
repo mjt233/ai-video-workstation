@@ -543,7 +543,7 @@
           </v-card-title>
           <v-card-text
             class="pa-2"
-            style="height: 480px;"
+            style="height: 560px;"
           >
             <div
               v-if="directorLoading"
@@ -559,7 +559,9 @@
               :episode="props.episode"
               :shot="props.shot"
               :allow-add-asset="true"
+              :prompt="data.prompt"
               @update:director="(p) => { director = p }"
+              @update:prompt="onPromptUpdate"
               @save="saveDirector"
               @generate="generateVideo"
             />
@@ -1253,11 +1255,28 @@ async function loadDirector() {
 }
 
 /**
- * 保存导演台配置到 director.json。
+ * 导演台 prompt 文本域输入：同步到分镜-视频生成的 prompt（data.prompt）。
+ *
+ * 内存态即时更新（下方 MarkdownView 实时反映），落盘由保存/生成时写入 prompt.md。
+ *
+ * @param v 最新 prompt 文本
+ */
+function onPromptUpdate(v: string): void {
+  if (data.value) data.value.prompt = v
+}
+
+/**
+ * 保存导演台配置：写入 director.json 与 prompt.md。
+ *
+ * 导演台 prompt 文本域与分镜-视频生成的 prompt（prompt.md）集成，
+ * 保存时一并落盘。
  */
 async function saveDirector() {
   try {
     await writeDirectorConfig(props.project, props.episode, props.shot, director.value)
+    if (data.value) {
+      await writeFs(props.project, `${basePath.value}/prompt.md`, data.value.prompt ?? '')
+    }
   } catch (e) {
     alert(e instanceof Error ? e.message : '导演台配置保存失败')
   }
@@ -1271,6 +1290,9 @@ async function saveDirector() {
 async function generateVideo() {
   try {
     await writeDirectorConfig(props.project, props.episode, props.shot, director.value)
+    if (data.value) {
+      await writeFs(props.project, `${basePath.value}/prompt.md`, data.value.prompt ?? '')
+    }
   } catch (e) {
     alert(e instanceof Error ? e.message : '导演台配置保存失败，已取消生成')
     return

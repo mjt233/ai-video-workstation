@@ -173,6 +173,22 @@
       />
     </div>
 
+    <!-- prompt：与分镜-视频生成的 prompt 集成（同一来源 prompt.md） -->
+    <div class="pa-2 pt-0">
+      <v-textarea
+        :model-value="prompt"
+        label="prompt"
+        variant="outlined"
+        density="compact"
+        rows="3"
+        auto-grow
+        hide-details
+        :readonly="readOnly"
+        placeholder="视频生成 prompt（与分镜-视频生成的 prompt 同步）"
+        @update:model-value="onPromptInput"
+      />
+    </div>
+
     <!-- 图片资产选择器：场景/角色/自定义/分镜场景图 -->
     <AssetPickerDialog
       v-model="imagePickerOpen"
@@ -232,16 +248,20 @@ const props = defineProps<{
   readOnly?: boolean
   /** 是否允许添加资产；非只读且为 false 时隐藏「添加图片/音频」按钮，其余编辑仍可用 */
   allowAddAsset?: boolean
+  /** 视频生成 prompt（与分镜-视频生成的 prompt 集成，同一来源 prompt.md） */
+  prompt?: string
 }>()
 
 /**
  * 视频导演台组件事件：
  * - update:director：内部编辑产生的数据变更（v-model 风格）
- * - save：用户点击「保存」，由外部落盘 director.json
+ * - update:prompt：prompt 文本域输入的最新值（由外部同步到分镜-视频生成的 prompt）
+ * - save：用户点击「保存」，由外部落盘 director.json 与 prompt.md
  * - generate：用户点击「生成视频」，由外部先保存再触发生成
  */
 const emit = defineEmits<{
   'update:director': [p: DirectorProject]
+  'update:prompt': [v: string]
   save: [p: DirectorProject]
   generate: [p: DirectorProject]
 }>()
@@ -584,11 +604,24 @@ const imagePickerOpen = ref(false)
 const audioPickerOpen = ref(false)
 
 /**
- * 保存：重置未保存标记并通知外部落盘 director.json。
+ * 保存：重置未保存标记并通知外部落盘 director.json 与 prompt.md。
  */
 function onSave(): void {
   dirty.value = false
   emit('save', toProject())
+}
+
+/**
+ * prompt 文本域输入：上报最新值（由外部同步到分镜-视频生成的 prompt）。
+ *
+ * 修改 prompt 视为未保存编辑（启用「保存」按钮），保存时由外部连同
+ * director.json 一并落盘 prompt.md。
+ *
+ * @param v 最新 prompt 文本
+ */
+function onPromptInput(v: string): void {
+  dirty.value = true
+  emit('update:prompt', v)
 }
 
 /**
