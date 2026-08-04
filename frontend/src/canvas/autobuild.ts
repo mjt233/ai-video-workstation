@@ -21,6 +21,63 @@ export interface AutoBuildResult {
   prompt: string
 }
 
+/** 引用解析结果 */
+export interface RefResolution {
+  /** 资产项目相对路径（assert/ 下） */
+  assetPath: string
+  /** 锚点节点显示名 */
+  label: string
+}
+
+/**
+ * 解析分镜 stage.json 的「基础场景」引用为 assert 路径（对齐服务端 resolveStageAssetPath）。
+ * 支持：`场景/标签`、`场景/标签@变体`、`custom/{路径}`；prev 返回 null（由调用方异步解析）。
+ *
+ * @param baseStage 基础场景引用
+ * @returns 解析结果或 null（prev / 空 / 格式无效）
+ */
+export function resolveShotStageRef(baseStage: string): RefResolution | null {
+  const trimmed = baseStage.trim()
+  if (!trimmed || trimmed === 'prev' || trimmed.startsWith('prev')) return null
+  if (trimmed.startsWith('custom/')) {
+    return { assetPath: `assert/custom/${trimmed.slice('custom/'.length)}`, label: trimmed }
+  }
+  const at = trimmed.indexOf('@')
+  const main = at >= 0 ? trimmed.slice(0, at) : trimmed
+  const variantId = at >= 0 ? trimmed.slice(at + 1).trim() : ''
+  const slash = main.indexOf('/')
+  if (slash <= 0 || slash === main.length - 1) return null
+  const stageName = main.slice(0, slash)
+  const stageLabel = main.slice(slash + 1)
+  if (variantId) {
+    return { assetPath: `assert/stage/${stageName}/variants/${stageLabel}/${variantId}.jpg`, label: trimmed }
+  }
+  return { assetPath: `assert/stage/${stageName}/${stageLabel}.jpg`, label: trimmed }
+}
+
+/**
+ * 解析分镜 stage.json 的「登场角色」引用为 assert 路径（对齐服务端 resolveCharacterAssetPath）。
+ * 支持：`角色名`、`角色名@变体`、`custom/{路径}`。
+ *
+ * @param character 角色引用
+ * @returns 解析结果或 null（空 / 格式无效）
+ */
+export function resolveCharacterRef(character: string): RefResolution | null {
+  const trimmed = character.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith('custom/')) {
+    return { assetPath: `assert/custom/${trimmed.slice('custom/'.length)}`, label: trimmed }
+  }
+  const at = trimmed.indexOf('@')
+  if (at < 0) {
+    return { assetPath: `assert/character/${trimmed}/appearance.jpg`, label: trimmed }
+  }
+  const name = trimmed.slice(0, at).trim()
+  const variantId = trimmed.slice(at + 1).trim()
+  if (!name || !variantId) return null
+  return { assetPath: `assert/character/${name}/variants/${variantId}.jpg`, label: trimmed }
+}
+
 /**
  * 从现有画布 + 引用列表生成自动搭画布结果。
  *
@@ -94,23 +151,16 @@ export function mergePrompt(prompt: string, extra: string): string {
   return extra.trim()
 }
 
-/** 从分镜 stage.json 提取自动搭画布引用（角色/场景） */
+/** 从分镜 stage.json 提取自动搭画布引用（角色/场景；prev 由调用方另行解析） */
 export function buildShotRefsFromStage(stageDefs: unknown[]): AutoBuildRef[] {
   const refs: AutoBuildRef[] = []
   for (const def of stageDefs ?? []) {
     const d = def as { 基础场景?: string; 登场角色?: string[] }
-    const stage = d.基础场景 ?? ''
-    // 场景引用：{场景名}/{标签}；prev 跳过
-    if (stage && stage !== 'prev' && !stage.startsWith('prev')) {
-      const [stageName, label] = stage.split('/')
-      if (stageName && label) {
-        refs.push({ assetPath: `assert/stage/${stageName}/${label}.jpg`, label: stage })
-      }
-    }
+    const shotRef = resolveShotStageRef(d.基础场景 ?? '')
+    if (shotRef) refs.push({ assetPath: shotRef.assetPath, label: shotRef.label })
     for (const ch of d.登场角色 ?? []) {
-      // 角色引用：{名}@{变体}，v1 仅用基础外观
-      const name = ch.split('@')[0]
-      if (name) refs.push({ assetPath: `assert/character/${name}/appearance.jpg`, label: name })
+      const charRef = resolveCharacterRef(ch)
+      if (charRef) refs.push({ assetPath: charRef.assetPath, label: charRef.label })
     }
   }
   return refs

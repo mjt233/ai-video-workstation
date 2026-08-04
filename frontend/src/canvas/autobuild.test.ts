@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { createCanvasData } from './types'
-import { buildAutoCanvas, buildShotRefsFromStage, mergePrompt } from './autobuild'
+import {
+  buildAutoCanvas,
+  buildShotRefsFromStage,
+  mergePrompt,
+  resolveCharacterRef,
+  resolveShotStageRef,
+} from './autobuild'
 
 describe('buildAutoCanvas', () => {
   it('空画布创建锚点与生成节点并连线', () => {
@@ -52,16 +58,75 @@ describe('mergePrompt', () => {
   })
 })
 
+describe('resolveShotStageRef', () => {
+  it('基础场景引用', () => {
+    expect(resolveShotStageRef('街角/白天')).toEqual({
+      assetPath: 'assert/stage/街角/白天.jpg',
+      label: '街角/白天',
+    })
+  })
+
+  it('场景衍生变体引用', () => {
+    expect(resolveShotStageRef('街角/白天@门已打开')).toEqual({
+      assetPath: 'assert/stage/街角/variants/白天/门已打开.jpg',
+      label: '街角/白天@门已打开',
+    })
+  })
+
+  it('custom 引用（含扩展名原样透传）', () => {
+    expect(resolveShotStageRef('custom/stage/商场门外/门已打开.png')).toEqual({
+      assetPath: 'assert/custom/stage/商场门外/门已打开.png',
+      label: 'custom/stage/商场门外/门已打开.png',
+    })
+  })
+
+  it('prev 返回 null（由调用方异步解析）', () => {
+    expect(resolveShotStageRef('prev')).toBeNull()
+  })
+
+  it('无效格式返回 null', () => {
+    expect(resolveShotStageRef('')).toBeNull()
+    expect(resolveShotStageRef('只有场景名')).toBeNull()
+  })
+})
+
+describe('resolveCharacterRef', () => {
+  it('基础角色引用', () => {
+    expect(resolveCharacterRef('张三')).toEqual({
+      assetPath: 'assert/character/张三/appearance.jpg',
+      label: '张三',
+    })
+  })
+
+  it('角色衍生变体引用', () => {
+    expect(resolveCharacterRef('李四@变体1')).toEqual({
+      assetPath: 'assert/character/李四/variants/变体1.jpg',
+      label: '李四@变体1',
+    })
+  })
+
+  it('custom 引用', () => {
+    expect(resolveCharacterRef('custom/character/张三/道具.png')).toEqual({
+      assetPath: 'assert/custom/character/张三/道具.png',
+      label: 'custom/character/张三/道具.png',
+    })
+  })
+})
+
 describe('buildShotRefsFromStage', () => {
-  it('提取角色与场景引用', () => {
+  it('提取角色与场景引用（含场景变体 / 角色变体 / custom）', () => {
     const refs = buildShotRefsFromStage([
       { 基础场景: '街角/白天', 登场角色: ['张三', '李四@变体1'] },
+      { 基础场景: '街角/白天@门已打开' },
+      { 基础场景: 'custom/stage/商场门外/门已打开.png' },
       { 基础场景: 'prev' },
     ])
     expect(refs).toEqual([
       { assetPath: 'assert/stage/街角/白天.jpg', label: '街角/白天' },
       { assetPath: 'assert/character/张三/appearance.jpg', label: '张三' },
-      { assetPath: 'assert/character/李四/appearance.jpg', label: '李四' },
+      { assetPath: 'assert/character/李四/variants/变体1.jpg', label: '李四@变体1' },
+      { assetPath: 'assert/stage/街角/variants/白天/门已打开.jpg', label: '街角/白天@门已打开' },
+      { assetPath: 'assert/custom/stage/商场门外/门已打开.png', label: 'custom/stage/商场门外/门已打开.png' },
     ])
   })
 
