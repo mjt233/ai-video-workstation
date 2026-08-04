@@ -45,6 +45,14 @@
           当前资产: {{ existingAsset }}
         </div>
 
+        <!-- Optional hint (e.g. director mode notice) -->
+        <div
+          v-if="props.hint"
+          class="text-caption text-primary mb-2"
+        >
+          {{ props.hint }}
+        </div>
+
         <!-- Loading state -->
         <template v-if="polling.status === 'running'">
           <v-progress-linear
@@ -151,6 +159,8 @@ const props = defineProps<{
   promptPaths?: string[]
   existingAsset?: string
   defaultImpl?: string
+  /** 可选提示文案（如导演台模式提示），非空时在对话框内展示 */
+  hint?: string
 }>()
 
 const emit = defineEmits<{

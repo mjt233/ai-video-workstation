@@ -29,6 +29,12 @@ export interface WorkflowImplementation {
   description?: string
   /** 可由用户手动传入的参数声明 */
   params?: WorkflowUserParamDeclaration[]
+  /**
+   * 工作流能力声明（前端据此展示导演台等能力入口）。
+   * - director：是否支持导演台模式（true 时引擎才会注入 director 负载）
+   * - audio：是否支持传入外部音频（如导演台混音产物）
+   */
+  capabilities?: { director?: boolean; audio?: boolean }
 }
 
 export interface WorkflowInfo {

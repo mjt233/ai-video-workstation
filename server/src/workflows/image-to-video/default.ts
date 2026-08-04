@@ -3,6 +3,7 @@ import {
   createComfyuiBridgeWorkflow,
   submitImageToVideo,
   submitComfyuiBridge,
+  submitLtxDirectorImageToVideo,
   pollTask,
   buildDownloadRequest,
 } from '../bridge-client.js';
@@ -19,6 +20,10 @@ import type { ImageToVideoVars } from '../types.js';
  * 1. 用户已进行【分镜音频编辑】并合并 → 使用 merged.flac
  * 2. 有台词但未编辑音频 → 拼接所有台词文本，调用 TTS 生成音频
  * 3. 无台词 → 不提交音频
+ *
+ * 导演台模式（声明 capabilities.director + audio）：
+ * - 引擎注入 director 负载时 → 走 ltx-2.3-director 工作流（关键帧 + 混音音频）
+ * - 否则走普通模式（FL2V / FML2V + TTS 音频策略）
  */
 register(
   createComfyuiBridgeWorkflow<ImageToVideoVars>({
@@ -27,34 +32,59 @@ register(
       name: 'LTX-2.3',
       impl: 'ltx',
       description: '使用 FL2V / FML2V 模型基于参考帧图生成视频',
+      capabilities: { director: true, audio: true },
     },
 
-    async submit(params) {
-      const episode = params.vars.episode;
-      const shot = params.vars.shot;
-      const prompt = await params.readFile(
+    async submit(ctx) {
+      const episode = ctx.vars.episode;
+      const shot = ctx.vars.shot;
+
+      // ── 导演台模式：引擎已注入 director 负载，直接走 ltx-2.3-director 工作流 ──
+      if (ctx.director) {
+        const prompt = await ctx.readFile(
+          `prompt/scene/${episode}/${shot}/prompt.md`,
+        );
+        const { duration, width, height, fps, frames, audio } = ctx.director;
+        if (!prompt.trim()) {
+          throw new Error('image-to-video 导演台模式 prompt.md 为空');
+        }
+        const result = await submitLtxDirectorImageToVideo({
+          prompt,
+          width,
+          height,
+          duration,
+          fps,
+          seed: ctx.vars.seed ? Number(ctx.vars.seed) : undefined,
+          frames,
+          ...(audio ? { audio } : {}),
+        });
+        return { taskId: result.taskId };
+      }
+
+      // ── 普通模式：现有逻辑 ──
+      const prompt = await ctx.readFile(
         `prompt/scene/${episode}/${shot}/prompt.md`,
       );
-      const durationSec = Number(params.vars.duration);
-      const width = params.projectConfig.width;
-      const height = params.projectConfig.height;
-      const fps = params.projectConfig.fps ?? 24;
+      const durationSec = Number(ctx.vars.duration);
+      const width = ctx.projectConfig.width;
+      const height = ctx.projectConfig.height;
+      const fps = ctx.projectConfig.fps ?? 24;
 
       let stageImagePaths: string[] = [];
       try {
-        const parsed = JSON.parse(params.vars.stageImages ?? '[]') as unknown;
+        const parsed = JSON.parse(ctx.vars.stageImages ?? '[]') as unknown;
         if (!Array.isArray(parsed) || !parsed.every((p) => typeof p === 'string')) {
           throw new Error('stageImages 须为字符串数组');
         }
         stageImagePaths = parsed;
       } catch (e) {
         throw new Error(
-          `image-to-video stageImages 无效: ${params.vars.stageImages}; ${e instanceof Error ? e.message : String(e)}`,
+          `image-to-video stageImages 无效: ${ctx.vars.stageImages}; ${e instanceof Error ? e.message : String(e)}`,
         );
       }
 
       if (!Number.isInteger(durationSec) || durationSec <= 0) {
-        throw new Error(`image-to-video 缺少有效 duration（秒）: ${params.vars.duration}`);
+        throw new Error(`image-to-video 缺少有效 duration（秒）: ${ctx.vars.duration}`);
       }
       if (!width || !height) {
         throw new Error('image-to-video 需要 project.json 中的 width/height');
@@ -67,19 +97,19 @@ register(
       }
 
       const frames = await Promise.all(
-        stageImagePaths.map((p) => params.readAssertFile(p)),
+        stageImagePaths.map((p) => ctx.readAssertFile(p)),
       );
 
       // ── 处理音频 ──
       let audio: File | undefined;
 
       // 策略 1：优先使用用户编辑并合并的音频
-      if (params.vars.audioPath) {
-        audio = await params.readAssertFile(params.vars.audioPath);
+      if (ctx.vars.audioPath) {
+        audio = await ctx.readAssertFile(ctx.vars.audioPath);
       } else {
         // 策略 2：有台词但未编辑音频 → 拼接台词文本后调用 TTS 生成
         try {
-          const scriptRaw = await params.readFile(
+          const scriptRaw = await ctx.readFile(
             `prompt/scene/${episode}/${shot}/script.json`,
           );
           const script = JSON.parse(scriptRaw) as Array<{
@@ -100,7 +130,7 @@ register(
               let desc: string;
               if (firstChar?.角色名) {
                 try {
-                  const voiceMd = await params.readFile(
+                  const voiceMd = await ctx.readFile(
                     `prompt/character/${firstChar.角色名.trim()}/voice.md`,
                   );
                   desc =
@@ -166,7 +196,7 @@ register(
         height,
         duration: durationSec,
         fps,
-        seed: params.vars.seed ? Number(params.vars.seed) : undefined,
+        seed: ctx.vars.seed ? Number(ctx.vars.seed) : undefined,
         frames,
         ...(audio ? { audio } : {}),
       });

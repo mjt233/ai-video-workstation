@@ -3,7 +3,15 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as db from './db.js';
 import { register, getImpl, getAllWorkflows } from './workflows/registry.js';
-import type { ProjectConfig, WorkflowDefinition, WorkflowParams, WorkflowVarsBase } from './workflows/types.js';
+import type {
+  DirectorPayload,
+  ProjectConfig,
+  WorkflowDefinition,
+  WorkflowRunContext,
+  WorkflowVarsBase,
+} from './workflows/types.js';
+import { buildDirectorPayload } from './workflows/director-inject.js';
+import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
 import { archiveExistingAsset } from './assets/history.js';
 
@@ -597,6 +605,9 @@ async function runTask(taskId: string): Promise<void> {
     return;
   }
 
+  // 记录实现声明的能力（capabilities），供导演台负载注入等按需逻辑判断
+  const capabilities = wf.capabilities;
+
   const paramsObj = JSON.parse(task.params) as {
     vars?: Record<string, string>;
     promptPaths?: string[];
@@ -687,52 +698,112 @@ async function runTask(taskId: string): Promise<void> {
 
   const projectRoot = path.resolve(DESIGN_DIR, task.project) + path.sep;
 
-  const workflowParams: WorkflowParams = {
-    project: task.project,
-    vars,
-    projectConfig,
-    async readFile(relPath: string): Promise<string> {
-      const full = path.resolve(DESIGN_DIR, task.project, relPath);
-      if (!full.startsWith(projectRoot)) {
-        throw new Error('Path traversal denied');
-      }
-      return fs.readFile(full, 'utf-8');
-    },
-    async readAssertFile(relPath: string): Promise<File> {
-      const full = path.resolve(DESIGN_DIR, task.project, relPath);
-      if (!full.startsWith(projectRoot)) {
-        throw new Error(`Path traversal denied: ${relPath}`);
-      }
-      const relAssertPath = path.relative(path.resolve(DESIGN_DIR, task.project), full);
-      // Windows 下 relative 使用反斜杠，统一为正斜杠再判断
-      const normalized = relAssertPath.split(path.sep).join('/');
-      if (!normalized.startsWith('assert/') && normalized !== 'assert') {
-        throw new Error(`Path must be under assert/: ${relPath}`);
-      }
-      try {
-        const buf = await fs.readFile(full);
-        const filename = path.basename(full);
-        const ext = path.extname(filename).toLowerCase();
-        const type =
-          ext === '.png' ? 'image/png'
-            : ext === '.webp' ? 'image/webp'
-              : ext === '.flac' ? 'audio/flac'
-                : ext === '.mp4' ? 'video/mp4'
-                  : 'image/jpeg';
-        return new File([buf], filename, { type });
-      } catch {
-        throw new Error(`assert 文件不存在: ${relPath}`);
-      }
-    },
+  /**
+   * 读取项目内文本文件（UTF-8）。
+   * 路径相对 design/{project}/；越界（路径穿越）时抛错。
+   */
+  const readFile = async (relPath: string): Promise<string> => {
+    const full = path.resolve(DESIGN_DIR, task.project, relPath);
+    if (!full.startsWith(projectRoot)) {
+      throw new Error('Path traversal denied');
+    }
+    return fs.readFile(full, 'utf-8');
+  };
+
+  /**
+   * 读取项目 assert/ 下二进制文件为 File 对象。
+   * 路径须以 assert/ 开头，相对 design/{project}/；按扩展名推断 MIME 类型。
+   */
+  const readAssertFile = async (relPath: string): Promise<File> => {
+    const full = path.resolve(DESIGN_DIR, task.project, relPath);
+    if (!full.startsWith(projectRoot)) {
+      throw new Error(`Path traversal denied: ${relPath}`);
+    }
+    const relAssertPath = path.relative(path.resolve(DESIGN_DIR, task.project), full);
+    // Windows 下 relative 使用反斜杠，统一为正斜杠再判断
+    const normalized = relAssertPath.split(path.sep).join('/');
+    if (!normalized.startsWith('assert/') && normalized !== 'assert') {
+      throw new Error(`Path must be under assert/: ${relPath}`);
+    }
+    try {
+      const buf = await fs.readFile(full);
+      const filename = path.basename(full);
+      const ext = path.extname(filename).toLowerCase();
+      const type =
+        ext === '.png' ? 'image/png'
+          : ext === '.webp' ? 'image/webp'
+            : ext === '.flac' ? 'audio/flac'
+              : ext === '.mp4' ? 'video/mp4'
+                : 'image/jpeg';
+      return new File([buf], filename, { type });
+    } catch {
+      throw new Error(`assert 文件不存在: ${relPath}`);
+    }
   };
 
   try {
     db.addLog(taskId, 'info', `Starting workflow: ${wf.name} (impl: ${wf.impl})`);
     db.updateTaskStatus(taskId, 'running');
 
+    // 导演台负载：仅当所选实现声明 capabilities.director 且分镜存在 director.json 时注入。
+    // 注入后 duration 以导演台为准（覆盖 enrichImageToVideoParams 从 overview.json 注入的时长）。
+    // 构建置于 try 内：任一依赖抛错（导演台配置损坏、关键帧图片缺失、混音无可用轨道等）都会
+    // 由下方统一失败处理标记 failed 或调度重试，避免任务停留在 running 状态
+    let director: DirectorPayload | undefined;
+    if (task.workflow_id === 'image-to-video' && capabilities?.director) {
+      const episode = vars.episode?.trim();
+      const shot = vars.shot?.trim();
+      if (episode && shot) {
+        const payload = await buildDirectorPayload(task.project, episode, shot, {
+          readFile,
+          readAssertFile,
+          mixAudioTracks: async (tracks, out) => {
+            // director.json 中的轨道路径为项目相对路径，解析为绝对路径后再交给 ffmpeg
+            await mixAudioTracks(
+              tracks.map((t) => ({ ...t, filePath: resolveProjectAssertPath(task.project, t.filePath) })),
+              out,
+            );
+          },
+          readTempAudio: async (p) => new Uint8Array(await fs.readFile(p)),
+          removeTempAudio: async (p) => {
+            // 尽力删除混音临时文件，失败静默忽略
+            try {
+              await fs.unlink(p);
+            } catch {
+              /* 忽略清理失败 */
+            }
+          },
+        });
+        if (payload) {
+          director = payload;
+          vars.duration = String(payload.duration);
+        }
+      }
+    }
+
+    // 用户手动传入的工作流参数：任务创建时已由路由（normalizeUserParams）合并进 vars，
+    // 此处按所选实现声明的参数 key 从 vars 中提取并透传给上下文，便于工作流区分用户参数与引擎注入值
+    const userParams: Record<string, string> = {};
+    for (const decl of wf.params ?? []) {
+      const v = vars[decl.key];
+      if (v !== undefined && v !== '') {
+        userParams[decl.key] = v;
+      }
+    }
+
+    const runContext: WorkflowRunContext = {
+      project: task.project,
+      projectConfig,
+      vars,
+      ...(director ? { director } : {}),
+      userParams,
+      readFile,
+      readAssertFile,
+    };
+
     // Step 1: Submit
     db.addLog(taskId, 'info', 'Submitting task to AI API...');
-    const { taskId: remoteTaskId } = await wf.submit(workflowParams);
+    const { taskId: remoteTaskId } = await wf.submit(runContext);
     db.addLog(taskId, 'info', `Submitted, remote task ID: ${remoteTaskId}`);
 
     let pollResponse: Record<string, unknown> | undefined;

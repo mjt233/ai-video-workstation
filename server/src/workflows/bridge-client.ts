@@ -11,7 +11,7 @@
  * 首次调用 status/output-files 时自动登录获取 token 并缓存。
  */
 
-import type { WorkflowDefinition, WorkflowParams, WorkflowBaseDefinition, WorkflowUserParamDeclaration, WorkflowVarsBase } from './types.js';
+import type { WorkflowDefinition, WorkflowRunContext, WorkflowBaseDefinition, WorkflowUserParamDeclaration, WorkflowVarsBase, WorkflowCapabilities } from './types.js';
 
 const BRIDGE_URL = (process.env.COMFYUI_BRIDGE_URL || 'http://localhost:10721').replace(/\/+$/, '');
 const BRIDGE_PASSWORD = process.env.COMFYUI_BRIDGE_PASSWORD || '0d000721';
@@ -339,6 +339,8 @@ export interface LtxDirectorImageToVideoSubmitParams {
   fps: number;
   /** 随机种子（可选） */
   seed?: number;
+  /** 背景音频文件（可选），存在时自动生成音频关闭 */
+  audio?: File;
   /**
    * 关键帧列表，按时间顺序排列。每帧携带文件与游标位置，
    * 关键帧序号由提交函数按数组顺序自动生成（0、1、2…），
@@ -359,7 +361,9 @@ export interface LtxDirectorImageToVideoSubmitParams {
  * - body 中 `frame_define` 为 JSON.stringify(FrameDefine[]) 字符串，
  *   描述每个关键帧的序号与游标位置；
  * - 文件以动态键 `frame_{frameSeq}` 上传（如 frame_0、frame_1、frame_2），
- *   走 multipart/form-data（方式 B）。
+ *   走 multipart/form-data（方式 B）；
+ * - 提供 `params.audio` 时以 `audio` 键上传背景音频文件，
+ *   并将 `auto_generate_audio` 置为 false（不自动生成音频）。
  *
  * @param params 导演模式图生视频提交参数
  * @returns Bridge 提交结果（含 taskId）
@@ -390,6 +394,10 @@ export async function submitLtxDirectorImageToVideo(
   params.frames.forEach((f, idx) => {
     files[`frame_${idx}`] = f.file;
   });
+  if (params.audio) {
+    files.audio = params.audio;
+    body.auto_generate_audio = false;
+  }
 
   return submitComfyuiBridge({
     workflowId: 'ltx-2.3-director',
@@ -511,16 +519,28 @@ export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = Work
   /** 可由用户手动传入的参数声明（可选，前端据此渲染输入表单） */
   params?: WorkflowUserParamDeclaration[];
   /** 返回文生图的提示词（imd_desc） */
-  getPrompt(params: WorkflowParams<TVars>): Promise<string> | string;
+  getPrompt(ctx: WorkflowRunContext<TVars>): Promise<string> | string;
   /** 返回图片宽度，默认 1080 */
-  getWidth?(params: WorkflowParams<TVars>): number;
+  getWidth?(ctx: WorkflowRunContext<TVars>): number;
   /** 返回图片高度，默认 1920 */
-  getHeight?(params: WorkflowParams<TVars>): number;
+  getHeight?(ctx: WorkflowRunContext<TVars>): number;
 }
 
+/**
+ * 创建通用 ComfyUI Bridge 工作流的快捷工厂。
+ *
+ * 封装 submit → poll → parseOutput 的完整生命周期：
+ * - submit：直接透传调用方提供的 submit（入参为统一执行上下文 WorkflowRunContext）
+ * - poll：轮询 Bridge 任务状态，completed / failed 视为结束
+ * - parseOutput：通过 buildDownloadRequest 解析首个输出文件的下载请求
+ *
+ * @param args.baseDefinition 工作流基础元信息（id / name / impl / description / params / capabilities）
+ * @param args.submit 提交函数，接收 WorkflowRunContext，返回远端任务 ID
+ * @returns 完整的工作流定义（WorkflowDefinition<TVars>）
+ */
 export function createComfyuiBridgeWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>({ baseDefinition, submit }: {
-  baseDefinition: WorkflowBaseDefinition,
-  submit: (params: WorkflowParams<TVars>) => Promise<{ taskId: string }>
+  baseDefinition: WorkflowBaseDefinition & { capabilities?: WorkflowCapabilities },
+  submit: (ctx: WorkflowRunContext<TVars>) => Promise<{ taskId: string }>
 }): WorkflowDefinition<TVars> {
   return {
     ...baseDefinition,
@@ -567,13 +587,13 @@ export function createTextToImageWorkflow<TVars extends WorkflowVarsBase = Workf
       description: config.description,
       params: config.params,
     },
-    async submit(params) {
-      const prompt = await config.getPrompt(params);
-      const width = config.getWidth ? config.getWidth(params) : WIDTH_DEFAULT;
-      const height = config.getHeight ? config.getHeight(params) : HEIGHT_DEFAULT;
-      const seed = params.vars.seed ? Number(params.vars.seed) : undefined;
+    async submit(ctx) {
+      const prompt = await config.getPrompt(ctx);
+      const width = config.getWidth ? config.getWidth(ctx) : WIDTH_DEFAULT;
+      const height = config.getHeight ? config.getHeight(ctx) : HEIGHT_DEFAULT;
+      const seed = ctx.vars.seed ? Number(ctx.vars.seed) : undefined;
       // enhance_prompt 仅作为布尔值提交给 ComfyUI 工作流，不修改提示词内容
-      const enhancePrompt = (params.vars as Record<string, unknown>).enhance_prompt === 'true';
+      const enhancePrompt = (ctx.vars as Record<string, unknown>).enhance_prompt === 'true';
       const result = await submitTextToImage({ imd_desc: prompt, width, height, seed, enhance_prompt: enhancePrompt });
       return { taskId: result.taskId };
     },
@@ -589,7 +609,7 @@ export interface ImageEditWorkflowConfig<TVars extends WorkflowVarsBase = Workfl
   description?: string;
   /** 可由用户手动传入的参数声明（可选，前端据此渲染输入表单） */
   params?: WorkflowUserParamDeclaration[];
-  getParams(params: WorkflowParams<TVars>): Promise<{
+  getParams(ctx: WorkflowRunContext<TVars>): Promise<{
     desc: string,
     imgs: File[],
     seed?: string | number
@@ -614,12 +634,12 @@ export function createImageEditWorkflow<TVars extends WorkflowVarsBase = Workflo
       description: config.description,
       params: config.params,
     },
-    async submit(params) {
-      const { desc, imgs, seed } = await config.getParams(params)
+    async submit(ctx) {
+      const { desc, imgs, seed } = await config.getParams(ctx)
       if (!imgs.length) {
         throw new Error('Image edit workflow requires at least one input image');
       }
-      const size = resolveImageEditSizeParams(params.vars as unknown as Record<string, string | undefined>);
+      const size = resolveImageEditSizeParams(ctx.vars as unknown as Record<string, string | undefined>);
       const result = await submitImageEdit({ imgs, desc, seed, ...size });
       return { taskId: result.taskId };
     },
@@ -641,15 +661,15 @@ export interface TtsWorkflowParam {
  */
 export function createTtsDesignWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>(
   baseDefinition: WorkflowBaseDefinition,
-  getTtsWorkflowParams: (params: WorkflowParams<TVars>) => Promise<TtsWorkflowParam> | TtsWorkflowParam
+  getTtsWorkflowParams: (ctx: WorkflowRunContext<TVars>) => Promise<TtsWorkflowParam> | TtsWorkflowParam
 ): WorkflowDefinition<TVars> {
   return createComfyuiBridgeWorkflow<TVars>({
     baseDefinition: baseDefinition,
-    async submit(params) {
+    async submit(ctx) {
       return submitComfyuiBridge({
         workflowId: 'tts_voice_design',
         params: {
-          ...await getTtsWorkflowParams(params)
+          ...await getTtsWorkflowParams(ctx)
         }
       })
     },
