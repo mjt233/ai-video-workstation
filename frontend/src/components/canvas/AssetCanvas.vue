@@ -500,6 +500,9 @@
         v-model="picker.show"
         :project="props.project"
         :multiple="false"
+        :tabs="['stage', 'character', 'custom', 'scene-stage']"
+        :context-episode="target.kind === 'scene' ? target.episode : undefined"
+        :context-shot="target.kind === 'scene' ? target.shot : undefined"
         @update:selected="onPickerConfirm"
       />
 

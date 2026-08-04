@@ -53,7 +53,7 @@
           自定义资产
         </v-tab>
         <v-tab
-          v-if="visibleTabs.includes('scene-stage') && hasSceneContext"
+          v-if="visibleTabs.includes('scene-stage')"
           value="scene-stage"
         >
           分镜场景图
@@ -335,7 +335,27 @@
         </template>
 
         <!-- 分镜场景图：分镜已生成的场景帧（assert/scene/{ep}/{shot}/stage/{i}.jpg） -->
-        <template v-else-if="activeTab === 'scene-stage' && visibleTabs.includes('scene-stage') && hasSceneContext">
+        <template v-else-if="activeTab === 'scene-stage' && visibleTabs.includes('scene-stage')">
+          <div class="d-flex align-center ga-2 mb-3">
+            <v-select
+              v-model="sceneEp"
+              :items="episodeOptions"
+              label="集数"
+              density="compact"
+              hide-details
+              style="width: 120px;"
+              @update:model-value="onSceneEpChange"
+            />
+            <v-select
+              v-model="sceneShot"
+              :items="shotOptions"
+              label="分镜"
+              density="compact"
+              hide-details
+              style="width: 120px;"
+              @update:model-value="loadSceneStages"
+            />
+          </div>
           <v-row
             v-if="sceneStages.length"
             dense
@@ -779,6 +799,47 @@ const voiceLines = ref<VoiceLineItem[]>([])
 
 /** 分镜场景图条目列表（assert/scene/{ep}/{shot}/stage/{i}.jpg） */
 const sceneStages = ref<AssetItem[]>([])
+
+/** 分镜场景图页签：当前选中的集数与分镜 */
+const sceneEp = ref<string | null>(null)
+const sceneShot = ref<string | null>(null)
+/** 集数选项（prompt/scene/ 下的目录名） */
+const episodeOptions = ref<string[]>([])
+/** 分镜选项（prompt/scene/{ep}/ 下的目录名） */
+const shotOptions = ref<string[]>([])
+
+/** 初始化分镜场景图页签：默认选中上下文集数/分镜，并加载集数选项 */
+async function initSceneStageTab() {
+  if (props.contextEpisode) sceneEp.value = props.contextEpisode
+  if (props.contextShot) sceneShot.value = props.contextShot
+  try {
+    const res = (await readFs(props.project, 'prompt/scene')) as DirResponse
+    episodeOptions.value = (res?.entries ?? [])
+      .filter((e: DirEntry) => e.type === 'dir')
+      .map((e: DirEntry) => e.name)
+      .sort((a, b) => a.localeCompare(b, 'zh', { numeric: true }))
+  } catch {
+    episodeOptions.value = []
+  }
+  await onSceneEpChange()
+}
+
+/** 集数变化：刷新分镜选项并加载场景帧 */
+async function onSceneEpChange() {
+  shotOptions.value = []
+  if (sceneEp.value) {
+    try {
+      const res = (await readFs(props.project, `prompt/scene/${sceneEp.value}`)) as DirResponse
+      shotOptions.value = (res?.entries ?? [])
+        .filter((e: DirEntry) => e.type === 'dir')
+        .map((e: DirEntry) => e.name)
+        .sort((a, b) => a.localeCompare(b, 'zh', { numeric: true }))
+    } catch {
+      shotOptions.value = []
+    }
+  }
+  await loadSceneStages()
+}
 
 /** 是否有分镜上下文（决定是否显示「分镜自定义」子页签） */
 const hasSceneContext = computed(
@@ -1234,14 +1295,15 @@ async function loadVoiceLines() {
 /**
  * 加载「分镜场景图」页签数据。
  *
- * 读取 assert/scene/{ep}/{shot}/stage/ 目录下的 {i}.jpg 场景帧，
- * 按帧序号展示为「分镜场景图 N」；无分镜上下文或目录不存在时为空。
+ * 读取选中的 assert/scene/{集数}/{分镜}/stage/ 目录下的 {i}.jpg 场景帧，
+ * 按帧序号展示为「分镜场景图 N」；未选集数/分镜或目录不存在时为空。
  */
 async function loadSceneStages() {
-  const { contextEpisode: ep, contextShot: shot } = props
   tabLoading.value = true
   sceneStages.value = []
   try {
+    const ep = sceneEp.value
+    const shot = sceneShot.value
     if (!ep || !shot) return
     const dir = `assert/scene/${ep}/${shot}/stage`
     const res = await readFs(props.project, dir).catch(() => null) as DirResponse | null
@@ -1367,7 +1429,7 @@ async function onTabChange() {
   } else if (activeTab.value === 'audio') {
     await onAudioSectionChange()
   } else if (activeTab.value === 'scene-stage') {
-    await loadSceneStages()
+    await initSceneStageTab()
   } else {
     tabLoading.value = true
     try {
