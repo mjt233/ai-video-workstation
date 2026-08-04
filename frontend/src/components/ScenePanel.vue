@@ -535,6 +535,35 @@
         >
           有 {{ disabledStageCount }} 个场景帧已禁用，视频生成将跳过它们，仅使用 {{ stageDefs.length - disabledStageCount }} 个场景帧。
         </v-alert>
+
+        <!-- 视频导演台：双轨编排关键帧与音频 -->
+        <v-card class="mx-2 mb-2">
+          <v-card-title class="text-subtitle-1 py-2">
+            视频导演台
+          </v-card-title>
+          <v-card-text
+            class="pa-2"
+            style="height: 480px;"
+          >
+            <div
+              v-if="directorLoading"
+              class="d-flex align-center justify-center"
+              style="height: 100%;"
+            >
+              <v-progress-circular indeterminate />
+            </div>
+            <VideoDirector
+              v-else
+              :project="props.project"
+              :director="director"
+              :allow-add-asset="true"
+              @update:director="(p) => { director = p }"
+              @save="saveDirector"
+              @generate="generateVideo"
+            />
+          </v-card-text>
+        </v-card>
+
         <MarkdownView :content="data.prompt" />
         <div
           v-if="hasVideo"
@@ -743,6 +772,7 @@
       :output-path="`assert/scene/${props.episode}/${props.shot}/video/0.mp4`"
       :prompt-paths="[`${basePath}/prompt.md`]"
       :existing-asset="hasVideo ? '已有视频' : undefined"
+      :hint="directorHint"
       @refresh="load"
     />
     <GenerateDialog
@@ -833,6 +863,13 @@ import ScriptEditDialog from './ScriptEditDialog.vue'
 import AudioEditor from './audio-editor/AudioEditor.vue'
 import CustomAssetSection from './CustomAssetSection.vue'
 import AssetCanvas from './canvas/AssetCanvas.vue'
+import VideoDirector from './video-director/VideoDirector.vue'
+import {
+  readDirectorConfig,
+  writeDirectorConfig,
+  emptyDirectorProject,
+} from '../api/director'
+import type { DirectorProject } from './video-director/types'
 
 interface ScriptEntry {
   角色名: string
@@ -991,6 +1028,17 @@ const stageFrameDialog = ref<{
 }>({ show: false, mode: 'create' })
 const historyDialog = ref<{ show: boolean; path: string }>({ show: false, path: '' })
 const showAudioEditor = ref(false)
+
+/** 导演台项目（从 director.json 加载；无配置时为空白项目） */
+const director = ref<DirectorProject>(emptyDirectorProject(5, 0, 0, 0))
+/** 导演台配置是否加载中 */
+const directorLoading = ref(false)
+
+/** 视频生成对话框提示：存在导演台图片块时提示将使用导演台参数 */
+const directorHint = computed(() => {
+  const d = director.value
+  return d && d.imageClips.length >= 1 ? '检测到导演台配置，将使用导演台参数生成' : ''
+})
 
 const hasFullVoice = computed(() => {
   const script = data.value?.script
@@ -1153,6 +1201,77 @@ function openVideoGen() {
     return
   }
   genDialog.value = { show: true, type: 'video', index: 0 }
+}
+
+/**
+ * 加载分镜导演台配置。
+ *
+ * 存在 director.json 时读取；否则依据 overview 时长与项目规格构造空白项目。
+ */
+async function loadDirector() {
+  const ep = props.episode
+  const shot = props.shot
+  directorLoading.value = true
+  try {
+    const existing = await readDirectorConfig(props.project, ep, shot)
+    if (existing) {
+      director.value = existing
+      return
+    }
+    let width = 0
+    let height = 0
+    let fps = 0
+    try {
+      const projRaw = await readFs(props.project, 'project.json')
+      const obj = (typeof projRaw === 'string' ? JSON.parse(projRaw) : projRaw) as Record<string, unknown> | null
+      width = Number(obj?.width) || 0
+      height = Number(obj?.height) || 0
+      fps = Number(obj?.fps) || 0
+    } catch {
+      // 无 project.json 时规格留空，由引擎回退 projectConfig
+    }
+    let duration = 5
+    try {
+      const ovRaw = await readFs(props.project, `prompt/scene/${ep}/${shot}/overview.json`)
+      const ov = parseOverview(ovRaw)
+      if (ov && ov.duration > 0) duration = ov.duration
+    } catch {
+      // 无 overview 时使用默认时长
+    }
+    director.value = emptyDirectorProject(duration, width, height, fps)
+  } finally {
+    directorLoading.value = false
+  }
+}
+
+/**
+ * 保存导演台配置到 director.json。
+ */
+async function saveDirector() {
+  try {
+    await writeDirectorConfig(props.project, props.episode, props.shot, director.value)
+  } catch (e) {
+    alert(e instanceof Error ? e.message : '导演台配置保存失败')
+  }
+}
+
+/**
+ * 生成视频：先保存导演台配置，再打开视频生成对话框。
+ *
+ * 导演台模式（存在图片块）不受场景帧禁用限制；否则沿用 openVideoGen 的校验。
+ */
+async function generateVideo() {
+  try {
+    await writeDirectorConfig(props.project, props.episode, props.shot, director.value)
+  } catch (e) {
+    alert(e instanceof Error ? e.message : '导演台配置保存失败，已取消生成')
+    return
+  }
+  if (director.value.imageClips.length >= 1) {
+    genDialog.value = { show: true, type: 'video', index: 0 }
+    return
+  }
+  openVideoGen()
 }
 
 function openStageImageHistory(index: number) {
@@ -1622,7 +1741,7 @@ async function save() {
   dialog.value.show = false
 }
 
-watch(() => [props.project, props.episode, props.shot], load, { immediate: true })
+watch(() => [props.project, props.episode, props.shot], () => { void load(); void loadDirector() }, { immediate: true })
 watch(() => props.project, loadCharacters, { immediate: true })
 </script>
 
