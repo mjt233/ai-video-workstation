@@ -159,11 +159,11 @@
 
 ## 10. 设为分镜场景图
 
-> **历史对话框**：生成节点「历史」打开的是独立组件 `CanvasAssertHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（缩略图、版本号、生成时间）；点「设为当前」把该版本激活为节点当前图片（仅改写 `config.current`，`history` 不变，原当前图自动成为历史版本），激活后对话框保持打开。
+> **历史对话框**：生成节点「历史」打开的是独立组件 `CanvasAssertHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（缩略图、版本号、生成时间）；点「设为当前」把该版本激活为节点当前图片（仅改写 `config.current`，`history` 不变，原当前图自动成为历史版本），激活后对话框保持打开；点「删除」图标（当前版本禁用）→ `confirm` 弹窗确认 → `deleteFs` 删除图片文件 + `removeHistoryEntry` 从 `config.history` 移除该条目，对话框保持打开，若被删条目正处于预览选中态则回落到当前项。
 
 - 生成节点编辑器「设为分镜场景图」→ 弹出对话框（`AssetCanvas` 内联 `sceneDialog`）。
 - 读取 `prompt/scene/{ep}/{shot}/stage.json` 列出**全部场景帧**（label = `基础场景` || prompt || `分镜场景图 N`，预览 `stage/{i}.jpg`，404 时 `@error` 置 `broken` 显示占位）。
-- 点击某帧 → `copyFs(current.path → assert/scene/{ep}/{shot}/stage/{i}.jpg)` 覆盖该帧。
+- 点击某帧只进入**选中状态**（高亮 + 右上角勾选图标，再点一次取消选中），底部「确认」按钮启用后点击才执行 `copyFs(current.path → assert/scene/{ep}/{shot}/stage/{i}.jpg)` 覆盖该帧。
 - 「新增场景图」→ `createSceneStageFrame`（`api/assets.ts`）追加帧并复制图片到新索引；新帧定义由 `deriveStageFrameBody` 从生成节点输入推导：
   - `assert/stage/{场景}/{标签}` 输入 → `基础场景 = 场景/标签`
   - `assert/stage/{场景}/variants/{标签}/{变体}.jpg` 输入 → `基础场景 = 场景/标签@变体`

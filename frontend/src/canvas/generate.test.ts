@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { activateHistory, collectInputs, collectInputPaths, getHistory, getNodeCurrentAssetPath, type HistoryEntry } from './generate'
+import { activateHistory, collectInputs, collectInputPaths, getHistory, getNodeCurrentAssetPath, removeHistoryEntry, type HistoryEntry } from './generate'
 
 const loader: CanvasNodeData = {
   id: 'l1', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,
@@ -124,5 +124,33 @@ describe('activateHistory', () => {
       date: '2026-01-01T00:00:00.000Z',
     })
     expect((next.history as HistoryEntry[]).map((h) => h.version)).toEqual([1, 2])
+  })
+})
+
+describe('removeHistoryEntry', () => {
+  it('移除指定版本，其余保留，current 不变', () => {
+    const cfg = gen.config
+    const next = removeHistoryEntry(cfg, 1)
+    expect(next.history).toEqual([
+      { version: 2, path: 'assert/scene/1/1/canvas/g1/v2.jpg', date: '2026-01-01T00:00:00.000Z' },
+    ])
+    expect(next.current).toEqual(cfg.current)
+    // 原 config 不被修改
+    expect((cfg.history as HistoryEntry[]).map((h) => h.version)).toEqual([1, 2])
+  })
+
+  it('版本不存在返回原配置（引用不变）', () => {
+    const cfg = gen.config
+    expect(removeHistoryEntry(cfg, 99)).toBe(cfg)
+  })
+
+  it('当前版本不可删除（返回原配置）', () => {
+    const cfg = gen.config
+    expect(removeHistoryEntry(cfg, 2)).toBe(cfg)
+  })
+
+  it('无历史时删除返回原配置', () => {
+    const cfg = { current: { version: 1, path: 'x/v1.jpg', date: '2026-01-01T00:00:00.000Z' } }
+    expect(removeHistoryEntry(cfg, 1)).toBe(cfg)
   })
 })

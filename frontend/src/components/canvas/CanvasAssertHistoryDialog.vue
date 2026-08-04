@@ -86,15 +86,26 @@
                 {{ formatDate(h.date) }}
               </v-list-item-subtitle>
               <template #append>
-                <v-btn
-                  size="x-small"
-                  variant="tonal"
-                  color="primary"
-                  :disabled="isCurrent(h)"
-                  @click.stop="activateEntry(h)"
-                >
-                  设为当前
-                </v-btn>
+                <div class="history-item__actions">
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    color="error"
+                    icon="mdi-delete-outline"
+                    :disabled="isCurrent(h)"
+                    :title="isCurrent(h) ? '当前版本不可删除' : '删除该版本'"
+                    @click.stop="deleteEntry(h)"
+                  />
+                  <v-btn
+                    size="x-small"
+                    variant="tonal"
+                    color="primary"
+                    :disabled="isCurrent(h)"
+                    @click.stop="activateEntry(h)"
+                  >
+                    设为当前
+                  </v-btn>
+                </div>
               </template>
             </v-list-item>
           </v-list>
@@ -126,10 +137,11 @@ const props = defineProps<{
   node: CanvasNodeData | null
 }>()
 
-/** 组件 emits：显隐同步、请求激活某历史版本 */
+/** 组件 emits：显隐同步、请求激活某历史版本、请求删除某历史版本 */
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void
   (e: 'activate', entry: HistoryEntry): void
+  (e: 'delete', entry: HistoryEntry): void
 }>()
 
 /** 历史条目列表（取节点 config.history） */
@@ -195,6 +207,11 @@ function activateEntry(h: HistoryEntry) {
   emit('activate', h)
 }
 
+/** 点击「删除」：请求父组件删除该历史版本（父组件确认后删除文件并更新 history） */
+function deleteEntry(h: HistoryEntry) {
+  emit('delete', h)
+}
+
 /** 内部 v-dialog 显隐变化 → 透传父组件 */
 function onDialogUpdate(v: unknown) {
   emit('update:modelValue', Boolean(v))
@@ -230,6 +247,15 @@ watch(
 watch(currentEntry, (cur) => {
   if (cur) {
     selected.value = cur
+    previewBroken.value = false
+  }
+})
+
+// 删除后（entries 变化）：若选中的条目已被移除，则回落到当前项，避免预览指向已删除文件
+watch(entries, (list) => {
+  const sel = selected.value
+  if (sel && !list.some((h) => h.version === sel.version)) {
+    selected.value = currentEntry.value
     previewBroken.value = false
   }
 })
@@ -278,6 +304,12 @@ watch(currentEntry, (cur) => {
 
 .history-item--current {
   background: rgba(25, 118, 210, 0.08);
+}
+
+.history-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .history-item__thumb {

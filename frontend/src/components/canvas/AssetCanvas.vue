@@ -355,6 +355,7 @@
         :project="props.project"
         :node="historyNode"
         @activate="onActivateHistory"
+        @delete="onDeleteHistory"
       />
 
       <!-- 设为分镜场景图对话框 -->
@@ -381,7 +382,7 @@
             </div>
             <template v-else>
               <div class="text-caption text-medium-emphasis mb-2">
-                选择应用到哪个分镜场景（{{ sceneDialog.frames.length }}）：
+                点击场景帧进入选中状态，再点击「确认」设为场景图（共 {{ sceneDialog.frames.length }} 帧）：
               </div>
               <div
                 v-if="sceneDialog.frames.length"
@@ -391,9 +392,16 @@
                   v-for="f in sceneDialog.frames"
                   :key="f.index"
                   class="scene-frame-option"
-                  @click="applySetAsScene(f)"
+                  :class="{ 'scene-frame-option--selected': sceneDialog.selectedIndex === f.index }"
+                  @click="sceneDialog.selectedIndex = sceneDialog.selectedIndex === f.index ? null : f.index"
                 >
                   <div class="scene-frame-option__img-wrap">
+                    <v-icon
+                      v-if="sceneDialog.selectedIndex === f.index"
+                      class="scene-frame-option__check"
+                      icon="mdi-check-circle"
+                      size="small"
+                    />
                     <img
                       v-if="!f.broken"
                       :src="f.imageUrl"
@@ -449,6 +457,15 @@
             >
               取消
             </v-btn>
+            <v-btn
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-check"
+              :disabled="sceneDialog.selectedIndex === null"
+              @click="confirmSetAsScene"
+            >
+              确认
+            </v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -499,7 +516,7 @@ import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
 import { canConnectNodes } from '../../canvas/connection'
-import { activateHistory, collectInputPaths, collectInputs, getNodeCurrentAssetPath, type CanvasInputInfo, type HistoryEntry } from '../../canvas/generate'
+import { activateHistory, collectInputPaths, collectInputs, getNodeCurrentAssetPath, removeHistoryEntry, type CanvasInputInfo, type HistoryEntry } from '../../canvas/generate'
 import {
   buildAutoCanvas,
   buildShotRefsFromStage,
@@ -509,7 +526,7 @@ import {
   type AutoBuildRef,
   type StageVariantRef,
 } from '../../canvas/autobuild'
-import { copyFs, existsFs, readFs, type DirResponse } from '../../api/client'
+import { copyFs, deleteFs, existsFs, readFs, type DirResponse } from '../../api/client'
 import { createSceneStageFrame } from '../../api/assets'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
@@ -1015,6 +1032,31 @@ function onActivateHistory(entry: HistoryEntry) {
   store.updateNode(node.id, { config: activateHistory(node.config, entry) })
 }
 
+/**
+ * 历史对话框「删除」：确认后删除该历史版本的图片文件，并从节点 history 中移除该条目。
+ * 当前版本不可删除（对话框已禁用）；删除后对话框保持打开。
+ *
+ * @param entry 要删除的历史条目
+ */
+async function onDeleteHistory(entry: HistoryEntry) {
+  const node = nodeMap.value[historyDialog.nodeId]
+  if (!node) return
+  const ok = await confirm({
+    title: '删除历史版本',
+    content: `确定删除历史版本 v${entry.version} 的图片文件吗？此操作不可撤销。`,
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
+  try {
+    await deleteFs(props.project, entry.path)
+    store.updateNode(node.id, { config: removeHistoryEntry(node.config, entry.version) })
+    showSnackbar(`已删除历史版本 v${entry.version}`, 'success')
+  } catch (e) {
+    showSnackbar(e instanceof Error ? e.message : '删除历史版本失败', 'error')
+  }
+}
+
 // ── 生成联动 ────────────────────────────────────────────
 
 /**
@@ -1083,6 +1125,8 @@ const sceneDialog = reactive<{
   frames: SceneFrameOption[]
   canAdd: boolean
   newFrameBody: { 基础场景: string; 登场角色: string[]; prompt: string } | null
+  /** 当前选中的场景帧下标；null 表示未选中 */
+  selectedIndex: number | null
 }>({
   show: false,
   nodeId: '',
@@ -1090,6 +1134,7 @@ const sceneDialog = reactive<{
   frames: [],
   canAdd: false,
   newFrameBody: null,
+  selectedIndex: null,
 })
 
 /**
@@ -1142,6 +1187,7 @@ async function openSetAsScene(nodeId: string) {
   sceneDialog.frames = []
   sceneDialog.canAdd = false
   sceneDialog.newFrameBody = null
+  sceneDialog.selectedIndex = null
   try {
     const raw = await readFs(props.project, `prompt/scene/${target.value.episode}/${target.value.shot}/stage.json`)
     let defs: { 基础场景?: string; prompt?: string }[] = []
@@ -1170,6 +1216,15 @@ async function openSetAsScene(nodeId: string) {
   } finally {
     sceneDialog.loading = false
   }
+}
+
+/**
+ * 确认「设为分镜场景图」：把当前选中的场景帧应用为分镜场景图。
+ */
+function confirmSetAsScene() {
+  if (sceneDialog.selectedIndex === null) return
+  const frame = sceneDialog.frames[sceneDialog.selectedIndex]
+  if (frame) applySetAsScene(frame)
 }
 
 /**
@@ -1640,9 +1695,24 @@ watch([panelEl, flowEl], ([panel, flow]) => {
   box-shadow: 0 0 0 1px rgb(25, 118, 210);
 }
 
+.scene-frame-option--selected {
+  border-color: rgb(25, 118, 210);
+  box-shadow: 0 0 0 2px rgb(25, 118, 210);
+}
+
 .scene-frame-option__img-wrap {
   height: 100px;
   background: rgba(0, 0, 0, 0.04);
+  position: relative;
+}
+
+.scene-frame-option__check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  color: rgb(25, 118, 210);
+  background: #fff;
+  border-radius: 50%;
 }
 
 .scene-frame-option__img {

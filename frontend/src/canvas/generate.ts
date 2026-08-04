@@ -41,6 +41,23 @@ export function activateHistory(config: NodeConfig, entry: HistoryEntry): NodeCo
 }
 
 /**
+ * 从节点 config 的历史列表中移除指定版本条目（返回新 config）。
+ * 仅改写 history，current 不变；当前版本不可删除（UI 层已禁用），
+ * 若目标版本恰为当前版本或不存在则返回原配置。
+ *
+ * @param config 节点原配置
+ * @param version 要删除的历史版本号
+ * @returns 新配置（history 中已移除该版本条目）
+ */
+export function removeHistoryEntry(config: NodeConfig, version: number): NodeConfig {
+  const cur = config.current as { version?: number } | undefined
+  if (cur && cur.version === version) return config
+  const history = getHistory(config).filter((h) => h.version !== version)
+  if (history.length === getHistory(config).length) return config
+  return { ...config, history }
+}
+
+/**
  * 获取节点当前的资产相对路径：
  * - 加载图片：config.assetPath
  * - 生成图片：config.current.path
