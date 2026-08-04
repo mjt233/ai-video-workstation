@@ -13,20 +13,15 @@ export interface AutoBuildRef {
   label: string
 }
 
+/** 引用解析结果（与 AutoBuildRef 同构，别名复用） */
+export type RefResolution = AutoBuildRef
+
 /** 自动搭画布结果：应新增的节点、连线与生成节点 prompt */
 export interface AutoBuildResult {
   nodes: CanvasNodeData[]
   connections: CanvasConnection[]
   generateNodeId: string
   prompt: string
-}
-
-/** 引用解析结果 */
-export interface RefResolution {
-  /** 资产项目相对路径（assert/ 下） */
-  assetPath: string
-  /** 锚点节点显示名 */
-  label: string
 }
 
 /**
@@ -157,10 +152,10 @@ export function buildShotRefsFromStage(stageDefs: unknown[]): AutoBuildRef[] {
   for (const def of stageDefs ?? []) {
     const d = def as { 基础场景?: string; 登场角色?: string[] }
     const shotRef = resolveShotStageRef(d.基础场景 ?? '')
-    if (shotRef) refs.push({ assetPath: shotRef.assetPath, label: shotRef.label })
+    if (shotRef) refs.push(shotRef)
     for (const ch of d.登场角色 ?? []) {
       const charRef = resolveCharacterRef(ch)
-      if (charRef) refs.push({ assetPath: charRef.assetPath, label: charRef.label })
+      if (charRef) refs.push(charRef)
     }
   }
   return refs
