@@ -159,7 +159,7 @@
 
 ## 10. 设为分镜场景图
 
-> **历史对话框**：生成节点「历史」打开的是独立组件 `AssetHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（缩略图、版本号、生成时间）；点「设为当前」把该版本激活为节点当前图片（仅改写 `config.current`，`history` 不变，原当前图自动成为历史版本），激活后对话框保持打开。
+> **历史对话框**：生成节点「历史」打开的是独立组件 `CanvasAssertHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（缩略图、版本号、生成时间）；点「设为当前」把该版本激活为节点当前图片（仅改写 `config.current`，`history` 不变，原当前图自动成为历史版本），激活后对话框保持打开。
 
 - 生成节点编辑器「设为分镜场景图」→ 弹出对话框（`AssetCanvas` 内联 `sceneDialog`）。
 - 读取 `prompt/scene/{ep}/{shot}/stage.json` 列出**全部场景帧**（label = `基础场景` || prompt || `分镜场景图 N`，预览 `stage/{i}.jpg`，404 时 `@error` 置 `broken` 显示占位）。

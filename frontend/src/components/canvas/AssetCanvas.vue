@@ -350,7 +350,7 @@
       <!-- 重命名对话框：已由节点名称双击内联编辑取代 -->
 
       <!-- 版本历史对话框（大图预览 + 激活为当前） -->
-      <AssetHistoryDialog
+      <CanvasAssertHistoryDialog
         v-model="historyDialog.show"
         :project="props.project"
         :node="historyNode"
@@ -515,7 +515,7 @@ import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { confirm } from '../../utils/confirm'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
-import AssetHistoryDialog from './AssetHistoryDialog.vue'
+import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
 
 /** 组件 props：定位一张画布 */
 const props = defineProps<{
