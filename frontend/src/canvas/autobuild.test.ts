@@ -356,4 +356,40 @@ describe('buildSubSceneAutoCanvas', () => {
     expect(gen?.config.current).toBeUndefined()
     expect(gen?.config.history).toBeUndefined()
   })
+
+  it('成环/自环 parentId 不崩溃（按根处理）', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [
+      { id: 'A', desc: 'A', parentId: 'B', refs: [] },
+      { id: 'B', desc: 'B', parentId: 'A', refs: [] }, // 成环
+      { id: 'C', desc: 'C', parentId: 'C', refs: [] }, // 自环
+    ]
+    expect(() => buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)).not.toThrow()
+    // 三个变体都生成了生成节点
+    const gens = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    expect(gens.nodes.filter((n) => n.prototypeId === 'image-generate')).toHaveLength(3)
+  })
+
+  it('增量重跑：新根变体排在既有同列节点下方（不重叠）', () => {
+    // 模拟已有一次搭建结果：基础图 + 已存在的根变体 A
+    const existing = createCanvasData('stage')
+    existing.nodes.push({
+      id: 'base-old', prototypeId: 'image-loader', name: '白天', x: 80, y: 80, width: 220, height: 150,
+      config: { assetPath: base },
+    })
+    existing.nodes.push({
+      id: 'gen-a', prototypeId: 'image-generate', name: 'A', x: 400, y: 80, width: 240, height: 160,
+      config: { autoRef: 'stage:白天@A' },
+    })
+    const variants: StageVariantRef[] = [
+      { id: 'A', desc: 'A', refs: [] },
+      { id: 'B', desc: 'B', refs: [] }, // 新增根变体
+    ]
+    const r = buildSubSceneAutoCanvas(existing, '白天', base, variants, 80, 80)
+    // A 复用既有节点（不在新增列表）；B 是新增节点，应排在 A 下方
+    expect(r.nodes.some((n) => n.config.autoRef === 'stage:白天@A')).toBe(false)
+    const bNode = r.nodes.find((n) => n.config.autoRef === 'stage:白天@B')
+    expect(bNode).toBeTruthy()
+    expect(bNode?.y).toBeGreaterThan(80)
+  })
 })

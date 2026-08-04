@@ -267,9 +267,22 @@ export function buildSubSceneAutoCanvas(
     }
   }
 
-  // 层级布局常量：列间距（列间 x 步进）与行间距（同列 y 步进）
+  // 层级布局：各列（x 列索引，0=基础加载列）已占用最大 y；预置自既有节点，避免增量重跑重叠
   const H_STEP = 320
   const V_STEP = 160
+  const columnOf = (nx: number) => Math.round((nx - x) / H_STEP)
+  const columnMaxY = new Map<number, number>()
+  for (const n of data.nodes) {
+    const col = columnOf(n.x)
+    const cur = columnMaxY.get(col)
+    if (cur === undefined || n.y > cur) columnMaxY.set(col, n.y)
+  }
+  /** 取某列下一个可用 y（该列最大 y + 行间距），并占用该行 */
+  const nextYInColumn = (column: number) => {
+    const ny = (columnMaxY.get(column) ?? y - V_STEP) + V_STEP
+    columnMaxY.set(column, ny)
+    return ny
+  }
 
   // 基础加载图片节点：只建一个，所有根变体共用
   let baseId = ''
@@ -288,14 +301,19 @@ export function buildSubSceneAutoCanvas(
       config: { assetPath: baseAssetPath },
     })
     existingPaths.add(baseAssetPath)
+    // 占用基础加载列（第 0 列）该行；若基础节点为复用的既有节点，其 y 已由上方预置循环计入
+    columnMaxY.set(0, Math.max(columnMaxY.get(0) ?? y - V_STEP, y))
   }
 
-  // 计算各变体深度：根=0；父缺失/父不在列表按根处理；递归解析
+  // 计算各变体深度：根=0；父缺失/父不在列表按根处理；成环/自环按根处理（visiting 防无限递归）
   const byId = new Map(variants.map((v) => [v.id, v]))
   const depthById = new Map<string, number>()
+  const visiting = new Set<string>()
   const resolveDepth = (id: string): number => {
     const memo = depthById.get(id)
     if (memo !== undefined) return memo
+    if (visiting.has(id)) return 0 // 成环/自环：按根处理
+    visiting.add(id)
     const v = byId.get(id)
     const d = v?.parentId && byId.has(v.parentId) ? resolveDepth(v.parentId) + 1 : 0
     depthById.set(id, d)
@@ -303,14 +321,6 @@ export function buildSubSceneAutoCanvas(
   }
   const depthByVariant = new Map<string, number>()
   for (const v of variants) depthByVariant.set(v.id, resolveDepth(v.id))
-
-  // 每层（列）已占行数：变体行 + refs 行
-  const levelRows = new Map<number, number>()
-  const nextRow = (level: number) => {
-    const r = levelRows.get(level) ?? 0
-    levelRows.set(level, r + 1)
-    return r
-  }
 
   // 每个变体一个生成图片节点（autoRef 幂等；按深度分列布局）
   const genIdByVariant = new Map<string, string>()
@@ -336,7 +346,7 @@ export function buildSubSceneAutoCanvas(
       prototypeId: 'image-generate',
       name: v.id,
       x: x + (level + 1) * H_STEP,
-      y: y + nextRow(level) * V_STEP,
+      y: nextYInColumn(level + 1),
       width: 240,
       height: 160,
       config,
@@ -346,12 +356,6 @@ export function buildSubSceneAutoCanvas(
 
   // 连线 + refs 加载节点（assetPath 共享；refs 放在所属变体所在列底部）
   const refLoaderIds = new Map<string, string>()
-  const refRowsByLevel = new Map<number, number>()
-  const nextRefRow = (level: number) => {
-    const r = refRowsByLevel.get(level) ?? 0
-    refRowsByLevel.set(level, r + 1)
-    return r
-  }
   for (const v of variants) {
     const genId = genIdByVariant.get(v.id)
     if (!genId) continue
@@ -373,7 +377,7 @@ export function buildSubSceneAutoCanvas(
             prototypeId: 'image-loader',
             name: ref.split('/').pop() ?? ref,
             x: x + (level + 1) * H_STEP,
-            y: y + ((levelRows.get(level) ?? 0) + nextRefRow(level)) * V_STEP,
+            y: nextYInColumn(level + 1),
             width: 220,
             height: 150,
             config: { assetPath: ref },
