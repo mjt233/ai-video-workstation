@@ -242,6 +242,15 @@ const emit = defineEmits<{
 /** 内部是否发生过未保存的编辑（用于禁用「保存」按钮） */
 const dirty = ref(false)
 
+/**
+ * 播放是否已自然走到音频结尾（引擎自动停止）。
+ *
+ * 引擎在音频末尾自动停止时，其内部时长（按音频块计算）可能小于项目总时长，
+ * 仅凭 currentTime >= duration 无法判断，因此单独用该标记记录，
+ * 供再次播放时从头开始。
+ */
+let reachedEnd = false
+
 /** 复用 useVideoDirector 管理编辑状态；编辑后通过 onChange 上报 */
 const {
   imageClips,
@@ -282,6 +291,8 @@ watch(
     if (JSON.stringify(p) === JSON.stringify(cur)) return
     syncFromProject(p)
     dirty.value = false
+    // 切换项目后清除「已播放到结尾」标记，避免影响新项目的播放行为
+    reachedEnd = false
   },
   { deep: true, immediate: true },
 )
@@ -403,6 +414,10 @@ engine.onStateChange = (s) => {
 }
 engine.onTimeUpdate = (t) => {
   currentTime.value = t
+  // 播放头到达引擎内部时长（音频结尾，即将自动停止）时记录标记
+  if (engine.duration > 0 && t >= engine.duration) {
+    reachedEnd = true
+  }
 }
 
 /**
@@ -435,6 +450,9 @@ function buildPlaybackClips(): PlaybackClip[] {
 
 /**
  * 播放/暂停/继续切换。
+ *
+ * 若播放头已停在末尾（播放到音频结尾自动停止，或手动 seek 到末尾），
+ * 再次播放时从时间轴开头重新起播。
  */
 function togglePlayback(): void {
   if (playState.value === 'playing') {
@@ -446,6 +464,13 @@ function togglePlayback(): void {
     engine.play(buildPlaybackClips(), currentTime.value)
     return
   }
+  // idle：已播放到结尾或播放头在末尾时从头播放，否则从当前位置起播
+  if (reachedEnd || currentTime.value >= duration.value) {
+    reachedEnd = false
+    setCurrentTime(0)
+    engine.play(buildPlaybackClips(), 0)
+    return
+  }
   engine.play(buildPlaybackClips(), currentTime.value)
 }
 
@@ -453,6 +478,7 @@ function togglePlayback(): void {
  * 停止播放并回到时间轴开头。
  */
 function stopPlayback(): void {
+  reachedEnd = false
   engine.stop()
   setCurrentTime(0)
 }
@@ -466,6 +492,8 @@ function stopPlayback(): void {
  */
 function seekTo(t: number): void {
   const clamped = Math.max(0, Math.min(duration.value, t))
+  // 手动转跳后清除「已播放到结尾」标记，使下次播放从转跳位置起播
+  reachedEnd = false
   setCurrentTime(clamped)
   if (playState.value === 'playing') {
     engine.play(buildPlaybackClips(), clamped)
@@ -530,18 +558,27 @@ function onAudioPicked(paths: string[]): void {
 
 // ── 快捷键（复制/粘贴/删除） ──────────────────────────────────────
 /**
- * 全局键盘事件：Ctrl+C 复制、Ctrl+V 粘贴、Delete/Backspace 删除。
+ * 全局键盘事件：空格 播放/暂停、Ctrl+C 复制、Ctrl+V 粘贴、Delete/Backspace 删除。
  *
- * 只读模式或焦点在输入框/文本域时不拦截。
+ * 焦点在输入框/文本域时不拦截；只读模式仅允许空格播放/暂停，
+ * 编辑类快捷键（复制/粘贴/删除）仍被拦截。
  *
  * @param e 键盘事件
  */
 function onKeydown(e: KeyboardEvent): void {
-  if (props.readOnly) return
   const target = e.target as HTMLElement | null
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) {
     return
   }
+  // 空格：播放/暂停（与「播放」按钮行为一致，无可播放音频时忽略）
+  if (e.key === ' ') {
+    if (canPlay.value) {
+      togglePlayback()
+      e.preventDefault()
+    }
+    return
+  }
+  if (props.readOnly) return
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
     copySelected()
     e.preventDefault()
