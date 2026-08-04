@@ -36,3 +36,26 @@ LTX-2.3导演台工作流需要支持传入音频，存在音频时，由LTX生�
 
 生成视频时，如果该分镜存在导演台配置数据，且图生视频工作流支持导演台模式，则用上导演台组件的参数来生成视频。
 
+---
+## 实现状态（2026-08-04 完成）
+
+✅ **三项功能已全部实现并合并至 master（`--no-ff`）。**
+
+### 设计文档
+- `docs/superpowers/specs/2026-08-04-video-director-design.md`
+- `docs/superpowers/plans/2026-08-04-video-director.md`
+
+### 关键实现决策
+1. **功能0**：统一执行上下文 `WorkflowRunContext`（引擎取数、工作流消费）；`WorkflowDefinition` 新增 `capabilities`（`director`/`audio`）并透传前端 `/api/workflows`；新增 `audio-mix.ts`（ffmpeg 混音，`duration=longest`）、`director.ts`（配置解析+关键帧定义）、`director-inject.ts`（引擎注入 `DirectorPayload`）
+2. **功能1**：`frontend/src/components/video-director/`（`VideoDirector`/`DirectorTimeline`/`DirectorImageClip`/`DirectorAudioClip`/`useVideoDirector`/`types`），布局 A（预览置顶+双轨），复用 `PlaybackEngine`/`waveform`
+3. **功能2**：`ScenePanel` 视频生成页签内嵌导演台；`api/director.ts`（读/写 `prompt/scene/{ep}/{shot}/director.json`，序列化剥离前端 id）；`GenerateDialog` 支持 `hint` 提示
+
+### 生成判定规则
+- 用户手动选择图生视频实现；当 `director.json` 存在 **且** `imageClips.length >= 1` **且** 所选实现 `capabilities.director` 为真 → 引擎注入 `DirectorPayload`（`ltx-2.3-director` 工作流，frames + ffmpeg 混音 audio）
+- 否则走普通路径（I2V/FL2V/FML2V + merged.flac/TTS）
+
+### 验证
+- 服务端 vitest 41 用例、前端 vitest 101 用例全部通过
+- `npm run typecheck`、`npm run lint`（0 error）通过
+- 浏览器 E2E：添加图片/保存 `director.json`（id 已剥离）/生成对话框提示「检测到导演台配置，将使用导演台参数生成」均正常
+

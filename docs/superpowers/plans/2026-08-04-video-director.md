@@ -422,7 +422,7 @@
   运行确认失败：`cd frontend && npx vitest run src/components/video-director/useVideoDirector.test.ts`
 
 - [ ] **Step 2: 实现 `useVideoDirector.ts`**：
-  - 纯函数：`previewImageAt(t, imageClips): string | null`、`computePasteOffset(clip): number`、`frameCursors(imageClips, duration): number[]`
+  - 纯函数：`previewImageAt(imageClips, t): string | null`、`computePasteOffset(clip): number`、`frameCursors(imageClips, duration): number[]`
   - `useVideoDirector(opts: { onChange?: (p: DirectorProject) => void })` 返回：`project`(ref)、`imageClips`、`audioClips`、`duration`、`currentTime`、`playState`、`zoom`(px/s 默认 80)、`selectedId`、`clipboard`
   - 方法：`syncFromProject(p)`、`toProject()`、`addImage(path)`（默认 duration=DEFAULT_IMAGE_CLIP_DURATION，落在 `max(0, currentTime)`）、`addAudio(path, duration)`、`moveClip(kind,id,startOffset)`（钳制 0~duration-显示长度）、`resizeClip(id,duration)`、`trimClip(id,trimStart,trimEnd)`、`select(id)`、`copySelected()`、`paste()`（同轨道，startOffset=选中+1s，新 id=`crypto.randomUUID()`）、`removeSelected()`、`setCurrentTime(t)`、`setZoom(z)`、`togglePlay()`/`stopPlay()`（状态机，实际音频播放由组件接 PlaybackEngine）
   - 所有变更方法内部调用 `commit()` → `onChange?.(toProject())`；`id` 用 `crypto.randomUUID()`
