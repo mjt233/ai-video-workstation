@@ -7,6 +7,8 @@ export interface CanvasTarget {
   kind: CanvasKind
   /** stage 画布时的场景名 */
   stage?: string
+  /** stage 画布时的子场景标签 */
+  label?: string
   /** scene 画布时的集数 */
   episode?: string
   /** scene 画布时的分镜号 */
@@ -23,7 +25,8 @@ export interface CanvasTarget {
 export function canvasRelPath(target: CanvasTarget): string {
   if (target.kind === 'stage') {
     if (!target.stage) throw new Error('场景画布需要 stage')
-    return stageCanvasRelPath(target.stage)
+    if (!target.label) throw new Error('场景画布需要 label')
+    return stageCanvasRelPath(target.stage, target.label)
   }
   if (!target.episode || !target.shot) throw new Error('分镜画布需要 episode 与 shot')
   return sceneCanvasRelPath(target.episode, target.shot)

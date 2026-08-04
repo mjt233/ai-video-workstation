@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { canvasAssetDir, canvasNodeAssetPath, sceneCanvasRelPath, stageCanvasRelPath } from './paths'
 
 describe('stageCanvasRelPath', () => {
-  it('返回场景画布定义路径', () => {
-    expect(stageCanvasRelPath('便利店内部')).toBe('prompt/stage/便利店内部/canvas.json')
+  it('返回场景画布定义路径（含子场景标签）', () => {
+    expect(stageCanvasRelPath('便利店内部', '便利店内部-白天-平视-晴-收银台')).toBe(
+      'prompt/stage/便利店内部/canvas/便利店内部-白天-平视-晴-收银台.json',
+    )
   })
 })
 
@@ -14,8 +16,10 @@ describe('sceneCanvasRelPath', () => {
 })
 
 describe('canvasAssetDir', () => {
-  it('场景画布产物目录', () => {
-    expect(canvasAssetDir({ kind: 'stage', primary: '便利店内部' })).toBe('assert/stage/便利店内部/canvas')
+  it('场景画布产物目录（含子场景标签）', () => {
+    expect(canvasAssetDir({ kind: 'stage', primary: '便利店内部', label: '白天' })).toBe(
+      'assert/stage/便利店内部/canvas/白天',
+    )
   })
 
   it('分镜画布产物目录', () => {
