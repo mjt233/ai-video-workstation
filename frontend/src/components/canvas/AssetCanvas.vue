@@ -151,6 +151,7 @@
                 :id="protoOf(id)?.inputPorts[0]?.id"
                 type="target"
                 :position="Position.Left"
+                class="canvas-node__handle"
               />
               <div class="canvas-node__body">
                 <component
@@ -169,6 +170,7 @@
                 :id="protoOf(id)?.outputPorts[0]?.id"
                 type="source"
                 :position="Position.Right"
+                class="canvas-node__handle"
               />
             </div>
           </template>
@@ -1622,6 +1624,41 @@ watch([panelEl, flowEl], ([panel, flow]) => {
   flex: 1;
   min-height: 0;
   position: relative;
+}
+
+/* 连接点：默认小尺寸；鼠标在附近悬浮时放大（带过渡动画），便于抓取拖拽连接。
+   注：放大通过 width/height 实现，避免覆盖库自带的 translate 居中变换 */
+.canvas-node__handle {
+  width: 6px;
+  height: 6px;
+  min-width: 6px;
+  min-height: 6px;
+  transition:
+    width .1s,
+    height .1s,
+    min-width 0.1s,
+    min-height 0.1s,
+    background-color 0.1s;
+}
+
+/* 扩大连接点命中区域：悬浮（或拖动连线靠近）即可触发放大，且该区域可直接抓取 */
+.canvas-node__handle::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  bottom: -10px;
+  left: -10px;
+  border-radius: 50%;
+}
+
+/* 悬浮放大；拖动连线时的起点（connecting）同步放大 */
+.canvas-node__handle:hover,
+.canvas-node__handle.connecting {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
 }
 
 .canvas-node-editor-panel {
