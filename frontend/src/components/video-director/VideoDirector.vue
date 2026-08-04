@@ -19,7 +19,7 @@
         :color="playState === 'playing' ? 'warning' : 'primary'"
         variant="tonal"
         size="small"
-        :disabled="readOnly || !canPlay"
+        :disabled="!canPlay"
         @click="togglePlayback"
       >
         {{ playState === 'playing' ? '暂停' : playState === 'paused' ? '继续' : '播放' }}
@@ -28,7 +28,7 @@
         icon="mdi-stop"
         variant="text"
         size="small"
-        :disabled="readOnly || playState === 'idle'"
+        :disabled="playState === 'idle'"
         @click="stopPlayback"
       />
 
@@ -112,7 +112,7 @@
         prepend-icon="mdi-content-save-check"
         size="small"
         :disabled="!dirty"
-        @click="emit('save', toProject())"
+        @click="onSave"
       >
         保存
       </v-btn>
@@ -278,10 +278,17 @@ watch(
 )
 
 // ── 图片预览 URL 映射（按 path） ──────────────────────────────────
+/** 图片 URL 缓存：path → URL，避免拖拽高频重算时用 Date.now() 生成全新 URL 导致图片反复重载 */
+const imageUrlCache = new Map<string, string>()
 const imageUrls = computed(() => {
   const m: Record<string, string> = {}
   for (const c of imageClips.value) {
-    m[c.path] = buildPreviewUrl(props.project, c.path)
+    let url = imageUrlCache.get(c.path)
+    if (!url) {
+      url = buildPreviewUrl(props.project, c.path)
+      imageUrlCache.set(c.path, url)
+    }
+    m[c.path] = url
   }
   return m
 })
@@ -304,10 +311,13 @@ const audioData = reactive<Record<string, { buffer?: AudioBuffer; peaks?: number
  * @param path 项目内音频相对路径（assert/ 下）
  */
 async function ensureAudioData(path: string): Promise<void> {
-  const existing = audioData[path]
-  if (existing && (existing.buffer || existing.peaks)) return
+  if (audioData[path]) return
   const buf = await loadAudioBuffer(path)
-  if (!buf) return
+  if (!buf) {
+    // 解码失败：写入失败标记，避免每次音频块变化都重复请求
+    audioData[path] = {}
+    return
+  }
   const peaks = extractPeaks(buf, 200)
   audioData[path] = { buffer: buf, peaks }
 }
@@ -423,7 +433,8 @@ function togglePlayback(): void {
     return
   }
   if (playState.value === 'paused') {
-    engine.resume(buildPlaybackClips())
+    // 从当前播放头位置起播（覆盖暂停后 seek 的场景），避免 resume 回到旧的暂停位置
+    engine.play(buildPlaybackClips(), currentTime.value)
     return
   }
   engine.play(buildPlaybackClips(), currentTime.value)
@@ -461,6 +472,14 @@ const zoomModel = computed({
 // ── 资产选择器 ────────────────────────────────────────────────────
 const imagePickerOpen = ref(false)
 const audioPickerOpen = ref(false)
+
+/**
+ * 保存：重置未保存标记并通知外部落盘 director.json。
+ */
+function onSave(): void {
+  dirty.value = false
+  emit('save', toProject())
+}
 
 /**
  * 图片选择结果：逐个加入图片轨。
@@ -506,7 +525,7 @@ function onAudioPicked(paths: string[]): void {
 function onKeydown(e: KeyboardEvent): void {
   if (props.readOnly) return
   const target = e.target as HTMLElement | null
-  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) {
     return
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
