@@ -220,11 +220,16 @@ export interface StageVariantRef {
   parentId?: string
   /** 额外引用资产路径（assert/ 开头，可选） */
   refs: string[]
+  /** 变体是否已有生成图（自动搭画布时复制既有图片作为节点当前产物） */
+  hasImage?: boolean
 }
 
 /**
  * 自动搭「子场景画布」：基础加载图片节点 + 每个衍生变体一个生成图片节点 + 变体 refs 加载图片节点。
  * 连线规则：根变体 ← 基础加载节点；嵌套变体 ← 父变体生成节点；变体 refs ← 各自加载节点。
+ * 层级布局：根变体在第 1 列（x + H_STEP）、子变体在第 2 列（x + 2*H_STEP）、孙变体第 3 列……
+ * 按深度分列（列间距 H_STEP=320），同层变体纵向堆叠（行间距 V_STEP=160），
+ * 变体 refs 的加载节点放在所属变体所在列底部（同列、接在变体行之后）。
  * 幂等：加载节点按 config.assetPath、生成节点按 config.autoRef（stage:{label}@{id}）判重；
  * 已存在节点只补缺连线，不重复创建。
  *
@@ -234,6 +239,9 @@ export interface StageVariantRef {
  * @param variants 变体元数据列表
  * @param x 基础加载节点 x
  * @param y 基础加载节点 y
+ * @param outputBase 可选。生成节点产物目录基路径（如 assert/stage/{stage}/canvas/{label}）。
+ *   当某变体 hasImage 且传了 outputBase 时，预置该生成节点 config.current/history 指向
+ *   {outputBase}/{nodeId}/v1.jpg（实际把既有变体图复制到该路径由调用方完成）。
  * @returns 应新增的节点与连线
  */
 export function buildSubSceneAutoCanvas(
@@ -243,6 +251,7 @@ export function buildSubSceneAutoCanvas(
   variants: StageVariantRef[],
   x = 80,
   y = 80,
+  outputBase?: string,
 ): AutoBuildResult {
   const nodes: CanvasNodeData[] = []
   const connections: CanvasConnection[] = []
@@ -258,13 +267,18 @@ export function buildSubSceneAutoCanvas(
     }
   }
 
+  // 层级布局常量：列间距（列间 x 步进）与行间距（同列 y 步进）
+  const H_STEP = 320
+  const V_STEP = 160
+
   // 基础加载图片节点：只建一个，所有根变体共用
   let baseId = ''
   if (existingPaths.has(baseAssetPath)) {
     baseId = data.nodes.find((n) => n.config.assetPath === baseAssetPath)?.id ?? ''
   } else {
-    const baseNode: CanvasNodeData = {
-      id: newId(),
+    baseId = newId()
+    nodes.push({
+      id: baseId,
       prototypeId: 'image-loader',
       name: label,
       x,
@@ -272,45 +286,78 @@ export function buildSubSceneAutoCanvas(
       width: 220,
       height: 150,
       config: { assetPath: baseAssetPath },
-    }
-    nodes.push(baseNode)
+    })
     existingPaths.add(baseAssetPath)
-    baseId = baseNode.id
   }
 
-  // 每个变体一个生成图片节点（autoRef 幂等）
+  // 计算各变体深度：根=0；父缺失/父不在列表按根处理；递归解析
+  const byId = new Map(variants.map((v) => [v.id, v]))
+  const depthById = new Map<string, number>()
+  const resolveDepth = (id: string): number => {
+    const memo = depthById.get(id)
+    if (memo !== undefined) return memo
+    const v = byId.get(id)
+    const d = v?.parentId && byId.has(v.parentId) ? resolveDepth(v.parentId) + 1 : 0
+    depthById.set(id, d)
+    return d
+  }
+  const depthByVariant = new Map<string, number>()
+  for (const v of variants) depthByVariant.set(v.id, resolveDepth(v.id))
+
+  // 每层（列）已占行数：变体行 + refs 行
+  const levelRows = new Map<number, number>()
+  const nextRow = (level: number) => {
+    const r = levelRows.get(level) ?? 0
+    levelRows.set(level, r + 1)
+    return r
+  }
+
+  // 每个变体一个生成图片节点（autoRef 幂等；按深度分列布局）
   const genIdByVariant = new Map<string, string>()
-  let row = 0
   for (const v of variants) {
     const autoRef = `stage:${label}@${v.id}`
     const existing = data.nodes.find((n) => n.config.autoRef === autoRef)
     if (existing) {
       genIdByVariant.set(v.id, existing.id)
-    } else {
-      const genNode: CanvasNodeData = {
-        id: newId(),
-        prototypeId: 'image-generate',
-        name: v.id,
-        x: x + 320,
-        y: y + row * 160,
-        width: 240,
-        height: 160,
-        config: { prompt: v.desc, autoRef },
-      }
-      nodes.push(genNode)
-      genIdByVariant.set(v.id, genNode.id)
-      row += 1
+      continue
     }
+    const genId = newId()
+    const level = depthByVariant.get(v.id) ?? 0
+    const config: Record<string, unknown> = { prompt: v.desc, autoRef }
+    // 变体已有生成图：预置 current/history 指向画布产物 v1（实际复制由调用方完成）
+    if (v.hasImage && outputBase) {
+      const outPath = `${outputBase}/${genId}/v1.jpg`
+      const now = new Date().toISOString()
+      config.current = { version: 1, path: outPath, date: now }
+      config.history = [{ version: 1, path: outPath, date: now }]
+    }
+    nodes.push({
+      id: genId,
+      prototypeId: 'image-generate',
+      name: v.id,
+      x: x + (level + 1) * H_STEP,
+      y: y + nextRow(level) * V_STEP,
+      width: 240,
+      height: 160,
+      config,
+    })
+    genIdByVariant.set(v.id, genId)
   }
 
-  // 连线 + refs 加载节点（assetPath 共享；refRow 独立计数，避免与生成节点 row 混淆导致重叠）
+  // 连线 + refs 加载节点（assetPath 共享；refs 放在所属变体所在列底部）
   const refLoaderIds = new Map<string, string>()
-  let refRow = 0
+  const refRowsByLevel = new Map<number, number>()
+  const nextRefRow = (level: number) => {
+    const r = refRowsByLevel.get(level) ?? 0
+    refRowsByLevel.set(level, r + 1)
+    return r
+  }
   for (const v of variants) {
     const genId = genIdByVariant.get(v.id)
     if (!genId) continue
     const inputNodeId = v.parentId ? (genIdByVariant.get(v.parentId) ?? '') : baseId
     addConnection(inputNodeId, genId)
+    const level = depthByVariant.get(v.id) ?? 0
     for (const ref of v.refs) {
       let loaderId = refLoaderIds.get(ref)
       if (loaderId == null) {
@@ -320,20 +367,18 @@ export function buildSubSceneAutoCanvas(
         } else if (existingPaths.has(ref)) {
           loaderId = data.nodes.find((n) => n.config.assetPath === ref)?.id ?? ''
         } else {
-          const loaderNode: CanvasNodeData = {
-            id: newId(),
+          loaderId = newId()
+          nodes.push({
+            id: loaderId,
             prototypeId: 'image-loader',
             name: ref.split('/').pop() ?? ref,
-            x: x + 640,
-            y: y + refRow * 160,
+            x: x + (level + 1) * H_STEP,
+            y: y + ((levelRows.get(level) ?? 0) + nextRefRow(level)) * V_STEP,
             width: 220,
             height: 150,
             config: { assetPath: ref },
-          }
-          nodes.push(loaderNode)
+          })
           existingPaths.add(ref)
-          loaderId = loaderNode.id
-          refRow += 1
         }
         refLoaderIds.set(ref, loaderId)
       }

@@ -551,7 +551,7 @@ import {
   type AutoBuildRef,
   type StageVariantRef,
 } from '../../canvas/autobuild'
-import { copyFs, readFs, type DirResponse } from '../../api/client'
+import { copyFs, existsFs, readFs, type DirResponse } from '../../api/client'
 import { createSceneStageFrame } from '../../api/assets'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
@@ -1307,8 +1307,35 @@ async function autoBuild() {
   autoBuilding.value = true
   try {
     if (target.value.kind === 'stage') {
+      const t = target.value
       const { baseAssetPath, variants } = await collectStageBuild()
-      const result = buildSubSceneAutoCanvas(store.data.value, target.value.label ?? '', baseAssetPath, variants)
+      const outputBase = `assert/stage/${t.stage ?? ''}/canvas/${t.label ?? ''}`
+      const result = buildSubSceneAutoCanvas(
+        store.data.value,
+        t.label ?? '',
+        baseAssetPath,
+        variants,
+        80,
+        80,
+        outputBase,
+      )
+      // 变体已有生成图：把既有图片复制到节点产物目录（复制失败不阻塞搭画布）
+      for (const node of result.nodes) {
+        if (node.prototypeId !== 'image-generate') continue
+        const autoRef = typeof node.config.autoRef === 'string' ? node.config.autoRef : ''
+        const vId = autoRef.slice(autoRef.lastIndexOf('@') + 1)
+        const cur = node.config.current as { path?: string } | undefined
+        if (!vId || !cur?.path) continue
+        try {
+          await copyFs(
+            props.project,
+            `assert/stage/${t.stage ?? ''}/variants/${t.label ?? ''}/${vId}.jpg`,
+            cur.path,
+          )
+        } catch {
+          // 复制失败忽略（节点仍保留，用户可自行重新生成）
+        }
+      }
       store.applyNodes(result.nodes, result.connections)
       const anchorCount = result.nodes.filter((n) => n.prototypeId === 'image-loader').length
       showSnackbar(`已搭建 ${anchorCount} 个锚点节点`, 'success')
@@ -1396,11 +1423,17 @@ async function collectStageBuild(): Promise<{ baseAssetPath: string; variants: S
           parentId?: string
           refs?: string[]
         }
+        // 变体是否已有生成图（决定自动搭画布时是否复制既有图片作为节点当前产物）
+        const hasImage = await existsFs(
+          props.project,
+          `assert/stage/${stage}/variants/${label}/${id}.jpg`,
+        )
         variants.push({
           id,
           desc: String(meta?.desc ?? ''),
           parentId: typeof meta?.parentId === 'string' ? meta.parentId : undefined,
           refs: Array.isArray(meta?.refs) ? (meta.refs as string[]) : [],
+          hasImage,
         })
       } catch {
         // 单个变体元数据读取失败则跳过

@@ -294,4 +294,66 @@ describe('buildSubSceneAutoCanvas', () => {
     const ys = refLoaders.map((n) => n.y)
     expect(new Set(ys).size).toBe(2)
   })
+
+  it('层级布局：根变体在第1列、嵌套变体按深度分列', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [
+      { id: 'A', desc: 'A', refs: [] },
+      { id: 'A1', desc: 'A 的子', parentId: 'A', refs: [] },
+      { id: 'A1a', desc: 'A 的孙', parentId: 'A1', refs: [] },
+      { id: 'B', desc: 'B', refs: [] },
+    ]
+    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    const xOf = (autoRef: string) => r.nodes.find((n) => n.config.autoRef === autoRef)?.x ?? -1
+    // 根在第1列（x+320），子在第2列（x+640），孙在第3列（x+960）
+    expect(xOf('stage:白天@A')).toBe(400)
+    expect(xOf('stage:白天@B')).toBe(400)
+    expect(xOf('stage:白天@A1')).toBe(720)
+    expect(xOf('stage:白天@A1a')).toBe(1040)
+    // 同层兄弟纵向不重叠（y 不同）
+    const yA = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A')?.y
+    const yB = r.nodes.find((n) => n.config.autoRef === 'stage:白天@B')?.y
+    expect(yA).not.toBe(yB)
+  })
+
+  it('refs 加载节点放在所属变体所在列底部', () => {
+    const data = createCanvasData('stage')
+    const ref = 'assert/custom/道具/伞.png'
+    const variants: StageVariantRef[] = [
+      { id: 'A', desc: 'A', refs: [ref] },
+      { id: 'A1', desc: 'A 的子', parentId: 'A', refs: [] },
+    ]
+    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    const loader = r.nodes.find((n) => n.config.assetPath === ref)
+    expect(loader).toBeTruthy()
+    // refs 与根变体同列（x 相同），且在根变体行之后（y 更大）
+    const genA = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A')
+    expect(loader?.x).toBe(genA?.x)
+    expect(loader?.y).toBeGreaterThan(genA?.y ?? 0)
+  })
+
+  it('变体已有生成图时预置 current/history（指向画布产物 v1）', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [
+      { id: 'A', desc: 'A', refs: [], hasImage: true },
+    ]
+    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80, 'assert/stage/街角/canvas/白天')
+    const gen = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A')
+    expect(gen).toBeTruthy()
+    const cur = gen?.config.current as { version: number; path: string; date: string } | undefined
+    expect(cur?.version).toBe(1)
+    expect(cur?.path).toContain('assert/stage/街角/canvas/白天/')
+    expect(cur?.path.endsWith('/v1.jpg')).toBe(true)
+    expect(Array.isArray(gen?.config.history)).toBe(true)
+    expect((gen?.config.history as unknown[]).length).toBe(1)
+  })
+
+  it('未传 outputBase 时即使 hasImage 也不预置 current', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [{ id: 'A', desc: 'A', refs: [], hasImage: true }]
+    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    const gen = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A')
+    expect(gen?.config.current).toBeUndefined()
+    expect(gen?.config.history).toBeUndefined()
+  })
 })
