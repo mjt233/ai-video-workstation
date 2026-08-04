@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { collectInputs, collectInputPaths, getHistory, getNodeCurrentAssetPath } from './generate'
+import { activateHistory, collectInputs, collectInputPaths, getHistory, getNodeCurrentAssetPath, type HistoryEntry } from './generate'
 
 const loader: CanvasNodeData = {
   id: 'l1', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,
@@ -90,5 +90,39 @@ describe('collectInputs / inputOrder 排序', () => {
   it('inputOrder 未出现的节点排在末尾', () => {
     const inputs = collectInputs('g1', conns, [loader, g2], { inputOrder: ['g2'] })
     expect(inputs.map((i) => i.nodeId)).toEqual(['g2', 'l1'])
+  })
+})
+
+describe('activateHistory', () => {
+  it('把历史条目激活为 current，history 引用与内容不变，原 config 不被修改', () => {
+    const cfg = gen.config
+    const next = activateHistory(cfg, {
+      version: 1,
+      path: 'assert/scene/1/1/canvas/g1/v1.jpg',
+      date: '2026-01-01T00:00:00.000Z',
+    })
+    expect(next.current).toEqual({
+      version: 1,
+      path: 'assert/scene/1/1/canvas/g1/v1.jpg',
+      date: '2026-01-01T00:00:00.000Z',
+    })
+    // history 引用不变（原当前图保留在历史中）
+    expect(next.history).toBe(cfg.history)
+    // 原 config 不被修改
+    expect(cfg.current).toEqual({
+      version: 2,
+      path: 'assert/scene/1/1/canvas/g1/v2.jpg',
+      date: '2026-01-01T00:00:00.000Z',
+    })
+  })
+
+  it('激活后原当前图仍在历史中', () => {
+    const cfg = gen.config
+    const next = activateHistory(cfg, {
+      version: 1,
+      path: 'assert/scene/1/1/canvas/g1/v1.jpg',
+      date: '2026-01-01T00:00:00.000Z',
+    })
+    expect((next.history as HistoryEntry[]).map((h) => h.version)).toEqual([1, 2])
   })
 })

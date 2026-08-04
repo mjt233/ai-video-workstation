@@ -28,6 +28,19 @@ export function getHistory(config: NodeConfig): HistoryEntry[] {
 }
 
 /**
+ * 把某历史版本激活为节点当前图片（返回新 config）。
+ * 仅改写 current 指针，history 列表不变——原当前图本就保留在历史中，
+ * 因此激活后原图自然成为历史版本。
+ *
+ * @param config 节点原配置
+ * @param entry 要激活的历史条目
+ * @returns 新配置（current 指向该条目，history 引用不变）
+ */
+export function activateHistory(config: NodeConfig, entry: HistoryEntry): NodeConfig {
+  return { ...config, current: { version: entry.version, path: entry.path, date: entry.date } }
+}
+
+/**
  * 获取节点当前的资产相对路径：
  * - 加载图片：config.assetPath
  * - 生成图片：config.current.path
