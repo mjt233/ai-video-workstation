@@ -254,8 +254,9 @@ export function buildSubSceneAutoCanvas(
     }
   }
 
-  // 连线 + refs 加载节点（assetPath 共享）
+  // 连线 + refs 加载节点（assetPath 共享；refRow 独立计数，避免与生成节点 row 混淆导致重叠）
   const refLoaderIds = new Map<string, string>()
+  let refRow = 0
   for (const v of variants) {
     const genId = genIdByVariant.get(v.id)
     if (!genId) continue
@@ -264,7 +265,10 @@ export function buildSubSceneAutoCanvas(
     for (const ref of v.refs) {
       let loaderId = refLoaderIds.get(ref)
       if (loaderId == null) {
-        if (existingPaths.has(ref)) {
+        if (ref === baseAssetPath) {
+          // ref 指向基础图本身：直接用基础加载节点
+          loaderId = baseId
+        } else if (existingPaths.has(ref)) {
           loaderId = data.nodes.find((n) => n.config.assetPath === ref)?.id ?? ''
         } else {
           const loaderNode: CanvasNodeData = {
@@ -272,7 +276,7 @@ export function buildSubSceneAutoCanvas(
             prototypeId: 'image-loader',
             name: ref.split('/').pop() ?? ref,
             x: x + 640,
-            y: y + row * 160,
+            y: y + refRow * 160,
             width: 220,
             height: 150,
             config: { assetPath: ref },
@@ -280,6 +284,7 @@ export function buildSubSceneAutoCanvas(
           nodes.push(loaderNode)
           existingPaths.add(ref)
           loaderId = loaderNode.id
+          refRow += 1
         }
         refLoaderIds.set(ref, loaderId)
       }

@@ -225,4 +225,29 @@ describe('buildSubSceneAutoCanvas', () => {
     expect(second.nodes).toHaveLength(0)
     expect(second.connections).toHaveLength(1)
   })
+
+  it('无变体时只搭基础加载节点', () => {
+    const data = createCanvasData('stage')
+    const r = buildSubSceneAutoCanvas(data, '白天', base, [], 80, 80)
+    expect(r.nodes).toHaveLength(1)
+    expect(r.nodes[0]?.prototypeId).toBe('image-loader')
+    expect(r.nodes[0]?.config.assetPath).toBe(base)
+    expect(r.connections).toHaveLength(0)
+  })
+
+  it('不同变体的不同 refs 不重叠（各自独立 y 坐标）', () => {
+    const data = createCanvasData('stage')
+    const variants: StageVariantRef[] = [
+      { id: 'A', desc: 'A', refs: ['assert/custom/道具/伞.png'] },
+      { id: 'B', desc: 'B', refs: ['assert/custom/道具/扇子.png'] },
+    ]
+    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
+    // 基础加载 + 2 生成 + 2 个不同 ref 加载
+    expect(r.nodes).toHaveLength(5)
+    const refLoaders = r.nodes.filter((n) => n.prototypeId === 'image-loader' && n.config.assetPath !== base)
+    expect(refLoaders).toHaveLength(2)
+    // 两个 ref 加载节点 y 坐标不同（不重叠）
+    const ys = refLoaders.map((n) => n.y)
+    expect(new Set(ys).size).toBe(2)
+  })
 })
