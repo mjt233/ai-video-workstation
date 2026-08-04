@@ -824,7 +824,7 @@ async function initSceneStageTab() {
   await onSceneEpChange()
 }
 
-/** 集数变化：刷新分镜选项并加载场景帧 */
+/** 集数变化：刷新分镜选项、校验既有选中，并加载场景帧 */
 async function onSceneEpChange() {
   shotOptions.value = []
   if (sceneEp.value) {
@@ -837,6 +837,10 @@ async function onSceneEpChange() {
     } catch {
       shotOptions.value = []
     }
+  }
+  // 分镜选项刷新后校验既有选中：不在新选项里则清空，避免幻影值
+  if (sceneShot.value && !shotOptions.value.includes(sceneShot.value)) {
+    sceneShot.value = null
   }
   await loadSceneStages()
 }
