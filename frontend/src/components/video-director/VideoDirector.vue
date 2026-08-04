@@ -172,11 +172,13 @@
       />
     </div>
 
-    <!-- 图片资产选择器 -->
+    <!-- 图片资产选择器：场景/角色/自定义/分镜场景图 -->
     <AssetPickerDialog
       v-model="imagePickerOpen"
       :project="project"
-      :tabs="['stage', 'character', 'custom']"
+      :tabs="['stage', 'character', 'custom', 'scene-stage']"
+      :context-episode="episode"
+      :context-shot="shot"
       title="添加图片素材"
       @update:selected="onImagePicked"
     />

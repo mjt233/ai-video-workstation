@@ -53,6 +53,12 @@
           自定义资产
         </v-tab>
         <v-tab
+          v-if="visibleTabs.includes('scene-stage') && hasSceneContext"
+          value="scene-stage"
+        >
+          分镜场景图
+        </v-tab>
+        <v-tab
           v-if="visibleTabs.includes('audio')"
           value="audio"
         >
@@ -328,6 +334,79 @@
           </div>
         </template>
 
+        <!-- 分镜场景图：分镜已生成的场景帧（assert/scene/{ep}/{shot}/stage/{i}.jpg） -->
+        <template v-else-if="activeTab === 'scene-stage' && visibleTabs.includes('scene-stage') && hasSceneContext">
+          <v-row
+            v-if="sceneStages.length"
+            dense
+          >
+            <v-col
+              v-for="item in sceneStages"
+              :key="item.path"
+              cols="4"
+              sm="3"
+              md="2"
+            >
+              <v-card
+                variant="outlined"
+                :class="{ 'asset-card--selected': isSelected(item.path) }"
+                class="asset-card"
+                ripple
+                @click="selectItem(item)"
+              >
+                <div class="asset-thumb-wrap">
+                  <v-img
+                    v-if="!imgErrors.has(item.path)"
+                    :src="item.thumbnail"
+                    height="120"
+                    cover
+                    class="bg-grey-lighten-3"
+                    @error="onImgError(item.path)"
+                  >
+                    <template #placeholder>
+                      <div class="d-flex align-center justify-center fill-height text-caption text-grey">
+                        加载中
+                      </div>
+                    </template>
+                  </v-img>
+                  <div
+                    v-else
+                    class="d-flex align-center justify-center bg-grey-lighten-3"
+                    style="height:120px;"
+                  >
+                    <v-icon
+                      color="grey"
+                      size="40"
+                    >
+                      mdi-image-off-outline
+                    </v-icon>
+                  </div>
+                  <v-icon
+                    v-if="isSelected(item.path)"
+                    class="asset-check-icon"
+                    color="primary"
+                    size="28"
+                  >
+                    mdi-check-circle
+                  </v-icon>
+                </div>
+                <div
+                  class="pa-1 text-caption text-truncate text-center"
+                  :title="item.label"
+                >
+                  {{ item.label }}
+                </div>
+              </v-card>
+            </v-col>
+          </v-row>
+          <div
+            v-else
+            class="text-grey text-body-2 text-center py-8"
+          >
+            该分镜暂无场景图（请先在「场景图片」页签生成）
+          </div>
+        </template>
+
         <!-- 音频：3 个子页签（台词音频 / 分镜自定义 / 全局自定义） -->
         <template v-else-if="activeTab === 'audio' && visibleTabs.includes('audio')">
           <v-tabs
@@ -593,7 +672,7 @@ import client, { readFs, existsFs, type DirEntry, type DirResponse } from '../ap
 import { listCharacterVariants, listStageVariants, type VariantInfo } from '../api/assets'
 
 /** 资产分类标签 */
-type AssetTab = 'character' | 'stage' | 'custom' | 'audio'
+type AssetTab = 'character' | 'stage' | 'custom' | 'audio' | 'scene-stage'
 
 /** 树形资产条目 */
 interface AssetItem {
@@ -697,6 +776,9 @@ interface VoiceLineItem {
 
 /** 台词列表（读 script.json，未生成语音的台词禁用） */
 const voiceLines = ref<VoiceLineItem[]>([])
+
+/** 分镜场景图条目列表（assert/scene/{ep}/{shot}/stage/{i}.jpg） */
+const sceneStages = ref<AssetItem[]>([])
 
 /** 是否有分镜上下文（决定是否显示「分镜自定义」子页签） */
 const hasSceneContext = computed(
@@ -814,6 +896,11 @@ function getPathLabel(path: string): string {
   if (path.startsWith('assert/stage/')) {
     const rest = path.slice('assert/stage/'.length)
     return rest.replace('/variants/', '/').replace(/\.jpg$/, '')
+  }
+  if (path.startsWith('assert/scene/')) {
+    const m = path.match(/\/stage\/(\d+)\.jpg$/)
+    if (m) return `分镜场景图 ${Number(m[1]) + 1}`
+    return path.split('/').pop() ?? path
   }
   return path.split('/').pop() ?? path
 }
@@ -1145,6 +1232,38 @@ async function loadVoiceLines() {
 }
 
 /**
+ * 加载「分镜场景图」页签数据。
+ *
+ * 读取 assert/scene/{ep}/{shot}/stage/ 目录下的 {i}.jpg 场景帧，
+ * 按帧序号展示为「分镜场景图 N」；无分镜上下文或目录不存在时为空。
+ */
+async function loadSceneStages() {
+  const { contextEpisode: ep, contextShot: shot } = props
+  tabLoading.value = true
+  sceneStages.value = []
+  try {
+    if (!ep || !shot) return
+    const dir = `assert/scene/${ep}/${shot}/stage`
+    const res = await readFs(props.project, dir).catch(() => null) as DirResponse | null
+    const entries = res?.entries ?? []
+    const images = entries
+      .filter((e: DirEntry) => e.type === 'file' && /\.jpe?g$/i.test(e.name))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true }))
+    sceneStages.value = images.map((e: DirEntry) => {
+      const idx = Number(e.name.replace(/\.[^.]+$/, ''))
+      return {
+        path: `${dir}/${e.name}`,
+        label: Number.isFinite(idx) ? `分镜场景图 ${idx + 1}` : e.name,
+        thumbnail: `/api/fs/${props.project}/${dir}/${e.name}?t=${ts()}`,
+        depth: 0,
+      }
+    })
+  } finally {
+    tabLoading.value = false
+  }
+}
+
+/**
  * 获取当前文件浏览器子页签的根目录（相对项目路径）。
  */
 function audioRoot(): string {
@@ -1247,6 +1366,8 @@ async function onTabChange() {
     await loadCustomTabInternal()
   } else if (activeTab.value === 'audio') {
     await onAudioSectionChange()
+  } else if (activeTab.value === 'scene-stage') {
+    await loadSceneStages()
   } else {
     tabLoading.value = true
     try {
