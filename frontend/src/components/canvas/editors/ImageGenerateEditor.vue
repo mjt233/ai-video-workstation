@@ -118,7 +118,7 @@
         历史 ({{ history.length }})
       </v-btn>
       <v-btn
-        v-if="node.config.current && !isRunning"
+        v-if="kind === 'scene' && node.config.current && !isRunning"
         size="small"
         variant="tonal"
         color="primary"
@@ -133,7 +133,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { getWorkflows, type WorkflowInfo } from '../../../api/workflow'
-import type { CanvasNodeData } from '../../../canvas/types'
+import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import { getHistory, type CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
@@ -144,6 +144,8 @@ const props = defineProps<{
   node: CanvasNodeData
   inputs: CanvasInputInfo[]
   isRunning: boolean
+  /** 画布类型：仅分镜画布（scene）显示「设为分镜场景图」 */
+  kind: CanvasKind
 }>()
 
 const emit = defineEmits<{

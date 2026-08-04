@@ -188,6 +188,7 @@
               :node="editorPanel?.node"
               :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
               :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
+              :kind="target.kind"
               @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
               @generate="generateNode"
               @interrupt="onInterrupt"
