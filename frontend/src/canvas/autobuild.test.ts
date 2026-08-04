@@ -4,6 +4,7 @@ import {
   buildAutoCanvas,
   buildShotRefsFromStage,
   buildSubSceneAutoCanvas,
+  deriveStageRefFromAssetPath,
   mergePrompt,
   resolveCharacterRef,
   resolveShotStageRef,
@@ -119,6 +120,24 @@ describe('resolveCharacterRef', () => {
       assetPath: 'assert/custom/character/张三/道具.png',
       label: 'custom/character/张三/道具.png',
     })
+  })
+})
+
+describe('deriveStageRefFromAssetPath', () => {
+  it('普通场景图路径 → 场景/标签', () => {
+    expect(deriveStageRefFromAssetPath('assert/stage/街角/白天.jpg')).toBe('街角/白天')
+  })
+
+  it('变体路径 → 场景/标签@变体', () => {
+    expect(deriveStageRefFromAssetPath('assert/stage/街角/variants/白天/门已打开.jpg')).toBe('街角/白天@门已打开')
+  })
+
+  it('非 assert/stage 路径返回空串', () => {
+    expect(deriveStageRefFromAssetPath('assert/character/张三/appearance.jpg')).toBe('')
+  })
+
+  it('畸形路径返回空串', () => {
+    expect(deriveStageRefFromAssetPath('assert/stage/只有场景名.jpg')).toBe('')
   })
 })
 

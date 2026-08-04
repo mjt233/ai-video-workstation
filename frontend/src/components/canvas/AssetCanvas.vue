@@ -543,6 +543,7 @@ import {
   buildAutoCanvas,
   buildShotRefsFromStage,
   buildSubSceneAutoCanvas,
+  deriveStageRefFromAssetPath,
   type AutoBuildRef,
   type StageVariantRef,
 } from '../../canvas/autobuild'
@@ -1145,26 +1146,8 @@ function deriveStageFrameBody(
   const characters: string[] = []
   for (const inp of inputs) {
     if (inp.path.startsWith('assert/stage/')) {
-      const rest = inp.path.slice('assert/stage/'.length).replace(/\.(jpg|jpeg|png|webp)$/i, '')
-      // 变体路径：{场景}/variants/{标签}/{变体} → 基础场景 = {场景}/{标签}@{变体}
-      const vIdx = rest.indexOf('/variants/')
-      if (vIdx > 0) {
-        const stageName = rest.slice(0, vIdx)
-        const rest2 = rest.slice(vIdx + '/variants/'.length)
-        const slash = rest2.indexOf('/')
-        if (slash > 0) {
-          const stageLabel = rest2.slice(0, slash)
-          const variantId = rest2.slice(slash + 1)
-          if (stageLabel && variantId && !baseScene) baseScene = `${stageName}/${stageLabel}@${variantId}`
-        }
-      } else {
-        const idx = rest.lastIndexOf('/')
-        if (idx > 0) {
-          const name = rest.slice(0, idx)
-          const label = rest.slice(idx + 1)
-          if (name && label && !baseScene) baseScene = `${name}/${label}`
-        }
-      }
+      const ref = deriveStageRefFromAssetPath(inp.path)
+      if (ref && !baseScene) baseScene = ref
     } else if (inp.path.startsWith('assert/character/')) {
       const name = inp.path.slice('assert/character/'.length).split('/')[0]
       if (name && !characters.includes(name)) characters.push(name)

@@ -74,6 +74,38 @@ export function resolveCharacterRef(character: string): RefResolution | null {
 }
 
 /**
+ * 从 assert/stage 资产路径推导「基础场景」引用（与 resolveShotStageRef 互为反方向）。
+ * - assert/stage/{场景}/{标签}.jpg → {场景}/{标签}
+ * - assert/stage/{场景}/variants/{标签}/{变体}.jpg → {场景}/{标签}@{变体}
+ *
+ * @param path 资产项目相对路径（assert/ 下）
+ * @returns 基础场景引用；非 assert/stage/ 路径或格式无效返回空串
+ */
+export function deriveStageRefFromAssetPath(path: string): string {
+  if (!path.startsWith('assert/stage/')) return ''
+  const rest = path.slice('assert/stage/'.length).replace(/\.(jpg|jpeg|png|webp)$/i, '')
+  const vIdx = rest.indexOf('/variants/')
+  if (vIdx > 0) {
+    const stageName = rest.slice(0, vIdx)
+    const rest2 = rest.slice(vIdx + '/variants/'.length)
+    const slash = rest2.indexOf('/')
+    if (slash > 0) {
+      const stageLabel = rest2.slice(0, slash)
+      const variantId = rest2.slice(slash + 1)
+      if (stageLabel && variantId) return `${stageName}/${stageLabel}@${variantId}`
+    }
+    return ''
+  }
+  const idx = rest.lastIndexOf('/')
+  if (idx > 0) {
+    const name = rest.slice(0, idx)
+    const label = rest.slice(idx + 1)
+    if (name && label) return `${name}/${label}`
+  }
+  return ''
+}
+
+/**
  * 从现有画布 + 引用列表生成自动搭画布结果。
  *
  * @param data 现有画布（用于幂等判断）
