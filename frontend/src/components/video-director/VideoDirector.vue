@@ -166,6 +166,7 @@
         @select="select"
         @move="moveClip"
         @resize="resizeClip"
+        @resize-shared="applyImageBoundary"
         @trim="trimClip"
         @seek="seekTo"
         @zoom="setZoom"
@@ -273,6 +274,7 @@ const {
   addAudio,
   moveClip,
   resizeClip,
+  applyImageBoundary,
   trimClip,
   select,
   copySelected,
@@ -409,11 +411,59 @@ watch(
   { immediate: true },
 )
 
-// ── 播放（复用 audio-editor PlaybackEngine） ──────────────────────
+// ── 播放（有音频走 PlaybackEngine；纯图片走 rAF 计时器） ──────────
 const engine = new PlaybackEngine()
 
-/** 是否有可播放的音频素材 */
-const canPlay = computed(() => audioClips.value.length > 0)
+/**
+ * 是否有可播放的素材（图片或音频）。
+ *
+ * 纯图片时也能播放：用计时器推进播放头预览关键帧切换。
+ */
+const canPlay = computed(() => imageClips.value.length > 0 || audioClips.value.length > 0)
+
+/** 是否有已解码可播放的音频（决定播放用引擎还是计时器） */
+const hasPlayableAudio = computed(() => audioClips.value.some((c) => !!audioData[c.path]?.buffer))
+
+/** 纯图片（无音频）播放：rAF 计时器 id（0 表示未在播放） */
+let silentRaf = 0
+/** 纯图片播放：起始时间戳（performance.now） */
+let silentStartTime = 0
+/** 纯图片播放：起始位置（秒） */
+let silentFromTime = 0
+
+/**
+ * 纯图片（无音频）播放：用 rAF 推进播放头直到结尾。
+ *
+ * 无音频时 PlaybackEngine 无法推进时间（其时长按音频块计算为 0），
+ * 故单独用计时器驱动 currentTime，到达项目总长后自动停止。
+ */
+function startSilentPlayback(): void {
+  stopSilentPlayback()
+  silentFromTime = currentTime.value
+  silentStartTime = performance.now()
+  playState.value = 'playing'
+  const tick = () => {
+    const t = silentFromTime + (performance.now() - silentStartTime) / 1000
+    if (t >= duration.value) {
+      currentTime.value = duration.value
+      reachedEnd = true
+      playState.value = 'idle'
+      silentRaf = 0
+      return
+    }
+    currentTime.value = t
+    silentRaf = requestAnimationFrame(tick)
+  }
+  silentRaf = requestAnimationFrame(tick)
+}
+
+/** 停止纯图片播放计时器（不改变播放状态） */
+function stopSilentPlayback(): void {
+  if (silentRaf) {
+    cancelAnimationFrame(silentRaf)
+    silentRaf = 0
+  }
+}
 
 engine.onStateChange = (s) => {
   playState.value = s
@@ -457,27 +507,39 @@ function buildPlaybackClips(): PlaybackClip[] {
 /**
  * 播放/暂停/继续切换。
  *
- * 若播放头已停在末尾（播放到音频结尾自动停止，或手动 seek 到末尾），
- * 再次播放时从时间轴开头重新起播。
+ * 若播放头已停在末尾（播放到结尾自动停止，或手动 seek 到末尾），
+ * 再次播放时从时间轴开头重新起播。有音频用 PlaybackEngine，
+ * 纯图片用 rAF 计时器。
  */
 function togglePlayback(): void {
   if (playState.value === 'playing') {
-    engine.pause()
+    if (hasPlayableAudio.value) {
+      engine.pause()
+    } else {
+      stopSilentPlayback()
+      playState.value = 'paused'
+    }
     return
   }
   if (playState.value === 'paused') {
     // 从当前播放头位置起播（覆盖暂停后 seek 的场景），避免 resume 回到旧的暂停位置
-    engine.play(buildPlaybackClips(), currentTime.value)
+    if (hasPlayableAudio.value) {
+      engine.play(buildPlaybackClips(), currentTime.value)
+    } else {
+      startSilentPlayback()
+    }
     return
   }
   // idle：已播放到结尾或播放头在末尾时从头播放，否则从当前位置起播
   if (reachedEnd || currentTime.value >= duration.value) {
     reachedEnd = false
     setCurrentTime(0)
-    engine.play(buildPlaybackClips(), 0)
-    return
   }
-  engine.play(buildPlaybackClips(), currentTime.value)
+  if (hasPlayableAudio.value) {
+    engine.play(buildPlaybackClips(), currentTime.value)
+  } else {
+    startSilentPlayback()
+  }
 }
 
 /**
@@ -485,6 +547,7 @@ function togglePlayback(): void {
  */
 function stopPlayback(): void {
   reachedEnd = false
+  stopSilentPlayback()
   engine.stop()
   setCurrentTime(0)
 }
@@ -502,7 +565,11 @@ function seekTo(t: number): void {
   reachedEnd = false
   setCurrentTime(clamped)
   if (playState.value === 'playing') {
-    engine.play(buildPlaybackClips(), clamped)
+    if (hasPlayableAudio.value) {
+      engine.play(buildPlaybackClips(), clamped)
+    } else {
+      startSilentPlayback()
+    }
   }
 }
 
@@ -626,6 +693,7 @@ onMounted(() => {
   window.addEventListener('focusin', updateDirectorActive, true)
 })
 onBeforeUnmount(() => {
+  stopSilentPlayback()
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('pointerdown', updateDirectorActive, true)
   window.removeEventListener('focusin', updateDirectorActive, true)

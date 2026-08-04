@@ -67,13 +67,19 @@ const props = defineProps<{
   readOnly: boolean
   /** 轨道总时长（秒），用于钳制移动范围上限 */
   trackDuration: number
+  /** 左邻图片块数据（其右缘与本块左缘相邻）；无相邻时为 null */
+  prev: { id: string; startOffset: number; duration: number } | null
+  /** 右邻图片块数据（其左缘与本块右缘相邻）；无相邻时为 null */
+  next: { id: string; startOffset: number; duration: number } | null
 }>()
 
-/** 素材块事件：选中 / 移动 / 拉伸占位长度 */
+/** 素材块事件：选中 / 移动 / 拉伸占位长度 / 相邻块共享边界拖拽 */
 const emit = defineEmits<{
   select: [id: string]
   move: [id: string, startOffset: number]
   resize: [id: string, duration: number]
+  /** 相邻块共享边界拖拽：上报左右两块的目标状态（绝对目标值，幂等） */
+  resizeShared: [leftId: string, leftDuration: number, rightId: string, rightStart: number, rightDuration: number]
 }>()
 
 /** 块绝对定位样式：left 由起始偏移换算，宽由占位时长换算 */
@@ -95,8 +101,15 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v))
 }
 
-/** 拖拽类型：move 移动 / resize-left 左缘拉伸 / resize-right 右缘拉伸 */
-type DragType = 'move' | 'resize-left' | 'resize-right'
+/** 拖拽类型：move 移动 / resize-left 左缘拉伸 / resize-right 右缘拉伸 / shared-left 左缘共享边界 / shared-right 右缘共享边界 */
+type DragType = 'move' | 'resize-left' | 'resize-right' | 'shared-left' | 'shared-right'
+
+/** 相邻块共享边界拖拽：左/右块拖拽起点快照 */
+interface BoundaryClipSnapshot {
+  id: string
+  start: number
+  dur: number
+}
 
 /** 拖拽会话状态（非响应式，仅指针交互期间有效） */
 let dragging = false
@@ -104,6 +117,10 @@ let dragType: DragType = 'move'
 let dragStartX = 0
 let dragStartOffset = 0
 let dragStartDuration = 0
+/** 共享边界拖拽：左块快照（拖拽起点） */
+let sharedLeft: BoundaryClipSnapshot | null = null
+/** 共享边界拖拽：右块快照（拖拽起点） */
+let sharedRight: BoundaryClipSnapshot | null = null
 
 /**
  * 块主体按下：选中并开始移动拖拽。
@@ -134,10 +151,23 @@ function onResizeStart(side: 'left' | 'right', e: PointerEvent): void {
   if (props.readOnly || e.button !== 0) return
   emit('select', props.clip.id)
   dragging = true
-  dragType = side === 'left' ? 'resize-left' : 'resize-right'
   dragStartX = e.clientX
   dragStartOffset = props.clip.startOffset
   dragStartDuration = props.clip.duration
+  sharedLeft = null
+  sharedRight = null
+  // 相邻块：右缘拖拽同时调整右邻块，左缘拖拽同时调整左邻块；记录拖拽起点快照
+  if (side === 'right' && props.next) {
+    dragType = 'shared-right'
+    sharedLeft = { id: props.clip.id, start: props.clip.startOffset, dur: props.clip.duration }
+    sharedRight = { id: props.next.id, start: props.next.startOffset, dur: props.next.duration }
+  } else if (side === 'left' && props.prev) {
+    dragType = 'shared-left'
+    sharedLeft = { id: props.prev.id, start: props.prev.startOffset, dur: props.prev.duration }
+    sharedRight = { id: props.clip.id, start: props.clip.startOffset, dur: props.clip.duration }
+  } else {
+    dragType = side === 'left' ? 'resize-left' : 'resize-right'
+  }
   document.addEventListener('pointermove', onPointerMove)
   document.addEventListener('pointerup', onPointerEnd)
   document.addEventListener('pointercancel', onPointerEnd)
@@ -159,6 +189,20 @@ function onPointerMove(e: PointerEvent): void {
   } else if (dragType === 'resize-right') {
     // 右缘拉伸：左边缘不动，仅改变占位时长（最小 0.5s）
     emit('resize', props.clip.id, Math.max(0.5, round1(dragStartDuration + deltaSec)))
+  } else if (dragType === 'shared-right' || dragType === 'shared-left') {
+    // 共享边界：基于拖拽起点快照计算两侧绝对目标值（幂等，多次上报不累积）
+    if (!sharedLeft || !sharedRight) return
+    const minDelta = Math.max(0.5 - sharedLeft.dur, -sharedRight.start)
+    const maxDelta = sharedRight.dur - 0.5
+    const d = clamp(round1(deltaSec), minDelta, maxDelta)
+    emit(
+      'resizeShared',
+      sharedLeft.id,
+      round1(sharedLeft.dur + d),
+      sharedRight.id,
+      round1(sharedRight.start + d),
+      round1(sharedRight.dur - d),
+    )
   } else {
     // 左缘拉伸：右边缘保持固定，左边缘跟随指针
     const rightEdge = dragStartOffset + dragStartDuration
@@ -175,6 +219,8 @@ function onPointerMove(e: PointerEvent): void {
  */
 function onPointerEnd(): void {
   dragging = false
+  sharedLeft = null
+  sharedRight = null
   document.removeEventListener('pointermove', onPointerMove)
   document.removeEventListener('pointerup', onPointerEnd)
   document.removeEventListener('pointercancel', onPointerEnd)

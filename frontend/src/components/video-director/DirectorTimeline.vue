@@ -45,9 +45,12 @@
           :selected="clip.id === selectedId"
           :read-only="readOnly"
           :track-duration="duration"
+          :prev="imageNeighbors[clip.id]?.prev ?? null"
+          :next="imageNeighbors[clip.id]?.next ?? null"
           @select="(id) => emit('select', id)"
           @move="(id, off) => emit('move', 'image', id, off)"
           @resize="(id, dur) => emit('resize', id, dur)"
+          @resize-shared="(l, ld, r, rs, rd) => emit('resizeShared', l, ld, r, rs, rd)"
         />
       </div>
 
@@ -120,6 +123,8 @@ const emit = defineEmits<{
   move: [kind: 'image' | 'audio', id: string, startOffset: number]
   /** 调整图片块占位长度 */
   resize: [id: string, duration: number]
+  /** 相邻图片块共享边界拖拽：上报左右两块的目标状态 */
+  resizeShared: [leftId: string, leftDuration: number, rightId: string, rightStart: number, rightDuration: number]
   /** 调整音频块裁剪 */
   trim: [id: string, trimStart: number, trimEnd: number]
   /** 跳转播放头（秒，0.1s 步进，钳制在 [0, duration]） */
@@ -132,6 +137,39 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLDivElement | null>(null)
 /** 滚动内容区引用（用于按坐标换算时间） */
 const contentRef = ref<HTMLDivElement | null>(null)
+
+/** 相邻图片块数据（供共享边界拖拽计算） */
+interface ImageNeighbor {
+  id: string
+  startOffset: number
+  duration: number
+}
+
+/**
+ * 相邻图片块关系：id → { prev, next }。
+ *
+ * 相邻判定容差 0.06s（容忍 0.1s 步进取整误差）；相邻时拖拽共享边界
+ * 会同时调整左右两块长度（resizeShared）。
+ */
+const imageNeighbors = computed(() => {
+  const m: Record<string, { prev: ImageNeighbor | null; next: ImageNeighbor | null }> = {}
+  const sorted = [...props.imageClips].sort((a, b) => a.startOffset - b.startOffset)
+  const TOL = 0.06
+  for (let i = 0; i < sorted.length; i++) {
+    const cur = sorted[i]
+    const prev = i > 0 ? sorted[i - 1] : null
+    const next = i < sorted.length - 1 ? sorted[i + 1] : null
+    m[cur.id] = {
+      prev: prev && Math.abs(prev.startOffset + prev.duration - cur.startOffset) < TOL
+        ? { id: prev.id, startOffset: prev.startOffset, duration: prev.duration }
+        : null,
+      next: next && Math.abs(cur.startOffset + cur.duration - next.startOffset) < TOL
+        ? { id: next.id, startOffset: next.startOffset, duration: next.duration }
+        : null,
+    }
+  }
+  return m
+})
 
 /** 滚轮缩放步长（向上滚动放大/向下缩小的倍率） */
 const WHEEL_ZOOM_STEP = 1.2

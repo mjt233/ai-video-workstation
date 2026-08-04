@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { previewImageAt, computePasteOffset, frameCursors } from './useVideoDirector'
+import {
+  previewImageAt,
+  computePasteOffset,
+  frameCursors,
+  resolveImageStartOffset,
+} from './useVideoDirector'
 
 const clips = [
   { id: 'a', path: 'assert/1.jpg', startOffset: 0, duration: 2 },
@@ -34,5 +39,40 @@ describe('frameCursors', () => {
         10,
       ),
     ).toEqual([0, 0.3])
+  })
+})
+
+describe('resolveImageStartOffset', () => {
+  it('无其他块 → 返回 desired（钳制到轨道内可放置范围）', () => {
+    expect(resolveImageStartOffset([], 10, 3, 2)).toBe(3)
+    expect(resolveImageStartOffset([], 10, 9.5, 2)).toBe(8)
+  })
+  it('期望位置在空闲区间内 → 原样返回', () => {
+    const others = [
+      { startOffset: 0, duration: 2 },
+      { startOffset: 4, duration: 2 },
+    ]
+    // 空闲区间 [2,4]，1s 块可从 3 开始
+    expect(resolveImageStartOffset(others, 10, 3, 1)).toBe(3)
+  })
+  it('期望位置落在占用区间 → 钳到占用块之后', () => {
+    const others = [{ startOffset: 0, duration: 2 }]
+    expect(resolveImageStartOffset(others, 10, 1, 2)).toBe(2)
+  })
+  it('空闲区间恰好放下 → 放最后一个占用块末尾', () => {
+    const others = [
+      { startOffset: 0, duration: 4 },
+      { startOffset: 4, duration: 4 },
+    ]
+    // 轨道 10s，两块占满 [0,8]，剩余 [8,10] 只够放 2s 块 → 8
+    expect(resolveImageStartOffset(others, 10, 5, 2)).toBe(8)
+  })
+  it('轨道已满（无任何空闲区间）→ 返回 null', () => {
+    const others = [
+      { startOffset: 0, duration: 4 },
+      { startOffset: 4, duration: 4 },
+    ]
+    // 轨道 8s，两块恰好占满 [0,8]，2s 块无处可放
+    expect(resolveImageStartOffset(others, 8, 3, 2)).toBeNull()
   })
 })

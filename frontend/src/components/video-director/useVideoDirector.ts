@@ -80,6 +80,55 @@ export function computePasteOffset(clip: DirectorImageClip | DirectorAudioClip):
 }
 
 /**
+ * 在既有图片块之间寻找不重叠的起始偏移（纯函数）。
+ *
+ * 图片轨不允许重叠：给定其他图片块的占用区间与轨道总时长，返回一个
+ * 使长度为 `clipDuration` 的新块与所有既有块不重叠、且尽量接近 `desired`
+ * 的起始偏移；轨道已满（所有空闲区间都放不下）时返回 null，调用方应
+ * 放弃放置（不添加/不移动），避免产生重叠。
+ *
+ * @param others 其他图片块（仅读取 startOffset/duration）
+ * @param totalDuration 轨道总时长（秒）
+ * @param desired 期望的起始偏移（秒）
+ * @param clipDuration 新块长度（秒）
+ * @returns 满足不重叠约束的起始偏移；轨道已满时返回 null
+ */
+export function resolveImageStartOffset(
+  others: Array<{ startOffset: number; duration: number }>,
+  totalDuration: number,
+  desired: number,
+  clipDuration: number,
+): number | null {
+  const maxStart = Math.max(0, totalDuration - clipDuration)
+  // 既有块的占用区间（按起点排序，合并重叠）
+  const occ = others
+    .map((o) => ({ s: o.startOffset, e: o.startOffset + o.duration }))
+    .sort((a, b) => a.s - b.s)
+  // 空闲区间（占用区间的补集）
+  const gaps: Array<{ s: number; e: number }> = []
+  let cursor = 0
+  for (const o of occ) {
+    if (o.s > cursor) gaps.push({ s: cursor, e: o.s })
+    cursor = Math.max(cursor, o.e)
+  }
+  gaps.push({ s: cursor, e: Infinity })
+
+  const target = clamp(desired, 0, maxStart)
+  // 找到包含 target（或其后第一个）的空闲区间，在其中钳制
+  for (const g of gaps) {
+    if (g.e < target) continue
+    const lo = Math.max(0, g.s)
+    const hi = Math.min(g.e, totalDuration)
+    const maxStartInGap = hi - clipDuration
+    if (maxStartInGap >= lo) {
+      return clamp(target, lo, maxStartInGap)
+    }
+  }
+  // 所有空闲区间都放不下 → 轨道已满
+  return null
+}
+
+/**
  * 将图片块映射为关键帧游标比值列表（纯函数）。
  *
  * 按 `startOffset` 升序排序后，逐块计算 `startOffset / duration` 并钳制到
@@ -196,10 +245,18 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
    * @param startOffset 起始偏移（秒）
    */
   function addImageAt(path: string, startOffset: number): void {
+    // 图片轨不允许重叠：起始偏移解析到不重叠的空闲位置；轨道已满时不添加
+    const resolved = resolveImageStartOffset(
+      project.value.imageClips,
+      project.value.duration,
+      startOffset,
+      DEFAULT_IMAGE_CLIP_DURATION,
+    )
+    if (resolved === null) return
     const clip: DirectorImageClip = {
       id: crypto.randomUUID(),
       path,
-      startOffset,
+      startOffset: resolved,
       duration: DEFAULT_IMAGE_CLIP_DURATION,
     }
     project.value = { ...project.value, imageClips: [...project.value.imageClips, clip] }
@@ -253,13 +310,19 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
    */
   function moveClip(kind: 'image' | 'audio', id: string, startOffset: number): void {
     if (kind === 'image') {
+      // 图片轨不允许重叠：移动后的起始偏移解析到不重叠的空闲位置；轨道已满时保持原位
       project.value = {
         ...project.value,
-        imageClips: project.value.imageClips.map((c) =>
-          c.id === id
-            ? { ...c, startOffset: clamp(startOffset, 0, Math.max(0, project.value.duration - c.duration)) }
-            : c,
-        ),
+        imageClips: project.value.imageClips.map((c) => {
+          if (c.id !== id) return c
+          const resolved = resolveImageStartOffset(
+            project.value.imageClips.filter((o) => o.id !== id),
+            project.value.duration,
+            startOffset,
+            c.duration,
+          )
+          return resolved === null ? c : { ...c, startOffset: resolved }
+        }),
       }
     } else {
       project.value = {
@@ -288,9 +351,46 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
   function resizeClip(id: string, duration: number): void {
     project.value = {
       ...project.value,
-      imageClips: project.value.imageClips.map((c) =>
-        c.id === id ? { ...c, duration: Math.max(0.5, duration) } : c,
-      ),
+      imageClips: project.value.imageClips.map((c) => {
+        if (c.id !== id) return c
+        // 图片轨不允许重叠：右缘拉伸不能越过下一个图片块的起点
+        const nextStart = project.value.imageClips
+          .filter((o) => o.id !== id && o.startOffset >= c.startOffset)
+          .reduce((min, o) => Math.min(min, o.startOffset), project.value.duration)
+        const maxDur = Math.max(0.5, nextStart - c.startOffset)
+        return { ...c, duration: clamp(duration, 0.5, maxDur) }
+      }),
+    }
+    commit()
+  }
+
+  /**
+   * 应用相邻两个图片块共享边界拖拽的结果（绝对目标值，幂等）。
+   *
+   * 拖拽相邻两块共享边界时同时改变两侧长度：左块新占位长度、右块新起始偏移
+   * 与新占位长度由组件按「拖拽起点快照」计算并一次性上报，故每次事件都是
+   * 绝对目标值，连续多次上报不会累积漂移。
+   *
+   * @param leftId 左块 id
+   * @param leftDuration 左块新占位长度（秒）
+   * @param rightId 右块 id
+   * @param rightStart 右块新起始偏移（秒）
+   * @param rightDuration 右块新占位长度（秒）
+   */
+  function applyImageBoundary(
+    leftId: string,
+    leftDuration: number,
+    rightId: string,
+    rightStart: number,
+    rightDuration: number,
+  ): void {
+    project.value = {
+      ...project.value,
+      imageClips: project.value.imageClips.map((c) => {
+        if (c.id === leftId) return { ...c, duration: leftDuration }
+        if (c.id === rightId) return { ...c, startOffset: rightStart, duration: rightDuration }
+        return c
+      }),
     }
     commit()
   }
@@ -359,12 +459,23 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
   function paste(): void {
     const src = clipboard.value
     if (!src) return
-    const startOffset = computePasteOffset(src)
     if (isAudioClip(src)) {
-      const clip: DirectorAudioClip = { ...src, id: crypto.randomUUID(), startOffset }
+      const clip: DirectorAudioClip = { ...src, id: crypto.randomUUID(), startOffset: computePasteOffset(src) }
       project.value = { ...project.value, audioClips: [...project.value.audioClips, clip] }
     } else {
-      const clip: DirectorImageClip = { ...src, id: crypto.randomUUID(), startOffset }
+      // 图片粘贴同样不允许与既有图片块重叠；轨道已满时不粘贴
+      const resolved = resolveImageStartOffset(
+        project.value.imageClips,
+        project.value.duration,
+        computePasteOffset(src),
+        src.duration,
+      )
+      if (resolved === null) return
+      const clip: DirectorImageClip = {
+        ...src,
+        id: crypto.randomUUID(),
+        startOffset: resolved,
+      }
       project.value = { ...project.value, imageClips: [...project.value.imageClips, clip] }
     }
     commit()
@@ -444,6 +555,7 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
     addAudio,
     moveClip,
     resizeClip,
+    applyImageBoundary,
     trimClip,
     select,
     copySelected,
