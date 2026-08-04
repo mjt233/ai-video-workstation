@@ -519,13 +519,6 @@
         </div>
       </v-tabs-window-item>
       <v-tabs-window-item value="video">
-        <div class="d-flex mt-2 mb-2 ml-2">
-          <v-btn
-            @click="edit('prompt')"
-          >
-            编辑
-          </v-btn>
-        </div>
         <v-alert
           v-if="disabledStageCount > 0"
           type="warning"
@@ -568,7 +561,6 @@
           </v-card-text>
         </v-card>
 
-        <MarkdownView :content="data.prompt" />
         <div
           v-if="hasVideo"
           class="d-flex justify-center ma-4"
@@ -858,7 +850,6 @@ import {
   AssetApiError,
 } from '../api/assets'
 import { confirm } from '../utils/confirm'
-import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 import StageFrameDialog from './StageFrameDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
@@ -1257,7 +1248,7 @@ async function loadDirector() {
 /**
  * 导演台 prompt 文本域输入：同步到分镜-视频生成的 prompt（data.prompt）。
  *
- * 内存态即时更新（下方 MarkdownView 实时反映），落盘由保存/生成时写入 prompt.md。
+ * 内存态即时更新（导演台 prompt 文本域即唯一编辑入口），落盘由保存/生成时写入 prompt.md。
  *
  * @param v 最新 prompt 文本
  */
@@ -1667,10 +1658,6 @@ async function load() {
   }
 }
 
-function edit(field: string) {
-  dialog.value = { show: true, field, content: data.value![field as keyof SceneData] as string }
-}
-
 function editJson(field: string) {
   dialog.value = { show: true, field, content: JSON.stringify(data.value![field as keyof SceneData], null, 2) }
 }
@@ -1765,8 +1752,6 @@ async function save() {
     await deleteSceneMergedAudio(props.project, props.episode, props.shot).catch(() => {})
     hasMergedAudio.value = false
     mergedAudioUrl.value = ''
-  } else if (data.value && field === 'prompt') {
-    data.value.prompt = content
   }
   dialog.value.show = false
 }

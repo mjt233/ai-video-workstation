@@ -174,7 +174,7 @@
     </div>
 
     <!-- prompt：与分镜-视频生成的 prompt 集成（同一来源 prompt.md） -->
-    <div class="pa-2 pt-0">
+    <div class="pt-4">
       <v-textarea
         :model-value="prompt"
         label="prompt"
