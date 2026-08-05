@@ -406,6 +406,65 @@ export async function submitLtxDirectorImageToVideo(
   });
 }
 
+// ── 参考模式图生视频封装（minimax-h3-r2v）─────────────────────────────
+
+/**
+ * 参考模式图生视频的提交参数。
+ */
+export interface ReferenceVideoSubmitParams {
+  /** 视频描述提示词 */
+  prompt: string;
+  /** 视频宽度（像素） */
+  width: number;
+  /** 视频高度（像素） */
+  height: number;
+  /** 视频时长（秒） */
+  duration: number;
+  /** 随机种子（可选） */
+  seed?: number;
+  /** 有序图片参考（键 image_0, image_1, …，独立从 0 计数） */
+  imageRefs?: File[];
+  /** 有序视频参考（键 video_0, video_1, …） */
+  videoRefs?: File[];
+  /** 有序音频参考（键 audio_0, audio_1, …） */
+  audioRefs?: File[];
+}
+
+/**
+ * 提交参考模式图生视频任务到 ComfyUI Bridge（如 minimax-h3-r2v 工作流）。
+ *
+ * - 动态文件键：`image_{n}` / `video_{n}` / `audio_{n}`，各类型序号从 0 开始独立递增；
+ * - 走 multipart/form-data（方式 B），params 为 JSON 字符串；
+ * - 参考素材的文件与数量由调用方（工作流实现）负责校验。
+ *
+ * @param params 参考模式图生视频提交参数
+ * @returns Bridge 提交结果（含 taskId）
+ */
+export async function submitReferenceVideo(
+  params: ReferenceVideoSubmitParams,
+): Promise<BridgeSubmitResult> {
+  const body: Record<string, unknown> = {
+    prompt: params.prompt,
+    width: params.width,
+    height: params.height,
+    duration: params.duration,
+  };
+  if (params.seed != null) {
+    body.seed = params.seed;
+  }
+
+  const files: Record<string, File> = {};
+  (params.imageRefs ?? []).forEach((f, idx) => { files[`image_${idx}`] = f; });
+  (params.videoRefs ?? []).forEach((f, idx) => { files[`video_${idx}`] = f; });
+  (params.audioRefs ?? []).forEach((f, idx) => { files[`audio_${idx}`] = f; });
+
+  return submitComfyuiBridge({
+    workflowId: 'minimax-h3-r2v',
+    params: body,
+    files,
+  });
+}
+
 export interface BridgeTaskStatus {
   status: string;
   progress: number;
