@@ -39,6 +39,20 @@ export function getNodeInputPortId(nodeId: string, nodes: CanvasNodeData[]): str
 }
 
 /**
+ * 获取节点指定输入端口的类型。
+ *
+ * @param nodeId 节点 id
+ * @param portId 输入端口 id
+ * @param nodes 画布全部节点
+ * @returns 端口数据类型，端口或节点不存在时返回 undefined
+ */
+export function getNodeInputPortType(nodeId: string, portId: string, nodes: CanvasNodeData[]): DataType | undefined {
+  const node = nodes.find((n) => n.id === nodeId)
+  const proto = node ? getPrototype(node.prototypeId) : undefined
+  return proto?.inputPorts.find((p) => p.id === portId)?.type
+}
+
+/**
  * 判断新增 from→to 连线是否会形成循环（从 to 沿既有输出边可达 from 即成环）。
  *
  * @param connections 现有连线
@@ -71,12 +85,13 @@ export function wouldCreateCycle(
 }
 
 /**
- * 校验一条连线是否可建立：两端节点存在、类型兼容、且不成环。
+ * 校验一条连线是否可建立：两端节点存在、目标端口类型兼容、且不成环。
  *
  * @param connections 现有连线
  * @param fromNodeId 输出节点 id
  * @param toNodeId 输入节点 id
  * @param nodes 画布全部节点
+ * @param toPortId 目标输入端口 id（缺省时用节点第一个输入端口）
  * @returns 可建立返回 true
  */
 export function canConnectNodes(
@@ -84,10 +99,16 @@ export function canConnectNodes(
   fromNodeId: string,
   toNodeId: string,
   nodes: CanvasNodeData[],
+  toPortId?: string,
 ): boolean {
   const outType = getNodeOutputType(fromNodeId, nodes)
-  const inType = getNodeInputType(toNodeId, nodes)
-  if (!outType || !inType) return false
-  if (!canConnect(outType, inType)) return false
+  if (!outType) return false
+  if (toPortId) {
+    const inType = getNodeInputPortType(toNodeId, toPortId, nodes)
+    if (!inType || !canConnect(outType, inType)) return false
+  } else {
+    const inType = getNodeInputType(toNodeId, nodes)
+    if (!inType || !canConnect(outType, inType)) return false
+  }
   return !wouldCreateCycle(connections, fromNodeId, toNodeId)
 }

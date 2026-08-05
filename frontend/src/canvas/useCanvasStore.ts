@@ -35,6 +35,32 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   const nodes = computed(() => data.value.nodes)
   const connections = computed(() => data.value.connections)
 
+  /** 连线变化事件：connect（建立）/ disconnect（断开） */
+  type ConnectionsChangedEvent = { type: 'connect' | 'disconnect'; connection: CanvasConnection }
+  const connectionListeners = new Set<(e: ConnectionsChangedEvent) => void>()
+
+  /**
+   * 订阅连线变化事件（connect/disconnect/节点删除连带断开时触发），返回取消订阅函数。
+   *
+   * @param listener 事件监听器（接收连线变化事件）
+   * @returns 取消订阅函数
+   */
+  function onConnectionsChanged(listener: (e: ConnectionsChangedEvent) => void): () => void {
+    connectionListeners.add(listener)
+    return () => { connectionListeners.delete(listener) }
+  }
+
+  /**
+   * 触发连线变化事件，通知全部监听者。
+   * 注意：connect/disconnect 已在结构变更前 pushHistory，一次撤销即可回退连线与节点级联动两个变更；
+   * 目标节点数据同步（轨道 clip 增删）在 Task 11 通过 connectionSync 接入。
+   *
+   * @param e 连线变化事件
+   */
+  function emitConnectionsChanged(e: ConnectionsChangedEvent): void {
+    for (const l of connectionListeners) l(e)
+  }
+
   /** 加载画布；不存在时保持空画布 */
   async function load(): Promise<void> {
     const existing = await loadCanvas(project, targetRef.value)
@@ -110,15 +136,19 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
-   * 删除节点及其所有连线。
+   * 删除节点及其所有连线（连带断开的连线触发 disconnect 事件）。
    *
    * @param nodeId 节点 id
    */
   function removeNode(nodeId: string): void {
     pushHistory()
+    const removed = data.value.connections.filter((c) => c.fromNodeId === nodeId || c.toNodeId === nodeId)
     data.value.nodes = data.value.nodes.filter((n) => n.id !== nodeId)
     data.value.connections = data.value.connections.filter((c) => c.fromNodeId !== nodeId && c.toNodeId !== nodeId)
     markDirty()
+    for (const connection of removed) {
+      emitConnectionsChanged({ type: 'disconnect', connection })
+    }
   }
 
   /**
@@ -136,38 +166,45 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
-   * 建立连线（自动校验类型兼容与防循环）。
+   * 建立连线（自动校验类型兼容与防循环，成功后触发 connect 事件）。
    *
    * @param fromNodeId 输出节点 id
    * @param toNodeId 输入节点 id
+   * @param fromPortId 输出端口 id（缺省时用节点第一个输出端口）
+   * @param toPortId 输入端口 id（缺省时用节点第一个输入端口）
    * @returns 成功建立返回 true
    */
-  function connect(fromNodeId: string, toNodeId: string): boolean {
-    if (!canConnectNodes(data.value.connections, fromNodeId, toNodeId, data.value.nodes)) {
+  function connect(fromNodeId: string, toNodeId: string, fromPortId?: string, toPortId?: string): boolean {
+    if (!canConnectNodes(data.value.connections, fromNodeId, toNodeId, data.value.nodes, toPortId)) {
       return false
     }
     const connection: CanvasConnection = {
       id: newId(),
       fromNodeId,
-      fromPortId: getNodeOutputPortId(fromNodeId, data.value.nodes) ?? 'out',
+      fromPortId: fromPortId ?? getNodeOutputPortId(fromNodeId, data.value.nodes) ?? 'out',
       toNodeId,
-      toPortId: getNodeInputPortId(toNodeId, data.value.nodes) ?? 'in',
+      toPortId: toPortId ?? getNodeInputPortId(toNodeId, data.value.nodes) ?? 'in',
     }
     pushHistory()
     data.value.connections.push(connection)
     markDirty()
+    emitConnectionsChanged({ type: 'connect', connection })
     return true
   }
 
   /**
-   * 断开连线。
+   * 断开连线（成功后触发 disconnect 事件）。
    *
    * @param connectionId 连线 id
    */
   function disconnect(connectionId: string): void {
     pushHistory()
+    const removed = data.value.connections.find((c) => c.id === connectionId)
     data.value.connections = data.value.connections.filter((c) => c.id !== connectionId)
     markDirty()
+    if (removed) {
+      emitConnectionsChanged({ type: 'disconnect', connection: removed })
+    }
   }
 
   /** 是否可撤销 */
@@ -287,6 +324,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     updateNode,
     connect,
     disconnect,
+    onConnectionsChanged,
     historyPast,
     historyFuture,
     canUndo,

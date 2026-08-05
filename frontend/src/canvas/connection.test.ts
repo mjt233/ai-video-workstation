@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { canConnect, canConnectNodes, getNodeInputType, getNodeOutputType, wouldCreateCycle } from './connection'
+import { canConnect, canConnectNodes, getNodeInputPortType, getNodeInputType, getNodeOutputType, wouldCreateCycle } from './connection'
 
 const nodes: CanvasNodeData[] = [
   { id: 'loader', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10, config: {} },
@@ -77,5 +77,33 @@ describe('canConnectNodes', () => {
   it('成环时不可连接', () => {
     const conns: CanvasConnection[] = [{ id: 'c1', fromNodeId: 'gen', fromPortId: 'o', toNodeId: 'loader', toPortId: 'i' }]
     expect(canConnectNodes(conns, 'loader', 'gen', nodes)).toBe(false)
+  })
+})
+
+describe('多端口连接校验', () => {
+  // video-generate 原型在 Task 11 注册（images/videos/audios 三输入端口）
+  const multiNodes: CanvasNodeData[] = [
+    { id: 'img', prototypeId: 'image-loader', name: 'img', x: 0, y: 0, width: 200, height: 120, config: {} },
+    { id: 'aud', prototypeId: 'audio-loader', name: 'aud', x: 0, y: 0, width: 200, height: 120, config: {} },
+    { id: 'vid', prototypeId: 'video-loader', name: 'vid', x: 0, y: 0, width: 200, height: 120, config: {} },
+    { id: 'target', prototypeId: 'video-generate', name: 'target', x: 0, y: 0, width: 240, height: 160, config: {} },
+  ]
+
+  it('图片源可连接到 images 端口', () => {
+    expect(canConnectNodes([], 'img', 'target', multiNodes, 'images')).toBe(true)
+  })
+
+  it('音频源可连接到 audios 端口', () => {
+    expect(canConnectNodes([], 'aud', 'target', multiNodes, 'audios')).toBe(true)
+  })
+
+  it('图片源不能连接到 audios 端口（类型不符）', () => {
+    expect(canConnectNodes([], 'img', 'target', multiNodes, 'audios')).toBe(false)
+  })
+
+  it('getNodeInputPortType 返回端口类型', () => {
+    expect(getNodeInputPortType('target', 'images', multiNodes)).toBe('image')
+    expect(getNodeInputPortType('target', 'videos', multiNodes)).toBe('video')
+    expect(getNodeInputPortType('target', 'audios', multiNodes)).toBe('audio')
   })
 })

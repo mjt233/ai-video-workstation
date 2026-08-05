@@ -146,13 +146,18 @@
                   @blur="commitRename(id)"
                 >
               </div>
-              <Handle
-                v-if="protoOf(id)?.inputPorts.length"
-                :id="protoOf(id)?.inputPorts[0]?.id"
-                type="target"
-                :position="Position.Left"
-                class="canvas-node__handle"
-              />
+              <template
+                v-for="(port, idx) in (protoOf(id)?.inputPorts ?? [])"
+                :key="port.id"
+              >
+                <Handle
+                  :id="port.id"
+                  type="target"
+                  :position="Position.Left"
+                  class="canvas-node__handle"
+                  :style="handleStyle(protoOf(id)?.inputPorts.length ?? 1, idx)"
+                />
+              </template>
               <div class="canvas-node__body">
                 <component
                   :is="protoOf(id)?.bodyComponent"
@@ -165,13 +170,18 @@
                   @retry="(nid: string) => generateNode(nid)"
                 />
               </div>
-              <Handle
-                v-if="protoOf(id)?.outputPorts.length"
-                :id="protoOf(id)?.outputPorts[0]?.id"
-                type="source"
-                :position="Position.Right"
-                class="canvas-node__handle"
-              />
+              <template
+                v-for="(port, idx) in (protoOf(id)?.outputPorts ?? [])"
+                :key="port.id"
+              >
+                <Handle
+                  :id="port.id"
+                  type="source"
+                  :position="Position.Right"
+                  class="canvas-node__handle"
+                  :style="handleStyle(protoOf(id)?.outputPorts.length ?? 1, idx)"
+                />
+              </template>
             </div>
           </template>
         </VueFlow>
@@ -604,6 +614,19 @@ function protoOf(nodeId: string): NodePrototype | undefined {
   return node ? getPrototype(node.prototypeId) : undefined
 }
 
+/**
+ * 多端口时按顺序垂直分布连接点；单端口保持默认 50% 位置。
+ *
+ * @param count 端口数量
+ * @param index 端口序号（0 起）
+ * @returns handle 定位样式（单端口返回空对象）
+ */
+function handleStyle(count: number, index: number): Record<string, string> {
+  if (count <= 1) return {}
+  const top = ((index + 1) * 100) / (count + 1)
+  return { top: `${top}%` }
+}
+
 /** Vue Flow 节点列表（type 固定 canvas，走自定义 slot 渲染） */
 const flowNodes = computed<FlowNode[]>(() =>
   store.nodes.value.map((n) => ({
@@ -653,19 +676,26 @@ function onNodeDragStop({ nodes: dragged }: NodeDragEvent) {
 
 /**
  * 校验临时连接是否可建立（source/target 可能为空需防御）。
+ * 指定目标端口时按端口类型校验，否则回退到节点第一输入端口。
  *
  * @param conn Vue Flow 临时连接
  * @returns 可建立返回 true
  */
 function isValidConnection(conn: Connection): boolean {
   if (!conn.source || !conn.target) return false
-  return canConnectNodes(store.connections.value, conn.source, conn.target, store.nodes.value)
+  return canConnectNodes(
+    store.connections.value,
+    conn.source,
+    conn.target,
+    store.nodes.value,
+    conn.targetHandle ?? undefined,
+  )
 }
 
-/** 连接成功：写入 store（store 内部再次校验，失败忽略） */
+/** 连接成功：写入 store（记录端口 id；store 内部再次校验，失败忽略） */
 function onConnect(conn: Connection) {
   if (!conn.source || !conn.target) return
-  store.connect(conn.source, conn.target)
+  store.connect(conn.source, conn.target, conn.sourceHandle ?? undefined, conn.targetHandle ?? undefined)
 }
 
 /**

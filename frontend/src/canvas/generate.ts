@@ -90,6 +90,7 @@ export function getNodeCurrentAssetPath(node: CanvasNodeData | undefined): strin
  * @param connections 全部连线
  * @param nodes 全部节点
  * @param config 目标节点配置（可选，用于读取 inputOrder 排序）
+ * @param portId 目标输入端口 id（可选，仅收集连到该端口的输入）
  * @returns 输入资产信息数组（仅包含有资产的输入节点）
  */
 export function collectInputs(
@@ -97,11 +98,13 @@ export function collectInputs(
   connections: CanvasConnection[],
   nodes: CanvasNodeData[],
   config?: NodeConfig,
+  portId?: string,
 ): CanvasInputInfo[] {
   const order: string[] = Array.isArray(config?.inputOrder) ? (config.inputOrder as string[]) : []
   const list: CanvasInputInfo[] = []
   for (const c of connections) {
     if (c.toNodeId !== nodeId) continue
+    if (portId && c.toPortId !== portId) continue
     const src = nodes.find((n) => n.id === c.fromNodeId)
     const p = getNodeCurrentAssetPath(src)
     if (!src || !p) continue
@@ -122,6 +125,7 @@ export function collectInputs(
  * @param connections 全部连线
  * @param nodes 全部节点
  * @param config 目标节点配置（可选，用于读取 inputOrder 排序）
+ * @param portId 目标输入端口 id（可选，仅收集连到该端口的输入）
  * @returns 输入资产相对路径数组
  */
 export function collectInputPaths(
@@ -129,6 +133,7 @@ export function collectInputPaths(
   connections: CanvasConnection[],
   nodes: CanvasNodeData[],
   config?: NodeConfig,
+  portId?: string,
 ): string[] {
-  return collectInputs(nodeId, connections, nodes, config).map((i) => i.path)
+  return collectInputs(nodeId, connections, nodes, config, portId).map((i) => i.path)
 }
