@@ -479,6 +479,32 @@ export interface BridgeTaskStatus {
   errorMessage: string | null;
 }
 
+export interface BridgeCancelResult {
+  /** 取消后 Bridge 任务状态（通常为 'failed'） */
+  status: string;
+}
+
+/**
+ * 中断 Bridge 任务。
+ * POST /api/tasks/:taskId/cancel
+ * - queued 任务：直接标记为失败（无需通知 ComfyUI）；
+ * - pending 任务：向 ComfyUI 发送 /interrupt 后再标记为失败。
+ *
+ * @param taskId Bridge 远端任务 ID
+ * @returns 取消结果（status 通常为 'failed'）
+ */
+export async function cancelBridgeTask(taskId: string): Promise<BridgeCancelResult> {
+  const res = await fetch(`${BRIDGE_URL}/api/tasks/${taskId}/cancel`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Bridge cancel failed (${res.status}): ${text}`);
+  }
+  const data = await res.json() as { task_id: string; status: string };
+  return { status: data.status };
+}
+
 /**
  * 轮询任务状态
  * GET /api/tasks/:taskId

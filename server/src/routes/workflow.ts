@@ -1,11 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import * as db from '../db.js';
+import type { TaskRecord } from '../db.js';
 import { getAllWorkflows } from '../workflow-engine.js';
 import { getImpl } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
-import type { VideoWorkflowSubmitParams } from '../workflows/types.js';
+import { cancelBridgeTask } from '../workflows/bridge-client.js';
+import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
 
 export const workflowRouter = Router();
 
@@ -109,6 +111,38 @@ function toTaskResponse(task: db.TaskRecord) {
   };
 }
 
+/** 从任务 params 解析远端（Bridge）任务 ID */
+export function getRemoteTaskId(task: TaskRecord): string | undefined {
+  return parseTaskParams(task.params).remoteTaskId;
+}
+
+/**
+ * 判断任务是否可中断，并返回拒绝原因。
+ *
+ * @param task 任务记录
+ * @param wf 工作流实现（可为空）
+ * @returns ok=true 可中断；否则携带 HTTP 状态码、错误码与消息
+ */
+export function canCancelTask(
+  task: TaskRecord,
+  wf: { capabilities?: WorkflowCapabilities } | undefined,
+): { ok: true } | { ok: false; status: number; code: string; message: string } {
+  if (!wf?.capabilities?.cancelable) {
+    return { ok: false, status: 400, code: 'not_cancelable', message: '该工作流不支持中断' };
+  }
+  if (task.status === 'pending') {
+    // 本地排队未提交远端 → 直接本地取消
+    return { ok: true };
+  }
+  if (task.status !== 'running') {
+    return { ok: false, status: 400, code: 'invalid_status', message: `任务状态不是 pending 或 running（当前 ${task.status}）` };
+  }
+  if (!getRemoteTaskId(task)) {
+    return { ok: false, status: 400, code: 'no_remote_task', message: '任务尚未提交到远端，无法中断' };
+  }
+  return { ok: true };
+}
+
 // GET /api/workflow/tasks/:taskId — get task status
 workflowRouter.get('/workflow/tasks/:taskId', (req: Request, res: Response) => {
   const task = db.getTask(req.params.taskId as string);
@@ -158,6 +192,33 @@ workflowRouter.post('/workflow/retry/:taskId', (req: Request, res: Response) => 
   db.addLog(newTaskId, 'info', `Retry of task ${existing.id}`);
 
   res.json({ taskId: newTaskId, status: 'pending' });
+});
+
+// POST /api/workflow/tasks/:taskId/cancel — 中断任务（本地排队直接失败 / 运行中调 Bridge cancel）
+workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: Response) => {
+  const task = db.getTask(req.params.taskId as string);
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+  const wf = getImpl(task.workflow_id, task.impl);
+  const decision = canCancelTask(task, wf);
+  if (!decision.ok) {
+    res.status(decision.status).json({ error: decision.code, message: decision.message });
+    return;
+  }
+
+  try {
+    if (task.status === 'running') {
+      await cancelBridgeTask(getRemoteTaskId(task)!);
+    }
+    db.updateTaskStatus(task.id, 'failed', { error_msg: '用户中断' });
+    db.addLog(task.id, 'info', 'Task cancelled by user');
+    res.json({ taskId: task.id, status: 'failed' });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(502).json({ error: 'cancel_failed', message: msg });
+  }
 });
 
 // POST /api/workflow/batch-run — submit batch generation tasks
