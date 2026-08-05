@@ -1,0 +1,117 @@
+<template>
+  <div class="video-loader-node">
+    <template v-if="assetUrl">
+      <video
+        :src="assetUrl"
+        controls
+        class="video-loader-node__video"
+      />
+    </template>
+    <template v-else>
+      <div class="video-loader-node__empty">
+        <v-icon
+          icon="mdi-video-outline"
+          size="large"
+        />
+        <div class="text-caption text-medium-emphasis">
+          未选择视频
+        </div>
+        <div class="d-flex ga-1 mt-1">
+          <v-btn
+            size="x-small"
+            variant="tonal"
+            color="primary"
+            @click.stop="openUpload"
+          >
+            上传视频
+          </v-btn>
+          <v-btn
+            size="x-small"
+            variant="tonal"
+            @click.stop="openPicker"
+          >
+            选择资产
+          </v-btn>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import type { CanvasNodeData } from '../../../canvas/types'
+import { buildPreviewUrl } from '../../../canvas/preview'
+import { uploadFs } from '../../../api/client'
+
+/** 加载视频节点 body：播放视频或提示未选择 */
+const props = defineProps<{
+  project: string
+  node: CanvasNodeData
+}>()
+
+const emit = defineEmits<{
+  (e: 'update:config', patch: Record<string, unknown>): void
+  (e: 'open-picker', nodeId: string): void
+}>()
+
+const assetUrl = ref('')
+
+/** 当前资产路径（config.assetPath） */
+const assetPath = computed(() => (typeof props.node.config.assetPath === 'string' ? props.node.config.assetPath : ''))
+
+watch(
+  assetPath,
+  (p) => {
+    assetUrl.value = p ? buildPreviewUrl(props.project, p) : ''
+  },
+  { immediate: true },
+)
+
+/** 打开系统文件选择并上传到自定义资产，成功后写入 assetPath */
+function openUpload() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'video/*'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    const dest = `assert/custom/canvas/${Date.now()}-${file.name}`
+    const res = await uploadFs(props.project, dest, file)
+    if (res.success) {
+      emit('update:config', { assetPath: res.path })
+    }
+  }
+  input.click()
+}
+
+/** 打开资产选择器（由 AssetCanvas 统一提供） */
+function openPicker() {
+  emit('open-picker', props.node.id)
+}
+</script>
+
+<style scoped>
+.video-loader-node {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.video-loader-node__video {
+  width: 100%;
+  max-height: 200px;
+}
+
+.video-loader-node__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px;
+}
+</style>

@@ -6,7 +6,7 @@
  */
 
 /** 数据流类型：连接是否允许由端口数据类型决定（ComfyUI 思路） */
-export type DataType = 'image' | 'text'
+export type DataType = 'image' | 'video' | 'audio' | 'text'
 
 /** 端口：节点的输入/输出接口，每个端口有固定类型 */
 export interface Port {

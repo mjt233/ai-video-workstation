@@ -59,7 +59,7 @@ export function removeHistoryEntry(config: NodeConfig, version: number): NodeCon
 
 /**
  * 获取节点当前的资产相对路径：
- * - 加载图片：config.assetPath
+ * - 加载图片/音频/视频：config.assetPath
  * - 生成图片：config.current.path
  *
  * @param node 节点数据（可为 undefined）
@@ -68,6 +68,10 @@ export function removeHistoryEntry(config: NodeConfig, version: number): NodeCon
 export function getNodeCurrentAssetPath(node: CanvasNodeData | undefined): string | undefined {
   if (!node) return undefined
   if (node.prototypeId === 'image-loader') {
+    const ap = node.config.assetPath
+    return typeof ap === 'string' && ap ? ap : undefined
+  }
+  if (node.prototypeId === 'audio-loader' || node.prototypeId === 'video-loader') {
     const ap = node.config.assetPath
     return typeof ap === 'string' && ap ? ap : undefined
   }

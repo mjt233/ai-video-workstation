@@ -3,8 +3,12 @@ import type { Component } from 'vue'
 import ImageLoaderNode from '../components/canvas/nodes/ImageLoaderNode.vue'
 import ImageGenerateNode from '../components/canvas/nodes/ImageGenerateNode.vue'
 import TextNode from '../components/canvas/nodes/TextNode.vue'
+import AudioLoaderNode from '../components/canvas/nodes/AudioLoaderNode.vue'
+import VideoLoaderNode from '../components/canvas/nodes/VideoLoaderNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
+import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
+import VideoLoaderEditor from '../components/canvas/editors/VideoLoaderEditor.vue'
 
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
 export interface NodePrototype {
@@ -37,6 +41,26 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     resizeable: false,
     bodyComponent: ImageLoaderNode,
     editorComponent: ImageLoaderEditor,
+  },
+  {
+    id: 'audio-loader',
+    name: '加载音频',
+    icon: 'mdi-music-note',
+    inputPorts: [],
+    outputPorts: [{ id: 'out', type: 'audio', label: '音频' }],
+    resizeable: false,
+    bodyComponent: AudioLoaderNode,
+    editorComponent: AudioLoaderEditor,
+  },
+  {
+    id: 'video-loader',
+    name: '加载视频',
+    icon: 'mdi-video-outline',
+    inputPorts: [],
+    outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
+    resizeable: false,
+    bodyComponent: VideoLoaderNode,
+    editorComponent: VideoLoaderEditor,
   },
   {
     id: 'image-generate',
