@@ -536,7 +536,7 @@ import '@vue-flow/core/dist/theme-default.css'
 import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
-import { canConnectNodes } from '../../canvas/connection'
+import { canConnectNodes, getNodeOutputType } from '../../canvas/connection'
 import { activateHistory, collectInputPaths, collectInputs, getNodeCurrentAssetPath, removeHistoryEntry, type CanvasInputInfo, type HistoryEntry } from '../../canvas/generate'
 import { buildVideoSubmitParams } from '../../canvas/videoSubmit'
 import {
@@ -1135,9 +1135,9 @@ async function generateNode(nodeId: string) {
   gen.clearStatus(nodeId)
   if (node.prototypeId === 'video-generate') {
     const videoParams = buildVideoSubmitParams(node, {
-      images: videoInputsOf(nodeId, 'images'),
-      videos: videoInputsOf(nodeId, 'videos'),
-      audios: videoInputsOf(nodeId, 'audios'),
+      images: videoInputsOf(nodeId, 'image'),
+      videos: videoInputsOf(nodeId, 'video'),
+      audios: videoInputsOf(nodeId, 'audio'),
     })
     await gen.generate(
       node,
@@ -1173,27 +1173,31 @@ function inputsOf(nodeId: string): CanvasInputInfo[] {
 }
 
 /**
- * 收集视频生成节点指定端口的输入资产（图片/视频/音频，按 config.inputOrder 排序）。
+ * 收集视频生成节点的输入资产并按来源节点输出类型过滤（图片/视频/音频）。
+ *
+ * 生成视频节点使用单一 media 输入连接点，素材类型由来源节点类型自动归类；
+ * 返回结果按 config.inputOrder 排序（collectInputs 已处理）。
  *
  * @param nodeId 目标节点 id
- * @param portId 目标输入端口 id（images/videos/audios）
- * @returns 该端口输入资产信息数组
+ * @param type 来源节点输出类型（image / video / audio）
+ * @returns 该类型输入资产信息数组
  */
-function videoInputsOf(nodeId: string, portId: string): CanvasInputInfo[] {
+function videoInputsOf(nodeId: string, type: 'image' | 'video' | 'audio'): CanvasInputInfo[] {
   const node = nodeMap.value[nodeId]
-  return collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, portId)
+  const all = collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config)
+  return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === type)
 }
 
-/** 视频生成节点三组端口输入（非 video-generate 节点为空数组；按 config.inputOrder 排序） */
+/** 视频生成节点三组输入（非 video-generate 节点为空数组；按 config.inputOrder 排序） */
 const videoInputGroups = computed(() => {
   if (!editorPanel.value || editorPanel.value.node.prototypeId !== 'video-generate') {
     return { images: [] as CanvasInputInfo[], videos: [] as CanvasInputInfo[], audios: [] as CanvasInputInfo[] }
   }
   const id = editorPanel.value.node.id
   return {
-    images: videoInputsOf(id, 'images'),
-    videos: videoInputsOf(id, 'videos'),
-    audios: videoInputsOf(id, 'audios'),
+    images: videoInputsOf(id, 'image'),
+    videos: videoInputsOf(id, 'video'),
+    audios: videoInputsOf(id, 'audio'),
   }
 })
 

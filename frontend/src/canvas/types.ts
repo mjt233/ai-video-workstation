@@ -5,8 +5,13 @@
  * 生成产物为磁盘文件（assert/{scope}/canvas/{nodeId}/v{n}.jpg）。
  */
 
-/** 数据流类型：连接是否允许由端口数据类型决定（ComfyUI 思路） */
-export type DataType = 'image' | 'video' | 'audio' | 'text'
+/**
+ * 数据流类型：连接是否允许由端口数据类型决定（ComfyUI 思路）。
+ *
+ * - image / video / audio / text：具体媒体类型，连接时要求一致；
+ * - media：任意媒体输入口（如生成视频节点），可接受 image/video/audio/text 来源。
+ */
+export type DataType = 'image' | 'video' | 'audio' | 'text' | 'media'
 
 /** 端口：节点的输入/输出接口，每个端口有固定类型 */
 export interface Port {

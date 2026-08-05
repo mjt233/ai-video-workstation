@@ -89,11 +89,8 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'video-generate',
     name: '生成视频',
     icon: 'mdi-video-plus',
-    inputPorts: [
-      { id: 'images', type: 'image', label: '图片' },
-      { id: 'videos', type: 'video', label: '视频' },
-      { id: 'audios', type: 'audio', label: '音频' },
-    ],
+    // 单一 media 输入连接点：素材类型由来源节点类型（图片/视频/音频加载节点）自动归类
+    inputPorts: [{ id: 'in', type: 'media', label: '输入' }],
     outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
     resizeable: true,
     bodyComponent: VideoGenerateNode,

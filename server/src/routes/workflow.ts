@@ -3,13 +3,33 @@ import { v4 as uuidv4 } from 'uuid';
 import * as db from '../db.js';
 import type { TaskRecord } from '../db.js';
 import { getAllWorkflows } from '../workflow-engine.js';
-import { getImpl } from '../workflows/registry.js';
+import { getImpl, getImplementations } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
 import { cancelBridgeTask } from '../workflows/bridge-client.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
 
 export const workflowRouter = Router();
+
+/**
+ * 解析工作流实现：指定实现存在则用之，否则回退到该工作流类型的第一个实现。
+ *
+ * 画布【生成视频】节点新建时 workflowImpl 可能未初始化（提交 'default'），
+ * 而部分工作流类型（如 image-to-video）没有名为 default 的实现；
+ * 此处兜底保证任务总能落到一个真实实现上。
+ *
+ * @param workflowId 工作流类型 ID
+ * @param impl 请求的实现标识（可能缺失或非法）
+ * @returns 可用的实现标识
+ */
+export function resolveImpl(workflowId: string, impl?: string): string {
+  const requested = impl ?? 'default';
+  const impls = getImplementations(workflowId);
+  if (impls.some((w) => w.impl === requested)) {
+    return requested;
+  }
+  return impls[0]?.impl ?? 'default';
+}
 
 // GET /api/workflows — list available workflow types and implementations
 workflowRouter.get('/workflows', (_req: Request, res: Response) => {
@@ -39,7 +59,9 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
   }
 
   // 用户手动传入的参数：仅保留所选实现声明的 key，按类型规范化后合并进 vars
-  const implDef = getImpl(workflowId, impl ?? 'default');
+  // 实现缺失/非法时回退到第一个实现（如 image-to-video 无 default 实现）
+  const resolvedImpl = resolveImpl(workflowId, impl);
+  const implDef = getImpl(workflowId, resolvedImpl);
   const userVars = normalizeUserParams(implDef?.params, params.userParams);
 
   const taskId = uuidv4();
@@ -47,7 +69,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     id: taskId,
     project,
     workflow_id: workflowId,
-    impl: impl ?? 'default',
+    impl: resolvedImpl,
     params: {
       vars: { ...(params.vars ?? {}), ...userVars },
       promptPaths: params.promptPaths ?? [],
@@ -56,7 +78,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     },
   });
 
-  db.addLog(taskId, 'info', `Task created: ${workflowId}/${impl ?? 'default'}`);
+  db.addLog(taskId, 'info', `Task created: ${workflowId}/${resolvedImpl}`);
 
   res.json({ taskId, status: 'pending' });
 });

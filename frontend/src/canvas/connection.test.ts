@@ -17,6 +17,17 @@ describe('canConnect', () => {
   it('不同类型不兼容', () => {
     expect(canConnect('image', 'text')).toBe(false)
   })
+
+  it('media 输入口接受任意类型', () => {
+    expect(canConnect('image', 'media')).toBe(true)
+    expect(canConnect('video', 'media')).toBe(true)
+    expect(canConnect('audio', 'media')).toBe(true)
+    expect(canConnect('text', 'media')).toBe(true)
+  })
+
+  it('media 仅作输入口，不能作为来源连接到具体类型', () => {
+    expect(canConnect('media', 'image')).toBe(false)
+  })
 })
 
 describe('getNodeOutputType / getNodeInputType', () => {
@@ -80,30 +91,33 @@ describe('canConnectNodes', () => {
   })
 })
 
-describe('多端口连接校验', () => {
-  // video-generate 原型在 Task 11 注册（images/videos/audios 三输入端口）
-  const multiNodes: CanvasNodeData[] = [
+describe('media 输入口连接校验', () => {
+  // video-generate 使用单一 media 输入连接点，素材类型由来源节点类型决定
+  const mediaNodes: CanvasNodeData[] = [
     { id: 'img', prototypeId: 'image-loader', name: 'img', x: 0, y: 0, width: 200, height: 120, config: {} },
     { id: 'aud', prototypeId: 'audio-loader', name: 'aud', x: 0, y: 0, width: 200, height: 120, config: {} },
     { id: 'vid', prototypeId: 'video-loader', name: 'vid', x: 0, y: 0, width: 200, height: 120, config: {} },
+    { id: 'txt', prototypeId: 'text', name: 'txt', x: 0, y: 0, width: 200, height: 120, config: {} },
     { id: 'target', prototypeId: 'video-generate', name: 'target', x: 0, y: 0, width: 240, height: 160, config: {} },
   ]
 
-  it('图片源可连接到 images 端口', () => {
-    expect(canConnectNodes([], 'img', 'target', multiNodes, 'images')).toBe(true)
+  it('图片源可连接到 media 输入口', () => {
+    expect(canConnectNodes([], 'img', 'target', mediaNodes, 'in')).toBe(true)
   })
 
-  it('音频源可连接到 audios 端口', () => {
-    expect(canConnectNodes([], 'aud', 'target', multiNodes, 'audios')).toBe(true)
+  it('音频源可连接到 media 输入口', () => {
+    expect(canConnectNodes([], 'aud', 'target', mediaNodes, 'in')).toBe(true)
   })
 
-  it('图片源不能连接到 audios 端口（类型不符）', () => {
-    expect(canConnectNodes([], 'img', 'target', multiNodes, 'audios')).toBe(false)
+  it('视频源可连接到 media 输入口', () => {
+    expect(canConnectNodes([], 'vid', 'target', mediaNodes, 'in')).toBe(true)
   })
 
-  it('getNodeInputPortType 返回端口类型', () => {
-    expect(getNodeInputPortType('target', 'images', multiNodes)).toBe('image')
-    expect(getNodeInputPortType('target', 'videos', multiNodes)).toBe('video')
-    expect(getNodeInputPortType('target', 'audios', multiNodes)).toBe('audio')
+  it('文本源可连接到 media 输入口（media 接受任意类型）', () => {
+    expect(canConnectNodes([], 'txt', 'target', mediaNodes, 'in')).toBe(true)
+  })
+
+  it('getNodeInputPortType 返回 media', () => {
+    expect(getNodeInputPortType('target', 'in', mediaNodes)).toBe('media')
   })
 })

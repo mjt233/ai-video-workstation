@@ -1,6 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { parseTaskParams, canCancelTask, getRemoteTaskId } from './workflow.js';
+import { parseTaskParams, canCancelTask, getRemoteTaskId, resolveImpl } from './workflow.js';
+import { register } from '../workflows/registry.js';
 import type { TaskRecord } from '../db.js';
+import type { WorkflowDefinition } from '../workflows/types.js';
+
+/** 注册一个最小假实现（与 capabilities.test.ts 一致），供 resolveImpl 用例使用 */
+function registerFake(id: string, impl: string): void {
+  register({
+    id,
+    name: id,
+    impl,
+    submit: async () => ({ taskId: 't' }),
+    parseOutput: async () => ({ type: 'body', contentType: 'video/mp4', data: '', filename: 'x.mp4' }),
+  } as WorkflowDefinition);
+}
+
+describe('resolveImpl', () => {
+  it('指定实现存在时返回之', () => {
+    registerFake('resolve-impl-test', 'ltx');
+    expect(resolveImpl('resolve-impl-test', 'ltx')).toBe('ltx');
+  });
+
+  it('指定实现缺失时回退到第一个实现', () => {
+    // 该工作流类型只有 ltx（无 default 实现）→ 回退到 ltx
+    expect(resolveImpl('resolve-impl-test', 'default')).toBe('ltx');
+    expect(resolveImpl('resolve-impl-test', undefined)).toBe('ltx');
+  });
+
+  it('未知工作流类型时回退 default', () => {
+    expect(resolveImpl('no-such-workflow', 'x')).toBe('default');
+  });
+});
 
 const mkTask = (overrides: Partial<TaskRecord> = {}): TaskRecord =>
   ({

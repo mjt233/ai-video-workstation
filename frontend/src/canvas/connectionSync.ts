@@ -1,5 +1,6 @@
 import type { CanvasConnection, CanvasData } from './types'
 import { newId } from './types'
+import { getNodeOutputType } from './connection'
 import type { CanvasDirectorConfig, CanvasDirectorImageClip, CanvasDirectorAudioClip } from './videoTypes'
 
 /** 自动追加图片块时的默认占位时长（秒） */
@@ -14,9 +15,9 @@ export interface ConnectionSyncEvent {
 /**
  * 画布节点级连接联动：连线建立/断开时按目标节点原型同步节点数据。
  *
- * 当前实现针对 video-generate 节点：
- * - connect → images：若 sourceNodeId 尚无 imageClip 则追加（startOffset 置于现有块末尾，duration=2s）；
- * - connect → audios：追加 audioClip；
+ * 当前实现针对 video-generate 节点（单一 media 输入口，素材类型由来源节点类型决定）：
+ * - connect：来源节点输出类型为 image → 追加 imageClip；audio → 追加 audioClip；
+ *   video → 不进导演台轨道（仅在参考模式作为参考素材）；
  * - disconnect：删除 sourceNodeId 匹配的 clip。
  * 只增删、不重排——保留用户已拖好的滑块位置。
  *
@@ -42,8 +43,9 @@ export function applyConnectionSync(data: CanvasData, event: ConnectionSyncEvent
     return withDirector(data, node.id, { ...d, imageClips, audioClips })
   }
 
-  // connect
-  if (event.connection.toPortId === 'images') {
+  // connect：按来源节点输出类型归类
+  const srcType = getNodeOutputType(event.connection.fromNodeId, data.nodes)
+  if (srcType === 'image') {
     const imageClips = d.imageClips ?? []
     if (imageClips.some((c) => c.sourceNodeId === event.connection.fromNodeId)) return data
     const maxStart = imageClips.reduce((m, c) => Math.max(m, c.startOffset + c.duration), 0)
@@ -57,7 +59,7 @@ export function applyConnectionSync(data: CanvasData, event: ConnectionSyncEvent
     return withDirector(data, node.id, { ...d, imageClips: [...imageClips, clip] })
   }
 
-  if (event.connection.toPortId === 'audios') {
+  if (srcType === 'audio') {
     const audioClips = d.audioClips ?? []
     if (audioClips.some((c) => c.sourceNodeId === event.connection.fromNodeId)) return data
     const maxStart = audioClips.reduce((m, c) => Math.max(m, c.startOffset + c.duration), 0)
@@ -72,6 +74,7 @@ export function applyConnectionSync(data: CanvasData, event: ConnectionSyncEvent
     return withDirector(data, node.id, { ...d, audioClips: [...audioClips, clip] })
   }
 
+  // video 来源不进导演台轨道（参考模式通过分组输入参与生成）
   return data
 }
 

@@ -5,8 +5,14 @@ import { getPrototype } from './registry'
  * 连接校验（ComfyUI 思路）：按端口数据类型判断，而非按节点类型。
  */
 
-/** 两个端口类型是否兼容（v1 仅支持同类型） */
+/**
+ * 两个端口类型是否兼容。
+ *
+ * - media 输入口（如生成视频节点）可接受任意来源类型；
+ * - 其余情况要求类型一致（v1 仅支持同类型）。
+ */
 export function canConnect(fromType: DataType, toType: DataType): boolean {
+  if (toType === 'media') return true
   return fromType === toType
 }
 
