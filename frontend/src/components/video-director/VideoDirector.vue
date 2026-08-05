@@ -113,7 +113,7 @@
       <v-spacer />
 
       <v-btn
-        v-if="!readOnly"
+        v-if="!readOnly && !standalone"
         color="primary"
         prepend-icon="mdi-content-save-check"
         size="small"
@@ -123,6 +123,7 @@
         保存
       </v-btn>
       <v-btn
+        v-if="!standalone"
         color="success"
         prepend-icon="mdi-video-outline"
         size="small"
@@ -246,6 +247,8 @@ const props = defineProps<{
   shot?: string
   /** 只读模式：禁止一切编辑（含播放除外）与保存 */
   readOnly?: boolean
+  /** 独立模式（画布节点嵌入）：隐藏「保存/生成视频」按钮，数据实时写回外部 */
+  standalone?: boolean
   /** 是否允许添加资产；非只读且为 false 时隐藏「添加图片/音频」按钮，其余编辑仍可用 */
   allowAddAsset?: boolean
   /** 视频生成 prompt（与分镜-视频生成的 prompt 集成，同一来源 prompt.md） */
