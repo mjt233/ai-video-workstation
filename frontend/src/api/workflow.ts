@@ -98,6 +98,28 @@ export interface LogEntry {
   created_at: string
 }
 
+/** 视频自包含提交参数（wire 形态，与后端 VideoWorkflowSubmitParams 对齐） */
+export interface VideoWorkflowSubmitParams {
+  /** 生成模式：导演台 / 首尾帧 / 参考 */
+  mode: 'director' | 'first-last-frame' | 'reference'
+  /** 输出分辨率（像素） */
+  resolution: { width: number; height: number }
+  /** 帧率（可选） */
+  fps?: number
+  /** 输出时长（秒） */
+  duration: number
+  /** 生成提示词 */
+  prompt: string
+  /** 随机种子（可选） */
+  seed?: number
+  /** 导演台/首尾帧模式：有序关键帧 + 可选音频 */
+  director?: { frames: Array<{ path: string; cursor: number }>; audio?: { path: string } }
+  /** 参考模式：按类型分组的引用素材 */
+  references?: Array<{ type: 'image' | 'video' | 'audio'; path: string }>
+  /** 透传给工作流实现的额外参数（seed 已剥离） */
+  extraParams: Record<string, unknown>
+}
+
 export interface WorkflowRunParams {
   project: string
   workflowId: string
@@ -108,6 +130,8 @@ export interface WorkflowRunParams {
     outputPath: string
     /** 用户手动传入的工作流参数（按所选实现的声明 key） */
     userParams?: Record<string, WorkflowUserParamValue>
+    /** 视频自包含提交参数（画布【生成视频】节点提交） */
+    video?: VideoWorkflowSubmitParams
   }
 }
 
@@ -173,5 +197,25 @@ export async function getTaskLogs(taskId: string): Promise<LogEntry[]> {
 
 export async function retryTask(taskId: string): Promise<{ taskId: string; status: string }> {
   const { data } = await client.post<{ taskId: string; status: string }>(`/workflow/retry/${taskId}`)
+  return data
+}
+
+/** 中断工作流任务的返回结果 */
+export interface CancelWorkflowResult {
+  /** 被中断的任务 id */
+  taskId: string
+  /** 中断后的任务状态（如 failed/cancelled） */
+  status: string
+}
+
+/**
+ * 中断工作流任务（调用后端 cancel 端点：本地排队直接失败 / 运行中调 Bridge cancel）。
+ * 仅对 capabilities.cancelable 的工作流有效，其余后端返回 400。
+ *
+ * @param taskId 要中断的任务 id
+ * @returns 中断结果（taskId + 中断后状态）
+ */
+export async function cancelWorkflow(taskId: string): Promise<CancelWorkflowResult> {
+  const { data } = await client.post<CancelWorkflowResult>(`/workflow/tasks/${taskId}/cancel`)
   return data
 }

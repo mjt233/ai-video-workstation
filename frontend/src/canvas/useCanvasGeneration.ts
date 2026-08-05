@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { writeFs } from '../api/client'
-import { runWorkflow, getTaskStatus, getTaskLogs, type WorkflowUserParamValue } from '../api/workflow'
+import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow, type WorkflowUserParamValue } from '../api/workflow'
+import type { VideoSubmitParams } from './videoSubmit'
 import type { CanvasNodeData, CanvasKind } from './types'
 import { canvasNodeAssetPath, sceneCanvasRelPath } from './paths'
 import { getHistory, type HistoryEntry } from './generate'
@@ -65,7 +66,12 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
             label: targetRef.value.label,
           }
         : { kind: 'scene' as const, primary: targetRef.value.episode ?? '', secondary: targetRef.value.shot }
-    return canvasNodeAssetPath(scope, node.id, version)
+    const base = canvasNodeAssetPath(scope, node.id, version)
+    if (node.prototypeId === 'video-generate') {
+      // 视频产物扩展名替换为 .mp4（图片路径助手默认 .jpg）
+      return base.replace(/\.jpg$/, '.mp4')
+    }
+    return base
   }
 
   /** 计算生成节点 prompt 文件相对路径（文生图工作流需要） */
@@ -81,12 +87,51 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
   /**
    * 触发生成节点的资产生成。
    *
-   * @param node 生成图片节点数据
+   * - 图片节点：走既有 prompt/inputPaths 逻辑（text-to-image / image-edit）
+   * - 视频节点（video-generate）：走自包含提交参数（videoParams，组装后传入）
+   *
+   * @param node 生成节点数据（图片或视频）
    * @param updateConfig 更新节点配置的回调（由调用方写入 current/history）
+   * @param videoParams 视频生成节点的自包含提交参数（仅 video-generate 需要）
    */
-  async function generate(node: CanvasNodeData, updateConfig: (config: Record<string, unknown>) => void): Promise<void> {
+  async function generate(
+    node: CanvasNodeData,
+    updateConfig: (config: Record<string, unknown>) => void,
+    videoParams?: VideoSubmitParams,
+  ): Promise<void> {
     const nodeId = node.id
     if (statusByNode.value[nodeId]?.status === 'running') return
+
+    // ── 视频生成节点：走自包含提交参数 ──
+    if (node.prototypeId === 'video-generate') {
+      if (!videoParams) {
+        statusByNode.value[nodeId] = { status: 'error', errorMsg: '缺少视频提交参数' }
+        return
+      }
+      statusByNode.value[nodeId] = { status: 'running' }
+      try {
+        const outputPath = computeOutputPath(node)
+        const { taskId } = await runWorkflow({
+          project,
+          workflowId: 'image-to-video',
+          impl: String(node.config.workflowImpl ?? 'default'),
+          params: {
+            vars: {},
+            outputPath,
+            userParams: (node.config.workflowParams as Record<string, WorkflowUserParamValue> | undefined) ?? {},
+            video: videoParams,
+          },
+        })
+        taskIdByNode.value[nodeId] = taskId
+        poll(taskId, node, outputPath, updateConfig)
+      } catch (e) {
+        statusByNode.value[nodeId] = {
+          status: 'error',
+          errorMsg: e instanceof Error ? e.message : String(e),
+        }
+      }
+      return
+    }
 
     const config = node.config
     const prompt = String(config.prompt ?? '')
@@ -167,7 +212,11 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     }, 2000)
   }
 
-  /** 中断生成 */
+  /**
+   * 中断生成：调用后端 cancel 端点 + 停轮询 + 状态置已中断。
+   *
+   * @param nodeId 生成节点 id
+   */
   async function interrupt(nodeId: string): Promise<void> {
     const taskId = taskIdByNode.value[nodeId]
     if (!taskId) return
@@ -176,7 +225,11 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
       delete pollTimers[nodeId]
     }
     statusByNode.value[nodeId] = { status: 'error', errorMsg: '已中断', taskId }
-    // 现有 API 无取消端点，v1 仅停止前端轮询与状态展示
+    try {
+      await cancelWorkflow(taskId)
+    } catch {
+      // cancel 失败不阻断状态展示（后端任务可能已结束）
+    }
   }
 
   /** 清除节点状态（如失败后重试前） */

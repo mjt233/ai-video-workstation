@@ -538,6 +538,7 @@ import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
 import { canConnectNodes } from '../../canvas/connection'
 import { activateHistory, collectInputPaths, collectInputs, getNodeCurrentAssetPath, removeHistoryEntry, type CanvasInputInfo, type HistoryEntry } from '../../canvas/generate'
+import { buildVideoSubmitParams } from '../../canvas/videoSubmit'
 import {
   buildAutoCanvas,
   buildShotRefsFromStage,
@@ -1118,13 +1119,30 @@ async function onDeleteHistory(entry: HistoryEntry) {
 
 /**
  * 触发生成节点：收集输入路径 → 注入 → 跑工作流，并把 current/history 回写节点配置。
+ * 视频节点（video-generate）额外组装自包含提交参数后传给 generate。
  *
  * @param nodeId 生成节点 id
  */
 async function generateNode(nodeId: string) {
   const node = nodeMap.value[nodeId]
-  if (!node || node.prototypeId !== 'image-generate') return
+  if (!node) return
   gen.clearStatus(nodeId)
+  if (node.prototypeId === 'video-generate') {
+    const videoParams = buildVideoSubmitParams(node, {
+      images: videoInputsOf(nodeId, 'images'),
+      videos: videoInputsOf(nodeId, 'videos'),
+      audios: videoInputsOf(nodeId, 'audios'),
+    })
+    await gen.generate(
+      node,
+      (config) => {
+        store.updateNode(nodeId, { config })
+      },
+      videoParams,
+    )
+    return
+  }
+  if (node.prototypeId !== 'image-generate') return
   const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config)
   gen.setInputPaths(nodeId, paths)
   await gen.generate(node, (config) => {
