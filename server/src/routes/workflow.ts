@@ -5,6 +5,7 @@ import { getAllWorkflows } from '../workflow-engine.js';
 import { getImpl } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
+import type { VideoWorkflowSubmitParams } from '../workflows/types.js';
 
 export const workflowRouter = Router();
 
@@ -25,6 +26,8 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
       outputPath: string;
       /** 用户手动传入的工作流参数（key → 值，仅保留所选实现声明的 key） */
       userParams?: Record<string, unknown>;
+      /** 视频自包含提交参数（wire 形态，画布【生成视频】节点提交） */
+      video?: VideoWorkflowSubmitParams;
     };
   };
 
@@ -47,6 +50,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
       vars: { ...(params.vars ?? {}), ...userVars },
       promptPaths: params.promptPaths ?? [],
       outputPath: params.outputPath,
+      ...(params.video ? { video: params.video } : {}),
     },
   });
 
@@ -55,21 +59,36 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
   res.json({ taskId, status: 'pending' });
 });
 
-function parseTaskParams(paramsJson: string): {
+/**
+ * 解析任务 params（JSON 字符串）为结构化对象。
+ *
+ * @param paramsJson - 任务 params 的 JSON 字符串
+ * @returns 结构化 params：vars 业务变量、promptPaths 提示词路径、outputPath 输出路径；
+ *          video 为视频自包含提交参数（wire 形态，可选）；
+ *          remoteTaskId 为提交成功后持久化的远端（Bridge）任务 ID（可选，供中断使用）
+ */
+export function parseTaskParams(paramsJson: string): {
   vars: Record<string, string>
   promptPaths: string[]
   outputPath: string
+  video?: VideoWorkflowSubmitParams
+  /** 提交成功后持久化的远端（Bridge）任务 ID，供中断使用 */
+  remoteTaskId?: string
 } {
   try {
     const parsed = JSON.parse(paramsJson) as {
       vars?: Record<string, string>
       promptPaths?: string[]
       outputPath?: string
+      video?: VideoWorkflowSubmitParams
+      remoteTaskId?: string
     };
     return {
       vars: parsed.vars ?? {},
       promptPaths: parsed.promptPaths ?? [],
       outputPath: parsed.outputPath ?? '',
+      video: parsed.video,
+      remoteTaskId: parsed.remoteTaskId,
     };
   } catch {
     return { vars: {}, promptPaths: [], outputPath: '' };
