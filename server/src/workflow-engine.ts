@@ -4,13 +4,15 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as db from './db.js';
 import { register, getImpl, getAllWorkflows } from './workflows/registry.js';
 import type {
-  DirectorPayload,
   ProjectConfig,
   WorkflowDefinition,
   WorkflowRunContext,
   WorkflowVarsBase,
+  VideoWorkflowSubmitData,
+  VideoWorkflowSubmitParams,
 } from './workflows/types.js';
-import { buildDirectorPayload } from './workflows/director-inject.js';
+import { buildSceneVideoSubmitData, type SceneAdapterDeps } from './workflows/scene-adapter.js';
+import { submitComfyuiBridge, pollTask, buildDownloadRequest } from './workflows/bridge-client.js';
 import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
 import { archiveExistingAsset } from './assets/history.js';
@@ -45,6 +47,44 @@ async function loadProjectConfig(project: string): Promise<ProjectConfig> {
     // 文件不存在或解析失败，静默忽略以保持向后兼容
     return { width: 0, height: 0, fps: DEFAULT_PROJECT_FPS };
   }
+}
+
+/**
+ * 将 wire 形态的视频提交参数（路径）解析为运行时形态（File）。
+ * 画布节点提交的 params.video 走此转换，随后注入 ctx.video。
+ *
+ * @param project 项目名
+ * @param wire wire 形态提交参数
+ * @param readAssertFile 读取 assert/ 文件为 File 的回调
+ * @returns 运行时形态视频提交数据
+ */
+async function resolveVideoSubmitData(
+  project: string,
+  wire: VideoWorkflowSubmitParams,
+  readAssertFile: (relPath: string) => Promise<File>,
+): Promise<VideoWorkflowSubmitData> {
+  const director = wire.director
+    ? {
+        frames: await Promise.all(
+          wire.director.frames.map(async (f) => ({ file: await readAssertFile(f.path), cursor: f.cursor })),
+        ),
+        ...(wire.director.audio ? { audio: await readAssertFile(wire.director.audio.path) } : {}),
+      }
+    : undefined;
+  const references = wire.references
+    ? await Promise.all(wire.references.map(async (r) => ({ type: r.type, file: await readAssertFile(r.path) })))
+    : undefined;
+  return {
+    mode: wire.mode,
+    resolution: wire.resolution,
+    ...(wire.fps != null ? { fps: wire.fps } : {}),
+    duration: wire.duration,
+    prompt: wire.prompt,
+    ...(wire.seed != null ? { seed: wire.seed } : {}),
+    ...(director ? { director } : {}),
+    ...(references ? { references } : {}),
+    extraParams: wire.extraParams ?? {},
+  };
 }
 
 /**
@@ -97,114 +137,6 @@ interface ScriptLine {
   角色名?: string;
   台词?: string;
   情绪?: string;
-}
-
-/**
- * image-to-video：由引擎统一读取分镜 overview.json / stage.json，
- * 注入 duration（秒，正整数）与 stageImages（场景图相对路径 JSON 数组）。
- * 分辨率/帧率走 projectConfig。
- */
-async function enrichImageToVideoParams(
-  project: string,
-  paramsObj: {
-    vars?: Record<string, string>;
-  },
-): Promise<{
-  vars: Record<string, string>;
-}> {
-  const vars = { ...(paramsObj.vars ?? {}) };
-  const episode = vars.episode?.trim();
-  const shot = vars.shot?.trim();
-  if (!episode || !shot) {
-    throw new Error('image-to-video 需要 vars.episode / vars.shot');
-  }
-
-  const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
-
-  const resolveUnderProject = (relPath: string): string => {
-    const full = path.resolve(DESIGN_DIR, project, relPath);
-    if (!full.startsWith(projectRoot)) {
-      throw new Error(`Path traversal denied: ${relPath}`);
-    }
-    return full;
-  };
-
-  // ── duration from overview.json ──
-  const overviewRel = `prompt/scene/${episode}/${shot}/overview.json`;
-  let overview: { duration?: unknown };
-  try {
-    const raw = await fs.readFile(resolveUnderProject(overviewRel), 'utf-8');
-    overview = JSON.parse(raw) as { duration?: unknown };
-  } catch {
-    throw new Error(`无法读取分镜总览: ${overviewRel}`);
-  }
-  if (!overview || typeof overview !== 'object' || Array.isArray(overview)) {
-    throw new Error(`overview.json 格式无效: ${overviewRel}`);
-  }
-
-  const duration = overview.duration;
-  if (typeof duration !== 'number' || !Number.isInteger(duration) || duration <= 0) {
-    throw new Error(
-      `分镜时长无效（overview.json.duration 须为正整数秒）: ${overviewRel}, 当前=${String(duration)}`,
-    );
-  }
-
-  // ── stage images from stage.json + assert/scene/.../stage/{i}.jpg ──
-  const stageJsonRel = `prompt/scene/${episode}/${shot}/stage.json`;
-  let stageDefs: unknown;
-  try {
-    const raw = await fs.readFile(resolveUnderProject(stageJsonRel), 'utf-8');
-    stageDefs = JSON.parse(raw) as unknown;
-  } catch {
-    throw new Error(`无法读取分镜场景定义: ${stageJsonRel}`);
-  }
-  if (!Array.isArray(stageDefs) || stageDefs.length === 0) {
-    throw new Error(`stage.json 须为非空数组: ${stageJsonRel}`);
-  }
-
-  const stageImages: string[] = [];
-  const missing: string[] = [];
-  for (let i = 0; i < stageDefs.length; i++) {
-    // 禁用的场景帧不参与视频生成，其图片也不要求存在
-    const def = stageDefs[i] as SceneStageDefinition | undefined;
-    if (def && def.disabled === true) continue;
-    const rel = `assert/scene/${episode}/${shot}/stage/${i}.jpg`;
-    const full = resolveUnderProject(rel);
-    try {
-      await fs.access(full);
-      stageImages.push(rel);
-    } catch {
-      missing.push(rel);
-    }
-  }
-  if (missing.length > 0) {
-    throw new Error(
-      `分镜场景图缺失（请先生成 scene-stage-image / image-edit）: ${missing.join(', ')}`,
-    );
-  }
-
-  // ── merged audio from audio-edit.json ──
-  let audioPath = '';
-  const audioEditRel = `prompt/scene/${episode}/${shot}/audio-edit.json`;
-  const mergedAudioRel = `assert/scene/${episode}/${shot}/audio/merged.flac`;
-  try {
-    await fs.access(resolveUnderProject(audioEditRel));
-    await fs.access(resolveUnderProject(mergedAudioRel));
-    audioPath = mergedAudioRel;
-  } catch {
-    // 没有音频编辑或合并产物，跳过
-  }
-
-  return {
-    vars: {
-      ...vars,
-      episode,
-      shot,
-      duration: String(duration),
-      stageImages: JSON.stringify(stageImages),
-      ...(audioPath ? { audioPath } : {}),
-    },
-  };
 }
 
 /**
@@ -612,6 +544,7 @@ async function runTask(taskId: string): Promise<void> {
     vars?: Record<string, string>;
     promptPaths?: string[];
     outputPath?: string;
+    video?: VideoWorkflowSubmitParams;
   };
   const projectConfig = await loadProjectConfig(task.project);
 
@@ -667,12 +600,6 @@ async function runTask(taskId: string): Promise<void> {
       desc: voiceDesc,
       text: (paramsObj.vars?.text ?? '').trim() || `你好，我叫${name}`,
     };
-  }
-
-  // image-to-video：引擎统一读取 overview.json / stage 图路径
-  if (task.workflow_id === 'image-to-video') {
-    const enriched = await enrichImageToVideoParams(task.project, paramsObj);
-    paramsObj.vars = enriched.vars;
   }
 
   // image-edit + purpose=scene-stage-image：直接引用或组装 desc/imagePaths
@@ -745,20 +672,33 @@ async function runTask(taskId: string): Promise<void> {
     db.addLog(taskId, 'info', `Starting workflow: ${wf.name} (impl: ${wf.impl})`);
     db.updateTaskStatus(taskId, 'running');
 
-    // 导演台负载：仅当所选实现声明 video.modes 含 director 且分镜存在 director.json 时注入。
-    // 注入后 duration 以导演台为准（覆盖 enrichImageToVideoParams 从 overview.json 注入的时长）。
-    // 构建置于 try 内：任一依赖抛错（导演台配置损坏、关键帧图片缺失、混音无可用轨道等）都会
-    // 由下方统一失败处理标记 failed 或调度重试，避免任务停留在 running 状态
-    let director: DirectorPayload | undefined;
-    if (task.workflow_id === 'image-to-video' && capabilities?.video?.modes?.includes('director')) {
-      const episode = vars.episode?.trim();
-      const shot = vars.shot?.trim();
-      if (episode && shot) {
-        const payload = await buildDirectorPayload(task.project, episode, shot, {
+    // ── 视频自包含提交数据 ──
+    // 画布节点任务：params.video（wire 形态）→ 解析为 File 形态；
+    // 分镜/批量任务：由场景适配层读取分镜文件组装（工作流实现不再读分镜文件）。
+    let video: VideoWorkflowSubmitData | undefined;
+    if (task.workflow_id === 'image-to-video') {
+      if (paramsObj.video) {
+        video = await resolveVideoSubmitData(task.project, paramsObj.video, readAssertFile);
+      } else {
+        const episode = vars.episode?.trim();
+        const shot = vars.shot?.trim();
+        if (!episode || !shot) {
+          throw new Error('image-to-video 需要 params.video 或 vars.episode/vars.shot');
+        }
+        const sceneDeps: SceneAdapterDeps = {
           readFile,
           readAssertFile,
+          fileExists: async (rel: string) => {
+            const full = path.resolve(DESIGN_DIR, task.project, rel);
+            if (!full.startsWith(projectRoot)) throw new Error('Path traversal denied');
+            try {
+              await fs.access(full);
+              return true;
+            } catch {
+              return false;
+            }
+          },
           mixAudioTracks: async (tracks, out) => {
-            // director.json 中的轨道路径为项目相对路径，解析为绝对路径后再交给 ffmpeg
             await mixAudioTracks(
               tracks.map((t) => ({ ...t, filePath: resolveProjectAssertPath(task.project, t.filePath) })),
               out,
@@ -766,18 +706,51 @@ async function runTask(taskId: string): Promise<void> {
           },
           readTempAudio: async (p) => new Uint8Array(await fs.readFile(p)),
           removeTempAudio: async (p) => {
-            // 尽力删除混音临时文件，失败静默忽略
             try {
               await fs.unlink(p);
             } catch {
               /* 忽略清理失败 */
             }
           },
-        });
-        if (payload) {
-          director = payload;
-          vars.duration = String(payload.duration);
-        }
+          generateVoice: async (text, voiceDesc) => {
+            // 拼接台词 → TTS 生成配音（失败降级返回 null，不注入音频）
+            try {
+              const ttsResult = await submitComfyuiBridge({
+                workflowId: 'tts_voice_design',
+                params: { desc: voiceDesc, text },
+              });
+              let ttsOk = false;
+              while (true) {
+                await new Promise((r) => setTimeout(r, 1000));
+                const ttsStatus = await pollTask(ttsResult.taskId);
+                if (ttsStatus.status === 'completed') { ttsOk = true; break; }
+                if (ttsStatus.status === 'failed') {
+                  console.warn(`TTS 生成失败，跳过音频: ${ttsStatus.errorMessage}`);
+                  break;
+                }
+              }
+              if (ttsOk) {
+                const download = await buildDownloadRequest(ttsResult.taskId);
+                if (download) {
+                  const resp = await fetch(download.url, { headers: download.headers });
+                  const blob = await resp.blob();
+                  return new File([blob], 'voice-combined.flac', { type: 'audio/flac' });
+                }
+              }
+              return null;
+            } catch {
+              return null;
+            }
+          },
+        };
+        video = await buildSceneVideoSubmitData(
+          task.project,
+          episode,
+          shot,
+          capabilities?.video,
+          projectConfig,
+          sceneDeps,
+        );
       }
     }
 
@@ -795,7 +768,7 @@ async function runTask(taskId: string): Promise<void> {
       project: task.project,
       projectConfig,
       vars,
-      ...(director ? { director } : {}),
+      ...(video ? { video } : {}),
       userParams,
       readFile,
       readAssertFile,
@@ -804,6 +777,9 @@ async function runTask(taskId: string): Promise<void> {
     // Step 1: Submit
     db.addLog(taskId, 'info', 'Submitting task to AI API...');
     const { taskId: remoteTaskId } = await wf.submit(runContext);
+    // 持久化远端任务 ID，供中断端点（/workflow/tasks/:id/cancel）使用
+    const taskParams = JSON.parse(task.params) as Record<string, unknown>;
+    db.updateTaskParams(taskId, { ...taskParams, remoteTaskId });
     db.addLog(taskId, 'info', `Submitted, remote task ID: ${remoteTaskId}`);
 
     let pollResponse: Record<string, unknown> | undefined;
