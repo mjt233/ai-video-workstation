@@ -10,7 +10,7 @@ import type { TtsVoiceDesignVars } from '../types.js';
  * - 分镜台词 TTS（desc=声线+情绪，text=台词；可由引擎注入）
  */
 register(createTtsDesignWorkflow<TtsVoiceDesignVars>({
-  id: 'tts-voice-design',
+  type: 'tts-voice-design',
   name: '音色设计 (qwen3-tts)',
   impl: 'default',
   description: '根据声线描述与文本生成语音（角色声音 / 分镜台词）',

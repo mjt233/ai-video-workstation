@@ -5,10 +5,10 @@ import type { TaskRecord } from '../db.js';
 import type { WorkflowDefinition } from '../workflows/types.js';
 
 /** 注册一个最小假实现（与 capabilities.test.ts 一致），供 resolveImpl 用例使用 */
-function registerFake(id: string, impl: string): void {
+function registerFake(type: string, impl: string): void {
   register({
-    id,
-    name: id,
+    type,
+    name: type,
     impl,
     submit: async () => ({ taskId: 't' }),
     parseOutput: async () => ({ type: 'body', contentType: 'video/mp4', data: '', filename: 'x.mp4' }),

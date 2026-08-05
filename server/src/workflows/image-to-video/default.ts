@@ -18,7 +18,7 @@ import type { ImageToVideoVars } from '../types.js';
 register(
   createComfyuiBridgeWorkflow<ImageToVideoVars>({
     baseDefinition: {
-      id: 'image-to-video',
+      type: 'image-to-video',
       name: 'LTX-2.3',
       impl: 'ltx',
       description: '使用 FL2V / FML2V 模型基于参考帧图生成视频',

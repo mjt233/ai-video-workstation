@@ -114,14 +114,19 @@ export interface WorkflowUserParamDeclaration {
   description?: string;
 }
 
-/** 工作流基础元信息 */
+/**
+ * 工作流基础元信息。
+ *
+ * 一个工作流「类型」（type）下可注册多个「实现」（impl）：
+ * 如 image-to-video 类型下有 ltx、minimax-h3-r2v 两个实现。
+ */
 export interface WorkflowBaseDefinition {
-  /** 工作流类型 ID，如 text-to-image */
-  id: string;
-  /** 展示名称 */
-  name: string;
-  /** 实现标识，如 default / flux / ltx */
+  /** 工作流类型，如 text-to-image / image-to-video（同一类型下可有多个实现） */
+  type: string;
+  /** 实现标识（具体工作流实现的唯一 ID），如 default / flux / ltx / minimax-h3-r2v */
   impl: string;
+  /** 阅读友好名称，如 LTX-2.3 / MiniMax H2V */
+  name: string;
   /** 可选描述 */
   description?: string;
   /** 可由用户手动传入的参数声明（前端据此渲染输入表单，并写入 vars） */

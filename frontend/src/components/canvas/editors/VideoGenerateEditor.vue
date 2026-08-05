@@ -1,32 +1,17 @@
 <template>
   <div class="video-generate-editor">
-    <!-- 工作流选择（仅视频类工作流） -->
+    <!-- 工作流选择（图生视频类型下的所有实现，如 LTX-2.3 / MiniMax H2V） -->
     <v-select
-      :model-value="workflowId"
+      :model-value="workflowImpl"
       :items="workflowItems"
       item-title="label"
-      item-value="id"
+      item-value="value"
       label="工作流"
       density="compact"
       variant="outlined"
       hide-details
       class="mb-2"
       @update:model-value="onWorkflowChange"
-    />
-
-    <!-- 实现选择（同一工作流类型下有多个实现时，如 LTX-2.3 / MiniMax H2V） -->
-    <v-select
-      v-if="implItems.length > 1"
-      :model-value="currentImpl?.impl"
-      :items="implItems"
-      item-title="label"
-      item-value="value"
-      label="模型实现"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="onImplChange"
     />
 
     <!-- 模式切换（所选实现声明多种模式时显示） -->
@@ -44,8 +29,27 @@
       @update:model-value="onModeChange"
     />
 
-    <!-- 导演台 / 首尾帧模式：嵌入导演台 -->
+    <!-- 导演台 / 首尾帧模式：输出规格 + 嵌入导演台（导演台内含 prompt 输入） -->
     <template v-if="mode === 'director' || mode === 'first-last-frame'">
+      <v-text-field
+        :model-value="String(directorDuration)"
+        label="时长(秒)"
+        type="number"
+        min="1"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="mb-2"
+        @update:model-value="onDirectorDurationChange"
+      />
+
+      <WorkflowSizePicker
+        :project="props.project"
+        :model-value="sizeModelValue"
+        class="mb-2"
+        @update:model-value="onSizeChange"
+      />
+
       <VideoDirector
         :project="props.project"
         :director="directorProject"
@@ -140,49 +144,38 @@
         {{ refLimitHint }}
       </div>
 
-      <!-- 参考模式输出规格 -->
-      <div class="d-flex ga-2 mb-2">
-        <v-text-field
-          :model-value="String(specDuration)"
-          label="时长(秒)"
-          type="number"
-          density="compact"
-          variant="outlined"
-          hide-details
-          @update:model-value="(v) => emit('update:config', { duration: Number(v) || 0 })"
-        />
-        <v-text-field
-          :model-value="String(specWidth)"
-          label="宽"
-          type="number"
-          density="compact"
-          variant="outlined"
-          hide-details
-          @update:model-value="(v) => emit('update:config', { resolution: { width: Number(v) || 0, height: specHeight } })"
-        />
-        <v-text-field
-          :model-value="String(specHeight)"
-          label="高"
-          type="number"
-          density="compact"
-          variant="outlined"
-          hide-details
-          @update:model-value="(v) => emit('update:config', { resolution: { width: specWidth, height: Number(v) || 0 } })"
-        />
-      </div>
-    </template>
+      <!-- 参考模式输出规格：时长 + 尺寸 -->
+      <v-text-field
+        :model-value="String(specDuration)"
+        label="时长(秒)"
+        type="number"
+        min="1"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="mb-2"
+        @update:model-value="(v) => emit('update:config', { duration: Number(v) || 0 })"
+      />
 
-    <!-- 提示词 -->
-    <v-textarea
-      :model-value="prompt"
-      label="提示词 Prompt"
-      rows="3"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="(v) => emit('update:config', { prompt: v })"
-    />
+      <WorkflowSizePicker
+        :project="props.project"
+        :model-value="sizeModelValue"
+        class="mb-2"
+        @update:model-value="onSizeChange"
+      />
+
+      <!-- 参考模式提示词（导演台模式由导演台内 prompt 输入承载） -->
+      <v-textarea
+        :model-value="prompt"
+        label="提示词 Prompt"
+        rows="3"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="mb-2"
+        @update:model-value="(v) => emit('update:config', { prompt: v })"
+      />
+    </template>
 
     <!-- 生成 / 中断 / 历史 -->
     <div class="d-flex align-center ga-2">
@@ -224,6 +217,8 @@ import type { CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { canvasDirectorToProject, projectToCanvasDirector } from '../../../canvas/videoDirectorBridge'
 import type { CanvasDirectorConfig, VideoGenerateMode } from '../../../canvas/videoTypes'
+import type { WorkflowUserParamValue } from '../../../api/workflow'
+import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
 import VideoDirector from '../../video-director/VideoDirector.vue'
 import VideoRefInputGroup from './VideoRefInputGroup.vue'
 
@@ -271,10 +266,17 @@ const emit = defineEmits<{
 /** 已加载的视频工作流列表（image-to-video 类） */
 const workflows = ref<WorkflowInfo[]>([])
 
-/** 当前选择的工作流 id（config.workflowId，缺省回退 image-to-video） */
-const workflowId = computed(() => {
-  const explicit = props.node.config.workflowId
-  return typeof explicit === 'string' && explicit ? explicit : 'image-to-video'
+/** 图生视频工作流类型（配置面板固定使用 image-to-video 类型） */
+const imageToVideoType = computed(() => workflows.value.find((w) => w.type === 'image-to-video'))
+
+/** 图生视频类型下的所有实现（如 LTX-2.3 / MiniMax H2V） */
+const impls = computed(() => imageToVideoType.value?.implementations ?? [])
+
+/** 当前选择的工作流实现标识（config.workflowImpl；非法/未初始化时回退第一个实现） */
+const workflowImpl = computed(() => {
+  const impl = props.node.config.workflowImpl
+  if (typeof impl === 'string' && impls.value.some((i) => i.impl === impl)) return impl
+  return impls.value[0]?.impl ?? ''
 })
 
 /** 当前提示词（config.prompt） */
@@ -294,15 +296,10 @@ const directorConfig = computed<CanvasDirectorConfig>(() => {
   return { duration: 0, width: 0, height: 0, fps: 0, imageClips: [], audioClips: [] }
 })
 
-/** 当前选择的工作流信息 */
-const currentWorkflow = computed(() => workflows.value.find((w) => w.id === workflowId.value))
-
-/** 当前选择的工作流实现（config.workflowImpl，缺省 default；找不到时回退第一个实现） */
-const currentImpl = computed(() => {
-  const impl = (props.node.config.workflowImpl as string | undefined) || 'default'
-  return currentWorkflow.value?.implementations.find((i) => i.impl === impl)
-    ?? currentWorkflow.value?.implementations[0]
-})
+/** 当前选择的工作流实现（找不到时回退第一个实现） */
+const currentImpl = computed(() =>
+  impls.value.find((i) => i.impl === workflowImpl.value) ?? impls.value[0],
+)
 
 /** 当前实现支持的生成模式列表（能力未声明 video.modes 时默认仅导演台） */
 const currentModes = computed<VideoGenerateMode[]>(() => {
@@ -318,11 +315,9 @@ const refVideoMax = computed(() => currentImpl.value?.capabilities?.video?.refer
 /** 参考模式音频数量上限（能力未声明时不限） */
 const refAudioMax = computed(() => currentImpl.value?.capabilities?.video?.reference?.types?.audio?.max)
 
-/** 工作流下拉选项（仅视频类工作流 image-to-video） */
+/** 工作流下拉选项（图生视频类型下的所有实现，直接选择实现） */
 const workflowItems = computed(() =>
-  workflows.value
-    .filter((w) => w.id === 'image-to-video')
-    .map((w) => ({ id: w.id, label: w.name })),
+  impls.value.map((i) => ({ value: i.impl, label: i.name })),
 )
 
 /** 生成模式下拉选项（按当前实现支持的模式生成中文标签） */
@@ -333,21 +328,23 @@ const modeItems = computed(() =>
   })),
 )
 
-/** 实现下拉选项（当前工作流类型下的所有实现） */
-const implItems = computed(() =>
-  (currentWorkflow.value?.implementations ?? []).map((i) => ({
-    value: i.impl,
-    label: i.name,
-  })),
-)
+/**
+ * 切换工作流实现：直接选择图生视频类型下的某个实现，重置工作流参数为默认。
+ * 模式由「模式回退」watch 收敛到新实现支持的第一个模式。
+ *
+ * @param v 实现标识（impl）
+ */
+function onWorkflowChange(v: string) {
+  emit('update:config', { workflowImpl: v, workflowParams: {} })
+}
 
 /**
- * 切换实现：重置工作流参数为默认，模式由模式回退 watch 收敛到新实现支持的第一个模式。
+ * 切换生成模式（director / first-last-frame / reference）。
  *
- * @param impl 实现标识
+ * @param v 目标模式
  */
-function onImplChange(impl: string) {
-  emit('update:config', { workflowImpl: impl, workflowParams: {} })
+function onModeChange(v: VideoGenerateMode) {
+  emit('update:config', { mode: v })
 }
 
 /** 当前模式不在所选实现支持范围内时，回退到第一个支持的模式（工作流列表加载后触发） */
@@ -359,30 +356,6 @@ watch(
     }
   },
 )
-
-/**
- * 切换工作流：重置实现与参数为所选工作流的第一个实现。
- *
- * @param v 工作流 id
- */
-function onWorkflowChange(v: string) {
-  const wf = workflows.value.find((w) => w.id === v)
-  const firstImpl = wf?.implementations[0]
-  emit('update:config', {
-    workflowId: v,
-    workflowImpl: firstImpl?.impl,
-    workflowParams: {},
-  })
-}
-
-/**
- * 切换生成模式（director / first-last-frame / reference）。
- *
- * @param v 目标模式
- */
-function onModeChange(v: VideoGenerateMode) {
-  emit('update:config', { mode: v })
-}
 
 /** 全部输入的预览 URL（nodeId → URL；输入或项目变化时重建） */
 const previewUrls = computed<Record<string, string>>(() => {
@@ -452,16 +425,64 @@ function mergeInputOrder(orderedIds: string[]): string[] {
 /** 参考模式输出时长（秒；config.duration，缺省 5） */
 const specDuration = computed(() => Number(props.node.config.duration) || 5)
 
-/** 参考模式输出分辨率（config.resolution，缺省 1280×720） */
-const specResolution = computed(() => {
-  const r = props.node.config.resolution as { width?: number; height?: number } | undefined
-  return { width: r?.width || 1280, height: r?.height || 720 }
+/** 导演台/首尾帧模式时长（秒；config.director.duration，缺省 5） */
+const directorDuration = computed(() => Number(directorConfig.value.duration) || 5)
+
+/**
+ * 当前输出尺寸（按模式读取）：
+ * - director / first-last-frame：config.director.width/height
+ * - reference：config.resolution.width/height
+ * 未设置时宽高为 0（对应 WorkflowSizePicker「不指定」，提交时回退默认尺寸）。
+ */
+const currentResolution = computed(() => {
+  if (mode.value === 'reference') {
+    const r = props.node.config.resolution as { width?: number; height?: number } | undefined
+    return { width: r?.width || 0, height: r?.height || 0 }
+  }
+  return { width: directorConfig.value.width || 0, height: directorConfig.value.height || 0 }
 })
 
-/** 参考模式输出宽度（像素） */
-const specWidth = computed(() => specResolution.value.width)
-/** 参考模式输出高度（像素） */
-const specHeight = computed(() => specResolution.value.height)
+/** WorkflowSizePicker 外部回显值（enable_specified_size + width/height） */
+const sizeModelValue = computed<Record<string, WorkflowUserParamValue>>(() => {
+  const { width, height } = currentResolution.value
+  const has = width > 0 && height > 0
+  return {
+    enable_specified_size: has,
+    ...(has ? { width, height } : {}),
+  }
+})
+
+/**
+ * 尺寸变化（WorkflowSizePicker 输出）回写配置：
+ * - 有宽高 → 写入当前模式存储位置（director.width/height 或 resolution）
+ * - 「不指定」→ 清空为 0，提交时回退默认尺寸
+ *
+ * @param v 组件输出的尺寸值（enable_specified_size / width / height）
+ */
+function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
+  const w = Number(v.width)
+  const h = Number(v.height)
+  const has = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
+  if (mode.value === 'reference') {
+    emit('update:config', { resolution: has ? { width: w, height: h } : { width: 0, height: 0 } })
+  } else {
+    emit('update:config', {
+      director: { ...directorConfig.value, width: has ? w : 0, height: has ? h : 0 },
+    })
+  }
+}
+
+/**
+ * 导演台/首尾帧模式时长变化，回写 config.director.duration。
+ *
+ * @param v 输入值（数字字符串或空串）
+ */
+function onDirectorDurationChange(v: unknown) {
+  const n = v === '' || v === null || v === undefined ? 0 : Number(v)
+  emit('update:config', {
+    director: { ...directorConfig.value, duration: Number.isFinite(n) ? n : 0 },
+  })
+}
 
 /** 参考模式限制提示（各类型输入超出能力上限时提示；非参考模式为空串） */
 const refLimitHint = computed(() => {

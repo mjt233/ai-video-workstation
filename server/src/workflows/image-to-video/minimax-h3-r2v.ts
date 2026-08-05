@@ -22,7 +22,7 @@ const REF_CAP: VideoReferenceCapability = {
 register(
   createComfyuiBridgeWorkflow<ImageToVideoVars>({
     baseDefinition: {
-      id: 'image-to-video',
+      type: 'image-to-video',
       name: 'MiniMax H2V',
       impl: 'minimax-h3-r2v',
       description: '参考模式：支持图片/视频/音频参考素材生成视频',

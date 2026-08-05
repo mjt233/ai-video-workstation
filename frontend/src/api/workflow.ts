@@ -67,9 +67,16 @@ export interface WorkflowImplementation {
   }
 }
 
+/**
+ * 工作流类型及其实现列表（/api/workflows 返回结构）。
+ *
+ * type 为工作流类型（如 image-to-video）；同一类型下可有多个实现（implementations），
+ * 每个实现的 impl 是其唯一 ID、name 是其阅读友好名称。
+ */
 export interface WorkflowInfo {
-  id: string
-  name: string
+  /** 工作流类型（如 image-to-video / text-to-image） */
+  type: string
+  /** 该类型下的全部实现（impl 为唯一 ID，name 为阅读友好名称） */
   implementations: WorkflowImplementation[]
 }
 

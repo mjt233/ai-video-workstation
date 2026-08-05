@@ -6,7 +6,7 @@ import type { TextToImageVars, WorkflowDefinition } from '../types.js';
  * 真实适配时替换 submit/poll/parseOutput。
  */
 register({
-  id: 'text-to-image',
+  type: 'text-to-image',
   name: '文生图 (Flux)',
   impl: 'flux',
   description: '使用 Flux 模型根据提示词生成图片（Mock）',

@@ -278,7 +278,7 @@ const configWarning = ref<string | null>(null)
 const workflows = ref<WorkflowInfo[]>([])
 const workflowMap = computed(() => {
   const m: Record<string, WorkflowInfo> = {}
-  for (const w of workflows.value) m[w.id] = w
+  for (const w of workflows.value) m[w.type] = w
   return m
 })
 

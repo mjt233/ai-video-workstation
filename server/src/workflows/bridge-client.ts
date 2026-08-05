@@ -597,7 +597,8 @@ export async function buildDownloadRequest(taskId: string): Promise<{
 // ── 文生图工作流快捷工厂 ─────────────────────────────────────────────
 
 export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
-  id: string;
+  /** 工作流类型，如 text-to-image */
+  type: string;
   name: string;
   impl: string;
   description?: string;
@@ -619,7 +620,7 @@ export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = Work
  * - poll：轮询 Bridge 任务状态，completed / failed 视为结束
  * - parseOutput：通过 buildDownloadRequest 解析首个输出文件的下载请求
  *
- * @param args.baseDefinition 工作流基础元信息（id / name / impl / description / params / capabilities）
+ * @param args.baseDefinition 工作流基础元信息（type / name / impl / description / params / capabilities）
  * @param args.submit 提交函数，接收 WorkflowRunContext，返回远端任务 ID
  * @returns 完整的工作流定义（WorkflowDefinition<TVars>）
  */
@@ -666,7 +667,7 @@ export function createTextToImageWorkflow<TVars extends WorkflowVarsBase = Workf
 
   return createComfyuiBridgeWorkflow<TVars>({
     baseDefinition: {
-      id: config.id,
+      type: config.type,
       name: config.name,
       impl: config.impl,
       description: config.description,
@@ -688,7 +689,8 @@ export function createTextToImageWorkflow<TVars extends WorkflowVarsBase = Workf
 // ── 图片编辑工作流快捷工厂 ───────────────────────────────────────────
 
 export interface ImageEditWorkflowConfig<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
-  id: string;
+  /** 工作流类型，如 image-edit */
+  type: string;
   name: string;
   impl: string;
   description?: string;
@@ -713,7 +715,7 @@ export function createImageEditWorkflow<TVars extends WorkflowVarsBase = Workflo
 ): WorkflowDefinition<TVars> {
   return createComfyuiBridgeWorkflow<TVars>({
     baseDefinition: {
-      id: config.id,
+      type: config.type,
       name: config.name,
       impl: config.impl,
       description: config.description,

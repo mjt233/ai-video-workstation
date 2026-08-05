@@ -252,7 +252,7 @@ function onDrop() {
   emit('update:config', { inputOrder: arr.map((x) => x.nodeId) })
 }
 
-const currentWorkflow = computed(() => workflows.value.find((w) => w.id === workflowId.value))
+const currentWorkflow = computed(() => workflows.value.find((w) => w.type === workflowId.value))
 const currentDeclarations = computed(() => {
   const impl = currentWorkflow.value?.implementations.find((i) => i.impl === (props.node.config.workflowImpl || 'default'))
   return impl?.params ?? []
@@ -260,8 +260,8 @@ const currentDeclarations = computed(() => {
 
 const workflowItems = computed(() =>
   workflows.value
-    .filter((w) => w.id === 'text-to-image' || w.id === 'image-edit')
-    .map((w) => ({ id: w.id, label: w.name })),
+    .filter((w) => w.type === 'text-to-image' || w.type === 'image-edit')
+    .map((w) => ({ id: w.type, label: w.implementations[0]?.name ?? w.type })),
 )
 
 watch(

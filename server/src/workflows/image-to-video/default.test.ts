@@ -14,7 +14,7 @@ vi.mock('../bridge-client.js', () => ({
   submitComfyuiBridge: vi.fn(),
   pollTask: vi.fn(),
   buildDownloadRequest: vi.fn(),
-  // 与真实工厂一致：把 baseDefinition 拍平到定义顶层（register 需要顶层 id/impl）
+  // 与真实工厂一致：把 baseDefinition 拍平到定义顶层（register 需要顶层 type/impl）
   createComfyuiBridgeWorkflow: (def: { baseDefinition: Record<string, unknown>; submit: unknown }) => ({
     ...def.baseDefinition,
     submit: def.submit,
