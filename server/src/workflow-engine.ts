@@ -787,17 +787,13 @@ async function runTask(taskId: string): Promise<void> {
     let pollResponse: Record<string, unknown> | undefined;
 
     // Step 2: Poll if defined
+    // 不设轮询时间上限：视频等生成任务可能远超 5 分钟，轮询直到远端返回 done（completed/failed）。
+    // 远端任务悬挂时用户可通过中断（cancel）兜底；Bridge 不可达时 wf.poll 抛错 → 任务直接 failed。
     if (wf.poll) {
       db.addLog(taskId, 'info', 'Polling task status...');
       const POLL_INTERVAL = 2000;
-      const MAX_POLL_TIME = 5 * 60 * 1000;
-      const startTime = Date.now();
 
       while (true) {
-        if (Date.now() - startTime > MAX_POLL_TIME) {
-          throw new Error('Task polling timed out after 5 minutes');
-        }
-
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
         const result = await wf.poll(remoteTaskId);
         pollResponse = result;
@@ -859,14 +855,9 @@ async function runTask(taskId: string): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     db.addLog(taskId, 'error', `Task failed: ${msg}`);
 
-    // Retry logic
-    if (task.retry_count < task.max_retries) {
-      db.incrementRetry(taskId);
-      db.updateTaskStatus(taskId, 'pending');
-      db.addLog(taskId, 'info', `Scheduled for retry (${task.retry_count + 1}/${task.max_retries})`);
-    } else {
-      db.updateTaskStatus(taskId, 'failed', { error_msg: msg });
-    }
+    // 失败直接标记 failed，不做自动重试/重新提交：避免长时间任务因轮询超时被重复提交远端生成
+    // （旧任务被遗弃仍消耗算力/费用）。需要重试时由用户通过节点「重试」/ POST /workflow/retry/:taskId 手动触发。
+    db.updateTaskStatus(taskId, 'failed', { error_msg: msg });
   }
 }
 
