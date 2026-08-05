@@ -465,6 +465,62 @@ export async function submitReferenceVideo(
   });
 }
 
+// ── 首尾帧模式图生视频封装（minimax-h3-fl2v）─────────────────────────
+
+/**
+ * minimax-h3-fl2v 首尾帧模式图生视频的提交参数。
+ */
+export interface MinimaxH3Fl2vSubmitParams {
+  /** 视频描述提示词 */
+  prompt: string;
+  /** 视频宽度（像素） */
+  width: number;
+  /** 视频高度（像素） */
+  height: number;
+  /** 视频时长（秒） */
+  duration: number;
+  /** 随机种子（可选） */
+  seed?: number;
+  /** 首帧图片（必填，文件键 image_0） */
+  firstFrame: File;
+  /** 尾帧图片（可选，文件键 image_1；存在时表示首尾帧插值） */
+  lastFrame?: File;
+}
+
+/**
+ * 提交首尾帧模式图生视频任务到 ComfyUI Bridge（minimax-h3-fl2v 工作流）。
+ *
+ * - params（prompt/width/height/duration/seed）以 JSON 字符串上传（multipart 方式 B）；
+ * - 首帧以文件键 `image_0` 上传；存在尾帧时以 `image_1` 上传。
+ *
+ * @param params 首尾帧模式图生视频提交参数
+ * @returns Bridge 提交结果（含 taskId）
+ */
+export async function submitMinimaxH3Fl2v(
+  params: MinimaxH3Fl2vSubmitParams,
+): Promise<BridgeSubmitResult> {
+  const body: Record<string, unknown> = {
+    prompt: params.prompt,
+    width: params.width,
+    height: params.height,
+    duration: params.duration,
+  };
+  if (params.seed != null) {
+    body.seed = params.seed;
+  }
+
+  const files: Record<string, File> = { image_0: params.firstFrame };
+  if (params.lastFrame) {
+    files.image_1 = params.lastFrame;
+  }
+
+  return submitComfyuiBridge({
+    workflowId: 'minimax-h3-fl2v',
+    params: body,
+    files,
+  });
+}
+
 export interface BridgeTaskStatus {
   status: string;
   progress: number;

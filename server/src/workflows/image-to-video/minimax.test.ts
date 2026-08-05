@@ -36,12 +36,13 @@ describe('minimax-h3-r2v 参考模式实现', () => {
     vi.unstubAllGlobals();
   });
 
-  it('能力声明含 reference 模式与限制', () => {
+  it('能力声明含 reference 与 first-last-frame 模式及限制', () => {
     const impl = getImpl('image-to-video', 'minimax-h3-r2v');
     expect(impl).toBeDefined();
-    expect(impl!.capabilities?.video?.modes).toEqual(['reference']);
+    expect(impl!.capabilities?.video?.modes).toEqual(['reference', 'first-last-frame']);
     expect(impl!.capabilities?.video?.reference?.types.image?.max).toBe(9);
     expect(impl!.capabilities?.video?.reference?.maxTotal).toBe(12);
+    expect(impl!.capabilities?.video?.firstLastFrame?.maxFrames).toBe(2);
     expect(impl!.capabilities?.cancelable).toBe(true);
   });
 
@@ -79,6 +80,73 @@ describe('minimax-h3-r2v 参考模式实现', () => {
     expect((form.get('image_0') as File).name).toBe('i0');
     expect((form.get('audio_0') as File).name).toBe('a0');
     expect((form.get('video_0') as File).name).toBe('v0');
+  });
+
+  it('首尾帧模式：提交 minimax-h3-fl2v，image_0 首帧必填、image_1 尾帧可选', async () => {
+    const impl = getImpl('image-to-video', 'minimax-h3-r2v')!;
+    const mk = (n: string) => new File([n], n, { type: 'image/png' });
+    const video = {
+      mode: 'first-last-frame',
+      resolution: { width: 1080, height: 1920 },
+      duration: 5,
+      prompt: '首尾帧',
+      director: {
+        frames: [
+          { file: mk('first.png'), cursor: 0 },
+          { file: mk('last.png'), cursor: 1 },
+        ],
+      },
+      extraParams: {},
+    };
+    const result = await impl.submit(mkContext(video));
+    expect(result.taskId).toBe('ref-task');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = fetchMock.mock.calls[0]?.[0] as string;
+    expect(url).toBe('http://localhost:10721/api/workflows/minimax-h3-fl2v/execute');
+    const form = (fetchMock.mock.calls[0]?.[1] as RequestInit).body as FormData;
+    const params = JSON.parse(form.get('params') as string) as Record<string, unknown>;
+    expect(params).toMatchObject({ prompt: '首尾帧', width: 1080, height: 1920, duration: 5 });
+    const fileKeys = [...form.keys()].filter((k) => k !== 'params');
+    expect(fileKeys).toEqual(['image_0', 'image_1']);
+    expect((form.get('image_0') as File).name).toBe('first.png');
+    expect((form.get('image_1') as File).name).toBe('last.png');
+  });
+
+  it('首尾帧模式：仅首帧时不带 image_1', async () => {
+    const impl = getImpl('image-to-video', 'minimax-h3-r2v')!;
+    const mk = (n: string) => new File([n], n, { type: 'image/png' });
+    const video = {
+      mode: 'first-last-frame',
+      resolution: { width: 720, height: 1280 },
+      duration: 5,
+      prompt: '仅首帧',
+      director: { frames: [{ file: mk('first.png'), cursor: 0 }] },
+      extraParams: {},
+    };
+    const result = await impl.submit(mkContext(video));
+    expect(result.taskId).toBe('ref-task');
+    const form = (fetchMock.mock.calls[0]?.[1] as RequestInit).body as FormData;
+    expect([...form.keys()].filter((k) => k !== 'params')).toEqual(['image_0']);
+  });
+
+  it('首尾帧模式：超过 2 帧抛错', async () => {
+    const impl = getImpl('image-to-video', 'minimax-h3-r2v')!;
+    const mk = () => new File(['x'], 'x.png', { type: 'image/png' });
+    const video = {
+      mode: 'first-last-frame',
+      resolution: { width: 720, height: 1280 },
+      duration: 5,
+      prompt: 'x',
+      director: {
+        frames: [
+          { file: mk(), cursor: 0 },
+          { file: mk(), cursor: 0.5 },
+          { file: mk(), cursor: 1 },
+        ],
+      },
+      extraParams: {},
+    };
+    await expect(impl.submit(mkContext(video))).rejects.toThrow('1~2 帧参考图');
   });
 
   it('超过总上限抛错', async () => {

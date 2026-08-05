@@ -1,5 +1,5 @@
 import { register } from '../registry.js';
-import { createComfyuiBridgeWorkflow, submitReferenceVideo } from '../bridge-client.js';
+import { createComfyuiBridgeWorkflow, submitReferenceVideo, submitMinimaxH3Fl2v } from '../bridge-client.js';
 import type { ImageToVideoVars, VideoReferenceCapability } from '../types.js';
 
 /** minimax-h3-r2v 参考模式限制 */
@@ -13,21 +13,30 @@ const REF_CAP: VideoReferenceCapability = {
   audioRequiresVisual: true,
 };
 
+/** minimax-h3-fl2v 首尾帧模式最大帧数 */
+const FL2V_MAX_FRAMES = 2;
+
 /**
- * 图生视频实现（ComfyUI Bridge，minimax-h3-r2v 参考模式）。
+ * 图生视频实现（ComfyUI Bridge，MiniMax H3）。
  *
- * 只消费引擎注入的自包含提交数据（ctx.video，mode=reference），
- * 将有序图片/视频/音频参考按类型序号映射为动态文件键提交。
+ * 只消费引擎注入的自包含提交数据（ctx.video）：
+ * - mode=reference → minimax-h3-r2v：将有序图片/视频/音频参考按类型序号映射为动态文件键提交；
+ * - mode=first-last-frame → minimax-h3-fl2v：首帧（image_0）必填，尾帧（image_1）可选。
  */
 register(
   createComfyuiBridgeWorkflow<ImageToVideoVars>({
     baseDefinition: {
       type: 'image-to-video',
-      name: 'MiniMax H2V',
+      name: 'MiniMax H3',
       impl: 'minimax-h3-r2v',
-      description: '参考模式：支持图片/视频/音频参考素材生成视频',
+      description: '参考模式（minimax-h3-r2v）：图片/视频/音频参考；首尾帧模式（minimax-h3-fl2v）：首帧+可选尾帧',
       capabilities: {
-        video: { modes: ['reference'], maxDuration: 15, reference: REF_CAP },
+        video: {
+          modes: ['reference', 'first-last-frame'],
+          maxDuration: 15,
+          reference: REF_CAP,
+          firstLastFrame: { maxFrames: FL2V_MAX_FRAMES },
+        },
         cancelable: true,
       },
     },
@@ -37,8 +46,27 @@ register(
       if (!video) {
         throw new Error('image-to-video 需要引擎注入 ctx.video');
       }
+
+      // ── 首尾帧模式（minimax-h3-fl2v）：首帧必填、尾帧可选 ──
+      if (video.mode === 'first-last-frame') {
+        const frames = video.director?.frames ?? [];
+        if (frames.length < 1 || frames.length > FL2V_MAX_FRAMES) {
+          throw new Error(`minimax-h3-fl2v 首尾帧模式需要 1~${FL2V_MAX_FRAMES} 帧参考图`);
+        }
+        const result = await submitMinimaxH3Fl2v({
+          prompt: video.prompt,
+          width: video.resolution.width,
+          height: video.resolution.height,
+          duration: video.duration,
+          seed: video.seed != null ? Number(video.seed) : undefined,
+          firstFrame: frames[0].file,
+          ...(frames.length > 1 ? { lastFrame: frames[frames.length - 1].file } : {}),
+        });
+        return { taskId: result.taskId };
+      }
+
       if (video.mode !== 'reference') {
-        throw new Error(`minimax-h3-r2v 仅支持参考模式，当前: ${video.mode}`);
+        throw new Error(`minimax-h3-r2v 不支持生成模式，当前: ${video.mode}`);
       }
       const refs = video.references ?? [];
       if (refs.length < 1) {

@@ -47,6 +47,11 @@ export interface WorkflowImplementation {
       audio?: boolean
       /** 最大输出时长（秒） */
       maxDuration?: number
+      /** 首尾帧模式限制（modes 含 first-last-frame 时可选声明） */
+      firstLastFrame?: {
+        /** 最大帧数（默认 3） */
+        maxFrames?: number
+      }
       /** 参考模式素材上限声明 */
       reference?: {
         /** 各类型素材数量上限 */

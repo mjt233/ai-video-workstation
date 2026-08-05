@@ -158,6 +158,11 @@ export interface VideoCapabilities {
   audio?: boolean;
   /** 参考模式声明（modes 含 reference 时必须提供） */
   reference?: VideoReferenceCapability;
+  /** 首尾帧模式限制（modes 含 first-last-frame 时可选声明） */
+  firstLastFrame?: {
+    /** 最大帧数（默认 3） */
+    maxFrames?: number;
+  };
   /** 视频最大输出时长（秒，默认 15） */
   maxDuration?: number;
 }

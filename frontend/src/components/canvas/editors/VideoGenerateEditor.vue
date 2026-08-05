@@ -64,13 +64,13 @@
 
     <!-- 首尾帧 / 参考模式：输入分组 + 输出规格 + 提示词 -->
     <template v-else>
-      <!-- 首尾帧模式：按顺序排列帧图片（首帧 0、尾帧 1，中间均匀分布；上限 3 帧） -->
+      <!-- 首尾帧模式：按顺序排列帧图片（首帧 0、尾帧 1，中间均匀分布；上限由实现能力决定） -->
       <VideoRefInputGroup
         v-if="mode === 'first-last-frame'"
         title="帧图片"
         prefix="帧"
         :inputs="imagesInputs"
-        :max="3"
+        :max="flfMaxFrames"
         @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
       >
         <template #thumb="{ input }">
@@ -345,6 +345,8 @@ const refImageMax = computed(() => currentImpl.value?.capabilities?.video?.refer
 const refVideoMax = computed(() => currentImpl.value?.capabilities?.video?.reference?.types?.video?.max)
 /** 参考模式音频数量上限（能力未声明时不限） */
 const refAudioMax = computed(() => currentImpl.value?.capabilities?.video?.reference?.types?.audio?.max)
+/** 首尾帧模式最大帧数（能力未声明时默认 3，如 LTX 3 帧 / MiniMax H3 2 帧） */
+const flfMaxFrames = computed(() => currentImpl.value?.capabilities?.video?.firstLastFrame?.maxFrames ?? 3)
 
 /** 工作流下拉选项（图生视频类型下的所有实现，直接选择实现） */
 const workflowItems = computed(() =>
