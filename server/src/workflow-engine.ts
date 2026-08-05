@@ -97,7 +97,9 @@ export async function discoverWorkflows(): Promise<void> {
     const categoryDir = path.join(WORKFLOWS_DIR, entry.name);
     const files = await fs.readdir(categoryDir);
     for (const file of files) {
+      // 跳过测试文件（*.test.ts / *.spec.ts）：其顶层 vi.mock 在服务启动环境不可用
       if (!file.endsWith('.ts') && !file.endsWith('.js')) continue;
+      if (file.endsWith('.test.ts') || file.endsWith('.spec.ts') || file.endsWith('.test.js')) continue;
       const mod = await import(pathToFileURL(path.join(categoryDir, file)).href);
       // Each module calls register() on import
       if (mod.default) {

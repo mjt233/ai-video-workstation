@@ -14,6 +14,21 @@
       @update:model-value="onWorkflowChange"
     />
 
+    <!-- 实现选择（同一工作流类型下有多个实现时，如 LTX-2.3 / MiniMax H2V） -->
+    <v-select
+      v-if="implItems.length > 1"
+      :model-value="currentImpl?.impl"
+      :items="implItems"
+      item-title="label"
+      item-value="value"
+      label="模型实现"
+      density="compact"
+      variant="outlined"
+      hide-details
+      class="mb-2"
+      @update:model-value="onImplChange"
+    />
+
     <!-- 模式切换（所选实现声明多种模式时显示） -->
     <v-select
       v-if="currentModes.length > 1"
@@ -282,10 +297,11 @@ const directorConfig = computed<CanvasDirectorConfig>(() => {
 /** 当前选择的工作流信息 */
 const currentWorkflow = computed(() => workflows.value.find((w) => w.id === workflowId.value))
 
-/** 当前选择的工作流实现（config.workflowImpl，缺省 default） */
+/** 当前选择的工作流实现（config.workflowImpl，缺省 default；找不到时回退第一个实现） */
 const currentImpl = computed(() => {
   const impl = (props.node.config.workflowImpl as string | undefined) || 'default'
   return currentWorkflow.value?.implementations.find((i) => i.impl === impl)
+    ?? currentWorkflow.value?.implementations[0]
 })
 
 /** 当前实现支持的生成模式列表（能力未声明 video.modes 时默认仅导演台） */
@@ -316,6 +332,23 @@ const modeItems = computed(() =>
     label: m === 'director' ? '导演台' : m === 'first-last-frame' ? '首尾帧' : '参考',
   })),
 )
+
+/** 实现下拉选项（当前工作流类型下的所有实现） */
+const implItems = computed(() =>
+  (currentWorkflow.value?.implementations ?? []).map((i) => ({
+    value: i.impl,
+    label: i.name,
+  })),
+)
+
+/**
+ * 切换实现：重置工作流参数为默认，模式由模式回退 watch 收敛到新实现支持的第一个模式。
+ *
+ * @param impl 实现标识
+ */
+function onImplChange(impl: string) {
+  emit('update:config', { workflowImpl: impl, workflowParams: {} })
+}
 
 /** 当前模式不在所选实现支持范围内时，回退到第一个支持的模式（工作流列表加载后触发） */
 watch(

@@ -773,6 +773,8 @@ const editorPanel = computed(() => {
 const EDITOR_PANEL_WIDTH = 400
 /** 生成图片节点配置面板固定宽度（更宽，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_WIDTH_GENERATE = 500
+/** 生成视频节点配置面板固定宽度（导演台嵌入需要，屏幕坐标，不随缩放变化） */
+const EDITOR_PANEL_WIDTH_VIDEO = 640
 /** 配置面板与节点底部之间的垂直间距（像素，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_GAP = 12
 
@@ -792,7 +794,11 @@ const editorPanelStyle = computed(() => {
   const node = selectedNode.value
   if (!node) return lastPanelStyle.value
   const vp = viewport.value
-  const width = node.prototypeId === 'image-generate' ? EDITOR_PANEL_WIDTH_GENERATE : EDITOR_PANEL_WIDTH
+  const width = node.prototypeId === 'image-generate'
+    ? EDITOR_PANEL_WIDTH_GENERATE
+    : node.prototypeId === 'video-generate'
+      ? EDITOR_PANEL_WIDTH_VIDEO
+      : EDITOR_PANEL_WIDTH
   // 面板水平中心 = 节点水平中心，保证节点在面板上方正中
   const nodeCenterX = (node.x + node.width / 2) * vp.zoom + vp.x
   const left = nodeCenterX - width / 2
