@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含五个内置节点', () => {
+  it('包含六个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'image-generate',
       'image-loader',
       'text',
+      'video-generate',
       'video-loader',
     ])
   })

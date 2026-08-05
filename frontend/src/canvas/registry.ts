@@ -1,14 +1,16 @@
-import type { Port } from './types'
+import type { NodeConfig, Port } from './types'
 import type { Component } from 'vue'
 import ImageLoaderNode from '../components/canvas/nodes/ImageLoaderNode.vue'
 import ImageGenerateNode from '../components/canvas/nodes/ImageGenerateNode.vue'
 import TextNode from '../components/canvas/nodes/TextNode.vue'
 import AudioLoaderNode from '../components/canvas/nodes/AudioLoaderNode.vue'
 import VideoLoaderNode from '../components/canvas/nodes/VideoLoaderNode.vue'
+import VideoGenerateNode from '../components/canvas/nodes/VideoGenerateNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
 import VideoLoaderEditor from '../components/canvas/editors/VideoLoaderEditor.vue'
+import VideoGenerateEditor from '../components/canvas/editors/VideoGenerateEditor.vue'
 
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
 export interface NodePrototype {
@@ -28,6 +30,8 @@ export interface NodePrototype {
   bodyComponent?: Component
   /** 节点被选中后渲染在节点下方的配置组件 */
   editorComponent?: Component
+  /** 创建节点时的默认配置（可选） */
+  defaultConfig?: NodeConfig
 }
 
 /** 内置节点原型注册表 */
@@ -80,6 +84,29 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,
     bodyComponent: TextNode,
+  },
+  {
+    id: 'video-generate',
+    name: '生成视频',
+    icon: 'mdi-video-plus',
+    inputPorts: [
+      { id: 'images', type: 'image', label: '图片' },
+      { id: 'videos', type: 'video', label: '视频' },
+      { id: 'audios', type: 'audio', label: '音频' },
+    ],
+    outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
+    resizeable: true,
+    bodyComponent: VideoGenerateNode,
+    editorComponent: VideoGenerateEditor,
+    defaultConfig: {
+      workflowId: 'image-to-video',
+      workflowImpl: undefined,
+      workflowParams: {},
+      mode: 'director',
+      prompt: '',
+      director: { duration: 0, width: 0, height: 0, fps: 0, imageClips: [], audioClips: [] },
+      inputOrder: [],
+    },
   },
 ]
 

@@ -3,6 +3,7 @@ import { createCanvasData, newId, type CanvasConnection, type CanvasData, type C
 import { loadCanvas, saveCanvas, type CanvasTarget } from './api'
 import { canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
 import { getPrototype } from './registry'
+import { applyConnectionSync } from './connectionSync'
 
 /** 自动保存防抖毫秒数 */
 const SAVE_DEBOUNCE_MS = 800
@@ -52,12 +53,19 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
 
   /**
    * 触发连线变化事件，通知全部监听者。
-   * 注意：connect/disconnect 已在结构变更前 pushHistory，一次撤销即可回退连线与节点级联动两个变更；
-   * 目标节点数据同步（轨道 clip 增删）在 Task 11 通过 connectionSync 接入。
+   * 画布节点级联动：先同步目标节点数据（connectionSync），再通知监听者。
+   * 注意：connect/disconnect 已在结构变更前 pushHistory，一次撤销即可回退连线与节点级联动两个变更。
    *
    * @param e 连线变化事件
    */
   function emitConnectionsChanged(e: ConnectionsChangedEvent): void {
+    // 不在此处 pushHistory：connect/disconnect 已在结构变更前快照，
+    // 一次撤销即可同时回退「连线」与「轨道同步」两个变更。
+    const synced = applyConnectionSync(data.value, e)
+    if (synced !== data.value) {
+      data.value = synced
+      markDirty()
+    }
     for (const l of connectionListeners) l(e)
   }
 
@@ -127,7 +135,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
       y,
       width: 240,
       height: 160,
-      config: {},
+      config: proto.defaultConfig ? JSON.parse(JSON.stringify(proto.defaultConfig)) : {},
     }
     pushHistory()
     data.value.nodes.push(node)
