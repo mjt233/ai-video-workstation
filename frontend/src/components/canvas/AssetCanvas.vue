@@ -199,6 +199,9 @@
               :project="props.project"
               :node="editorPanel?.node"
               :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
+              :images-inputs="videoInputGroups.images"
+              :videos-inputs="videoInputGroups.videos"
+              :audios-inputs="videoInputGroups.audios"
               :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
               :kind="target.kind"
               @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
@@ -1144,6 +1147,31 @@ function inputsOf(nodeId: string): CanvasInputInfo[] {
   const node = nodeMap.value[nodeId]
   return collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config)
 }
+
+/**
+ * 收集视频生成节点指定端口的输入资产（图片/视频/音频，按 config.inputOrder 排序）。
+ *
+ * @param nodeId 目标节点 id
+ * @param portId 目标输入端口 id（images/videos/audios）
+ * @returns 该端口输入资产信息数组
+ */
+function videoInputsOf(nodeId: string, portId: string): CanvasInputInfo[] {
+  const node = nodeMap.value[nodeId]
+  return collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, portId)
+}
+
+/** 视频生成节点三组端口输入（非 video-generate 节点为空数组；按 config.inputOrder 排序） */
+const videoInputGroups = computed(() => {
+  if (!editorPanel.value || editorPanel.value.node.prototypeId !== 'video-generate') {
+    return { images: [] as CanvasInputInfo[], videos: [] as CanvasInputInfo[], audios: [] as CanvasInputInfo[] }
+  }
+  const id = editorPanel.value.node.id
+  return {
+    images: videoInputsOf(id, 'images'),
+    videos: videoInputsOf(id, 'videos'),
+    audios: videoInputsOf(id, 'audios'),
+  }
+})
 
 /** 上游更新角标：生成节点任一输入节点资产比本节点新（current.date 更大）则显示 */
 function isUpstreamUpdated(nodeId: string): boolean {

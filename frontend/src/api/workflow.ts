@@ -33,8 +33,38 @@ export interface WorkflowImplementation {
    * 工作流能力声明（前端据此展示导演台等能力入口）。
    * - director：是否支持导演台模式（true 时引擎才会注入 director 负载）
    * - audio：是否支持传入外部音频（如导演台混音产物）
+   * - cancelable：是否支持中断（true 时前端可调用取消接口）
+   * - video：视频生成能力声明（支持的生成模式组合与参考模式素材上限）
    */
-  capabilities?: { director?: boolean; audio?: boolean }
+  capabilities?: {
+    director?: boolean
+    audio?: boolean
+    cancelable?: boolean
+    video?: {
+      /** 支持的生成模式组合（导演台/首尾帧/参考；未声明时默认仅导演台） */
+      modes?: Array<'director' | 'first-last-frame' | 'reference'>
+      /** 是否支持传入音频（如导演台混音产物） */
+      audio?: boolean
+      /** 最大输出时长（秒） */
+      maxDuration?: number
+      /** 参考模式素材上限声明 */
+      reference?: {
+        /** 各类型素材数量上限 */
+        types?: {
+          /** 图片：数量上限 */
+          image?: { max?: number }
+          /** 视频：数量上限与单段时长限制 */
+          video?: { max?: number; minDuration?: number; maxDuration?: number }
+          /** 音频：数量上限与单段时长限制 */
+          audio?: { max?: number; minDuration?: number; maxDuration?: number }
+        }
+        /** 混合输入合计上限 */
+        maxTotal?: number
+        /** 音频是否必须与图像/视频一同输入（不能作为唯一输入） */
+        audioRequiresVisual?: boolean
+      }
+    }
+  }
 }
 
 export interface WorkflowInfo {
