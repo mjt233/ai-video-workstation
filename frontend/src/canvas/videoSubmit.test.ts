@@ -53,33 +53,29 @@ describe('buildVideoSubmitParams', () => {
     expect(params.extraParams).toEqual({})
   })
 
-  it('首尾帧模式：cursor 自动均匀分布', () => {
+  it('首尾帧模式：按 inputOrder 排列帧图片，cursor 自动均匀分布', () => {
     const node = mkNode({
       mode: 'first-last-frame',
       prompt: 'p',
-      director: {
-        duration: 6,
-        width: 1080,
-        height: 1920,
-        fps: 24,
-        imageClips: [
-          { id: 'a', sourceNodeId: 'img1', startOffset: 0, duration: 2 },
-          { id: 'b', sourceNodeId: 'img2', startOffset: 2, duration: 2 },
-          { id: 'c', sourceNodeId: 'img3', startOffset: 4, duration: 2 },
-        ],
-        audioClips: [],
-      },
+      inputOrder: ['img3', 'img1', 'img2'],
+      duration: 6,
+      resolution: { width: 1080, height: 1920 },
       workflowParams: {},
     })
     const inputs = {
       images: [mkInput('img1', 'assert/1.png'), mkInput('img2', 'assert/2.png'), mkInput('img3', 'assert/3.png')],
       videos: [],
-      audios: [],
+      audios: [mkInput('aud1', 'assert/a.flac')],
     }
     const params = buildVideoSubmitParams(node, inputs)
     expect(params.mode).toBe('first-last-frame')
-    const cursors = params.director?.frames.map((f) => f.cursor)
-    expect(cursors).toEqual([0, 0.5, 1])
+    // 帧顺序按 inputOrder：img3 在前，img1、img2 其后
+    expect(params.director?.frames.map((f) => f.path)).toEqual(['assert/3.png', 'assert/1.png', 'assert/2.png'])
+    expect(params.director?.frames.map((f) => f.cursor)).toEqual([0, 0.5, 1])
+    expect(params.resolution).toEqual({ width: 1080, height: 1920 })
+    expect(params.duration).toBe(6)
+    // 音频取第一条音频输入
+    expect(params.director?.audio?.path).toBe('assert/a.flac')
   })
 
   it('参考模式：按 inputOrder 过滤分组生成有序 references', () => {

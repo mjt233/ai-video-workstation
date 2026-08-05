@@ -29,8 +29,8 @@
       @update:model-value="onModeChange"
     />
 
-    <!-- 导演台 / 首尾帧模式：输出规格 + 嵌入导演台（导演台内含 prompt 输入） -->
-    <template v-if="mode === 'director' || mode === 'first-last-frame'">
+    <!-- 导演台模式：输出规格 + 嵌入导演台（仅导演台加载 VideoDirector，内含 prompt 输入） -->
+    <template v-if="mode === 'director'">
       <v-text-field
         :model-value="String(directorDuration)"
         label="时长(秒)"
@@ -62,13 +62,15 @@
       />
     </template>
 
-    <!-- 参考模式：分组预览 + 提示词 + 规格 -->
+    <!-- 首尾帧 / 参考模式：输入分组 + 输出规格 + 提示词 -->
     <template v-else>
+      <!-- 首尾帧模式：按顺序排列帧图片（首帧 0、尾帧 1，中间均匀分布；上限 3 帧） -->
       <VideoRefInputGroup
-        title="图片"
-        prefix="图"
+        v-if="mode === 'first-last-frame'"
+        title="帧图片"
+        prefix="帧"
         :inputs="imagesInputs"
-        :max="refImageMax"
+        :max="3"
         @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
       >
         <template #thumb="{ input }">
@@ -88,54 +90,81 @@
         </template>
       </VideoRefInputGroup>
 
-      <VideoRefInputGroup
-        title="视频"
-        prefix="视"
-        :inputs="videosInputs"
-        :max="refVideoMax"
-        @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
-      >
-        <template #thumb="{ input }">
-          <video
-            class="canvas-input-item__thumb"
-            :src="previewUrls[input.nodeId]"
-            muted
-            draggable="false"
-          />
-        </template>
-        <template #zoom="{ input }">
-          <video
-            class="canvas-input-zoom"
-            :src="previewUrls[input.nodeId]"
-            controls
-            muted
-          />
-        </template>
-      </VideoRefInputGroup>
+      <!-- 参考模式：图片 / 视频 / 音频分组预览 -->
+      <template v-if="mode === 'reference'">
+        <VideoRefInputGroup
+          title="图片"
+          prefix="图"
+          :inputs="imagesInputs"
+          :max="refImageMax"
+          @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+        >
+          <template #thumb="{ input }">
+            <img
+              class="canvas-input-item__thumb"
+              :src="previewUrls[input.nodeId]"
+              :alt="input.label"
+              draggable="false"
+            >
+          </template>
+          <template #zoom="{ input }">
+            <img
+              class="canvas-input-zoom"
+              :src="previewUrls[input.nodeId]"
+              :alt="input.label"
+            >
+          </template>
+        </VideoRefInputGroup>
 
-      <VideoRefInputGroup
-        title="音频"
-        prefix="音"
-        :inputs="audiosInputs"
-        :max="refAudioMax"
-        @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
-      >
-        <template #thumb="{ input }">
-          <audio
-            class="canvas-input-item__thumb"
-            :src="previewUrls[input.nodeId]"
-            controls
-            draggable="false"
-          />
-        </template>
-        <template #zoom="{ input }">
-          <audio
-            class="canvas-input-zoom"
-            :src="previewUrls[input.nodeId]"
-            controls
-          />
-        </template>
-      </VideoRefInputGroup>
+        <VideoRefInputGroup
+          title="视频"
+          prefix="视"
+          :inputs="videosInputs"
+          :max="refVideoMax"
+          @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+        >
+          <template #thumb="{ input }">
+            <video
+              class="canvas-input-item__thumb"
+              :src="previewUrls[input.nodeId]"
+              muted
+              draggable="false"
+            />
+          </template>
+          <template #zoom="{ input }">
+            <video
+              class="canvas-input-zoom"
+              :src="previewUrls[input.nodeId]"
+              controls
+              muted
+            />
+          </template>
+        </VideoRefInputGroup>
+
+        <VideoRefInputGroup
+          title="音频"
+          prefix="音"
+          :inputs="audiosInputs"
+          :max="refAudioMax"
+          @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+        >
+          <template #thumb="{ input }">
+            <audio
+              class="canvas-input-item__thumb"
+              :src="previewUrls[input.nodeId]"
+              controls
+              draggable="false"
+            />
+          </template>
+          <template #zoom="{ input }">
+            <audio
+              class="canvas-input-zoom"
+              :src="previewUrls[input.nodeId]"
+              controls
+            />
+          </template>
+        </VideoRefInputGroup>
+      </template>
 
       <div
         v-if="refLimitHint"
@@ -144,7 +173,7 @@
         {{ refLimitHint }}
       </div>
 
-      <!-- 参考模式输出规格：时长 + 尺寸 -->
+      <!-- 输出规格：时长 + 尺寸 -->
       <v-text-field
         :model-value="String(specDuration)"
         label="时长(秒)"
@@ -164,7 +193,7 @@
         @update:model-value="onSizeChange"
       />
 
-      <!-- 参考模式提示词（导演台模式由导演台内 prompt 输入承载） -->
+      <!-- 提示词（导演台模式由导演台内 prompt 输入承载） -->
       <v-textarea
         :model-value="prompt"
         label="提示词 Prompt"
@@ -226,9 +255,11 @@ import VideoRefInputGroup from './VideoRefInputGroup.vue'
  * 视频生成节点配置组件。
  *
  * 支持三种生成模式（由所选工作流实现的能力声明决定）：
- * - director / first-last-frame：嵌入 VideoDirector 导演台，编辑结果实时写回 config.director
+ * - director：仅此模式加载 VideoDirector 导演台（编辑结果实时写回 config.director，内含 prompt 输入）
+ * - first-last-frame：按 config.inputOrder 排列帧图片（首帧 0、尾帧 1，中间均匀分布），
+ *   编辑输出规格（时长/尺寸）与提示词
  * - reference：参考模式，按图片/视频/音频三组展示输入并支持组内拖拽排序，
- *   可编辑输出规格（时长/宽/高）并校验参考素材数量上限
+ *   可编辑输出规格（时长/尺寸）并校验参考素材数量上限
  */
 const props = defineProps<{
   /** 项目名（用于资产预览 URL 与导演台素材） */
@@ -430,16 +461,16 @@ const directorDuration = computed(() => Number(directorConfig.value.duration) ||
 
 /**
  * 当前输出尺寸（按模式读取）：
- * - director / first-last-frame：config.director.width/height
- * - reference：config.resolution.width/height
+ * - director：config.director.width/height
+ * - first-last-frame / reference：config.resolution.width/height
  * 未设置时宽高为 0（对应 WorkflowSizePicker「不指定」，提交时回退默认尺寸）。
  */
 const currentResolution = computed(() => {
-  if (mode.value === 'reference') {
-    const r = props.node.config.resolution as { width?: number; height?: number } | undefined
-    return { width: r?.width || 0, height: r?.height || 0 }
+  if (mode.value === 'director') {
+    return { width: directorConfig.value.width || 0, height: directorConfig.value.height || 0 }
   }
-  return { width: directorConfig.value.width || 0, height: directorConfig.value.height || 0 }
+  const r = props.node.config.resolution as { width?: number; height?: number } | undefined
+  return { width: r?.width || 0, height: r?.height || 0 }
 })
 
 /** WorkflowSizePicker 外部回显值（enable_specified_size + width/height） */
@@ -463,12 +494,13 @@ function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
   const w = Number(v.width)
   const h = Number(v.height)
   const has = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
-  if (mode.value === 'reference') {
-    emit('update:config', { resolution: has ? { width: w, height: h } : { width: 0, height: 0 } })
-  } else {
+  if (mode.value === 'director') {
     emit('update:config', {
       director: { ...directorConfig.value, width: has ? w : 0, height: has ? h : 0 },
     })
+  } else {
+    // first-last-frame / reference
+    emit('update:config', { resolution: has ? { width: w, height: h } : { width: 0, height: 0 } })
   }
 }
 
@@ -500,13 +532,17 @@ const refLimitHint = computed(() => {
   return parts.join('；')
 })
 
-/** 是否可触发生成：参考模式需至少一个输入且不超上限；导演台/首尾帧需有图片块 */
+/** 是否可触发生成：导演台需有图片块；首尾帧需有帧图片；参考需至少一个输入且不超上限 */
 const canGenerate = computed(() => {
-  if (mode.value === 'reference') {
-    const total = props.imagesInputs.length + props.videosInputs.length + props.audiosInputs.length
-    return total > 0 && !refLimitHint.value
+  if (mode.value === 'director') {
+    return directorConfig.value.imageClips.length > 0
   }
-  return directorConfig.value.imageClips.length > 0
+  if (mode.value === 'first-last-frame') {
+    return props.imagesInputs.length > 0
+  }
+  // reference
+  const total = props.imagesInputs.length + props.videosInputs.length + props.audiosInputs.length
+  return total > 0 && !refLimitHint.value
 })
 
 // 加载工作流列表（初始化一次）
