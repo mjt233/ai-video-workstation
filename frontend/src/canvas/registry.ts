@@ -12,6 +12,8 @@ export interface NodePrototype {
   id: string
   /** 节点名称（方便用户阅读） */
   name: string
+  /** 节点图标（Material Design Icons 名称，用于菜单/列表展示） */
+  icon: string
   /** 输入端口定义（可接受的连接类型由此决定） */
   inputPorts: Port[]
   /** 输出端口定义 */
@@ -29,6 +31,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
   {
     id: 'image-loader',
     name: '加载图片',
+    icon: 'mdi-image-outline',
     inputPorts: [],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: false,
@@ -38,6 +41,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
   {
     id: 'image-generate',
     name: '生成图片',
+    icon: 'mdi-image-plus',
     inputPorts: [{ id: 'in', type: 'image', label: '参考图' }],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: true,
@@ -47,6 +51,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
   {
     id: 'text',
     name: '文本',
+    icon: 'mdi-format-text',
     inputPorts: [],
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,

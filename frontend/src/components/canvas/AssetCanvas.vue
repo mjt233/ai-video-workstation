@@ -74,7 +74,7 @@
           variant="text"
           icon="mdi-plus-thick"
           title="添加节点（或双击空白处）"
-          @click="openAddDialogAt(80, 80)"
+          @click="openAddMenu($event, 80, 80)"
         />
         <v-spacer />
         <v-progress-circular
@@ -303,6 +303,37 @@
             断开连接
           </div>
         </div>
+
+        <!-- 添加节点菜单锚点：0×0 隐藏定位点，供 VMenu 在鼠标双击处定位 -->
+        <div
+          ref="addMenuAnchorEl"
+          class="add-menu-anchor"
+          :style="{ left: `${addMenu.x}px`, top: `${addMenu.y}px` }"
+        />
+        <!-- 添加节点菜单：双击空白处/工具栏「＋」在鼠标处弹出，选择要添加的节点原型 -->
+        <v-menu
+          v-model="addMenu.show"
+          :activator="addMenuActivator"
+          location="bottom start"
+          :open-on-click="false"
+          min-width="180"
+        >
+          <v-list
+            density="compact"
+            nav
+          >
+            <v-list-subheader class="add-menu__title">
+              添加节点
+            </v-list-subheader>
+            <v-list-item
+              v-for="p in NODE_PROTOTYPES"
+              :key="p.id"
+              :title="p.name"
+              :prepend-icon="p.icon"
+              @click="addNodeAt(p.id)"
+            />
+          </v-list>
+        </v-menu>
       </div>
 
       <!-- 加载中 / 空画布引导 -->
@@ -323,31 +354,6 @@
           双击空白处或点击工具栏「＋」添加节点
         </div>
       </div>
-
-      <!-- 添加节点对话框 -->
-      <v-dialog
-        v-model="addDialog.show"
-        max-width="360"
-      >
-        <v-card>
-          <v-card-title class="text-body-1">
-            添加节点
-          </v-card-title>
-          <v-card-text class="pa-2">
-            <v-list
-              density="compact"
-              nav
-            >
-              <v-list-item
-                v-for="p in NODE_PROTOTYPES"
-                :key="p.id"
-                :title="p.name"
-                @click="addNodeAt(p.id)"
-              />
-            </v-list>
-          </v-card-text>
-        </v-card>
-      </v-dialog>
 
       <!-- 重命名对话框：已由节点名称双击内联编辑取代 -->
 
@@ -779,12 +785,13 @@ watch(editorPanelStyle, (style) => {
   if (style) lastPanelStyle.value = style
 })
 
-/** 点击节点：选中并关闭右键菜单（允许显示配置面板） */
+/** 点击节点：选中并关闭右键菜单/添加节点菜单（允许显示配置面板） */
 function onNodeClick({ node }: NodeMouseEvent) {
   suppressEditor.value = false
   selectedNodeId.value = node.id
   contextMenu.show = false
   edgeMenu.show = false
+  addMenu.show = false
 }
 
 /** 节点开始拖拽：抑制配置面板显示（仅点击节点才显示配置） */
@@ -942,31 +949,46 @@ function onKeydown(e: KeyboardEvent) {
 
 // ── 添加节点 ────────────────────────────────────────────
 
-const addDialog = reactive({ show: false, x: 80, y: 80 })
+/** 添加节点菜单状态：show 控制显隐；x/y 为菜单锚点坐标（相对画布容器）；flowX/flowY 为新建节点放置的流坐标 */
+const addMenu = reactive({ show: false, x: 0, y: 0, flowX: 80, flowY: 80 })
+/** 添加节点菜单锚点元素（0×0 隐藏定位点，VMenu 依此在鼠标处弹出） */
+const addMenuAnchorEl = ref<HTMLElement | null>(null)
+/** VMenu 的定位锚点：去掉 null（activator 类型不接受 null，undefined 可接受），元素挂载后即可用 */
+const addMenuActivator = computed(() => addMenuAnchorEl.value ?? undefined)
 
-/** 打开添加节点对话框（指定初始坐标） */
-function openAddDialogAt(x: number, y: number) {
-  addDialog.x = x
-  addDialog.y = y
-  addDialog.show = true
+/**
+ * 打开添加节点菜单：锚点定位到鼠标位置，并指定新建节点放置的流坐标。
+ *
+ * @param event 触发打开的鼠标事件（提供菜单弹出位置）
+ * @param flowX 新建节点在画布流坐标系中的 x
+ * @param flowY 新建节点在画布流坐标系中的 y
+ */
+function openAddMenu(event: MouseEvent, flowX: number, flowY: number) {
+  const rect = flowEl.value?.getBoundingClientRect()
+  addMenu.x = Math.round(event.clientX - (rect?.left ?? 0))
+  addMenu.y = Math.round(event.clientY - (rect?.top ?? 0))
+  addMenu.flowX = flowX
+  addMenu.flowY = flowY
+  addMenu.show = true
 }
 
-/** 按原型添加节点 */
+/** 按原型添加节点（关闭菜单） */
 function addNodeAt(prototypeId: string) {
-  store.addNode(prototypeId, addDialog.x, addDialog.y)
-  addDialog.show = false
+  store.addNode(prototypeId, addMenu.flowX, addMenu.flowY)
+  addMenu.show = false
 }
 
-/** 空白处点击：单击关闭右键菜单，双击打开添加节点对话框 */
+/** 空白处点击：单击关闭菜单，双击在鼠标处弹出添加节点菜单 */
 function onPaneClick(event: MouseEvent) {
   contextMenu.show = false
   edgeMenu.show = false
+  addMenu.show = false
   suppressEditor.value = false
   selectedNodeId.value = ''
   selectedEdgeId.value = ''
   if (event.detail >= 2) {
     const p = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
-    openAddDialogAt(Math.round(p.x - 60), Math.round(p.y - 40))
+    openAddMenu(event, Math.round(p.x - 60), Math.round(p.y - 40))
   }
 }
 
@@ -1720,6 +1742,23 @@ watch([panelEl, flowEl], ([panel, flow]) => {
 
 .canvas-context-menu__item--danger:hover {
   background: rgba(176, 0, 32, 0.08);
+}
+
+/* 添加节点菜单锚点：0×0 隐藏定位点，供 VMenu 在鼠标处弹出（不拦截画布交互） */
+.add-menu-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* 添加节点菜单标题：加粗 + 底部细分隔线，与选项列表区分 */
+.add-menu__title {
+  font-weight: 500;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  margin-bottom: 2px;
+  padding-bottom: 6px;
 }
 
 .scene-frame-option {
