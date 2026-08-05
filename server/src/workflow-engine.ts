@@ -745,12 +745,12 @@ async function runTask(taskId: string): Promise<void> {
     db.addLog(taskId, 'info', `Starting workflow: ${wf.name} (impl: ${wf.impl})`);
     db.updateTaskStatus(taskId, 'running');
 
-    // 导演台负载：仅当所选实现声明 capabilities.director 且分镜存在 director.json 时注入。
+    // 导演台负载：仅当所选实现声明 video.modes 含 director 且分镜存在 director.json 时注入。
     // 注入后 duration 以导演台为准（覆盖 enrichImageToVideoParams 从 overview.json 注入的时长）。
     // 构建置于 try 内：任一依赖抛错（导演台配置损坏、关键帧图片缺失、混音无可用轨道等）都会
     // 由下方统一失败处理标记 failed 或调度重试，避免任务停留在 running 状态
     let director: DirectorPayload | undefined;
-    if (task.workflow_id === 'image-to-video' && capabilities?.director) {
+    if (task.workflow_id === 'image-to-video' && capabilities?.video?.modes?.includes('director')) {
       const episode = vars.episode?.trim();
       const shot = vars.shot?.trim();
       if (episode && shot) {

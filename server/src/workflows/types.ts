@@ -80,7 +80,7 @@ export interface WorkflowRunContext<TVars extends WorkflowVarsBase = WorkflowVar
   vars: TVars;
   /** 引擎按需解析的资产文件（预留，P1 可不使用） */
   assets?: Record<string, File>;
-  /** 导演台负载：仅当 director.json 存在且所选实现声明 capabilities.director 时注入 */
+  /** 导演台负载：仅当 director.json 存在且所选实现声明 video.modes 含 director 时注入 */
   director?: DirectorPayload;
   /** 用户手动传入的工作流参数（按实现声明 key） */
   userParams?: Record<string, boolean | number | string>;
@@ -126,17 +126,48 @@ export interface WorkflowBaseDefinition {
   params?: WorkflowUserParamDeclaration[];
 }
 
+/** 视频生成模式（可组合声明） */
+export type VideoGenerateMode = 'director' | 'first-last-frame' | 'reference';
+
+/** 参考模式能力声明 */
+export interface VideoReferenceCapability {
+  /** 各参考类型的最大数量（未声明=不支持该类型） */
+  types: {
+    image?: { max: number };
+    video?: { max: number; minDuration?: number; maxDuration?: number };
+    audio?: { max: number; minDuration?: number; maxDuration?: number };
+  };
+  /** 参考素材总数量上限 */
+  maxTotal: number;
+  /** 音频是否不能作为唯一输入（默认 false） */
+  audioRequiresVisual?: boolean;
+}
+
+/** 视频工作流能力 */
+export interface VideoCapabilities {
+  /** 支持的生成模式（可组合，如 ['director', 'reference']） */
+  modes: VideoGenerateMode[];
+  /** 是否支持输入音频（供导演台/首尾帧模式使用） */
+  audio?: boolean;
+  /** 参考模式声明（modes 含 reference 时必须提供） */
+  reference?: VideoReferenceCapability;
+  /** 视频最大输出时长（秒，默认 15） */
+  maxDuration?: number;
+}
+
 /**
  * 工作流能力声明（注册时声明，经 /api/workflows 透传前端）。
  *
- * 前端据此展示能力入口（如导演台模式、外部音频导入），
- * 引擎据此决定是否注入对应负载（如 director）。
+ * 前端据此展示能力入口（导演台模式、外部音频导入、参考模式等），
+ * 引擎据此决定是否注入对应负载（如 video 自包含提交数据）。
  */
 export interface WorkflowCapabilities {
-  /** 是否支持导演台模式（true 时引擎才会注入 director 负载） */
-  director?: boolean;
+  /** 视频工作流能力（导演台/首尾帧/参考模式与限制） */
+  video?: VideoCapabilities;
   /** 是否支持传入外部音频（如导演台混音产物） */
   audio?: boolean;
+  /** 是否支持中断（所有 Bridge 工作流声明 true） */
+  cancelable?: boolean;
 }
 
 /**

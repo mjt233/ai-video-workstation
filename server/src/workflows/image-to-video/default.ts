@@ -21,7 +21,7 @@ import type { ImageToVideoVars } from '../types.js';
  * 2. 有台词但未编辑音频 → 拼接所有台词文本，调用 TTS 生成音频
  * 3. 无台词 → 不提交音频
  *
- * 导演台模式（声明 capabilities.director + audio）：
+ * 导演台模式（声明 video.modes 含 director + audio）：
  * - 引擎注入 director 负载时 → 走 ltx-2.3-director 工作流（关键帧 + 混音音频）
  * - 否则走普通模式（FL2V / FML2V + TTS 音频策略）
  */
@@ -32,7 +32,7 @@ register(
       name: 'LTX-2.3',
       impl: 'ltx',
       description: '使用 FL2V / FML2V 模型基于参考帧图生成视频',
-      capabilities: { director: true, audio: true },
+      capabilities: { video: { modes: ['director'], audio: true, maxDuration: 15 }, cancelable: true },
     },
 
     async submit(ctx) {

@@ -44,7 +44,7 @@ export interface DirectorInjectDeps {
  * 构建导演台执行负载（DirectorPayload）。
  *
  * 由引擎在图像生成视频（image-to-video）任务中调用：当所选实现声明
- * `capabilities.director` 且分镜目录存在 `prompt/scene/{ep}/{shot}/director.json`
+ * `video.modes` 含 `director` 且分镜目录存在 `prompt/scene/{ep}/{shot}/director.json`
  * 时，将导演台配置解析为视频生成所需的关键帧序列（frames）与混音音频（audio）。
  *
  * 处理流程：
