@@ -44,7 +44,7 @@
         />
         <span
           v-if="!voiceEp || !voiceShot"
-          class="text-caption text-grey"
+          class="text-body-small text-grey"
         >
           请选择集数与分镜
         </span>

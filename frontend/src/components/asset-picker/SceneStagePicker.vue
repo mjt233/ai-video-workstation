@@ -61,7 +61,7 @@
             </v-icon>
           </div>
           <div
-            class="pa-1 text-caption text-truncate text-center"
+            class="pa-1 text-body-small text-truncate text-center"
             :title="item.label"
           >
             {{ item.label }}
@@ -71,7 +71,7 @@
     </v-row>
     <div
       v-else
-      class="text-grey text-body-2 text-center py-8"
+      class="text-grey text-body-medium text-center py-8"
     >
       该分镜暂无场景图（请先在「场景图片」页签生成）
     </div>

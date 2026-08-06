@@ -10,7 +10,7 @@
     @error="imgError = true"
   >
     <template #placeholder>
-      <div class="d-flex align-center justify-center fill-height text-caption text-grey">
+      <div class="d-flex align-center justify-center fill-height text-body-small text-grey">
         {{ placeholder }}
       </div>
     </template>

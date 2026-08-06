@@ -10,7 +10,7 @@
         title="返回上级目录"
         @click="goUp"
       />
-      <span class="text-caption text-truncate">
+      <span class="text-body-small text-truncate">
         {{ cwdLabel }}
       </span>
     </div>
@@ -39,7 +39,7 @@
         >
           mdi-folder
         </v-icon>
-        <span class="text-caption">{{ dir }}/</span>
+        <span class="text-body-small">{{ dir }}/</span>
       </div>
       <div
         v-for="file in files"
@@ -55,7 +55,7 @@
           mdi-music-note
         </v-icon>
         <span
-          class="text-caption text-truncate"
+          class="text-body-small text-truncate"
           :title="file.label"
         >
           {{ file.label }}
@@ -72,7 +72,7 @@
     </div>
     <div
       v-else
-      class="text-grey text-body-2 text-center py-8"
+      class="text-grey text-body-medium text-center py-8"
     >
       该目录暂无音频文件
     </div>

@@ -33,7 +33,7 @@
           class="flex-grow-1"
           style="min-width: 0;"
         >
-          <div class="text-caption text-truncate">
+          <div class="text-body-small text-truncate">
             <strong>{{ line.index + 1 }}. {{ line.角色名 }}</strong>
             <span class="text-grey ml-1">{{ line.台词 }}</span>
           </div>
@@ -57,7 +57,7 @@
     </div>
     <div
       v-else
-      class="text-grey text-body-2 text-center py-8"
+      class="text-grey text-body-medium text-center py-8"
     >
       该分镜暂无台词
     </div>

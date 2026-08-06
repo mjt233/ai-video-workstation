@@ -3,7 +3,7 @@
     class="pa-3"
     style="min-height: 84px;"
   >
-    <div class="text-caption text-medium-emphasis mb-2">
+    <div class="text-body-small text-medium-emphasis mb-2">
       已选资产（按序）：
     </div>
     <div
@@ -41,7 +41,7 @@
               mdi-music-note
             </v-icon>
           </v-avatar>
-          <span class="text-caption">{{ item.label }}</span>
+          <span class="text-body-small">{{ item.label }}</span>
         </v-chip>
         <div class="d-flex flex-column ga-0">
           <v-btn
@@ -65,7 +65,7 @@
     </div>
     <div
       v-else
-      class="text-caption text-grey"
+      class="text-body-small text-grey"
     >
       暂无选择，点击上方资产添加
     </div>

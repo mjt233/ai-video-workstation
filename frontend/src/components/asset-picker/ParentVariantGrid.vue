@@ -10,7 +10,7 @@
   </div>
   <div
     v-else-if="!parentVariants.length"
-    class="text-grey text-body-2 text-center py-8"
+    class="text-grey text-body-medium text-center py-8"
   >
     暂无可用变体
   </div>
@@ -37,16 +37,16 @@
           class="bg-grey-lighten-3"
         >
           <template #placeholder>
-            <div class="d-flex align-center justify-center fill-height text-caption text-grey">
+            <div class="d-flex align-center justify-center fill-height text-body-small text-grey">
               加载中
             </div>
           </template>
         </v-img>
         <div class="pa-1">
-          <div class="text-caption text-truncate font-weight-medium">
+          <div class="text-body-small text-truncate font-weight-medium">
             {{ v.id }}
           </div>
-          <div class="text-caption text-truncate text-grey">
+          <div class="text-body-small text-truncate text-grey">
             {{ v.desc }}
           </div>
           <v-chip

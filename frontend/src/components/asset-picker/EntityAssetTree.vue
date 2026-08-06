@@ -11,7 +11,7 @@
       <div
         v-for="ent in entityList"
         :key="ent.key"
-        class="entity-item pa-2 text-caption cursor-pointer"
+        class="entity-item pa-2 text-body-small cursor-pointer"
         :class="{ 'entity-item--active': selectedEntity === ent.key }"
         @click="selectEntity(ent.key)"
       >
@@ -19,7 +19,7 @@
       </div>
       <div
         v-if="!entityList.length"
-        class="text-grey text-caption pa-2 text-center"
+        class="text-grey text-body-small pa-2 text-center"
       >
         暂无
       </div>
@@ -41,13 +41,13 @@
       </div>
       <div
         v-else-if="!selectedEntity"
-        class="text-grey text-caption pa-4 text-center"
+        class="text-grey text-body-small pa-4 text-center"
       >
         请从左侧选择
       </div>
       <div
         v-else-if="!currentTree.length"
-        class="text-grey text-caption pa-4 text-center"
+        class="text-grey text-body-small pa-4 text-center"
       >
         该{{ kind === 'character' ? '角色' : '场景' }}暂无可用资产
       </div>
@@ -82,7 +82,7 @@
             >
               mdi-music-note
             </v-icon>
-            <span class="text-caption text-truncate">{{ item.label }}</span>
+            <span class="text-body-small text-truncate">{{ item.label }}</span>
             <v-spacer />
             <v-icon
               v-if="isSelected(item.path)"
@@ -113,7 +113,7 @@
               >
                 {{ isSelected(item.path) ? 'mdi-check-circle' : 'mdi-circle-outline' }}
               </v-icon>
-              <span class="text-caption text-truncate ml-1">{{ item.label }}</span>
+              <span class="text-body-small text-truncate ml-1">{{ item.label }}</span>
             </div>
           </div>
         </template>
