@@ -14,7 +14,6 @@
         v-for="(input, i) in inputs"
         :key="input.nodeId"
         location="top"
-        open-delay="250"
       >
         <template #activator="{ props: tp }">
           <div

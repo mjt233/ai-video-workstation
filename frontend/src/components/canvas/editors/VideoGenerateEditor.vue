@@ -1,55 +1,60 @@
 <template>
   <div class="video-generate-editor">
-    <!-- 工作流选择（图生视频类型下的所有实现，如 LTX-2.3 / MiniMax H2V） -->
-    <v-select
-      :model-value="workflowImpl"
-      :items="workflowItems"
-      item-title="label"
-      item-value="value"
-      label="工作流"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="onWorkflowChange"
-    />
+    <!-- 工作流 + 生成模式（同一行显示） -->
+    <div class="d-flex ga-2 mb-2">
+      <v-select
+        :model-value="workflowImpl"
+        :items="workflowItems"
+        item-title="label"
+        item-value="value"
+        label="工作流"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="flex-grow-1"
+        @update:model-value="onWorkflowChange"
+      />
 
-    <!-- 模式切换（所选实现声明多种模式时显示） -->
-    <v-select
-      v-if="currentModes.length > 1"
-      :model-value="mode"
-      :items="modeItems"
-      item-title="label"
-      item-value="value"
-      label="生成模式"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="onModeChange"
-    />
+      <!-- 模式切换（所选实现声明多种模式时显示） -->
+      <v-select
+        v-if="currentModes.length > 1"
+        :model-value="mode"
+        :items="modeItems"
+        item-title="label"
+        item-value="value"
+        label="生成模式"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="flex-grow-1"
+        @update:model-value="onModeChange"
+      />
+    </div>
 
-    <!-- 导演台模式：输出规格 + 嵌入导演台（仅导演台加载 VideoDirector，内含 prompt 输入） -->
-    <template v-if="mode === 'director'">
+    <!-- 输出规格：时长 + 尺寸（统一放在生成模式下方，所有模式共用） -->
+    <div class="d-flex ga-2 mb-1">
       <v-text-field
-        :model-value="String(directorDuration)"
+        :model-value="String(duration)"
         label="时长(秒)"
         type="number"
         min="1"
         density="compact"
         variant="outlined"
         hide-details
-        class="mb-2"
-        @update:model-value="onDirectorDurationChange"
+        style="height: 32px;max-width: 120px;"
+        @update:model-value="onDurationChange"
       />
 
       <WorkflowSizePicker
         :project="props.project"
         :model-value="sizeModelValue"
-        class="mb-2"
+        class="flex-grow-1"
         @update:model-value="onSizeChange"
       />
+    </div>
 
+    <!-- 导演台模式：嵌入导演台（仅导演台加载 VideoDirector，内含 prompt 输入） -->
+    <template v-if="mode === 'director'">
       <VideoDirector
         :project="props.project"
         :director="directorProject"
@@ -148,13 +153,10 @@
           :max="refAudioMax"
           @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
         >
-          <template #thumb="{ input }">
-            <audio
-              class="canvas-input-item__thumb"
-              :src="previewUrls[input.nodeId]"
-              controls
-              draggable="false"
-            />
+          <template #thumb>
+            <div class="canvas-input-item__audio">
+              <v-icon icon="mdi-music-note" />
+            </div>
           </template>
           <template #zoom="{ input }">
             <audio
@@ -172,26 +174,6 @@
       >
         {{ refLimitHint }}
       </div>
-
-      <!-- 输出规格：时长 + 尺寸 -->
-      <v-text-field
-        :model-value="String(specDuration)"
-        label="时长(秒)"
-        type="number"
-        min="1"
-        density="compact"
-        variant="outlined"
-        hide-details
-        class="mb-2"
-        @update:model-value="(v) => emit('update:config', { duration: Number(v) || 0 })"
-      />
-
-      <WorkflowSizePicker
-        :project="props.project"
-        :model-value="sizeModelValue"
-        class="mb-2"
-        @update:model-value="onSizeChange"
-      />
 
       <!-- 提示词（导演台模式由导演台内 prompt 输入承载） -->
       <v-textarea
@@ -455,11 +437,11 @@ function mergeInputOrder(orderedIds: string[]): string[] {
   return [...rest, ...orderedIds]
 }
 
-/** 参考模式输出时长（秒；config.duration，缺省 5） */
-const specDuration = computed(() => Number(props.node.config.duration) || 5)
-
-/** 导演台/首尾帧模式时长（秒；config.director.duration，缺省 5） */
-const directorDuration = computed(() => Number(directorConfig.value.duration) || 5)
+/** 当前输出时长（秒）：导演台存 config.director.duration；首尾帧/参考存 config.duration，缺省 5 */
+const duration = computed(() => {
+  if (mode.value === 'director') return Number(directorConfig.value.duration) || 5
+  return Number(props.node.config.duration) || 5
+})
 
 /**
  * 当前输出尺寸（按模式读取）：
@@ -507,15 +489,22 @@ function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
 }
 
 /**
- * 导演台/首尾帧模式时长变化，回写 config.director.duration。
+ * 输出时长变化，按当前模式回写：
+ * - director：config.director.duration
+ * - first-last-frame / reference：config.duration
  *
  * @param v 输入值（数字字符串或空串）
  */
-function onDirectorDurationChange(v: unknown) {
+function onDurationChange(v: unknown) {
   const n = v === '' || v === null || v === undefined ? 0 : Number(v)
-  emit('update:config', {
-    director: { ...directorConfig.value, duration: Number.isFinite(n) ? n : 0 },
-  })
+  const value = Number.isFinite(n) ? n : 0
+  if (mode.value === 'director') {
+    emit('update:config', {
+      director: { ...directorConfig.value, duration: value },
+    })
+  } else {
+    emit('update:config', { duration: value })
+  }
 }
 
 /** 参考模式限制提示（各类型输入超出能力上限时提示；非参考模式为空串） */
@@ -560,6 +549,18 @@ getWorkflows()
   width: 64px;
   height: 48px;
   object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* 参考音频缩略：图标占位（悬浮时由 tooltip 提供 audio 播放器） */
+.canvas-input-item__audio {
+  width: 64px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 4px;
   border: 1px solid rgba(0, 0, 0, 0.12);
   background: rgba(0, 0, 0, 0.04);
