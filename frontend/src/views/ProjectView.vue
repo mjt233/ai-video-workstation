@@ -106,9 +106,9 @@
           size="small"
           class="mr-1"
         />
-        <span class="text-body-2 font-weight-medium">一键生成</span>
+        <span class="text-body-medium font-weight-medium">一键生成</span>
         <v-spacer />
-        <span class="text-caption text-grey">
+        <span class="text-body-small text-grey">
           {{ summary.completed + summary.failed }} / {{ summary.total }}
         </span>
         <v-btn
@@ -127,7 +127,7 @@
         rounded
         class="mb-1"
       />
-      <div class="text-caption text-medium-emphasis">
+      <div class="text-body-small text-medium-emphasis">
         {{ floatingStatusText }}
       </div>
     </v-card>

@@ -8,7 +8,7 @@
       class="pa-2"
       style="overflow: hidden"
     >
-      <v-card-title class="text-primary text-h5 font-weight-bold">
+      <v-card-title class="text-primary text-headline-small font-weight-bold">
         <v-icon
           icon="mdi-folder-open"
           class="mr-2"
