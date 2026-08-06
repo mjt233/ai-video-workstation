@@ -145,10 +145,12 @@ git commit -m "chore: 升级 Vue 3.5.41 与 Vuetify 4.1.7"
 
 ```bash
 cd frontend
-Select-String -Path "src\views\*.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\views\*.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
+
+> 注意：pattern 必须精确匹配**旧**类名（`text-body-[12]` 而非 `text-body`），因为新类名 `text-body-medium`/`text-body-small` 包含 `text-body` 子串，会被误报。
 
 - [ ] **Step 4: typecheck + 提交**
 
@@ -192,7 +194,7 @@ git commit -m "refactor: 视图层排版类迁移到 Vuetify 4 MD3 类名"
 
 ```bash
 cd frontend
-Select-String -Path "src\components\asset-picker\*.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\components\asset-picker\*.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
@@ -251,7 +253,7 @@ git commit -m "refactor: 资产选择器组件排版类迁移到 Vuetify 4 MD3 �
 
 ```bash
 cd frontend
-Select-String -Path "src\components\AssetHistoryDialog.vue","src\components\AssetTree.vue","src\components\BatchGenerateDialog.vue","src\components\CharacterPanel.vue","src\components\CharacterPicker.vue","src\components\ConfirmDialog.vue","src\components\CustomAssetPanel.vue","src\components\CustomAssetSection.vue","src\components\GenerateDialog.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\components\AssetHistoryDialog.vue","src\components\AssetTree.vue","src\components\BatchGenerateDialog.vue","src\components\CharacterPanel.vue","src\components\CharacterPicker.vue","src\components\ConfirmDialog.vue","src\components\CustomAssetPanel.vue","src\components\CustomAssetSection.vue","src\components\GenerateDialog.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
@@ -297,7 +299,7 @@ git commit -m "refactor: 对话框与面板组件排版类迁移到 Vuetify 4 MD
 
 ```bash
 cd frontend
-Select-String -Path "src\components\ScenePanel.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\components\ScenePanel.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
@@ -368,7 +370,7 @@ git commit -m "refactor: ScenePanel 排版类迁移到 Vuetify 4 MD3 类名"
 
 ```bash
 cd frontend
-Select-String -Path "src\components\ProjectPanel.vue","src\components\StageFrameDialog.vue","src\components\StagePanel.vue","src\components\StagePicker.vue","src\components\VariantPanel.vue","src\components\VariantTreeNode.vue","src\components\VariantTreeView.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\components\ProjectPanel.vue","src\components\StageFrameDialog.vue","src\components\StagePanel.vue","src\components\StagePicker.vue","src\components\VariantPanel.vue","src\components\VariantTreeNode.vue","src\components\VariantTreeView.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
@@ -408,7 +410,7 @@ git commit -m "refactor: 舞台与变体面板排版类迁移到 Vuetify 4 MD3 �
 
 ```bash
 cd frontend
-Select-String -Path "src\components\canvas\AssetCanvas.vue","src\components\canvas\CanvasAssertHistoryDialog.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\components\canvas\AssetCanvas.vue","src\components\canvas\CanvasAssertHistoryDialog.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
@@ -452,7 +454,7 @@ git commit -m "refactor: 资产画布主体排版类迁移到 Vuetify 4 MD3 类�
 
 ```bash
 cd frontend
-Select-String -Path "src\components\canvas\editors\*.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\components\canvas\editors\*.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
@@ -495,7 +497,7 @@ git commit -m "refactor: 画布编辑器排版类迁移到 Vuetify 4 MD3 类名"
 
 ```bash
 cd frontend
-Select-String -Path "src\components\canvas\nodes\*.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\components\canvas\nodes\*.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
@@ -538,7 +540,7 @@ git commit -m "refactor: 画布节点排版类迁移到 Vuetify 4 MD3 类名"
 
 ```bash
 cd frontend
-Select-String -Path "src\components\custom-asset\*.vue","src\components\audio-editor\AudioEditor.vue","src\components\video-director\VideoDirector.vue" -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button"
+Select-String -Path "src\components\custom-asset\*.vue","src\components\audio-editor\AudioEditor.vue","src\components\video-director\VideoDirector.vue" -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b"
 ```
 
 Expected: 无任何输出（0 匹配）。
@@ -686,7 +688,7 @@ Vuetify 4 移除了全局 CSS reset。`MarkdownView.vue` 已对 h1-h6、p、ul/o
 
 ```bash
 cd frontend
-Select-String -Path (Get-ChildItem -Path src -Recurse -Filter *.vue) -Pattern "text-h[1-6]|text-subtitle|text-body|text-caption|text-overline|text-button|<v-row\s+dense"
+Select-String -Path (Get-ChildItem -Path src -Recurse -Filter *.vue) -Pattern "text-h[1-6]\b|text-subtitle-[12]\b|text-body-[12]\b|text-caption\b|text-overline\b|text-button\b|<v-row\s+dense"
 ```
 
 Expected: 无任何输出（0 匹配）——所有旧类名与 `dense` 均已迁移。
