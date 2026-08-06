@@ -91,6 +91,7 @@
           :kind="entityKind"
           :exclude="exclude"
           :selected-paths="selectedPaths"
+          :show-voice="showVoice"
           @select="onSelect"
         />
 
@@ -216,6 +217,8 @@ const props = withDefaults(defineProps<{
   contextEpisode?: string
   /** 分镜编号（audio 页签：定位分镜台词音频与分镜自定义资产；可选） */
   contextShot?: string
+  /** 是否为音频选择场景：为 true 时「角色」页签额外展示角色音色（默认 false） */
+  showVoice?: boolean
 }>(), {
   selected: () => [],
   exclude: () => [],
@@ -229,6 +232,7 @@ const props = withDefaults(defineProps<{
   contextBaseLabel: undefined,
   contextEpisode: undefined,
   contextShot: undefined,
+  showVoice: false,
 })
 
 const emit = defineEmits<{

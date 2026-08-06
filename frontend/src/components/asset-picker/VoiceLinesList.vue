@@ -72,17 +72,18 @@ import type { AssetItem, VoiceLineItem } from './types'
 /**
  * 台词音频子页签。
  *
- * 读取 script.json 的台词列表，逐条探测对应语音文件
+ * 按选中的集数/分镜读取 script.json 的台词列表，逐条探测对应语音文件
  * （assert/scene/{ep}/{shot}/voice/{index}-{角色名}.flac）是否存在；
  * 无论是否已生成都展示，仅存在语音文件的台词可选。
+ * 集数/分镜变化时自动重新加载（支持选择任意分镜的台词音频）。
  */
 const props = withDefaults(defineProps<{
   /** 项目名 */
   project: string
-  /** 集数（定位分镜台词） */
-  contextEpisode?: string
-  /** 分镜编号（定位分镜台词） */
-  contextShot?: string
+  /** 选中的集数（可任意指定，不限于当前上下文） */
+  episode?: string
+  /** 选中的分镜（可任意指定，不限于当前上下文） */
+  shot?: string
   /** 当前已选中的资产路径列表（用于高亮） */
   selectedPaths: string[]
   /** 该子页签是否激活（激活时加载数据） */
@@ -90,8 +91,8 @@ const props = withDefaults(defineProps<{
   /** 弹窗打开时递增的重新加载信号 */
   reloadKey: number
 }>(), {
-  contextEpisode: undefined,
-  contextShot: undefined,
+  episode: undefined,
+  shot: undefined,
 })
 
 defineEmits<{
@@ -118,8 +119,8 @@ function isSelected(path: string): boolean {
  * 加载「台词音频」子页签数据。
  */
 async function loadVoiceLines() {
-  const ep = props.contextEpisode
-  const shot = props.contextShot
+  const ep = props.episode
+  const shot = props.shot
   if (!ep || !shot) {
     voiceLines.value = []
     return
@@ -162,9 +163,9 @@ async function loadVoiceLines() {
   }
 }
 
-/** 子页签激活或 reloadKey 变化时重新加载 */
+/** 子页签激活、reloadKey 变化或集数/分镜切换时重新加载 */
 watch(
-  () => [props.active, props.reloadKey] as const,
+  () => [props.active, props.reloadKey, props.episode, props.shot] as const,
   () => {
     if (props.active) void loadVoiceLines()
   },

@@ -40,7 +40,11 @@ export function getPathLabel(path: string): string {
   }
   if (path.startsWith('assert/character/')) {
     const rest = path.slice('assert/character/'.length)
-    return rest.replace('/appearance.jpg', '/外观').replace('/variants/', '/').replace(/\.jpg$/, '')
+    return rest
+      .replace('/appearance.jpg', '/外观')
+      .replace('/voice.flac', '/音色')
+      .replace('/variants/', '/')
+      .replace(/\.jpg$/, '')
   }
   if (path.startsWith('assert/stage/')) {
     const rest = path.slice('assert/stage/'.length)
@@ -110,6 +114,38 @@ export async function listImageFilesRecursive(project: string, dirRelPath: strin
         if (ext && IMAGE_EXTS.has(`.${ext}`)) {
           results.push(childRel)
         }
+      }
+    }
+  }
+
+  try {
+    await walk(dirRelPath)
+  } catch {
+    // 目录不存在时静默处理
+  }
+  return results
+}
+
+/**
+ * 递归列出目录下的所有音频文件路径。
+ * 服务端目前不支持 recursive 参数，故客户端递归实现。
+ *
+ * @param project 项目名
+ * @param dirRelPath 目录相对路径（project 根）
+ * @returns 目录下所有音频文件的相对路径列表（目录不存在时返回空数组）
+ */
+export async function listAudioFilesRecursive(project: string, dirRelPath: string): Promise<string[]> {
+  const results: string[] = []
+
+  async function walk(relPath: string) {
+    const res = await readFs(project, relPath) as DirResponse
+    const entries = res.entries ?? []
+    for (const entry of entries) {
+      const childRel = relPath.endsWith('/') ? `${relPath}${entry.name}` : `${relPath}/${entry.name}`
+      if (entry.type === 'dir') {
+        await walk(childRel)
+      } else if (isAudioFile(entry.name)) {
+        results.push(childRel)
       }
     }
   }

@@ -491,12 +491,13 @@
         </v-card>
       </v-dialog>
 
-      <!-- 资产选择器（加载图片节点绑定资产） -->
+      <!-- 资产选择器（加载图片/音频节点绑定资产） -->
       <AssetPickerDialog
         v-model="picker.show"
         :project="props.project"
         :multiple="false"
-        :tabs="['stage', 'character', 'custom', 'scene-stage']"
+        :tabs="pickerTabs"
+        :show-voice="picker.showVoice"
         :context-episode="target.kind === 'scene' ? target.episode : undefined"
         :context-shot="target.kind === 'scene' ? target.shot : undefined"
         @update:selected="onPickerConfirm"
@@ -554,6 +555,7 @@ import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { confirm } from '../../utils/confirm'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
+import type { AssetTab } from '../asset-picker/types'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
 
 /** 组件 props：定位一张画布 */
@@ -1380,13 +1382,22 @@ function onUpdateConfig(nodeId: string, patch: Record<string, unknown>) {
   store.updateNode(nodeId, { config: { ...node.config, ...patch } })
 }
 
-// ── 资产选择器（加载图片节点）────────────────────────────
+// ── 资产选择器（加载图片/音频节点）────────────────────────
 
-const picker = reactive({ show: false, nodeId: '' })
+const picker = reactive({ show: false, nodeId: '', showVoice: false })
 
-/** 打开资产选择器（绑定到某加载图片节点） */
+/** 资产选择器页签：音频加载节点额外提供「音频」页签（台词音频/自定义音频） */
+const pickerTabs = computed<AssetTab[]>(() =>
+  picker.showVoice
+    ? ['character', 'stage', 'custom', 'audio', 'scene-stage']
+    : ['stage', 'character', 'custom', 'scene-stage'],
+)
+
+/** 打开资产选择器（绑定到某加载节点；音频节点启用角色音色与音频页签） */
 function openAssetPicker(nodeId: string) {
+  const node = nodeMap.value[nodeId]
   picker.nodeId = nodeId
+  picker.showVoice = node?.prototypeId === 'audio-loader'
   picker.show = true
 }
 

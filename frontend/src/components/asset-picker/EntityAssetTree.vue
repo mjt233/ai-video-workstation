@@ -68,6 +68,31 @@
             />
             {{ item.section }}
           </div>
+          <!-- 音频条目：整行音频图标 + 标签 -->
+          <div
+            v-else-if="item.audio"
+            class="audio-tree-item d-flex align-center ga-2 px-2 py-1 rounded cursor-pointer ma-1"
+            :class="{ 'asset-tree-item--selected': isSelected(item.path) }"
+            :title="item.label"
+            @click="$emit('select', item)"
+          >
+            <v-icon
+              color="secondary"
+              size="20"
+            >
+              mdi-music-note
+            </v-icon>
+            <span class="text-caption text-truncate">{{ item.label }}</span>
+            <v-spacer />
+            <v-icon
+              v-if="isSelected(item.path)"
+              color="primary"
+              size="18"
+            >
+              mdi-check-circle
+            </v-icon>
+          </div>
+          <!-- 图片条目：缩略图卡片 -->
           <div
             v-else
             class="asset-tree-item ma-1 pa-2 rounded cursor-pointer"
@@ -99,9 +124,9 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { readFs, type DirEntry, type DirResponse } from '../../api/client'
+import { existsFs, readFs, type DirEntry, type DirResponse } from '../../api/client'
 import { listCharacterVariants, listStageVariants } from '../../api/assets'
-import { flattenVariantTree, listImageFilesRecursive, thumbUrl } from './utils'
+import { flattenVariantTree, listAudioFilesRecursive, listImageFilesRecursive, thumbUrl } from './utils'
 import AssetThumb from './AssetThumb.vue'
 import type { AssetItem, EntityItem } from './types'
 
@@ -110,6 +135,8 @@ import type { AssetItem, EntityItem } from './types'
  *
  * 左侧列出实体（角色名/场景名），右侧以树形展示该实体的资产及变体，
  * 并附「自定义资产」分区。点击资产条目 emit select 事件交由父组件处理选中。
+ * 当 showVoice 为 true（音频选择场景）时，角色树额外展示「音色」分区
+ * （角色设计音色 voice.flac 与自定义音频）。
  */
 const props = defineProps<{
   /** 项目名 */
@@ -124,6 +151,8 @@ const props = defineProps<{
   active: boolean
   /** 弹窗打开时递增的重新加载信号 */
   reloadKey: number
+  /** 是否为音频选择场景：为 true 时角色树额外展示「音色」分区（默认 false） */
+  showVoice?: boolean
 }>()
 
 defineEmits<{
@@ -189,6 +218,7 @@ async function selectEntity(key: string) {
 /**
  * 构建角色的树形资产列表：外观图片为根，变体按 parentId 递归嵌套，
  * 自定义资产（assert/custom/character/{name}/）单独分区显示。
+ * showVoice 为 true 时额外展示「音色」分区（角色设计音色 + 自定义音频）。
  *
  * @param project 项目名
  * @param name 角色名
@@ -214,10 +244,48 @@ async function buildCharacterTree(project: string, name: string): Promise<AssetI
     // 单个角色加载失败不影响
   }
 
+  // 音色分区：仅在选择音频（showVoice）时展示角色的音色资产
+  if (props.showVoice) {
+    tree.push(...(await buildVoiceSection(project, name)))
+  }
+
   // 自定义资产分区：在普通资产与衍生变体之下单独换行显示
-  tree.push(...(await buildCustomSection(project, `assert/custom/character/${name}`)))
+  tree.push(...(await buildCustomSection(project, `assert/custom/character/${name}`, props.showVoice)))
 
   return tree
+}
+
+/**
+ * 构建角色的「音色」分区条目：角色设计音色（assert/character/{name}/voice.flac）。
+ * 仅在该文件已生成且未被排除时返回分区标题 + 音频条目，否则返回空数组。
+ *
+ * @param project 项目名
+ * @param name 角色名
+ * @returns 音色分区标题与音频条目数组
+ */
+async function buildVoiceSection(project: string, name: string): Promise<AssetItem[]> {
+  const voicePath = `assert/character/${name}/voice.flac`
+  if (props.exclude.includes(voicePath)) return []
+  const exists = await existsFs(project, voicePath)
+  if (!exists) return []
+
+  return [
+    {
+      path: '',
+      label: '',
+      thumbnail: '',
+      depth: 0,
+      section: '音色',
+      header: true,
+    },
+    {
+      path: voicePath,
+      label: `${name}/音色`,
+      thumbnail: '',
+      depth: 1,
+      audio: true,
+    },
+  ]
 }
 
 /**
@@ -259,17 +327,20 @@ async function buildStageTree(project: string, stage: string): Promise<AssetItem
 
 /**
  * 构建自定义资产分区条目。
- * 仅在目录存在且包含图片时返回分区标题 + 资产条目，否则返回空数组。
+ * 仅在目录存在且包含图片（或 includeAudio 时含音频）时返回分区标题 + 资产条目，否则返回空数组。
  *
  * @param project 项目名
  * @param customRootDir assert/custom/ 下的实体映射目录（如 assert/custom/character/陈书文）
+ * @param includeAudio 是否同时列出音频文件（音频条目标记 audio=true，默认 false）
  * @returns 分区标题与资产条目数组
  */
-async function buildCustomSection(project: string, customRootDir: string): Promise<AssetItem[]> {
+async function buildCustomSection(project: string, customRootDir: string, includeAudio = false): Promise<AssetItem[]> {
   const items: AssetItem[] = []
   const imagePaths = await listImageFilesRecursive(project, customRootDir)
-  const visible = imagePaths.filter((p) => !props.exclude.includes(p))
-  if (!visible.length) return items
+  const audioPaths = includeAudio ? await listAudioFilesRecursive(project, customRootDir) : []
+  const visibleImages = imagePaths.filter((p) => !props.exclude.includes(p))
+  const visibleAudio = audioPaths.filter((p) => !props.exclude.includes(p))
+  if (!visibleImages.length && !visibleAudio.length) return items
 
   // 分区标题（不可选择，单独换行）
   items.push({
@@ -280,12 +351,21 @@ async function buildCustomSection(project: string, customRootDir: string): Promi
     section: '自定义资产',
     header: true,
   })
-  for (const p of visible) {
+  for (const p of visibleImages) {
     items.push({
       path: p,
       label: `自定义/${p.replace(/^assert\/custom\//, '')}`,
       thumbnail: thumbUrl(project, p),
       depth: 1,
+    })
+  }
+  for (const p of visibleAudio) {
+    items.push({
+      path: p,
+      label: `自定义/${p.replace(/^assert\/custom\//, '')}`,
+      thumbnail: '',
+      depth: 1,
+      audio: true,
     })
   }
   return items
@@ -311,11 +391,11 @@ async function listStageLabels(project: string, stage: string): Promise<string[]
 }
 
 /**
- * 弹窗打开、reloadKey 变化或 kind 切换（角色/场景页签互切）时加载，
- * 并自动选中第一个实体。
+ * 弹窗打开、reloadKey 变化、kind 切换（角色/场景页签互切）或 showVoice
+ * 变化（音频/图片选择场景互切）时加载，并自动选中第一个实体。
  */
 watch(
-  () => [props.active, props.reloadKey, props.kind] as const,
+  () => [props.active, props.reloadKey, props.kind, props.showVoice] as const,
   async () => {
     if (!props.active) return
     await loadEntityList()
@@ -358,6 +438,17 @@ watch(
 
 .asset-tree-item--selected {
   background: rgba(var(--v-theme-primary), 0.06);
+}
+
+/* 音频条目（整行显示：音频图标 + 标签 + 选中勾） */
+.audio-tree-item {
+  border-radius: 4px;
+  min-width: 0;
+  transition: background 0.15s ease;
+}
+
+.audio-tree-item:hover {
+  background: rgba(var(--v-theme-on-surface), 0.04);
 }
 
 /* 分区标题：在普通资产与衍生变体之下单独换行显示 */
