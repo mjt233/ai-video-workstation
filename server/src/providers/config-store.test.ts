@@ -110,4 +110,28 @@ describe('config-store', () => {
       setProviderConfig('test-store-required', { baseUrl: 'http://x' }, configPath),
     ).rejects.toThrow('必填');
   });
+
+  it('secret 提交 MASKED_SECRET 占位符时保留原值（防回写）', async () => {
+    await setProviderConfig('test-store', { apiKey: 'sk-original' }, configPath);
+    await setProviderConfig('test-store', { apiKey: MASKED_SECRET }, configPath);
+    // 未脱敏读取：真实值仍是 sk-original，而不是被 '__set__' 覆盖
+    const config = await getProviderConfig('test-store', configPath);
+    expect(config.apiKey).toBe('sk-original');
+  });
+
+  it('配置文件损坏（非法 JSON）时 setProviderConfig 抛错而非覆盖', async () => {
+    await fs.writeFile(configPath, '{ 这不是合法 JSON', 'utf-8');
+    await expect(
+      setProviderConfig('test-store', { baseUrl: 'http://x' }, configPath),
+    ).rejects.toThrow();
+    // 损坏文件未被覆盖
+    const raw = await fs.readFile(configPath, 'utf-8');
+    expect(raw).toBe('{ 这不是合法 JSON');
+  });
+
+  it('配置文件不存在时 setProviderConfig 正常创建（ENOENT 不算损坏）', async () => {
+    await setProviderConfig('test-store', { baseUrl: 'http://fresh' }, configPath);
+    const config = await getProviderConfig('test-store', configPath);
+    expect(config.baseUrl).toBe('http://fresh');
+  });
 });

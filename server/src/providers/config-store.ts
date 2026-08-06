@@ -18,17 +18,26 @@ interface ProvidersFile {
 }
 
 /**
- * 读取配置文件；不存在/非法时返回空对象（不抛错）。
+ * 读取配置文件。
+ * - 文件不存在（ENOENT）：返回空对象（首次保存时正常创建）；
+ * - 存在但解析失败：抛错（避免 setProviderConfig 以空对象为基础覆盖损坏文件、抹掉其它配置）。
  * @param configPath 配置文件路径（测试可注入临时路径）
  */
 async function readConfigFile(configPath: string): Promise<ProvidersFile> {
+  let raw: string;
   try {
-    const raw = await fs.readFile(configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === 'object' ? (parsed as ProvidersFile) : {};
-  } catch {
-    return {};
+    raw = await fs.readFile(configPath, 'utf-8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return {};
+    }
+    throw e;
   }
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`配置文件解析失败（应为 JSON 对象）: ${configPath}`);
+  }
+  return parsed as ProvidersFile;
 }
 
 /** 取字段的环境变量兜底值 */
@@ -121,8 +130,8 @@ export async function setProviderConfig(
   for (const field of provider.configSchema) {
     const raw = values[field.key];
     if (raw === undefined) continue;
-    // secret 空串 = 保留原值
-    if (field.secret && raw === '') continue;
+    // secret 空串 / MASKED_SECRET 占位符 = 保留原值（防止前端把脱敏占位符回写覆盖真实密钥）
+    if (field.secret && (raw === '' || raw === MASKED_SECRET)) continue;
     if (raw === '') {
       delete current[field.key];
       continue;
