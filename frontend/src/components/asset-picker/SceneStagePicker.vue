@@ -33,7 +33,7 @@
     </div>
     <v-row
       v-else-if="sceneStages.length"
-      dense
+      density="compact"
     >
       <v-col
         v-for="item in sceneStages"

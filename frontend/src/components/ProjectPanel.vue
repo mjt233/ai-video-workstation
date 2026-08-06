@@ -79,7 +79,7 @@
               @update:model-value="onPresetChange"
             />
 
-            <v-row dense>
+            <v-row density="compact">
               <v-col
                 cols="12"
                 sm="4"

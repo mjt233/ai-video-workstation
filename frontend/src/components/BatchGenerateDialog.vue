@@ -50,7 +50,7 @@
           <div class="text-body-medium mb-2 font-weight-medium">
             选择要生成的资产类型与工作流实现
           </div>
-          <v-row dense>
+          <v-row density="compact">
             <v-col
               v-for="at in assetTypes"
               :key="at.id"

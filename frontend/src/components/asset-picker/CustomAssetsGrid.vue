@@ -11,7 +11,7 @@
   <template v-else>
     <v-row
       v-if="tabItems.length"
-      dense
+      density="compact"
     >
       <v-col
         v-for="item in tabItems"

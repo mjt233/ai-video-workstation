@@ -16,7 +16,7 @@
   </div>
   <v-row
     v-else
-    dense
+    density="compact"
   >
     <v-col
       v-for="v in parentVariants"
