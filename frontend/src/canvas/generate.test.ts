@@ -93,6 +93,23 @@ describe('collectInputs / inputOrder 排序', () => {
   })
 })
 
+describe('collectInputs / collectInputPaths：portId 过滤', () => {
+  const conns: CanvasConnection[] = [
+    { id: 'c1', fromNodeId: 'l1', fromPortId: 'out', toNodeId: 'g1', toPortId: 'in' },
+    { id: 'c2', fromNodeId: 't1', fromPortId: 'out', toNodeId: 'g1', toPortId: 'in' },
+  ]
+
+  it('指定 portId 时只收集对应端口的输入', () => {
+    const inputs = collectInputs('g1', conns, [loader, text], undefined, 'in')
+    expect(inputs.map((i) => i.nodeId)).toEqual(['l1'])
+  })
+
+  it('指定不存在的 portId 返回空数组', () => {
+    expect(collectInputs('g1', conns, [loader, text], undefined, 'other')).toEqual([])
+    expect(collectInputPaths('g1', conns, [loader, text], undefined, 'other')).toEqual([])
+  })
+})
+
 describe('activateHistory', () => {
   it('把历史条目激活为 current，history 引用与内容不变，原 config 不被修改', () => {
     const cfg = gen.config

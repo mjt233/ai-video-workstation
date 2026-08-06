@@ -202,7 +202,7 @@ watch(show, async (val) => {
     submitError.value = null
     try {
       const workflows = await getWorkflows()
-      const wf = workflows.find(w => w.id === props.workflowId)
+      const wf = workflows.find(w => w.type === props.workflowId)
       if (wf) {
         implementations.value = wf.implementations
         if (props.defaultImpl) {

@@ -146,13 +146,18 @@
                   @blur="commitRename(id)"
                 >
               </div>
-              <Handle
-                v-if="protoOf(id)?.inputPorts.length"
-                :id="protoOf(id)?.inputPorts[0]?.id"
-                type="target"
-                :position="Position.Left"
-                class="canvas-node__handle"
-              />
+              <template
+                v-for="(port, idx) in (protoOf(id)?.inputPorts ?? [])"
+                :key="port.id"
+              >
+                <Handle
+                  :id="port.id"
+                  type="target"
+                  :position="Position.Left"
+                  class="canvas-node__handle"
+                  :style="handleStyle(protoOf(id)?.inputPorts.length ?? 1, idx)"
+                />
+              </template>
               <div class="canvas-node__body">
                 <component
                   :is="protoOf(id)?.bodyComponent"
@@ -165,13 +170,18 @@
                   @retry="(nid: string) => generateNode(nid)"
                 />
               </div>
-              <Handle
-                v-if="protoOf(id)?.outputPorts.length"
-                :id="protoOf(id)?.outputPorts[0]?.id"
-                type="source"
-                :position="Position.Right"
-                class="canvas-node__handle"
-              />
+              <template
+                v-for="(port, idx) in (protoOf(id)?.outputPorts ?? [])"
+                :key="port.id"
+              >
+                <Handle
+                  :id="port.id"
+                  type="source"
+                  :position="Position.Right"
+                  class="canvas-node__handle"
+                  :style="handleStyle(protoOf(id)?.outputPorts.length ?? 1, idx)"
+                />
+              </template>
             </div>
           </template>
         </VueFlow>
@@ -189,6 +199,9 @@
               :project="props.project"
               :node="editorPanel?.node"
               :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
+              :images-inputs="videoInputGroups.images"
+              :videos-inputs="videoInputGroups.videos"
+              :audios-inputs="videoInputGroups.audios"
               :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
               :kind="target.kind"
               @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
@@ -478,12 +491,13 @@
         </v-card>
       </v-dialog>
 
-      <!-- 资产选择器（加载图片节点绑定资产） -->
+      <!-- 资产选择器（加载图片/音频节点绑定资产） -->
       <AssetPickerDialog
         v-model="picker.show"
         :project="props.project"
         :multiple="false"
-        :tabs="['stage', 'character', 'custom', 'scene-stage']"
+        :tabs="pickerTabs"
+        :show-voice="picker.showVoice"
         :context-episode="target.kind === 'scene' ? target.episode : undefined"
         :context-shot="target.kind === 'scene' ? target.shot : undefined"
         @update:selected="onPickerConfirm"
@@ -523,8 +537,9 @@ import '@vue-flow/core/dist/theme-default.css'
 import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
-import { canConnectNodes } from '../../canvas/connection'
+import { canConnectNodes, getNodeOutputType } from '../../canvas/connection'
 import { activateHistory, collectInputPaths, collectInputs, getNodeCurrentAssetPath, removeHistoryEntry, type CanvasInputInfo, type HistoryEntry } from '../../canvas/generate'
+import { buildVideoSubmitParams } from '../../canvas/videoSubmit'
 import {
   buildAutoCanvas,
   buildShotRefsFromStage,
@@ -540,6 +555,7 @@ import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { confirm } from '../../utils/confirm'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
+import type { AssetTab } from '../asset-picker/types'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
 
 /** 组件 props：定位一张画布 */
@@ -604,6 +620,19 @@ function protoOf(nodeId: string): NodePrototype | undefined {
   return node ? getPrototype(node.prototypeId) : undefined
 }
 
+/**
+ * 多端口时按顺序垂直分布连接点；单端口保持默认 50% 位置。
+ *
+ * @param count 端口数量
+ * @param index 端口序号（0 起）
+ * @returns handle 定位样式（单端口返回空对象）
+ */
+function handleStyle(count: number, index: number): Record<string, string> {
+  if (count <= 1) return {}
+  const top = ((index + 1) * 100) / (count + 1)
+  return { top: `${top}%` }
+}
+
 /** Vue Flow 节点列表（type 固定 canvas，走自定义 slot 渲染） */
 const flowNodes = computed<FlowNode[]>(() =>
   store.nodes.value.map((n) => ({
@@ -653,19 +682,26 @@ function onNodeDragStop({ nodes: dragged }: NodeDragEvent) {
 
 /**
  * 校验临时连接是否可建立（source/target 可能为空需防御）。
+ * 指定目标端口时按端口类型校验，否则回退到节点第一输入端口。
  *
  * @param conn Vue Flow 临时连接
  * @returns 可建立返回 true
  */
 function isValidConnection(conn: Connection): boolean {
   if (!conn.source || !conn.target) return false
-  return canConnectNodes(store.connections.value, conn.source, conn.target, store.nodes.value)
+  return canConnectNodes(
+    store.connections.value,
+    conn.source,
+    conn.target,
+    store.nodes.value,
+    conn.targetHandle ?? undefined,
+  )
 }
 
-/** 连接成功：写入 store（store 内部再次校验，失败忽略） */
+/** 连接成功：写入 store（记录端口 id；store 内部再次校验，失败忽略） */
 function onConnect(conn: Connection) {
   if (!conn.source || !conn.target) return
-  store.connect(conn.source, conn.target)
+  store.connect(conn.source, conn.target, conn.sourceHandle ?? undefined, conn.targetHandle ?? undefined)
 }
 
 /**
@@ -739,6 +775,8 @@ const editorPanel = computed(() => {
 const EDITOR_PANEL_WIDTH = 400
 /** 生成图片节点配置面板固定宽度（更宽，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_WIDTH_GENERATE = 500
+/** 生成视频节点配置面板固定宽度（导演台嵌入需要，屏幕坐标，不随缩放变化） */
+const EDITOR_PANEL_WIDTH_VIDEO = 640
 /** 配置面板与节点底部之间的垂直间距（像素，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_GAP = 12
 
@@ -758,7 +796,11 @@ const editorPanelStyle = computed(() => {
   const node = selectedNode.value
   if (!node) return lastPanelStyle.value
   const vp = viewport.value
-  const width = node.prototypeId === 'image-generate' ? EDITOR_PANEL_WIDTH_GENERATE : EDITOR_PANEL_WIDTH
+  const width = node.prototypeId === 'image-generate'
+    ? EDITOR_PANEL_WIDTH_GENERATE
+    : node.prototypeId === 'video-generate'
+      ? EDITOR_PANEL_WIDTH_VIDEO
+      : EDITOR_PANEL_WIDTH
   // 面板水平中心 = 节点水平中心，保证节点在面板上方正中
   const nodeCenterX = (node.x + node.width / 2) * vp.zoom + vp.x
   const left = nodeCenterX - width / 2
@@ -1085,13 +1127,30 @@ async function onDeleteHistory(entry: HistoryEntry) {
 
 /**
  * 触发生成节点：收集输入路径 → 注入 → 跑工作流，并把 current/history 回写节点配置。
+ * 视频节点（video-generate）额外组装自包含提交参数后传给 generate。
  *
  * @param nodeId 生成节点 id
  */
 async function generateNode(nodeId: string) {
   const node = nodeMap.value[nodeId]
-  if (!node || node.prototypeId !== 'image-generate') return
+  if (!node) return
   gen.clearStatus(nodeId)
+  if (node.prototypeId === 'video-generate') {
+    const videoParams = buildVideoSubmitParams(node, {
+      images: videoInputsOf(nodeId, 'image'),
+      videos: videoInputsOf(nodeId, 'video'),
+      audios: videoInputsOf(nodeId, 'audio'),
+    })
+    await gen.generate(
+      node,
+      (config) => {
+        store.updateNode(nodeId, { config })
+      },
+      videoParams,
+    )
+    return
+  }
+  if (node.prototypeId !== 'image-generate') return
   const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config)
   gen.setInputPaths(nodeId, paths)
   await gen.generate(node, (config) => {
@@ -1114,6 +1173,35 @@ function inputsOf(nodeId: string): CanvasInputInfo[] {
   const node = nodeMap.value[nodeId]
   return collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config)
 }
+
+/**
+ * 收集视频生成节点的输入资产并按来源节点输出类型过滤（图片/视频/音频）。
+ *
+ * 生成视频节点使用单一 media 输入连接点，素材类型由来源节点类型自动归类；
+ * 返回结果按 config.inputOrder 排序（collectInputs 已处理）。
+ *
+ * @param nodeId 目标节点 id
+ * @param type 来源节点输出类型（image / video / audio）
+ * @returns 该类型输入资产信息数组
+ */
+function videoInputsOf(nodeId: string, type: 'image' | 'video' | 'audio'): CanvasInputInfo[] {
+  const node = nodeMap.value[nodeId]
+  const all = collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config)
+  return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === type)
+}
+
+/** 视频生成节点三组输入（非 video-generate 节点为空数组；按 config.inputOrder 排序） */
+const videoInputGroups = computed(() => {
+  if (!editorPanel.value || editorPanel.value.node.prototypeId !== 'video-generate') {
+    return { images: [] as CanvasInputInfo[], videos: [] as CanvasInputInfo[], audios: [] as CanvasInputInfo[] }
+  }
+  const id = editorPanel.value.node.id
+  return {
+    images: videoInputsOf(id, 'image'),
+    videos: videoInputsOf(id, 'video'),
+    audios: videoInputsOf(id, 'audio'),
+  }
+})
 
 /** 上游更新角标：生成节点任一输入节点资产比本节点新（current.date 更大）则显示 */
 function isUpstreamUpdated(nodeId: string): boolean {
@@ -1294,13 +1382,22 @@ function onUpdateConfig(nodeId: string, patch: Record<string, unknown>) {
   store.updateNode(nodeId, { config: { ...node.config, ...patch } })
 }
 
-// ── 资产选择器（加载图片节点）────────────────────────────
+// ── 资产选择器（加载图片/音频节点）────────────────────────
 
-const picker = reactive({ show: false, nodeId: '' })
+const picker = reactive({ show: false, nodeId: '', showVoice: false })
 
-/** 打开资产选择器（绑定到某加载图片节点） */
+/** 资产选择器页签：音频加载节点额外提供「音频」页签（台词音频/自定义音频） */
+const pickerTabs = computed<AssetTab[]>(() =>
+  picker.showVoice
+    ? ['character', 'stage', 'custom', 'audio', 'scene-stage']
+    : ['stage', 'character', 'custom', 'scene-stage'],
+)
+
+/** 打开资产选择器（绑定到某加载节点；音频节点启用角色音色与音频页签） */
 function openAssetPicker(nodeId: string) {
+  const node = nodeMap.value[nodeId]
   picker.nodeId = nodeId
+  picker.showVoice = node?.prototypeId === 'audio-loader'
   picker.show = true
 }
 

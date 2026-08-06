@@ -6,10 +6,11 @@ vi.mock('../api/workflow', () => ({
   runWorkflow: vi.fn(),
   getTaskStatus: vi.fn(),
   getTaskLogs: vi.fn(),
+  cancelWorkflow: vi.fn(),
 }))
 
 import { writeFs } from '../api/client'
-import { runWorkflow, getTaskStatus, getTaskLogs } from '../api/workflow'
+import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow } from '../api/workflow'
 import type { CanvasNodeData } from './types'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
@@ -89,5 +90,58 @@ describe('useCanvasGeneration', () => {
     await vi.advanceTimersByTimeAsync(2100)
     expect(gen.statusByNode.value.n1.status).toBe('error')
     expect(gen.statusByNode.value.n1.errorMsg).toBe('失败')
+  })
+
+  it('视频节点：走自包含提交参数并生成 .mp4 产物路径', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
+      config: { workflowImpl: 'default', workflowParams: { seed: '1' } },
+    }
+    const videoParams = { mode: 'director' as const, resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', extraParams: {} }
+    await gen.generate(node, () => {}, videoParams)
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: 'image-to-video',
+        impl: 'default',
+        params: expect.objectContaining({
+          outputPath: 'assert/scene/1/1/canvas/vg/v1.mp4',
+          video: videoParams,
+        }),
+      }),
+    )
+  })
+
+  it('视频节点缺少提交参数：进入 error 状态且不调用 runWorkflow', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
+      config: {},
+    }
+    await gen.generate(node, () => {})
+    expect(runWorkflow).not.toHaveBeenCalled()
+    expect(gen.statusByNode.value.vg?.status).toBe('error')
+    expect(gen.statusByNode.value.vg?.errorMsg).toBe('缺少视频提交参数')
+  })
+
+  it('中断：停止轮询并调用 cancelWorkflow', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node = makeNode('一只猫')
+    gen.setInputPaths('n1', ['assert/a.jpg'])
+    await gen.generate(node, () => {})
+    await gen.interrupt('n1')
+    expect(cancelWorkflow).toHaveBeenCalledWith('task-1')
+    expect(gen.statusByNode.value.n1?.status).toBe('error')
+    expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
+  })
+
+  it('cancelWorkflow 失败不阻断状态展示', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node = makeNode('一只猫')
+    gen.setInputPaths('n1', ['assert/a.jpg'])
+    await gen.generate(node, () => {})
+    ;(cancelWorkflow as Mock).mockRejectedValueOnce(new Error('boom'))
+    await expect(gen.interrupt('n1')).resolves.toBeUndefined()
+    expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
   })
 })

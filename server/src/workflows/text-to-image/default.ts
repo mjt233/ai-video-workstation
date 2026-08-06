@@ -11,7 +11,7 @@ import type { TextToImageVars } from '../types.js';
  * - vars.enhance_prompt："true"/"false"，以布尔值提交给 ComfyUI 工作流（提示词强化开关，不修改提示词内容）
  */
 register(createTextToImageWorkflow<TextToImageVars>({
-  id: 'text-to-image',
+  type: 'text-to-image',
   name: '文生图 (Krea2)',
   impl: 'default',
   description: '使用 ComfyUI 文生图工作流，根据提示词生成图片（角色外观 / 场景图等）',

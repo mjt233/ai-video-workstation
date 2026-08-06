@@ -140,6 +140,16 @@ export function incrementRetry(id: string): void {
   db.prepare("UPDATE tasks SET retry_count = retry_count + 1, updated_at = datetime('now') WHERE id = ?").run(id);
 }
 
+/**
+ * 更新任务 params（JSON），用于提交后持久化远端任务 ID 等运行时信息。
+ *
+ * @param id - 任务 ID
+ * @param params - 新的任务 params 对象（将序列化为 JSON 存入 tasks.params 列）
+ */
+export function updateTaskParams(id: string, params: object): void {
+  db.prepare("UPDATE tasks SET params = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(params), id);
+}
+
 export function getPendingTasks(): TaskRecord[] {
   return db.prepare("SELECT * FROM tasks WHERE status IN ('pending', 'running') ORDER BY phase ASC, created_at ASC").all() as TaskRecord[];
 }

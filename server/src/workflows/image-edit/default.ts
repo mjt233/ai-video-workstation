@@ -12,7 +12,7 @@ import type { ImageEditVars } from '../types.js';
  * vars.imagePaths 为 JSON 数组字符串；vars.desc 为编辑描述。
  */
 register(createImageEditWorkflow<ImageEditVars>({
-  id: 'image-edit',
+  type: 'image-edit',
   name: 'Qwen Image Edit 2509',
   impl: 'default',
   description: '基于输入图片与编辑描述进行图像编辑/合成（分镜场景图、衍生变体等）',

@@ -33,13 +33,55 @@ export interface WorkflowImplementation {
    * 工作流能力声明（前端据此展示导演台等能力入口）。
    * - director：是否支持导演台模式（true 时引擎才会注入 director 负载）
    * - audio：是否支持传入外部音频（如导演台混音产物）
+   * - cancelable：是否支持中断（true 时前端可调用取消接口）
+   * - video：视频生成能力声明（支持的生成模式组合与参考模式素材上限）
    */
-  capabilities?: { director?: boolean; audio?: boolean }
+  capabilities?: {
+    director?: boolean
+    audio?: boolean
+    cancelable?: boolean
+    video?: {
+      /** 支持的生成模式组合（导演台/首尾帧/参考；未声明时默认仅导演台） */
+      modes?: Array<'director' | 'first-last-frame' | 'reference'>
+      /** 是否支持传入音频（如导演台混音产物） */
+      audio?: boolean
+      /** 最大输出时长（秒） */
+      maxDuration?: number
+      /** 首尾帧模式限制（modes 含 first-last-frame 时可选声明） */
+      firstLastFrame?: {
+        /** 最大帧数（默认 3） */
+        maxFrames?: number
+      }
+      /** 参考模式素材上限声明 */
+      reference?: {
+        /** 各类型素材数量上限 */
+        types?: {
+          /** 图片：数量上限 */
+          image?: { max?: number }
+          /** 视频：数量上限与单段时长限制 */
+          video?: { max?: number; minDuration?: number; maxDuration?: number }
+          /** 音频：数量上限与单段时长限制 */
+          audio?: { max?: number; minDuration?: number; maxDuration?: number }
+        }
+        /** 混合输入合计上限 */
+        maxTotal?: number
+        /** 音频是否必须与图像/视频一同输入（不能作为唯一输入） */
+        audioRequiresVisual?: boolean
+      }
+    }
+  }
 }
 
+/**
+ * 工作流类型及其实现列表（/api/workflows 返回结构）。
+ *
+ * type 为工作流类型（如 image-to-video）；同一类型下可有多个实现（implementations），
+ * 每个实现的 impl 是其唯一 ID、name 是其阅读友好名称。
+ */
 export interface WorkflowInfo {
-  id: string
-  name: string
+  /** 工作流类型（如 image-to-video / text-to-image） */
+  type: string
+  /** 该类型下的全部实现（impl 为唯一 ID，name 为阅读友好名称） */
   implementations: WorkflowImplementation[]
 }
 
@@ -68,6 +110,28 @@ export interface LogEntry {
   created_at: string
 }
 
+/** 视频自包含提交参数（wire 形态，与后端 VideoWorkflowSubmitParams 对齐） */
+export interface VideoWorkflowSubmitParams {
+  /** 生成模式：导演台 / 首尾帧 / 参考 */
+  mode: 'director' | 'first-last-frame' | 'reference'
+  /** 输出分辨率（像素） */
+  resolution: { width: number; height: number }
+  /** 帧率（可选） */
+  fps?: number
+  /** 输出时长（秒） */
+  duration: number
+  /** 生成提示词 */
+  prompt: string
+  /** 随机种子（可选） */
+  seed?: number
+  /** 导演台/首尾帧模式：有序关键帧 + 可选音频 */
+  director?: { frames: Array<{ path: string; cursor: number }>; audio?: { path: string } }
+  /** 参考模式：按类型分组的引用素材 */
+  references?: Array<{ type: 'image' | 'video' | 'audio'; path: string }>
+  /** 透传给工作流实现的额外参数（seed 已剥离） */
+  extraParams: Record<string, unknown>
+}
+
 export interface WorkflowRunParams {
   project: string
   workflowId: string
@@ -78,6 +142,8 @@ export interface WorkflowRunParams {
     outputPath: string
     /** 用户手动传入的工作流参数（按所选实现的声明 key） */
     userParams?: Record<string, WorkflowUserParamValue>
+    /** 视频自包含提交参数（画布【生成视频】节点提交） */
+    video?: VideoWorkflowSubmitParams
   }
 }
 
@@ -143,5 +209,25 @@ export async function getTaskLogs(taskId: string): Promise<LogEntry[]> {
 
 export async function retryTask(taskId: string): Promise<{ taskId: string; status: string }> {
   const { data } = await client.post<{ taskId: string; status: string }>(`/workflow/retry/${taskId}`)
+  return data
+}
+
+/** 中断工作流任务的返回结果 */
+export interface CancelWorkflowResult {
+  /** 被中断的任务 id */
+  taskId: string
+  /** 中断后的任务状态（如 failed/cancelled） */
+  status: string
+}
+
+/**
+ * 中断工作流任务（调用后端 cancel 端点：本地排队直接失败 / 运行中调 Bridge cancel）。
+ * 仅对 capabilities.cancelable 的工作流有效，其余后端返回 400。
+ *
+ * @param taskId 要中断的任务 id
+ * @returns 中断结果（taskId + 中断后状态）
+ */
+export async function cancelWorkflow(taskId: string): Promise<CancelWorkflowResult> {
+  const { data } = await client.post<CancelWorkflowResult>(`/workflow/tasks/${taskId}/cancel`)
   return data
 }

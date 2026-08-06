@@ -152,4 +152,45 @@ describe('useCanvasStore', () => {
     expect(saveCanvas).not.toHaveBeenCalled()
     expect(loadCanvas).toHaveBeenCalledWith('p', { kind: 'scene', episode: '1', shot: '2' })
   })
+
+  it('connect：显式端口参数写入连线', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 0, 0)
+    expect(store.connect(a.id, b.id, 'out', 'in')).toBe(true)
+    expect(store.connections.value[0]).toMatchObject({
+      fromNodeId: a.id,
+      fromPortId: 'out',
+      toNodeId: b.id,
+      toPortId: 'in',
+    })
+  })
+
+  it('onConnectionsChanged：connect/disconnect 触发事件，取消订阅后不再触发', () => {
+    const store = useCanvasStore('p', TARGET)
+    const events: { type: 'connect' | 'disconnect'; connection: { id: string } }[] = []
+    const unsub = store.onConnectionsChanged((e) => events.push(e))
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 0, 0)
+    expect(store.connect(a.id, b.id)).toBe(true)
+    expect(events).toHaveLength(1)
+    expect(events[0].type).toBe('connect')
+    store.disconnect(store.connections.value[0].id)
+    expect(events).toHaveLength(2)
+    expect(events[1].type).toBe('disconnect')
+    unsub()
+    expect(store.connect(a.id, b.id)).toBe(true)
+    expect(events).toHaveLength(2)
+  })
+
+  it('removeNode：连带断开的连线触发 disconnect 事件', () => {
+    const store = useCanvasStore('p', TARGET)
+    const events: { type: 'connect' | 'disconnect' }[] = []
+    store.onConnectionsChanged((e) => events.push(e))
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 0, 0)
+    store.connect(a.id, b.id)
+    store.removeNode(a.id)
+    expect(events.map((e) => e.type)).toEqual(['connect', 'disconnect'])
+  })
 })

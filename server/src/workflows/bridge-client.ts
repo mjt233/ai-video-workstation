@@ -406,6 +406,121 @@ export async function submitLtxDirectorImageToVideo(
   });
 }
 
+// ── 参考模式图生视频封装（minimax-h3-r2v）─────────────────────────────
+
+/**
+ * 参考模式图生视频的提交参数。
+ */
+export interface ReferenceVideoSubmitParams {
+  /** 视频描述提示词 */
+  prompt: string;
+  /** 视频宽度（像素） */
+  width: number;
+  /** 视频高度（像素） */
+  height: number;
+  /** 视频时长（秒） */
+  duration: number;
+  /** 随机种子（可选） */
+  seed?: number;
+  /** 有序图片参考（键 image_0, image_1, …，独立从 0 计数） */
+  imageRefs?: File[];
+  /** 有序视频参考（键 video_0, video_1, …） */
+  videoRefs?: File[];
+  /** 有序音频参考（键 audio_0, audio_1, …） */
+  audioRefs?: File[];
+}
+
+/**
+ * 提交参考模式图生视频任务到 ComfyUI Bridge（如 minimax-h3-r2v 工作流）。
+ *
+ * - 动态文件键：`image_{n}` / `video_{n}` / `audio_{n}`，各类型序号从 0 开始独立递增；
+ * - 走 multipart/form-data（方式 B），params 为 JSON 字符串；
+ * - 参考素材的文件与数量由调用方（工作流实现）负责校验。
+ *
+ * @param params 参考模式图生视频提交参数
+ * @returns Bridge 提交结果（含 taskId）
+ */
+export async function submitReferenceVideo(
+  params: ReferenceVideoSubmitParams,
+): Promise<BridgeSubmitResult> {
+  const body: Record<string, unknown> = {
+    prompt: params.prompt,
+    width: params.width,
+    height: params.height,
+    duration: params.duration,
+  };
+  if (params.seed != null) {
+    body.seed = params.seed;
+  }
+
+  const files: Record<string, File> = {};
+  (params.imageRefs ?? []).forEach((f, idx) => { files[`image_${idx}`] = f; });
+  (params.videoRefs ?? []).forEach((f, idx) => { files[`video_${idx}`] = f; });
+  (params.audioRefs ?? []).forEach((f, idx) => { files[`audio_${idx}`] = f; });
+
+  return submitComfyuiBridge({
+    workflowId: 'minimax-h3-r2v',
+    params: body,
+    files,
+  });
+}
+
+// ── 首尾帧模式图生视频封装（minimax-h3-fl2v）─────────────────────────
+
+/**
+ * minimax-h3-fl2v 首尾帧模式图生视频的提交参数。
+ */
+export interface MinimaxH3Fl2vSubmitParams {
+  /** 视频描述提示词 */
+  prompt: string;
+  /** 视频宽度（像素） */
+  width: number;
+  /** 视频高度（像素） */
+  height: number;
+  /** 视频时长（秒） */
+  duration: number;
+  /** 随机种子（可选） */
+  seed?: number;
+  /** 首帧图片（必填，文件键 image_0） */
+  firstFrame: File;
+  /** 尾帧图片（可选，文件键 image_1；存在时表示首尾帧插值） */
+  lastFrame?: File;
+}
+
+/**
+ * 提交首尾帧模式图生视频任务到 ComfyUI Bridge（minimax-h3-fl2v 工作流）。
+ *
+ * - params（prompt/width/height/duration/seed）以 JSON 字符串上传（multipart 方式 B）；
+ * - 首帧以文件键 `image_0` 上传；存在尾帧时以 `image_1` 上传。
+ *
+ * @param params 首尾帧模式图生视频提交参数
+ * @returns Bridge 提交结果（含 taskId）
+ */
+export async function submitMinimaxH3Fl2v(
+  params: MinimaxH3Fl2vSubmitParams,
+): Promise<BridgeSubmitResult> {
+  const body: Record<string, unknown> = {
+    prompt: params.prompt,
+    width: params.width,
+    height: params.height,
+    duration: params.duration,
+  };
+  if (params.seed != null) {
+    body.seed = params.seed;
+  }
+
+  const files: Record<string, File> = { image_0: params.firstFrame };
+  if (params.lastFrame) {
+    files.image_1 = params.lastFrame;
+  }
+
+  return submitComfyuiBridge({
+    workflowId: 'minimax-h3-fl2v',
+    params: body,
+    files,
+  });
+}
+
 export interface BridgeTaskStatus {
   status: string;
   progress: number;
@@ -418,6 +533,32 @@ export interface BridgeTaskStatus {
     url: string;
   }> | null;
   errorMessage: string | null;
+}
+
+export interface BridgeCancelResult {
+  /** 取消后 Bridge 任务状态（通常为 'failed'） */
+  status: string;
+}
+
+/**
+ * 中断 Bridge 任务。
+ * POST /api/tasks/:taskId/cancel
+ * - queued 任务：直接标记为失败（无需通知 ComfyUI）；
+ * - pending 任务：向 ComfyUI 发送 /interrupt 后再标记为失败。
+ *
+ * @param taskId Bridge 远端任务 ID
+ * @returns 取消结果（status 通常为 'failed'）
+ */
+export async function cancelBridgeTask(taskId: string): Promise<BridgeCancelResult> {
+  const res = await fetch(`${BRIDGE_URL}/api/tasks/${taskId}/cancel`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Bridge cancel failed (${res.status}): ${text}`);
+  }
+  const data = await res.json() as { task_id: string; status: string };
+  return { status: data.status };
 }
 
 /**
@@ -512,7 +653,8 @@ export async function buildDownloadRequest(taskId: string): Promise<{
 // ── 文生图工作流快捷工厂 ─────────────────────────────────────────────
 
 export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
-  id: string;
+  /** 工作流类型，如 text-to-image */
+  type: string;
   name: string;
   impl: string;
   description?: string;
@@ -534,7 +676,7 @@ export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = Work
  * - poll：轮询 Bridge 任务状态，completed / failed 视为结束
  * - parseOutput：通过 buildDownloadRequest 解析首个输出文件的下载请求
  *
- * @param args.baseDefinition 工作流基础元信息（id / name / impl / description / params / capabilities）
+ * @param args.baseDefinition 工作流基础元信息（type / name / impl / description / params / capabilities）
  * @param args.submit 提交函数，接收 WorkflowRunContext，返回远端任务 ID
  * @returns 完整的工作流定义（WorkflowDefinition<TVars>）
  */
@@ -581,7 +723,7 @@ export function createTextToImageWorkflow<TVars extends WorkflowVarsBase = Workf
 
   return createComfyuiBridgeWorkflow<TVars>({
     baseDefinition: {
-      id: config.id,
+      type: config.type,
       name: config.name,
       impl: config.impl,
       description: config.description,
@@ -603,7 +745,8 @@ export function createTextToImageWorkflow<TVars extends WorkflowVarsBase = Workf
 // ── 图片编辑工作流快捷工厂 ───────────────────────────────────────────
 
 export interface ImageEditWorkflowConfig<TVars extends WorkflowVarsBase = WorkflowVarsBase> {
-  id: string;
+  /** 工作流类型，如 image-edit */
+  type: string;
   name: string;
   impl: string;
   description?: string;
@@ -628,7 +771,7 @@ export function createImageEditWorkflow<TVars extends WorkflowVarsBase = Workflo
 ): WorkflowDefinition<TVars> {
   return createComfyuiBridgeWorkflow<TVars>({
     baseDefinition: {
-      id: config.id,
+      type: config.type,
       name: config.name,
       impl: config.impl,
       description: config.description,

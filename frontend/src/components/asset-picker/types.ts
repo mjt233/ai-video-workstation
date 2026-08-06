@@ -14,14 +14,16 @@ export interface AssetItem {
   path: string
   /** 显示标签 */
   label: string
-  /** 缩略图直链 */
+  /** 缩略图直链（音频条目为空） */
   thumbnail: string
   /** 缩进层级（0 = 根） */
   depth: number
-  /** 分区标题（如「自定义资产」）；仅 header 条目使用 */
+  /** 分区标题（如「自定义资产」「音色」）；仅 header 条目使用 */
   section?: string
   /** 是否为分区标题条目（不可选择、不渲染缩略图） */
   header?: boolean
+  /** 是否为音频条目（渲染音频图标行而非图片缩略图） */
+  audio?: boolean
 }
 
 /** 角色/场景页签左侧实体列表条目 */
