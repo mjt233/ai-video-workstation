@@ -11,7 +11,6 @@ function registerFake(type: string, impl: string): void {
     name: type,
     impl,
     submit: async () => ({ taskId: 't' }),
-    parseOutput: async () => ({ type: 'body', contentType: 'video/mp4', data: '', filename: 'x.mp4' }),
   } as WorkflowDefinition);
 }
 

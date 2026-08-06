@@ -93,4 +93,34 @@ describe('submitLtxDirectorImageToVideo', () => {
     expect(arg.files.frame_0).toBe(file0);
     expect(arg.files.frame_1).toBe(file1);
   });
+
+  it('提供 audio 时以 audio 键上传并关闭自动生成音频', async () => {
+    const execute = vi.fn(async (_p: {
+      workflowId: string;
+      params?: Record<string, unknown>;
+      files?: Record<string, File>;
+    }) => ({ taskId: 'task-audio' }));
+    const client = { execute } as unknown as ProviderClient;
+    const file0 = new File(['f0'], 'f0.png', { type: 'image/png' });
+    const audio = new File(['a'], 'bg.flac', { type: 'audio/flac' });
+
+    await submitLtxDirectorImageToVideo(client, {
+      prompt: 'p',
+      width: 1280,
+      height: 720,
+      duration: 5,
+      fps: 24,
+      frames: [{ file: file0, cursor: 0 }],
+      audio,
+    });
+
+    const arg = execute.mock.calls[0][0] as {
+      workflowId: string;
+      params: Record<string, unknown>;
+      files: Record<string, File>;
+    };
+    expect(arg.params.auto_generate_audio).toBe(false);
+    expect(arg.files.audio).toBe(audio);
+    expect(arg.files.frame_0).toBe(file0);
+  });
 });

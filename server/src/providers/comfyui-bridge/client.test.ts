@@ -124,4 +124,17 @@ describe('createComfyuiBridgeClient', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('http://b/api/tasks/task-1/cancel');
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
   });
+
+  it('execute 非 2xx 时抛错（含 status 与响应文本）', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => 'boom body',
+    } as unknown as Response);
+
+    const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+    await expect(
+      client.execute({ workflowId: 'text_to_image', params: {} }),
+    ).rejects.toThrow('Bridge submit failed (500): boom body');
+  });
 });
