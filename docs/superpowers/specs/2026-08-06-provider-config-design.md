@@ -174,7 +174,7 @@ type WorkflowOutput =
 |---|---|
 | `workflows/types.ts` | `WorkflowBaseDefinition` 加 `provider?: string`（默认 `'comfyui-bridge'`）；`WorkflowRunContext` 加 `provider: ProviderClient`；`WorkflowDefinition` 移除 `poll` / `parseOutput`；`WorkflowOutput` 改为从 `providers/types` re-export |
 | `workflows/registry.ts` | `getAllWorkflows` 暴露 `provider` 字段 |
-| `workflows/bridge-client.ts` | 传输函数迁往 `providers/comfyui-bridge/client.ts`；工厂改为通用 `createProviderWorkflow(providerId, { baseDefinition, submit })`（不再预绑 poll/parseOutput）；submit 辅助函数改 `(client, params)` 签名 |
+| `workflows/bridge-client.ts` | 传输函数（execute/poll/cancel/getOutput + token）迁往 `providers/comfyui-bridge/client.ts`；本文件保留工作流层内容：工厂改为通用 `createProviderWorkflow(providerId, { baseDefinition, submit })`（内部设置 `provider` 字段，不再预绑 poll/parseOutput）；submit 辅助函数（`submitTextToImage` 等）保留在本文件，改 `(client, params)` 签名 |
 | 5 个工作流实现文件（text-to-image / image-edit / image-to-video ×2 / tts-voice-design） | `baseDefinition` 声明 `provider: 'comfyui-bridge'`；submit 内改用 `ctx.provider` |
 
 ### 8.2 引擎（`server/src/workflow-engine.ts`）
@@ -190,7 +190,7 @@ type WorkflowOutput =
 其他改造点：
 
 - **`generateVoice`（TTS 内联调用）**：`sceneDeps` 里目前直接 `submitComfyuiBridge` + `pollTask`，改为接收并调用 `ctx.provider`。
-- **cancel 路由**（`routes/workflow.ts`）：`cancelBridgeTask` 直调 → `getProvider(providerId).createClient(config).cancel(remoteTaskId)`；provider 按任务参数里存的 `wf.provider` 解析。
+- **cancel 路由**（`routes/workflow.ts`）：`cancelBridgeTask` 直调 → `getProvider(providerId).createClient(config).cancel(remoteTaskId)`。provider 由任务记录反查：`getImpl(task.workflow_id, task.impl)?.provider ?? 'comfyui-bridge'`（任务表已存 workflow_id + impl，无需额外持久化 provider）。
 - **`discoverWorkflows` 同款自动发现**：新增 `providers/index.ts` 的 `discoverProviders()`，扫描 `server/src/providers/*/index.ts`（跳过 test 文件），`server/src/index.ts` 启动时**先 discoverProviders 再 discoverWorkflows**。
 
 ## 9. 热加载边界
