@@ -27,11 +27,20 @@ import './default.js';
 import { getImpl } from '../registry.js';
 import type { WorkflowRunContext } from '../types.js';
 
+/** provider stub：default.test 整体 mock 了 bridge-client，submit 不会真正调用 provider */
+const stubProvider = {
+  execute: async () => ({ taskId: 'mock' }),
+  poll: async () => ({ status: 'completed', progress: 100, done: true, errorMessage: null }),
+  getOutput: async () => null,
+  cancel: async () => {},
+} as WorkflowRunContext['provider'];
+
 const mkContext = (video: unknown): WorkflowRunContext =>
   ({
     project: 'p',
     projectConfig: { width: 1080, height: 1920, fps: 24 },
     vars: {},
+    provider: stubProvider,
     video: video as never,
     readFile: async () => '',
     readAssertFile: async () => new File(['x'], 'x.png', { type: 'image/png' }),

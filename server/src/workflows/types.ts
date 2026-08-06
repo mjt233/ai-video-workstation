@@ -1,3 +1,4 @@
+import type { ProviderClient, WorkflowOutput } from '../providers/types.js';
 import type { WorkflowVarsBase } from './vars.js';
 
 export type {
@@ -14,6 +15,9 @@ export type {
   SceneTtsVars,
   VideoGenerateVars,
 } from './vars.js';
+
+/** Provider 输出规格（传输层由 provider 提供，WorkflowOutput 定义已移入 providers/types） */
+export type { WorkflowOutput } from '../providers/types.js';
 
 /**
  * 工作流执行类型（按 AI 能力分类，而非资产类型）。
@@ -84,6 +88,8 @@ export interface WorkflowRunContext<TVars extends WorkflowVarsBase = WorkflowVar
   director?: DirectorPayload;
   /** 用户手动传入的工作流参数（按实现声明 key） */
   userParams?: Record<string, boolean | number | string>;
+  /** Provider 客户端（引擎按工作流声明的 provider 解析配置后注入；工作流用它提交任务） */
+  provider: ProviderClient;
   /** 视频自包含提交数据：仅当工作流为视频类型且数据已组装时注入（画布节点透传 / 场景适配层生成） */
   video?: VideoWorkflowSubmitData;
   /** 读取项目内文本文件（UTF-8），路径相对 design/{project}/ */
@@ -129,6 +135,8 @@ export interface WorkflowBaseDefinition {
   name: string;
   /** 可选描述 */
   description?: string;
+  /** 该实现使用的 Provider 插件 ID（引擎据此解析配置并创建传输客户端；默认 comfyui-bridge） */
+  provider?: string;
   /** 可由用户手动传入的参数声明（前端据此渲染输入表单，并写入 vars） */
   params?: WorkflowUserParamDeclaration[];
 }
@@ -314,10 +322,5 @@ export interface WorkflowDefinition<
   /** Extract output spec from completed task. response is the extra fields from poll's return (excluding status/done) */
   parseOutput(taskId: string, response?: TPollResult): Promise<WorkflowOutput>;
 }
-
-export type WorkflowOutput =
-  | { type: 'download'; url: string; filename: string }
-  | { type: 'fetch'; request: { url: string; method: string; headers?: Record<string, string> }; filename: string }
-  | { type: 'body'; contentType: string; data: string; filename: string };
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';

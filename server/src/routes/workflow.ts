@@ -6,9 +6,8 @@ import { getAllWorkflows } from '../workflow-engine.js';
 import { getImpl, getImplementations } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
-import { cancelBridgeTask } from '../workflows/bridge-client.js';
-import { getProviderConfigMasked, setProviderConfig } from '../providers/config-store.js';
-import { getAllProviders } from '../providers/registry.js';
+import { getProviderConfig, getProviderConfigMasked, setProviderConfig } from '../providers/config-store.js';
+import { getAllProviders, getProvider } from '../providers/registry.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
 
 export const workflowRouter = Router();
@@ -270,7 +269,14 @@ workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: 
 
   try {
     if (task.status === 'running') {
-      await cancelBridgeTask(getRemoteTaskId(task)!);
+      const providerId = wf?.provider ?? 'comfyui-bridge';
+      const providerDef = getProvider(providerId);
+      if (!providerDef) {
+        throw new Error(`provider 未注册: ${providerId}`);
+      }
+      await providerDef
+        .createClient(await getProviderConfig(providerId))
+        .cancel(getRemoteTaskId(task)!);
     }
     db.updateTaskStatus(task.id, 'failed', { error_msg: '用户中断' });
     db.addLog(task.id, 'info', 'Task cancelled by user');

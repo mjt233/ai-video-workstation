@@ -65,6 +65,7 @@ export function getAllWorkflows(): {
       impl: w.impl,
       name: w.name,
       description: w.description,
+      provider: w.provider,
       params: w.params,
       capabilities: w.capabilities,
     }))

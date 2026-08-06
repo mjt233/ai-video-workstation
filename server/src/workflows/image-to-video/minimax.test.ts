@@ -12,11 +12,20 @@ import type { WorkflowRunContext } from '../types.js';
 
 const fetchMock = vi.fn();
 
+/** provider stub：Task 9 将换成真实 comfyui-bridge client 以保留全链路 fetch 覆盖 */
+const stubProvider = {
+  execute: async () => ({ taskId: 'mock' }),
+  poll: async () => ({ status: 'completed', progress: 100, done: true, errorMessage: null }),
+  getOutput: async () => null,
+  cancel: async () => {},
+} as WorkflowRunContext['provider'];
+
 const mkContext = (video: unknown): WorkflowRunContext =>
   ({
     project: 'p',
     projectConfig: { width: 1080, height: 1920, fps: 24 },
     vars: {},
+    provider: stubProvider,
     video: video as never,
     readFile: async () => '',
     readAssertFile: async () => new File(['x'], 'x.png', { type: 'image/png' }),
