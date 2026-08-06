@@ -54,6 +54,13 @@ try {
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_batch ON tasks(batch_id);`);
 
+// Migration: add phase column（批量任务执行阶段；历史库可能缺失）
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN phase INTEGER NOT NULL DEFAULT 0;`);
+} catch {
+  // Column already exists, ignore
+}
+
 export interface TaskRecord {
   id: string;
   project: string;

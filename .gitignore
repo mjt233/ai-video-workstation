@@ -6,3 +6,4 @@ data/
 __pycache__/
 .superpowers/
 .worktrees/
+server/config/providers.json*

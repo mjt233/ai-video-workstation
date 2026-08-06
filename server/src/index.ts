@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { fsRouter } from './routes/fs.js';
 import { assetsRouter } from './routes/assets.js';
 import { workflowRouter } from './routes/workflow.js';
+import { discoverProviders } from './providers/index.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,9 +25,11 @@ app.get('*', (req, res) => {
   }
 });
 
-discoverWorkflows().then(() => {
-  startEngine();
-  app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-});
+discoverProviders().then(() =>
+  discoverWorkflows().then(() => {
+    startEngine();
+    app.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }),
+);

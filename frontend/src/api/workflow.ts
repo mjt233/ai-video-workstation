@@ -27,6 +27,8 @@ export interface WorkflowImplementation {
   impl: string
   name: string
   description?: string
+  /** 该实现使用的 Provider 插件 ID（如 comfyui-bridge） */
+  provider?: string
   /** 可由用户手动传入的参数声明 */
   params?: WorkflowUserParamDeclaration[]
   /**
