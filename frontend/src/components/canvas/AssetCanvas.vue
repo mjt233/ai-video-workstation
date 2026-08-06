@@ -85,11 +85,11 @@
         />
         <span
           v-else-if="dirty"
-          class="text-caption text-medium-emphasis"
+          class="text-body-small text-medium-emphasis"
         >未保存</span>
         <span
           v-else
-          class="text-caption text-disabled"
+          class="text-body-small text-disabled"
         >已保存</span>
       </div>
 
@@ -128,7 +128,7 @@
               <div class="canvas-node__header">
                 <span
                   v-if="renamingNodeId !== id"
-                  class="text-caption font-weight-medium canvas-node__name"
+                  class="text-body-small font-weight-medium canvas-node__name"
                   title="双击重命名"
                   @dblclick.stop="startRename(id)"
                 >
@@ -360,10 +360,10 @@
         v-else-if="nodes.length === 0"
         class="asset-canvas__overlay asset-canvas__empty"
       >
-        <div class="text-body-2">
+        <div class="text-body-medium">
           画布为空
         </div>
-        <div class="text-caption text-medium-emphasis">
+        <div class="text-body-small text-medium-emphasis">
           双击空白处或点击工具栏「＋」添加节点
         </div>
       </div>
@@ -397,12 +397,12 @@
           <v-card-text>
             <div
               v-if="sceneDialog.loading"
-              class="text-grey text-body-2"
+              class="text-grey text-body-medium"
             >
               加载中…
             </div>
             <template v-else>
-              <div class="text-caption text-medium-emphasis mb-2">
+              <div class="text-body-small text-medium-emphasis mb-2">
                 点击场景帧进入选中状态，再点击「确认」设为场景图（共 {{ sceneDialog.frames.length }} 帧）：
               </div>
               <div
@@ -446,7 +446,7 @@
               </div>
               <div
                 v-else
-                class="text-grey text-body-2 mb-2"
+                class="text-grey text-body-medium mb-2"
               >
                 当前分镜还没有场景图定义（stage.json 为空）
               </div>
@@ -463,7 +463,7 @@
                 </v-btn>
                 <span
                   v-if="!sceneDialog.canAdd"
-                  class="text-caption text-grey"
+                  class="text-body-small text-grey"
                 >
                   无可用的基础场景引用，可先在「场景图片」页签添加场景帧
                 </span>

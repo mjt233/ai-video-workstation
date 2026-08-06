@@ -17,7 +17,7 @@
       <v-card-text>
         <div
           v-if="!props.node || entries.length === 0"
-          class="text-grey text-body-2"
+          class="text-grey text-body-medium"
         >
           暂无历史版本
         </div>
@@ -71,7 +71,7 @@
                   />
                 </div>
               </template>
-              <v-list-item-title class="text-body-2">
+              <v-list-item-title class="text-body-medium">
                 v{{ h.version }}
                 <v-chip
                   v-if="isCurrent(h)"
@@ -82,7 +82,7 @@
                   当前
                 </v-chip>
               </v-list-item-title>
-              <v-list-item-subtitle class="text-caption">
+              <v-list-item-subtitle class="text-body-small">
                 {{ formatDate(h.date) }}
               </v-list-item-subtitle>
               <template #append>
