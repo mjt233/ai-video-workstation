@@ -58,7 +58,7 @@
         <div class="text-grey mt-2">
           当前目录为空
         </div>
-        <div class="text-caption text-grey-lighten-1 mt-1">
+        <div class="text-body-small text-grey-lighten-1 mt-1">
           点击上方「新建目录」或「上传」添加文件
         </div>
       </div>

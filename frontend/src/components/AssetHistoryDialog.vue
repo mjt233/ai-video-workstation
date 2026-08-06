@@ -33,7 +33,7 @@
 
         <div
           v-else-if="!versions.length"
-          class="text-grey text-body-2 py-4"
+          class="text-grey text-body-medium py-4"
         >
           暂无历史版本
         </div>
@@ -71,16 +71,16 @@
                 />
                 <div
                   v-else
-                  class="text-grey text-caption"
+                  class="text-grey text-body-small"
                 >
                   {{ v.name }}
                 </div>
               </div>
               <v-card-text class="pt-1 pb-1">
-                <div class="text-body-2 font-weight-medium">
+                <div class="text-body-medium font-weight-medium">
                   {{ v.name }}
                 </div>
-                <div class="text-caption text-medium-emphasis">
+                <div class="text-body-small text-medium-emphasis">
                   {{ formatTime(v.mtime) }} · {{ formatSize(v.size) }}
                 </div>
               </v-card-text>

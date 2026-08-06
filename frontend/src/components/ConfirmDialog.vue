@@ -9,7 +9,7 @@
       <v-card-title>
         {{ title }}
       </v-card-title>
-      <v-card-text class="text-body-2">
+      <v-card-text class="text-body-medium">
         {{ content }}
       </v-card-text>
       <v-card-actions>

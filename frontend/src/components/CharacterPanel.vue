@@ -88,7 +88,7 @@
 
         <!-- 角色自定义资产：映射到 assert/custom/character/{name}/（置于衍生变体之下） -->
         <v-divider class="my-4" />
-        <div class="text-subtitle-1 font-weight-medium mb-2 d-flex align-center">
+        <div class="text-body-large font-weight-medium mb-2 d-flex align-center">
           <v-icon
             icon="mdi-folder-star-outline"
             size="small"
@@ -97,7 +97,7 @@
           />
           自定义资产
         </div>
-        <div class="text-body-2 text-medium-emphasis mb-2">
+        <div class="text-body-medium text-medium-emphasis mb-2">
           该角色的自定义资产存储在 <code>assert/custom/character/{{ props.name }}/</code> 下，支持上传、预览与删除。
         </div>
         <CustomAssetSection

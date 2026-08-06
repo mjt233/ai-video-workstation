@@ -40,7 +40,7 @@
         <!-- Existing asset info -->
         <div
           v-if="existingAsset"
-          class="text-caption text-grey mb-2"
+          class="text-body-small text-grey mb-2"
         >
           当前资产: {{ existingAsset }}
         </div>
@@ -48,7 +48,7 @@
         <!-- Optional hint (e.g. director mode notice) -->
         <div
           v-if="props.hint"
-          class="text-caption text-primary mb-2"
+          class="text-body-small text-primary mb-2"
         >
           {{ props.hint }}
         </div>
@@ -60,7 +60,7 @@
             color="primary"
             class="mb-2"
           />
-          <div class="text-caption text-primary mb-2">
+          <div class="text-body-small text-primary mb-2">
             生成中，请稍候...
           </div>
         </template>
@@ -75,7 +75,7 @@
           <div
             v-for="(log, i) in polling.logs"
             :key="i"
-            class="text-caption"
+            class="text-body-small"
             :class="log.level === 'error' ? 'text-error' : log.level === 'warn' ? 'text-warning' : 'text-grey-darken-1'"
           >
             [{{ log.created_at }}] {{ log.message }}

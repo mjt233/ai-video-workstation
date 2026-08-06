@@ -65,7 +65,7 @@
           </div>
           <div
             v-if="errorDialog.refs.length"
-            class="text-body-2"
+            class="text-body-medium"
           >
             <div class="font-weight-medium mb-1">
               引用位置：

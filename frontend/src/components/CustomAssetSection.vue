@@ -82,7 +82,7 @@
     </div>
     <div
       v-else-if="!entries.length"
-      class="text-grey text-body-2 pa-4 text-center"
+      class="text-grey text-body-medium pa-4 text-center"
     >
       暂无自定义资产，点击「上传」添加文件
     </div>
@@ -139,7 +139,7 @@
           </div>
         </div>
         <div
-          class="custom-grid-name text-caption"
+          class="custom-grid-name text-body-small"
           :title="entry.name"
         >
           {{ entry.name }}

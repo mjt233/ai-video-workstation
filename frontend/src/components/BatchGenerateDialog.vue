@@ -47,7 +47,7 @@
             {{ submitError }}
           </v-alert>
 
-          <div class="text-body-2 mb-2 font-weight-medium">
+          <div class="text-body-medium mb-2 font-weight-medium">
             选择要生成的资产类型与工作流实现
           </div>
           <v-row dense>
@@ -91,7 +91,7 @@
 
           <v-divider class="my-3" />
 
-          <div class="text-body-2 mb-2 font-weight-medium">
+          <div class="text-body-medium mb-2 font-weight-medium">
             并发执行数
           </div>
           <v-slider
@@ -144,7 +144,7 @@
           </v-icon>
           一键生成资产
           <v-spacer />
-          <span class="text-body-2 font-weight-regular text-grey">
+          <span class="text-body-medium font-weight-regular text-grey">
             {{ summary.completed + summary.failed }} / {{ summary.total }}
           </span>
         </v-card-title>
@@ -174,11 +174,11 @@
                 />
               </template>
 
-              <v-list-item-title class="text-body-2">
+              <v-list-item-title class="text-body-medium">
                 {{ getTaskDisplayName(task) }}
               </v-list-item-title>
 
-              <v-list-item-subtitle class="text-caption">
+              <v-list-item-subtitle class="text-body-small">
                 {{ getTaskStatusText(task.status) }}
                 <span v-if="task.errorMsg"> — {{ task.errorMsg }}</span>
               </v-list-item-subtitle>
