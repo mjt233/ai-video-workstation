@@ -12,7 +12,8 @@ import type {
   VideoWorkflowSubmitParams,
 } from './workflows/types.js';
 import { buildSceneVideoSubmitData, type SceneAdapterDeps } from './workflows/scene-adapter.js';
-import { submitComfyuiBridge, pollTask, buildDownloadRequest } from './workflows/bridge-client.js';
+import { getProviderConfig } from './providers/config-store.js';
+import { getProvider } from './providers/registry.js';
 import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
 import { archiveExistingAsset } from './assets/history.js';
@@ -674,6 +675,14 @@ async function runTask(taskId: string): Promise<void> {
     db.addLog(taskId, 'info', `Starting workflow: ${wf.name} (impl: ${wf.impl})`);
     db.updateTaskStatus(taskId, 'running');
 
+    // ── Provider 解析：工作流声明 → 插件 → 配置 → client（按请求实时解析，配置热加载）──
+    const providerId = wf.provider ?? 'comfyui-bridge';
+    const providerDef = getProvider(providerId);
+    if (!providerDef) {
+      throw new Error(`工作流 ${task.workflow_id}/${task.impl} 声明的 provider 未注册: ${providerId}`);
+    }
+    const provider = providerDef.createClient(await getProviderConfig(providerId));
+
     // ── 视频自包含提交数据 ──
     // 画布节点任务：params.video（wire 形态）→ 解析为 File 形态；
     // 分镜/批量任务：由场景适配层读取分镜文件组装（工作流实现不再读分镜文件）。
@@ -717,14 +726,14 @@ async function runTask(taskId: string): Promise<void> {
           generateVoice: async (text, voiceDesc) => {
             // 拼接台词 → TTS 生成配音（失败降级返回 null，不注入音频）
             try {
-              const ttsResult = await submitComfyuiBridge({
+              const ttsResult = await provider.execute({
                 workflowId: 'tts_voice_design',
                 params: { desc: voiceDesc, text },
               });
               let ttsOk = false;
               while (true) {
                 await new Promise((r) => setTimeout(r, 1000));
-                const ttsStatus = await pollTask(ttsResult.taskId);
+                const ttsStatus = await provider.poll(ttsResult.taskId);
                 if (ttsStatus.status === 'completed') { ttsOk = true; break; }
                 if (ttsStatus.status === 'failed') {
                   console.warn(`TTS 生成失败，跳过音频: ${ttsStatus.errorMessage}`);
@@ -732,9 +741,9 @@ async function runTask(taskId: string): Promise<void> {
                 }
               }
               if (ttsOk) {
-                const download = await buildDownloadRequest(ttsResult.taskId);
-                if (download) {
-                  const resp = await fetch(download.url, { headers: download.headers });
+                const output = await provider.getOutput(ttsResult.taskId);
+                if (output && output.type === 'fetch') {
+                  const resp = await fetch(output.request.url, { headers: output.request.headers });
                   const blob = await resp.blob();
                   return new File([blob], 'voice-combined.flac', { type: 'audio/flac' });
                 }
@@ -770,6 +779,7 @@ async function runTask(taskId: string): Promise<void> {
       project: task.project,
       projectConfig,
       vars,
+      provider,
       ...(video ? { video } : {}),
       userParams,
       readFile,
@@ -777,39 +787,35 @@ async function runTask(taskId: string): Promise<void> {
     };
 
     // Step 1: Submit
-    db.addLog(taskId, 'info', 'Submitting task to AI API...');
+    db.addLog(taskId, 'info', `Submitting task to AI API (provider: ${providerId})...`);
     const { taskId: remoteTaskId } = await wf.submit(runContext);
     // 持久化远端任务 ID，供中断端点（/workflow/tasks/:id/cancel）使用
     const taskParams = JSON.parse(task.params) as Record<string, unknown>;
     db.updateTaskParams(taskId, { ...taskParams, remoteTaskId });
     db.addLog(taskId, 'info', `Submitted, remote task ID: ${remoteTaskId}`);
 
-    let pollResponse: Record<string, unknown> | undefined;
-
-    // Step 2: Poll if defined
+    // Step 2: Poll
     // 不设轮询时间上限：视频等生成任务可能远超 5 分钟，轮询直到远端返回 done（completed/failed）。
-    // 远端任务悬挂时用户可通过中断（cancel）兜底；Bridge 不可达时 wf.poll 抛错 → 任务直接 failed。
-    if (wf.poll) {
-      db.addLog(taskId, 'info', 'Polling task status...');
-      const POLL_INTERVAL = 2000;
+    // 远端任务悬挂时用户可通过中断（cancel）兜底；provider 不可达时 poll 抛错 → 任务直接 failed。
+    db.addLog(taskId, 'info', 'Polling task status...');
+    const POLL_INTERVAL = 2000;
+    while (true) {
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+      const result = await provider.poll(remoteTaskId);
+      db.addLog(taskId, 'debug', `Poll result: status=${result.status} progress=${result.progress}`);
 
-      while (true) {
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
-        const result = await wf.poll(remoteTaskId);
-        pollResponse = result;
-
-        db.addLog(taskId, 'debug', `Poll result: ${Object.keys(result).map(k => k + '=' + result[k]).join(',')}`);
-
-        if (result.done) {
-          db.addLog(taskId, 'info', `Task completed with status: ${result.status}`);
-          break;
-        }
+      if (result.done) {
+        db.addLog(taskId, 'info', `Task completed with status: ${result.status}`);
+        break;
       }
     }
 
     // Step 3: Parse output
     db.addLog(taskId, 'info', 'Parsing output...');
-    const output = await wf.parseOutput(remoteTaskId, pollResponse);
+    const output = await provider.getOutput(remoteTaskId);
+    if (!output) {
+      throw new Error('No output files found from provider task');
+    }
 
     // Step 4: Download/fetch output and write to assert/
     const outputPath = paramsObj.outputPath;

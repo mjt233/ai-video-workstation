@@ -22,7 +22,6 @@ describe('工作流能力声明透传', () => {
         cancelable: true,
       },
       submit: async () => ({ taskId: 't' }),
-      parseOutput: async () => ({ type: 'body', contentType: 'video/mp4', data: '', filename: 'x.mp4' }),
     };
     register(fake);
     const found = getAllWorkflows().find((w) => w.type === 'test-video-cap');

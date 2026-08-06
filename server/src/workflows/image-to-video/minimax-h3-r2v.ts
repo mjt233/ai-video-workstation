@@ -1,5 +1,5 @@
 import { register } from '../registry.js';
-import { createComfyuiBridgeWorkflow, submitReferenceVideo, submitMinimaxH3Fl2v } from '../bridge-client.js';
+import { createProviderWorkflow, submitReferenceVideo, submitMinimaxH3Fl2v } from '../bridge-client.js';
 import type { ImageToVideoVars, VideoReferenceCapability } from '../types.js';
 
 /** minimax-h3-r2v 参考模式限制 */
@@ -24,7 +24,7 @@ const FL2V_MAX_FRAMES = 2;
  * - mode=first-last-frame → minimax-h3-fl2v：首帧（image_0）必填，尾帧（image_1）可选。
  */
 register(
-  createComfyuiBridgeWorkflow<ImageToVideoVars>({
+  createProviderWorkflow<ImageToVideoVars>({
     baseDefinition: {
       type: 'image-to-video',
       name: 'MiniMax H3',
@@ -53,7 +53,7 @@ register(
         if (frames.length < 1 || frames.length > FL2V_MAX_FRAMES) {
           throw new Error(`minimax-h3-fl2v 首尾帧模式需要 1~${FL2V_MAX_FRAMES} 帧参考图`);
         }
-        const result = await submitMinimaxH3Fl2v({
+        const result = await submitMinimaxH3Fl2v(ctx.provider, {
           prompt: video.prompt,
           width: video.resolution.width,
           height: video.resolution.height,
@@ -96,7 +96,7 @@ register(
         throw new Error('音频参考必须与图片或视频参考一同输入，不能作为唯一输入');
       }
 
-      const result = await submitReferenceVideo({
+      const result = await submitReferenceVideo(ctx.provider, {
         prompt: video.prompt,
         width: video.resolution.width,
         height: video.resolution.height,
