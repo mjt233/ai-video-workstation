@@ -77,7 +77,7 @@
               color="deep-purple-darken-1"
               class="mb-4"
             />
-            <div class="text-body-1 mb-4 text-center">
+            <div class="text-body-large mb-4 text-center">
               {{ fileName }}
             </div>
             <audio
@@ -92,7 +92,7 @@
           <!-- 文本预览 -->
           <pre
             v-else-if="kind === 'text'"
-            class="pa-4 text-body-2 preview-text"
+            class="pa-4 text-body-medium preview-text"
           >{{ textContent }}</pre>
 
           <div

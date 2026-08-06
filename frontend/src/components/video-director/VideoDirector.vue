@@ -39,7 +39,7 @@
         vertical
         class="mx-1"
       />
-      <span class="text-caption text-grey">缩放：</span>
+      <span class="text-body-small text-grey">缩放：</span>
       <v-slider
         v-model="zoomModel"
         :min="10"

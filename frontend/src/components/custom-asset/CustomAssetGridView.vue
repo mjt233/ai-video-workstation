@@ -47,7 +47,7 @@
         </div>
       </div>
       <div
-        class="custom-grid-name text-caption"
+        class="custom-grid-name text-body-small"
         :title="entry.name"
       >
         {{ entry.name }}

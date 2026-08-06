@@ -22,7 +22,7 @@
         </v-icon>
       </template>
       <template #title>
-        <span class="text-body-2">{{ entry.name }}</span>
+        <span class="text-body-medium">{{ entry.name }}</span>
       </template>
       <template #append>
         <div class="d-flex align-center ga-1">
