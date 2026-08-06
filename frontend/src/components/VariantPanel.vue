@@ -1,7 +1,7 @@
 <template>
   <div class="mt-4">
     <div class="d-flex align-center ga-2 mb-2">
-      <div class="text-subtitle-2">
+      <div class="text-title-small">
         衍生变体
       </div>
       <v-btn
@@ -26,7 +26,7 @@
 
     <div
       v-else-if="!variants.length"
-      class="text-grey text-body-2 mb-2"
+      class="text-grey text-body-medium mb-2"
     >
       暂无衍生变体。可为当前{{ kindLabel }}创建变体（如图片编辑描述「门已打开」），生成时使用图片编辑工作流。
     </div>
@@ -86,7 +86,7 @@
 
           <div v-if="formDialog.mode === 'create' || formDialog.parentIdEditable">
             <div class="d-flex align-center ga-2 mb-2">
-              <span class="text-body-2">父变体（可选）</span>
+              <span class="text-body-medium">父变体（可选）</span>
               <v-btn
                 size="small"
                 variant="tonal"
@@ -132,7 +132,7 @@
           />
 
           <div class="d-flex align-center ga-2 mb-2">
-            <span class="text-body-2">引用资产（可选）</span>
+            <span class="text-body-medium">引用资产（可选）</span>
             <v-btn
               size="small"
               variant="tonal"
@@ -161,7 +161,7 @@
                 cover
                 class="rounded"
               />
-              <span class="text-caption flex-grow-1 text-truncate">{{ getRefLabel(refPath) }}</span>
+              <span class="text-body-small flex-grow-1 text-truncate">{{ getRefLabel(refPath) }}</span>
               <div class="d-flex ga-0 flex-shrink-0">
                 <v-btn
                   icon="mdi-chevron-up"
@@ -192,7 +192,7 @@
           </div>
           <div
             v-else
-            class="text-caption text-grey"
+            class="text-body-small text-grey"
           >
             未选择引用资产
           </div>
@@ -279,7 +279,7 @@
           </div>
           <div
             v-if="previewDialog.desc"
-            class="text-body-2 text-medium-emphasis mt-3"
+            class="text-body-medium text-medium-emphasis mt-3"
             style="white-space: pre-wrap;"
           >
             {{ previewDialog.desc }}

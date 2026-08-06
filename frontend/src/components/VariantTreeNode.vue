@@ -20,7 +20,7 @@
           />
           <div
             v-else
-            class="variant-placeholder text-grey text-caption"
+            class="variant-placeholder text-grey text-body-small"
             :style="{ aspectRatio: props.aspectRatio ?? 1 }"
           >
             暂无图片
@@ -84,7 +84,7 @@
         <div class="pa-2">
           <div class="d-flex align-center ga-1 mb-1">
             <div
-              class="text-body-2 font-weight-medium text-truncate"
+              class="text-body-medium font-weight-medium text-truncate"
               :title="node.id"
             >
               {{ node.id }}
@@ -99,7 +99,7 @@
             </v-chip>
           </div>
           <div
-            class="text-caption text-medium-emphasis variant-desc"
+            class="text-body-small text-medium-emphasis variant-desc"
             :title="node.desc"
           >
             {{ node.desc }}

@@ -63,7 +63,7 @@
           class="ma-2"
           variant="outlined"
         >
-          <v-card-title class="text-subtitle-1">
+          <v-card-title class="text-body-large">
             核心配置
           </v-card-title>
           <v-card-text>
@@ -123,7 +123,7 @@
               </v-col>
             </v-row>
 
-            <div class="text-body-2 mb-4">
+            <div class="text-body-medium mb-4">
               <span class="text-medium-emphasis">aspectRatio（自动）：</span>
               <strong>{{ computedAspectRatio || '—' }}</strong>
             </div>

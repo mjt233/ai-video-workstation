@@ -25,7 +25,7 @@
         </div>
         <div
           v-else-if="!filtered.length"
-          class="text-grey text-body-2"
+          class="text-grey text-body-medium"
         >
           暂无子场景
         </div>
@@ -74,7 +74,7 @@
             <v-list-item-subtitle>
               <span
                 v-if="item.isVariant"
-                class="text-caption"
+                class="text-body-small"
               >{{ item.variantDesc || '衍生变体' }} · </span>
               <span
                 v-if="item.imageUrl"
@@ -82,7 +82,7 @@
               >已有设定图</span>
               <span
                 v-else
-                class="text-grey text-caption"
+                class="text-grey text-body-small"
               >未生成资产</span>
             </v-list-item-subtitle>
             <template #append>

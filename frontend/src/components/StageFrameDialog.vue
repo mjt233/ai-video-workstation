@@ -17,7 +17,7 @@
           {{ error }}
         </v-alert>
 
-        <div class="text-caption text-medium-emphasis mb-1">
+        <div class="text-body-small text-medium-emphasis mb-1">
           基础场景
         </div>
         <div class="d-flex align-center ga-3 mb-2">
@@ -40,7 +40,7 @@
           <div class="flex-grow-1">
             <div
               v-if="form.基础场景"
-              class="text-body-2"
+              class="text-body-medium"
             >
               <template v-if="isPrevRef">
                 prev
@@ -52,13 +52,13 @@
             </div>
             <div
               v-else
-              class="text-grey text-body-2"
+              class="text-grey text-body-medium"
             >
               未选择
             </div>
             <div
               v-if="form.基础场景 && !stagePreviewUrl"
-              class="text-grey text-caption"
+              class="text-grey text-body-small"
             >
               {{ isPrevRef ? '上一分镜最后场景图尚未生成' : '未生成资产' }}
             </div>
@@ -92,7 +92,7 @@
           prev 仅支持直接引用：将复制上一分镜最后一帧场景图，不可叠加角色或合成 Prompt。
         </v-alert>
 
-        <div class="text-caption text-medium-emphasis mb-1">
+        <div class="text-body-small text-medium-emphasis mb-1">
           登场角色
         </div>
         <div class="d-flex flex-wrap align-center ga-2 mb-2">
@@ -121,7 +121,7 @@
           </v-chip>
           <span
             v-if="!form.登场角色.length"
-            class="text-grey text-body-2"
+            class="text-grey text-body-medium"
           >{{ isPrevRef ? '无（prev 仅直接引用）' : '无（直接引用基础场景时可不选）' }}</span>
           <v-btn
             size="small"
@@ -135,7 +135,7 @@
         <div
           v-for="name in form.登场角色.filter((n) => !characterPreviewUrls[n])"
           :key="`miss-${name}`"
-          class="text-grey text-caption mb-1"
+          class="text-grey text-body-small mb-1"
         >
           {{ name }}：未生成资产
         </div>

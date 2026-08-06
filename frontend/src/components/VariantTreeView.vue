@@ -83,7 +83,7 @@ function collectAllNodes(): Map<string, { top: number; bottom: number; left: num
   const containerRect = container.getBoundingClientRect()
   const cards = container.querySelectorAll('.variant-node-card')
   for (const card of cards) {
-    const titleEl = card.querySelector('.text-body-2') as HTMLElement | null
+    const titleEl = card.querySelector('.text-body-medium') as HTMLElement | null
     if (!titleEl) continue
     const id = titleEl.title
     const rect = card.getBoundingClientRect()
