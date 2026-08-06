@@ -1,7 +1,7 @@
 <template>
   <div class="video-loader-editor">
     <!-- 当前视频预览 -->
-    <div class="text-caption text-medium-emphasis mb-1">
+    <div class="text-body-small text-medium-emphasis mb-1">
       当前视频
     </div>
     <div class="video-loader-editor__preview mb-2">
@@ -19,7 +19,7 @@
           icon="mdi-video-outline"
           size="large"
         />
-        <span class="text-caption text-grey">
+        <span class="text-body-small text-grey">
           未选择视频
         </span>
       </div>
@@ -49,7 +49,7 @@
     <!-- 当前资产路径提示 -->
     <div
       v-if="assetPath"
-      class="text-caption text-grey mt-1 video-loader-editor__path"
+      class="text-body-small text-grey mt-1 video-loader-editor__path"
       :title="assetPath"
     >
       {{ assetPath }}

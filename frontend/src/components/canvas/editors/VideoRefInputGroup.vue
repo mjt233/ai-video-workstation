@@ -1,6 +1,6 @@
 <template>
   <div class="video-ref-group">
-    <div class="text-caption text-medium-emphasis mb-1">
+    <div class="text-body-small text-medium-emphasis mb-1">
       {{ title }}（{{ inputs.length }}{{ max != null ? `/${max}` : '' }}）
     </div>
     <div
@@ -46,7 +46,7 @@
     </div>
     <div
       v-else
-      class="text-caption text-grey mb-2"
+      class="text-body-small text-grey mb-2"
     >
       无{{ title }}输入
     </div>

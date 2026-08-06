@@ -187,7 +187,7 @@
 
         <div
           v-if="refLimitHint"
-          class="text-caption text-warning mb-2"
+          class="text-body-small text-warning mb-2"
         >
           {{ refLimitHint }}
         </div>

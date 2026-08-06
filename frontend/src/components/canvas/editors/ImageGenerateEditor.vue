@@ -1,6 +1,6 @@
 <template>
   <div class="image-generate-editor">
-    <div class="text-caption text-medium-emphasis mb-1">
+    <div class="text-body-small text-medium-emphasis mb-1">
       输入图（{{ inputs.length }}）
       <span
         v-if="inputs.length"
@@ -56,7 +56,7 @@
     </div>
     <div
       v-else
-      class="text-caption text-grey mb-2"
+      class="text-body-small text-grey mb-2"
     >
       无输入图，默认使用文生图工作流
     </div>
