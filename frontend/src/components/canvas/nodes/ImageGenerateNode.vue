@@ -20,7 +20,7 @@
           icon="mdi-image-plus"
           size="large"
         />
-        <div class="text-caption text-medium-emphasis">
+        <div class="text-body-small text-medium-emphasis">
           尚未生成
         </div>
       </div>
@@ -48,7 +48,7 @@
       />
       <div
         v-if="status.lastLog"
-        class="text-caption log-text"
+        class="text-body-small log-text"
       >
         {{ status.lastLog }}
       </div>
@@ -62,7 +62,7 @@
         color="error"
         size="28"
       />
-      <div class="text-caption error-text">
+      <div class="text-body-small error-text">
         {{ status.errorMsg || '生成失败' }}
       </div>
       <v-btn

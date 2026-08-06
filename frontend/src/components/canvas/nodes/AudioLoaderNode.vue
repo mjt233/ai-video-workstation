@@ -13,7 +13,7 @@
           icon="mdi-music-note"
           size="large"
         />
-        <div class="text-caption text-medium-emphasis">
+        <div class="text-body-small text-medium-emphasis">
           未选择音频
         </div>
         <div class="d-flex ga-1 mt-1">

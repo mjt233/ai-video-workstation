@@ -13,7 +13,7 @@
           icon="mdi-video-plus"
           size="large"
         />
-        <div class="text-caption text-medium-emphasis">
+        <div class="text-body-small text-medium-emphasis">
           未生成视频
         </div>
       </div>
