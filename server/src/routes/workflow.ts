@@ -7,6 +7,8 @@ import { getImpl, getImplementations } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
 import { cancelBridgeTask } from '../workflows/bridge-client.js';
+import { getProviderConfigMasked, setProviderConfig } from '../providers/config-store.js';
+import { getAllProviders } from '../providers/registry.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
 
 export const workflowRouter = Router();
@@ -30,6 +32,42 @@ export function resolveImpl(workflowId: string, impl?: string): string {
   }
   return impls[0]?.impl ?? 'default';
 }
+
+// GET /api/providers — 列出所有 Provider 插件及其配置（secret 字段脱敏为 '__set__'）
+workflowRouter.get('/providers', async (_req: Request, res: Response) => {
+  try {
+    const providers = await Promise.all(
+      getAllProviders().map(async (p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        configSchema: p.configSchema,
+        config: await getProviderConfigMasked(p.id),
+      })),
+    );
+    res.json({ providers });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: `读取 Provider 配置失败: ${msg}` });
+  }
+});
+
+// PUT /api/providers/:id — 保存 Provider 配置（按 schema 校验；secret 空串保留原值）
+workflowRouter.put('/providers/:id', async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const { config } = req.body as { config?: Record<string, unknown> };
+  if (!config || typeof config !== 'object') {
+    res.status(400).json({ error: 'Missing body: config' });
+    return;
+  }
+  try {
+    await setProviderConfig(id, config);
+    res.json({ success: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
+  }
+});
 
 // GET /api/workflows — list available workflow types and implementations
 workflowRouter.get('/workflows', (_req: Request, res: Response) => {
