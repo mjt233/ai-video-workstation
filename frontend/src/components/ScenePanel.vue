@@ -35,7 +35,7 @@
           v-if="data.overview"
           class="ma-2"
         >
-          <v-card-title class="text-h6">
+          <v-card-title class="text-title-large">
             {{ data.overview.title || '（无标题）' }}
             <v-chip
               class="ml-2"
@@ -48,34 +48,34 @@
           </v-card-title>
           <v-card-text>
             <div class="mb-3">
-              <div class="text-caption text-medium-emphasis mb-1">
+              <div class="text-body-small text-medium-emphasis mb-1">
                 叙事节拍
               </div>
-              <div class="text-body-2 overview-text">
+              <div class="text-body-medium overview-text">
                 {{ data.overview.beat || '（空）' }}
               </div>
             </div>
             <div class="mb-3">
-              <div class="text-caption text-medium-emphasis mb-1">
+              <div class="text-body-small text-medium-emphasis mb-1">
                 画面描述
               </div>
-              <div class="text-body-2 overview-text">
+              <div class="text-body-medium overview-text">
                 {{ data.overview.visual || '（空）' }}
               </div>
             </div>
             <div class="mb-3">
-              <div class="text-caption text-medium-emphasis mb-1">
+              <div class="text-body-small text-medium-emphasis mb-1">
                 镜头运动
               </div>
-              <div class="text-body-2 overview-text">
+              <div class="text-body-medium overview-text">
                 {{ data.overview.camera || '（空）' }}
               </div>
             </div>
             <div>
-              <div class="text-caption text-medium-emphasis mb-1">
+              <div class="text-body-small text-medium-emphasis mb-1">
                 情绪基调
               </div>
-              <div class="text-body-2 overview-text">
+              <div class="text-body-medium overview-text">
                 {{ data.overview.mood || '（空）' }}
               </div>
             </div>
@@ -125,7 +125,7 @@
             <v-icon color="secondary">
               mdi-waveform
             </v-icon>
-            <span class="text-body-2">已保存的分镜合并音频：</span>
+            <span class="text-body-medium">已保存的分镜合并音频：</span>
             <audio
               :src="mergedAudioUrl"
               controls
@@ -149,7 +149,7 @@
                 color="primary"
                 size="32"
               >
-                <span class="text-caption">{{ i + 1 }}</span>
+                <span class="text-body-small">{{ i + 1 }}</span>
               </v-avatar>
             </template>
             <v-list-item-title>
@@ -265,7 +265,7 @@
             variant="outlined"
             :class="{ 'stage-disabled-card': stage.disabled }"
           >
-            <v-card-title class="text-subtitle-1 d-flex align-center">
+            <v-card-title class="text-body-large d-flex align-center">
               <span>场景{{ i }}</span>
               <v-chip
                 v-if="stage.disabled"
@@ -320,7 +320,7 @@
               <v-row>
                 <v-col cols="6">
                   <div class="mb-2">
-                    <div class="text-caption text-medium-emphasis mb-1">
+                    <div class="text-body-small text-medium-emphasis mb-1">
                       基础场景
                     </div>
                     <v-menu
@@ -355,7 +355,7 @@
                           v-else
                           class="d-flex flex-column align-center ga-2 pa-2"
                         >
-                          <div class="text-caption text-medium-emphasis">
+                          <div class="text-body-small text-medium-emphasis">
                             {{ isPrevStageRef(stage.基础场景) ? '上一分镜最后场景图尚未生成' : '暂无设定图' }}
                           </div>
                           <v-btn
@@ -382,7 +382,7 @@
                     </v-chip>
                   </div>
                   <div class="mb-2">
-                    <div class="text-caption text-medium-emphasis mb-1">
+                    <div class="text-body-small text-medium-emphasis mb-1">
                       登场角色
                     </div>
                     <div
@@ -421,7 +421,7 @@
                             v-else
                             class="d-flex flex-column align-center ga-2 pa-2"
                           >
-                            <div class="text-caption text-medium-emphasis">
+                            <div class="text-body-small text-medium-emphasis">
                               暂无设定图
                             </div>
                             <v-btn
@@ -439,7 +439,7 @@
                     </div>
                     <div
                       v-else
-                      class="text-grey text-body-2"
+                      class="text-grey text-body-medium"
                     >
                       {{
                         isDirectStageRef(stage)
@@ -449,10 +449,10 @@
                     </div>
                   </div>
                   <div>
-                    <div class="text-caption text-medium-emphasis mb-1">
+                    <div class="text-body-small text-medium-emphasis mb-1">
                       合成 Prompt
                     </div>
-                    <div class="text-body-2 stage-prompt">
+                    <div class="text-body-medium stage-prompt">
                       {{
                         stage.prompt
                           || (isDirectStageRef(stage)
@@ -531,7 +531,7 @@
 
         <!-- 视频导演台：双轨编排关键帧与音频 -->
         <v-card class="mx-2 mb-2">
-          <v-card-title class="text-subtitle-1 py-2">
+          <v-card-title class="text-body-large py-2">
             视频导演台
           </v-card-title>
           <v-card-text
@@ -595,7 +595,7 @@
 
       <v-tabs-window-item value="custom">
         <div class="pa-2">
-          <div class="text-body-2 text-medium-emphasis mb-2">
+          <div class="text-body-medium text-medium-emphasis mb-2">
             该分镜的自定义资产存储在 <code>assert/custom/scene/{{ props.episode }}/{{ props.shot }}/</code> 下，支持上传、预览与删除。
           </div>
           <CustomAssetSection
