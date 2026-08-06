@@ -54,6 +54,8 @@ export function getAllWorkflows(): {
     impl: string;
     name: string;
     description?: string;
+    /** 该实现使用的 Provider 插件 ID（引擎据此解析配置并创建传输客户端） */
+    provider?: string;
     params?: WorkflowUserParamDeclaration[];
     /** 工作流能力声明（前端据此展示导演台等能力入口） */
     capabilities?: WorkflowCapabilities;

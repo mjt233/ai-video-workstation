@@ -1,24 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 副作用注册：minimax 实现靠模块顶层 register() 注册，测试必须导入才能让 getImpl 找到。
-// 注意：这里不 mock ../bridge-client.js 模块——真实 submitReferenceVideo 内部的
-// submitComfyuiBridge 调用走模块内部绑定，模块级 vi.mock 无法拦截；
-// 因此沿用 bridge-client.test.ts 的既有模式：mock 全局 fetch（网络边界），
-// 让真实 submitReferenceVideo → submitComfyuiBridge → fetch 全链路（除网络外）都被覆盖。
+// 注意：这里不 mock ../bridge-client.js 模块——提交走真实链路：
+// submitReferenceVideo(ctx.provider, …) → client.execute → fetch（网络边界）。
+// 传输层由真实 comfyui-bridge client 承担（见下方 stubProvider），
+// 全局 mock fetch 覆盖网络边界，让 submitReferenceVideo → execute → fetch 全链路（除网络外）都被覆盖。
 import './minimax-h3-r2v.js';
+import { createComfyuiBridgeClient } from '../../providers/comfyui-bridge/client.js';
 
 import { getImpl } from '../registry.js';
 import type { WorkflowRunContext } from '../types.js';
 
 const fetchMock = vi.fn();
 
-/** provider stub：Task 9 将换成真实 comfyui-bridge client 以保留全链路 fetch 覆盖 */
-const stubProvider = {
-  execute: async () => ({ taskId: 'mock' }),
-  poll: async () => ({ status: 'completed', progress: 100, done: true, errorMessage: null }),
-  getOutput: async () => null,
-  cancel: async () => {},
-} as WorkflowRunContext['provider'];
+/** 真实 comfyui-bridge client：submitReferenceVideo → client.execute → fetch 全链路（网络边界由全局 fetch mock 覆盖） */
+const stubProvider = createComfyuiBridgeClient({
+  baseUrl: 'http://localhost:10721',
+  password: '0d000721',
+});
 
 const mkContext = (video: unknown): WorkflowRunContext =>
   ({

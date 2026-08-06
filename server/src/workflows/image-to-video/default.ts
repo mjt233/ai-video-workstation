@@ -1,6 +1,6 @@
 import { register } from '../registry.js';
 import {
-  createComfyuiBridgeWorkflow,
+  createProviderWorkflow,
   submitImageToVideo,
   submitLtxDirectorImageToVideo,
 } from '../bridge-client.js';
@@ -16,7 +16,7 @@ import type { ImageToVideoVars } from '../types.js';
  * 分镜/批量路径的数据读取由引擎的场景适配层（scene-adapter.ts）完成。
  */
 register(
-  createComfyuiBridgeWorkflow<ImageToVideoVars>({
+  createProviderWorkflow<ImageToVideoVars>({
     baseDefinition: {
       type: 'image-to-video',
       name: 'LTX-2.3',
@@ -38,7 +38,7 @@ register(
         if (!video.director || video.director.frames.length < 1) {
           throw new Error('image-to-video 导演台模式需要 director.frames');
         }
-        const result = await submitLtxDirectorImageToVideo({
+        const result = await submitLtxDirectorImageToVideo(ctx.provider, {
           prompt: video.prompt,
           width: video.resolution.width,
           height: video.resolution.height,
@@ -56,7 +56,7 @@ register(
         if (!video.director || video.director.frames.length < 1 || video.director.frames.length > 3) {
           throw new Error('image-to-video 首尾帧模式需要 1~3 帧参考图');
         }
-        const result = await submitImageToVideo({
+        const result = await submitImageToVideo(ctx.provider, {
           prompt: video.prompt,
           width: video.resolution.width,
           height: video.resolution.height,

@@ -2,21 +2,24 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // vi.mock 工厂会被提升到文件顶部，无法访问顶层 const；
 // 用 vi.hoisted 声明 mock 函数，工厂与断言共享同一实例。
+// submit 辅助函数首参为 ProviderClient（本测试不关心，仅占位），第二参为参数对象。
 const { submitLtxDirectorImageToVideo, submitImageToVideo } = vi.hoisted(() => ({
-  submitLtxDirectorImageToVideo: vi.fn(async (_p: { duration: number; frames: unknown[] }) => ({ taskId: 'director-task' })),
-  submitImageToVideo: vi.fn(async (_p: { frames: unknown[] }) => ({ taskId: 'frame-task' })),
+  submitLtxDirectorImageToVideo: vi.fn(async (_client: unknown, _p: { duration: number; frames: unknown[] }) => ({ taskId: 'director-task' })),
+  submitImageToVideo: vi.fn(async (_client: unknown, _p: { frames: unknown[] }) => ({ taskId: 'frame-task' })),
 }));
 
 // 注意：本文件与 default.ts 同目录，bridge-client 的相对路径为 ../bridge-client.js
 vi.mock('../bridge-client.js', () => ({
   submitLtxDirectorImageToVideo,
   submitImageToVideo,
-  submitComfyuiBridge: vi.fn(),
-  pollTask: vi.fn(),
-  buildDownloadRequest: vi.fn(),
-  // 与真实工厂一致：把 baseDefinition 拍平到定义顶层（register 需要顶层 type/impl）
-  createComfyuiBridgeWorkflow: (def: { baseDefinition: Record<string, unknown>; submit: unknown }) => ({
+  // 与真实工厂一致：把 baseDefinition 拍平到定义顶层并带上 provider（register 需要顶层 type/impl）
+  createProviderWorkflow: (def: {
+    provider?: string;
+    baseDefinition: Record<string, unknown>;
+    submit: unknown;
+  }) => ({
     ...def.baseDefinition,
+    provider: def.provider ?? 'comfyui-bridge',
     submit: def.submit,
   }),
 }));
@@ -66,7 +69,9 @@ describe('image-to-video ltx impl', () => {
       extraParams: {},
     }));
     expect(submitLtxDirectorImageToVideo).toHaveBeenCalledTimes(1);
-    const params = submitLtxDirectorImageToVideo.mock.calls[0][0];
+    // submit 辅助函数首参为 ProviderClient（ctx.provider），第二参为参数对象
+    expect(submitLtxDirectorImageToVideo.mock.calls[0][0]).toBe(stubProvider);
+    const params = submitLtxDirectorImageToVideo.mock.calls[0][1];
     expect(params.duration).toBe(5);
     expect(params.frames).toHaveLength(1);
   });
@@ -89,7 +94,9 @@ describe('image-to-video ltx impl', () => {
       extraParams: {},
     }));
     expect(submitImageToVideo).toHaveBeenCalledTimes(1);
-    const params = submitImageToVideo.mock.calls[0][0];
+    // submit 辅助函数首参为 ProviderClient（ctx.provider），第二参为参数对象
+    expect(submitImageToVideo.mock.calls[0][0]).toBe(stubProvider);
+    const params = submitImageToVideo.mock.calls[0][1];
     expect(params.frames).toHaveLength(2);
   });
 });

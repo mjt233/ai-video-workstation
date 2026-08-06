@@ -1,4 +1,4 @@
-import type { ProviderClient, WorkflowOutput } from '../providers/types.js';
+import type { ProviderClient } from '../providers/types.js';
 import type { WorkflowVarsBase } from './vars.js';
 
 export type {
@@ -303,24 +303,18 @@ export interface DirectorPayload {
 /**
  * 工作流完整定义。
  *
+ * 传输职责归 Provider：引擎在运行任务时按 provider 解析配置创建 ProviderClient 并
+ * 注入 ctx.provider，submit 内通过 ctx.provider 提交；轮询与输出获取由引擎直接驱动
+ * provider client（因此本定义不再有 poll / parseOutput）。
+ *
  * @typeParam TVars - 业务变量类型
- * @typeParam TPollResult - poll 返回的额外字段类型
  */
-export interface WorkflowDefinition<
-  TVars extends WorkflowVarsBase = WorkflowVarsBase,
-  TPollResult = Record<string, unknown>,
-> extends WorkflowBaseDefinition {
+export interface WorkflowDefinition<TVars extends WorkflowVarsBase = WorkflowVarsBase> extends WorkflowBaseDefinition {
   /** 工作流能力声明（注册时声明，前端据此展示导演台等能力入口） */
   capabilities?: WorkflowCapabilities;
 
   /** Submit task to AI API, return remote task ID */
   submit(ctx: WorkflowRunContext<TVars>): Promise<{ taskId: string }>;
-
-  /** Optional: poll task status. Not implementing = synchronous task */
-  poll?(taskId: string): Promise<{ status: string; done: boolean } & TPollResult>;
-
-  /** Extract output spec from completed task. response is the extra fields from poll's return (excluding status/done) */
-  parseOutput(taskId: string, response?: TPollResult): Promise<WorkflowOutput>;
 }
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
