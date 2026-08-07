@@ -137,4 +137,40 @@ describe('createComfyuiBridgeClient', () => {
       client.execute({ workflowId: 'text_to_image', params: {} }),
     ).rejects.toThrow('Bridge submit failed (500): boom body');
   });
+
+  describe('listWorkflows / getWorkflowDetail', () => {
+    beforeEach(() => {
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'tok' }) } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ([{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [] }]) } as unknown as Response);
+    });
+
+    it('listWorkflows 带标签时拼 tags 查询参数', async () => {
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      const list = await client.listWorkflows('auto');
+      expect(list[0].id).toBe('text_to_image');
+      const url = fetchMock.mock.calls[1][0] as string;
+      expect(url).toContain('/api/workflows?tags=auto');
+    });
+
+    it('listWorkflows 不带标签时不带查询参数', async () => {
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      await client.listWorkflows();
+      const url = fetchMock.mock.calls[1][0] as string;
+      expect(url).toBe('http://b/api/workflows');
+    });
+
+    it('getWorkflowDetail 返回解析数组并带 Bearer', async () => {
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'tok' }) } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'qwen-edit-2509', name: '编辑', declaredParams: [{ alias: 'prompt', label: '提示词', paramType: 'text' }], tags: [] }) } as unknown as Response);
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      const detail = await client.getWorkflowDetail('qwen-edit-2509');
+      expect(detail.declaredParams[0].alias).toBe('prompt');
+      const init = fetchMock.mock.calls[1][1] as RequestInit;
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+    });
+  });
 });
