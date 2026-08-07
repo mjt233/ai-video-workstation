@@ -20,12 +20,6 @@ export interface FrameDefine {
   cursor: number;
 }
 
-/** 导演台关键帧（文件 + 游标） */
-export interface DirectorFrame {
-  file: File;
-  cursor: number;
-}
-
 // ── 文本类构建器 ─────────────────────────────────────────────────────
 
 /**
@@ -107,6 +101,7 @@ export function resolveImageEditSizeParams(
 
 /**
  * 图片编辑提交载荷（多图动态 key image_0/image_1/...，0-based）。
+ * 注：不再默认发送 enable_multiple_angles_lora（由动态注册按 expose_field 暴露为用户可配置参数；Bridge 默认值兜底）。
  * @param args.workflowId Bridge 工作流 id
  * @param args.prompt 编辑描述
  * @param args.imgs 输入图片（按数组顺序映射 image_{n}）
@@ -134,7 +129,21 @@ export function buildImageEditPayload(args: {
 
 /**
  * 首尾帧模式图生视频提交载荷（文件 key image_{0..n-1}）。
- * 3 帧时附带 params.mid_frame_cursor=0.5；提供 audio 时置 auto_generate_audio=false。
+ *
+ * - 恰好 3 帧时附带 params.mid_frame_cursor=0.5（对应 FML2V 约定）；
+ * - 提供 audio 时以 audio 键上传并将 auto_generate_audio 置 false；
+ * - 调用方须校验帧数 1~3（本构建器不做数量校验）。
+ *
+ * @param args.workflowId Bridge 工作流 id
+ * @param args.prompt 视频描述提示词
+ * @param args.width 视频宽度（像素）
+ * @param args.height 视频高度（像素）
+ * @param args.duration 视频时长（秒）
+ * @param args.fps 帧率
+ * @param args.seed 随机种子（可选）
+ * @param args.frames 参考帧图片（按时间顺序，1~3 张）
+ * @param args.audio 背景音频（可选）
+ * @returns Bridge execute 载荷
  */
 export function buildFirstLastFramePayload(args: {
   workflowId: string;
@@ -168,7 +177,24 @@ export function buildFirstLastFramePayload(args: {
 
 /**
  * 导演台模式图生视频提交载荷。
- * frame_define 为 JSON 字符串；文件 key image_{frameSeq}；提供 audio 时置 auto_generate_audio=false。
+ *
+ * - body 中 frame_define 为 JSON.stringify(FrameDefine[]) 字符串；
+ * - 文件以动态键 image_{frameSeq} 上传，frameSeq 与 frameDefines 一一对应；
+ * - 提供 audio 时以 audio 键上传并将 auto_generate_audio 置 false。
+ *
+ * @param args.workflowId Bridge 工作流 id
+ * @param args.prompt 视频描述提示词
+ * @param args.width 视频宽度（像素）
+ * @param args.height 视频高度（像素）
+ * @param args.duration 视频时长（秒）
+ * @param args.fps 帧率
+ * @param args.seed 随机种子（可选）
+ * @param args.frameDefines 关键帧定义（frameSeq 0-based，cursor 0~1）
+ * @param args.frameFiles 关键帧图片文件（与 frameDefines 顺序一致）
+ * @param args.audio 背景音频（可选）
+ * @returns Bridge execute 载荷
+ *
+ * 注意：本函数为纯载荷构建器，与 director-inject.ts 导出的 DirectorPayload（导演台解析负载）同名不同义。
  */
 export function buildDirectorPayload(args: {
   workflowId: string;
@@ -202,7 +228,21 @@ export function buildDirectorPayload(args: {
 }
 
 /**
- * 参考模式图生视频提交载荷（文件 key image_{n}/video_{n}/audio_{n}，各类型独立 0-based）。
+ * 参考模式图生视频提交载荷。
+ *
+ * - 文件 key image_{n}/video_{n}/audio_{n}，各类型序号独立从 0 开始递增；
+ * - 参考素材文件与数量由调用方（工作流实现）负责校验。
+ *
+ * @param args.workflowId Bridge 工作流 id
+ * @param args.prompt 视频描述提示词
+ * @param args.width 视频宽度（像素）
+ * @param args.height 视频高度（像素）
+ * @param args.duration 视频时长（秒）
+ * @param args.seed 随机种子（可选）
+ * @param args.imageRefs 有序图片参考（可选）
+ * @param args.videoRefs 有序视频参考（可选）
+ * @param args.audioRefs 有序音频参考（可选）
+ * @returns Bridge execute 载荷
  */
 export function buildReferencePayload(args: {
   workflowId: string;
