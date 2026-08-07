@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getImpl, getImplementations, unregister, register } from './registry.js';
 import { syncBridgeWorkflows, buildSubmit } from './bridge-sync.js';
 import type { BridgeWorkflowDetail } from '../providers/comfyui-bridge/client.js';
-import type { WorkflowDefinition } from './types.js';
+import type { WorkflowCapabilities, WorkflowDefinition } from './types.js';
 
 // ── mock getProviderConfig / getProvider（避免真实配置与网络） ──
 // 注意：vi.mock 工厂被 hoist 到顶部，mock 客户端与可变配置必须用 vi.hoisted 定义；
@@ -208,6 +208,46 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
       workflowId: 'ceb-x',
       params: expect.objectContaining({ prompt: 'p', width: 1080, height: 1920, duration: 10 }),
       files: expect.objectContaining({ image_0: expect.anything(), video_0: expect.anything() }),
+    }));
+  });
+
+  /** 带 reference 能力声明的 caps（maxTotal=12，image 9/video 3/audio 3） */
+  const refCaps: WorkflowCapabilities = {
+    cancelable: true,
+    video: {
+      modes: ['reference'],
+      reference: { maxTotal: 12, types: { image: { max: 9 }, video: { max: 3 }, audio: { max: 3 } } },
+    },
+  };
+
+  it('reference 模式：参考素材超过 maxTotal 抛错', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('ceb-x', 'image-to-video', refCaps);
+    const refs = Array.from({ length: 13 }, (_, i) => ({ type: 'image', file: new File([], `${i}.png`) }));
+    await expect(submit(mkVideoCtx(execute, { mode: 'reference', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', references: refs, extraParams: {} }) as never)).rejects.toThrow(/参考素材总数量超过上限（12）/);
+  });
+
+  it('reference 模式：音频唯一输入抛错（不能作为唯一输入）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('ceb-x', 'image-to-video', refCaps);
+    await expect(submit(mkVideoCtx(execute, { mode: 'reference', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', references: [{ type: 'audio', file: new File([], 'a.mp3') }], extraParams: {} }) as never)).rejects.toThrow(/音频参考必须与图片或视频参考一同输入/);
+  });
+
+  it('reference 模式：合法参考（image+audio）执行 execute', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('ceb-x', 'image-to-video', refCaps);
+    await submit(mkVideoCtx(execute, {
+      mode: 'reference',
+      resolution: { width: 1080, height: 1920 },
+      duration: 10,
+      prompt: 'p',
+      references: [{ type: 'image', file: new File([], 'a.png') }, { type: 'audio', file: new File([], 'a.mp3') }],
+      extraParams: {},
+    }) as never);
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: 'ceb-x',
+      params: expect.objectContaining({ prompt: 'p', width: 1080, height: 1920, duration: 10 }),
+      files: expect.objectContaining({ image_0: expect.anything(), audio_0: expect.anything() }),
     }));
   });
 

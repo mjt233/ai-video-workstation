@@ -223,11 +223,29 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
     if (video.mode === 'reference') {
       const refs = video.references ?? [];
       if (refs.length < 1) throw new Error('参考模式需要至少 1 个参考素材');
+      // 按能力声明校验参考素材数量上限与分类型上限（caps.video.reference）
+      const cap = caps.video?.reference as
+        | { maxTotal?: number; types?: Record<string, { max?: number }> }
+        | undefined;
+      if (cap?.maxTotal != null && refs.length > cap.maxTotal) {
+        throw new Error(`参考素材总数量超过上限（${cap.maxTotal}）`);
+      }
       const imageRefs: File[] = []; const videoRefs: File[] = []; const audioRefs: File[] = [];
       for (const r of refs) {
         if (r.type === 'image') imageRefs.push(r.file);
         else if (r.type === 'video') videoRefs.push(r.file);
         else audioRefs.push(r.file);
+      }
+      const types = cap?.types ?? {};
+      const maxImage = types.image?.max ?? 0;
+      const maxVideo = types.video?.max ?? 0;
+      const maxAudio = types.audio?.max ?? 0;
+      if (maxImage && imageRefs.length > maxImage) throw new Error(`图片参考数量超过上限（${maxImage}）`);
+      if (maxVideo && videoRefs.length > maxVideo) throw new Error(`视频参考数量超过上限（${maxVideo}）`);
+      if (maxAudio && audioRefs.length > maxAudio) throw new Error(`音频参考数量超过上限（${maxAudio}）`);
+      // 音频参考不能作为唯一输入（audioRequiresVisual 约定）
+      if (audioRefs.length > 0 && imageRefs.length === 0 && videoRefs.length === 0) {
+        throw new Error('音频参考必须与图片或视频参考一同输入，不能作为唯一输入');
       }
       return ctx.provider.execute(buildReferencePayload({
         workflowId, prompt: video.prompt, width: video.resolution.width, height: video.resolution.height,
