@@ -75,11 +75,20 @@ describe('text-to-image/seedream', () => {
     expect(call.params.optimize_prompt_options).toBeUndefined();
   });
 
-  it('vars.width/height 覆盖 projectConfig 尺寸', async () => {
+  it('enable_specified_size=true 时 vars.width/height 覆盖 projectConfig 尺寸', async () => {
+    const impl = getImpl('text-to-image', 'seedream-5-pro')!;
+    await impl.submit(mkCtx({
+      vars: { promptPath: 'x.md', enable_specified_size: 'true', width: '720', height: '1280' },
+    }));
+    const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
+    expect(call.params.size).toBe('720x1280');
+  });
+
+  it('未启用指定尺寸时回退 projectConfig 尺寸（忽略 vars.width/height）', async () => {
     const impl = getImpl('text-to-image', 'seedream-5-pro')!;
     await impl.submit(mkCtx({ vars: { promptPath: 'x.md', width: '720', height: '1280' } }));
     const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
-    expect(call.params.size).toBe('720x1280');
+    expect(call.params.size).toBe('1080x1920');
   });
 
   it('promptPath 缺失抛错', async () => {

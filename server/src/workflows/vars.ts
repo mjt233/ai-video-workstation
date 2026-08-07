@@ -23,7 +23,7 @@ export interface WorkflowVarsBase {
  *
  * 用于角色外观、场景图等纯文本生成图片的场景。
  * 调用方提供 promptPath；引擎/工作流读取该路径作为 prompt。
- * 可选 width/height 覆盖 projectConfig 默认分辨率。
+ * 可选 enable_specified_size + width/height 覆盖 projectConfig 默认分辨率。
  */
 export interface TextToImageVars extends WorkflowVarsBase {
   /**
@@ -38,13 +38,20 @@ export interface TextToImageVars extends WorkflowVarsBase {
    */
   enhance_prompt?: string;
   /**
+   * 可选：是否启用指定输出尺寸（"true"/"false"）。
+   * 由用户通过工作流参数声明传入；仅当为 "true" 时 width/height 生效，否则回退 projectConfig。
+   */
+  enable_specified_size?: string;
+  /**
    * 可选：覆盖默认宽度（像素，字符串形式）。
    * 角色外观通常固定 1280；场景图默认使用 projectConfig.width。
+   * 仅当 enable_specified_size 为 "true" 时生效。
    */
   width?: string;
   /**
    * 可选：覆盖默认高度（像素，字符串形式）。
    * 角色外观通常固定 720；场景图默认使用 projectConfig.height。
+   * 仅当 enable_specified_size 为 "true" 时生效。
    */
   height?: string;
   /**

@@ -18,6 +18,27 @@ for (const def of SEEDREAM_MODELS) {
         defaultValue: false,
         description: '启用后使用方舟 standard 模式优化提示词（质量更优，耗时更长）',
       },
+      {
+        name: '指定输出尺寸',
+        key: 'enable_specified_size',
+        type: 'boolean',
+        defaultValue: false,
+        description: '启用后按下方选定的宽高输出图片',
+      },
+      {
+        name: '输出宽度',
+        key: 'width',
+        type: 'integer',
+        defaultValue: '',
+        description: '输出图片宽度（像素）',
+      },
+      {
+        name: '输出高度',
+        key: 'height',
+        type: 'integer',
+        defaultValue: '',
+        description: '输出图片高度（像素）',
+      },
     ],
     async submit(ctx: WorkflowRunContext<TextToImageVars>) {
       const promptPath = ctx.vars.promptPath?.trim();
@@ -25,10 +46,15 @@ for (const def of SEEDREAM_MODELS) {
         throw new Error('text-to-image 需要 vars.promptPath');
       }
       const prompt = await ctx.readFile(promptPath);
-      // 尺寸：vars.width/height 非空时优先，否则 projectConfig（空串视为未提供，与 default.ts 一致）；
-      // 经 resolveSeedreamSize 按模型约束校验/自动匹配最接近的允许尺寸
-      const width = (ctx.vars.width != null && ctx.vars.width !== '') ? ctx.vars.width : ctx.projectConfig.width;
-      const height = (ctx.vars.height != null && ctx.vars.height !== '') ? ctx.vars.height : ctx.projectConfig.height;
+      // 尺寸：仅当 enable_specified_size==="true" 时采用 vars.width/height，否则回退 projectConfig
+      // （空串视为未提供，与 default.ts 一致）；经 resolveSeedreamSize 按模型约束校验/自动匹配最接近的允许尺寸
+      const specified = ctx.vars.enable_specified_size === 'true';
+      const width = specified && ctx.vars.width != null && ctx.vars.width !== ''
+        ? ctx.vars.width
+        : ctx.projectConfig.width;
+      const height = specified && ctx.vars.height != null && ctx.vars.height !== ''
+        ? ctx.vars.height
+        : ctx.projectConfig.height;
       const optimizeMode = ctx.userParams?.enhance_prompt === 'true' ? ('standard' as const) : undefined;
       return submitSeedreamTextToImage(ctx.provider, {
         model: def.model,
