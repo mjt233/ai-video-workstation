@@ -1,6 +1,6 @@
 import { register } from '../registry.js';
 import type { ImageEditVars, WorkflowRunContext } from '../types.js';
-import { fileToDataUrl, resolveSeedreamSize, SEEDREAM_MODELS, submitSeedreamImageEdit } from '../seedream.js';
+import { fileToDataUrl, resolveSeedreamSize, SEEDREAM_MODELS, SEEDREAM_SIZE_LIMITS, submitSeedreamImageEdit } from '../seedream.js';
 
 for (const def of SEEDREAM_MODELS) {
   register<ImageEditVars>({
@@ -68,12 +68,12 @@ for (const def of SEEDREAM_MODELS) {
         dataUrls.push(await fileToDataUrl(f));
       }
 
-      // 尺寸：enable_specified_size=true 且宽高有效 → 显式 WxH；否则回退 2K
+      // 尺寸：enable_specified_size=true 且宽高有效 → 显式 WxH；否则回退档位
       // 注：userParams 值类型为 boolean|number|string，需 String() 强转后再解析
       const up = ctx.userParams ?? {};
       const size = String(up.enable_specified_size) === 'true'
-        ? resolveSeedreamSize(String(up.width ?? ''), String(up.height ?? ''))
-        : resolveSeedreamSize();
+        ? resolveSeedreamSize(SEEDREAM_SIZE_LIMITS[def.kind], String(up.width ?? ''), String(up.height ?? ''))
+        : resolveSeedreamSize(SEEDREAM_SIZE_LIMITS[def.kind]);
 
       return submitSeedreamImageEdit(ctx.provider, {
         model: def.model,

@@ -3,6 +3,7 @@ import type { ProviderClient } from '../providers/types.js';
 import {
   fileToDataUrl,
   resolveSeedreamSize,
+  SEEDREAM_SIZE_LIMITS,
   submitSeedreamImageEdit,
   submitSeedreamTextToImage,
 } from './seedream.js';
@@ -15,40 +16,55 @@ const stubProvider = {
   cancel: vi.fn(),
 } as unknown as ProviderClient;
 
+/** pro / lite 尺寸约束速记 */
+const PRO = SEEDREAM_SIZE_LIMITS.pro;
+const LITE = SEEDREAM_SIZE_LIMITS.lite;
+
 describe('resolveSeedreamSize', () => {
-  it('合法宽高返回 WxH', () => {
-    expect(resolveSeedreamSize(1080, 1920)).toBe('1080x1920');
-    expect(resolveSeedreamSize('1080', '1920')).toBe('1080x1920');
+  it('合法宽高返回 WxH（pro）', () => {
+    expect(resolveSeedreamSize(PRO, 1080, 1920)).toBe('1080x1920');
+    expect(resolveSeedreamSize(PRO, '1080', '1920')).toBe('1080x1920');
   });
 
-  it('总像素低于下限回退 2K', () => {
-    expect(resolveSeedreamSize(512, 512)).toBe('2K');
+  it('lite 总像素低于下限自动匹配最接近允许尺寸（保持宽高比）', () => {
+    // 1080x1920 总像素 2,073,600 < 3,686,400 → 放大到 1440x2560（总像素恰为下限）
+    expect(resolveSeedreamSize(LITE, 1080, 1920)).toBe('1440x2560');
+    // 1500x1500 总像素 2,250,000 < 3,686,400 → 放大到 1920x1920
+    expect(resolveSeedreamSize(LITE, 1500, 1500)).toBe('1920x1920');
   });
 
-  it('总像素高于上限回退 2K', () => {
-    expect(resolveSeedreamSize(3000, 2000)).toBe('2K'); // 6,000,000 > 4,624,220
+  it('pro 总像素低于下限自动匹配（保持宽高比）', () => {
+    expect(resolveSeedreamSize(PRO, 512, 512)).toBe('960x960'); // 恰为下限 921600
   });
 
-  it('宽高比越界回退 2K', () => {
-    expect(resolveSeedreamSize(2000, 100)).toBe('2K'); // 2000/100 = 20 > 16
+  it('pro 总像素高于上限自动匹配最接近允许尺寸', () => {
+    // 3000x2000 总像素 6,000,000 > 4,624,220 → 缩小到 2633x1755（接近上限）
+    expect(resolveSeedreamSize(PRO, 3000, 2000)).toBe('2633x1755');
   });
 
-  it('缺省回退 2K', () => {
-    expect(resolveSeedreamSize()).toBe('2K');
-    expect(resolveSeedreamSize(1080)).toBe('2K');
-    expect(resolveSeedreamSize(0, 1920)).toBe('2K');
+  it('宽高比越界时钳制到允许比例', () => {
+    // 2000x100 宽高比 20 > 16 → 钳到 16:1 且总像素到下限 → 3840x240
+    expect(resolveSeedreamSize(PRO, 2000, 100)).toBe('3840x240');
   });
 
-  it('边界值包含两端', () => {
-    expect(resolveSeedreamSize(960, 960)).toBe('960x960');     // 总像素正好 921600
-    expect(resolveSeedreamSize(860, 5377)).toBe('860x5377');   // 总像素正好 4624220
-    expect(resolveSeedreamSize(3840, 240)).toBe('3840x240');   // 宽高比正好 16
-    expect(resolveSeedreamSize(240, 3840)).toBe('240x3840');   // 宽高比正好 1/16
+  it('缺省/非法宽高回退档位', () => {
+    expect(resolveSeedreamSize(PRO)).toBe('2K');
+    expect(resolveSeedreamSize(PRO, 1080)).toBe('2K');
+    expect(resolveSeedreamSize(PRO, 0, 1920)).toBe('2K');
+    expect(resolveSeedreamSize(LITE)).toBe('2K');
   });
 
-  it('边界外一像素回退 2K', () => {
-    expect(resolveSeedreamSize(959, 961)).toBe('2K');          // 921,599 低于下限
-    expect(resolveSeedreamSize(860, 5378)).toBe('2K');         // 4,625,080 高于上限
+  it('边界值包含两端（pro）', () => {
+    expect(resolveSeedreamSize(PRO, 960, 960)).toBe('960x960');     // 总像素正好 921600
+    expect(resolveSeedreamSize(PRO, 860, 5377)).toBe('860x5377');   // 总像素正好 4624220
+    expect(resolveSeedreamSize(PRO, 3840, 240)).toBe('3840x240');   // 宽高比正好 16
+    expect(resolveSeedreamSize(PRO, 240, 3840)).toBe('240x3840');   // 宽高比正好 1/16
+  });
+
+  it('lite 边界与合法尺寸直接使用', () => {
+    expect(resolveSeedreamSize(LITE, 2560, 1440)).toBe('2560x1440'); // 总像素恰为下限 3686400
+    expect(resolveSeedreamSize(LITE, 2048, 2048)).toBe('2048x2048'); // 合法
+    expect(resolveSeedreamSize(LITE, 3000, 2000)).toBe('3000x2000'); // 合法（lite 范围更大）
   });
 });
 

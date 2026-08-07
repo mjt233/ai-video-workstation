@@ -100,10 +100,11 @@
 
 供两个实现文件复用，全部可单测：
 
-- **`resolveSeedreamSize(width?, height?)`** — 纯函数，映射应用宽高 → 方舟 `size`：
-  - 宽高均有效且总像素在 `[921600, 4624220]`、宽高比在 `[1/16, 16]` → 返回 `"{width}x{height}"`（如 `1080x1920`）
-  - 超出约束或未提供 → 回退 `"2K"`
-  - **约束说明**：`[921600, 4624220]` 取 pro 的显式尺寸约束作为**两个模型共享的安全边界**（应用默认 1080×1920 落在区间内）；lite 虽支持更高分辨率，但超出安全边界时统一回退 `2K` 档位（两个模型均接受），保证任何项目配置都能生成成功
+- **`resolveSeedreamSize(limits, width?, height?)`** — 纯函数，映射应用宽高 → 方舟 `size`：
+  - 宽高有效且在模型允许范围（总像素 + 宽高比）内 → 直接 `"{width}x{height}"`
+  - 超出范围 → **自动匹配最接近的允许尺寸**（保持宽高比）：先钳制宽高比到 `[1/16, 16]`，再钳制总像素到允许范围（最接近用户目标），由 `W*H=target`、`W/H=ratio` 反解宽高并取整；取整越界时按比例微调到边界内
+  - 无有效配置（缺省/非法）→ 回退模型默认档位 `"2K"`
+- **约束按模型区分**（`SEEDREAM_SIZE_LIMITS`）：pro 总像素 `[921600, 4624220]`、档位 `1K/1.5K/2K`；lite 总像素 `[3686400, 16777216]`、档位 `2K/3K/4K`；宽高比均为 `[1/16, 16]`（`SEEDREAM_MODELS` 增加 `kind: 'pro'|'lite'`，实现按 `def.kind` 取约束）
 - **`fileToDataUrl(file)`** — File → `data:image/...;base64,...`
 - **`submitSeedreamTextToImage(client, { model, prompt, size, optimizeMode })`** — 文生图提交，返回 `client.execute({ workflowId: model, params: body })`
 - **`submitSeedreamImageEdit(client, { model, prompt, imageDataUrls, size, optimizeMode })`** — 图片编辑提交（`image` 单图为字符串、多图为数组）
@@ -159,7 +160,7 @@
 | 文件 | 覆盖 |
 |---|---|
 | `server/src/providers/volcengine-ark/client.test.ts` | execute 拼 body 正确（model/prompt/image/size/watermark/output_format）；files→data URL 合并；多图数组；url/b64_json 两种响应解析；非 2xx 抛错；超时；poll 返回 done；getOutput 缓存/缺失返回 null；cancel no-op |
-| `server/src/workflows/seedream.test.ts` | `resolveSeedreamSize`（合法/越界/缺省回退 2K）；`submitSeedreamTextToImage`/`submitSeedreamImageEdit` 提交参数正确 |
+| `server/src/workflows/seedream.test.ts` | `resolveSeedreamSize`（合法直接用/低于下限放大/lite 下限更大/高于上限缩小/宽高比钳制/缺省回退/边界值，按 pro/lite 约束）；`submitSeedreamTextToImage`/`submitSeedreamImageEdit` 提交参数正确 |
 | `server/src/workflows/text-to-image/seedream.test.ts` | 文生图实现 submit：读 prompt、尺寸、enhance_prompt→optimize_prompt_options 映射 |
 | `server/src/workflows/image-edit/seedream.test.ts` | 图片编辑实现 submit：多图 data URL、desc→prompt、尺寸参数、图片数量/大小超限校验 |
 | `server/src/routes/workflow.test.ts` | `canCancelTask`：running 无远端任务 ID + `deferredCancel` → ok（原 `no_remote_task` 路径仅对非 deferredCancel 保留，既有用例不变）；取消路由 deferred 分支：写 `cancelRequested` 标记 + 返回 `cancelling`、不立即标记 failed；retry 剥离 `cancelRequested` |

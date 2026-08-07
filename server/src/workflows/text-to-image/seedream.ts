@@ -1,6 +1,6 @@
 import { register } from '../registry.js';
 import type { TextToImageVars, WorkflowRunContext } from '../types.js';
-import { resolveSeedreamSize, SEEDREAM_MODELS, submitSeedreamTextToImage } from '../seedream.js';
+import { resolveSeedreamSize, SEEDREAM_MODELS, SEEDREAM_SIZE_LIMITS, submitSeedreamTextToImage } from '../seedream.js';
 
 for (const def of SEEDREAM_MODELS) {
   register<TextToImageVars>({
@@ -25,14 +25,15 @@ for (const def of SEEDREAM_MODELS) {
         throw new Error('text-to-image 需要 vars.promptPath');
       }
       const prompt = await ctx.readFile(promptPath);
-      // 尺寸：vars.width/height 非空时优先，否则 projectConfig（空串视为未提供，与 default.ts 一致）；经 resolveSeedreamSize 校验/回退
+      // 尺寸：vars.width/height 非空时优先，否则 projectConfig（空串视为未提供，与 default.ts 一致）；
+      // 经 resolveSeedreamSize 按模型约束校验/自动匹配最接近的允许尺寸
       const width = (ctx.vars.width != null && ctx.vars.width !== '') ? ctx.vars.width : ctx.projectConfig.width;
       const height = (ctx.vars.height != null && ctx.vars.height !== '') ? ctx.vars.height : ctx.projectConfig.height;
       const optimizeMode = ctx.userParams?.enhance_prompt === 'true' ? ('standard' as const) : undefined;
       return submitSeedreamTextToImage(ctx.provider, {
         model: def.model,
         prompt,
-        size: resolveSeedreamSize(width, height),
+        size: resolveSeedreamSize(SEEDREAM_SIZE_LIMITS[def.kind], width, height),
         ...(optimizeMode ? { optimizeMode } : {}),
       });
     },
