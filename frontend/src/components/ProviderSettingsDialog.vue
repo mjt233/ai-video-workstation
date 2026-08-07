@@ -78,6 +78,7 @@
                 persistent-hint
                 density="comfortable"
                 class="mt-2"
+                variant="outlined"
               />
 
               <!-- string / password / number 字段 -->
@@ -93,6 +94,7 @@
                 persistent-hint
                 density="comfortable"
                 class="mt-2"
+                variant="outlined"
                 @click:append-inner="toggleSecret(p, f)"
               />
 
