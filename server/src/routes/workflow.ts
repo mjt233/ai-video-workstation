@@ -348,8 +348,11 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
 
     for (const task of discovered) {
       const phase = ASSET_PHASE[task.assetType ?? ''] ?? 0;
-      // 用户手动传入的参数：按该任务实际实现（workflowId + impl）的声明规范化后合并进 vars
-      const implDef = getImpl(task.workflowId, task.impl);
+      // 任务不再携带默认 impl（发现阶段仅在按资产类型手动覆盖时设置）：
+      // 缺省或非法实现由 resolveImpl 回退到该工作流类型的第一个实现
+      const resolvedImpl = resolveImpl(task.workflowId, task.impl);
+      // 用户手动传入的参数：按该任务实际实现（workflowId + resolvedImpl）的声明规范化后合并进 vars
+      const implDef = getImpl(task.workflowId, resolvedImpl);
       const userVars = normalizeUserParams(
         implDef?.params,
         task.assetType ? userParamsByAssetType?.[task.assetType] : undefined,
@@ -358,7 +361,7 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
         id: uuidv4(),
         project,
         workflow_id: task.workflowId,
-        impl: task.impl,
+        impl: resolvedImpl,
         params: {
           vars: { ...task.vars, ...userVars },
           promptPaths: task.promptPaths,
