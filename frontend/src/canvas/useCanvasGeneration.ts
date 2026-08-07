@@ -114,7 +114,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
         const { taskId } = await runWorkflow({
           project,
           workflowId: 'image-to-video',
-          impl: String(node.config.workflowImpl ?? 'default'),
+          impl: String(node.config.workflowImpl ?? ''),
           params: {
             vars: {},
             outputPath,
@@ -138,7 +138,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     const inputPaths = inputPathsRef.value[nodeId] ?? []
     const explicitWorkflow = typeof config.workflowId === 'string' && config.workflowId ? config.workflowId : undefined
     const workflowId = explicitWorkflow ?? (inputPaths.length > 0 ? 'image-edit' : 'text-to-image')
-    const impl = String(config.workflowImpl ?? 'default')
+    const impl = String(config.workflowImpl ?? '')
     const outputPath = computeOutputPath(node)
 
     let vars: Record<string, string>

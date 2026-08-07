@@ -27,7 +27,7 @@ describe('useCanvasGeneration', () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     ;(runWorkflow as Mock).mockResolvedValue({ taskId: 'task-1', status: 'running' })
-    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'completed', result: { path: 'x' }, errorMsg: undefined, workflowId: 'image-edit', impl: 'default', createdAt: '', updatedAt: '' })
+    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'completed', result: { path: 'x' }, errorMsg: undefined, workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '' })
     ;(getTaskLogs as Mock).mockResolvedValue([])
   })
 
@@ -82,7 +82,7 @@ describe('useCanvasGeneration', () => {
   })
 
   it('生成失败进入 error 状态', async () => {
-    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'failed', result: null, errorMsg: '失败', workflowId: 'image-edit', impl: 'default', createdAt: '', updatedAt: '' })
+    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'failed', result: null, errorMsg: '失败', workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '' })
     const gen = useCanvasGeneration('p', TARGET)
     const node = makeNode('x', 'image-edit')
     gen.setInputPaths('n1', ['assert/a.jpg'])
@@ -96,14 +96,14 @@ describe('useCanvasGeneration', () => {
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
       id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
-      config: { workflowImpl: 'default', workflowParams: { seed: '1' } },
+      config: { workflowImpl: 'ceb-ltx-2.3-director', workflowParams: { seed: '1' } },
     }
     const videoParams = { mode: 'director' as const, resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', extraParams: {} }
     await gen.generate(node, () => {}, videoParams)
     expect(runWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
         workflowId: 'image-to-video',
-        impl: 'default',
+        impl: 'ceb-ltx-2.3-director',
         params: expect.objectContaining({
           outputPath: 'assert/scene/1/1/canvas/vg/v1.mp4',
           video: videoParams,
