@@ -69,6 +69,18 @@ describe('syncBridgeWorkflows', () => {
     expect(getImplementations('text-to-image').filter((w) => w.impl === 'ceb-text_to_image')).toHaveLength(1);
   });
 
+  it('重同步刷新工作流元数据（name/params 更新）', async () => {
+    const list = [{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] }];
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue(list);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
+    await syncBridgeWorkflows();
+    expect(getImpl('text-to-image', 'ceb-text_to_image')!.name).toBe('文生图');
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail({ name: '文生图V2' }));
+    await syncBridgeWorkflows();
+    expect(getImpl('text-to-image', 'ceb-text_to_image')!.name).toBe('文生图V2');
+    expect(getImplementations('text-to-image').filter((w) => w.impl === 'ceb-text_to_image')).toHaveLength(1);
+  });
+
   it('单详情拉取失败：跳过该工作流且保留其旧注册', async () => {
     const list = [{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] }];
     (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue(list);

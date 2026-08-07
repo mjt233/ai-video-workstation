@@ -6,7 +6,7 @@ import type {
   BridgeWorkflowSummary,
   ComfyuiBridgeClient,
 } from '../providers/comfyui-bridge/client.js';
-import { getAllWorkflows, getImpl, register, unregister } from './registry.js';
+import { getAllWorkflows, register, unregister } from './registry.js';
 import { deriveCapabilities, deriveParams, deriveWorkflowType, type BridgeDerivedType } from './bridge-derive.js';
 import {
   buildDirectorPayload,
@@ -260,14 +260,15 @@ export function buildSubmit(
 }
 
 /**
- * 从详情构建并注册一个动态工作流定义（幂等）。
+ * 从详情构建并注册一个动态工作流定义（替换语义）。
  *
- * 类型推导失败（未知类型）时告警并返回 null，由调用方跳过；实现已注册
- * （重同步时同 id 工作流再次出现）时直接跳过，避免重复注册。
+ * 类型推导失败（未知类型）时告警并返回 null，由调用方跳过；对同 id 实现
+ * 先注销旧定义再注册（unregister + register），保证重同步刷新
+ * name/params/capabilities 且不会重复注册。
  *
  * @param detail Bridge 工作流详情（含解析后的 declaredParams 与 tags）
  * @param tagId 自动注册标签 id（expose_field 元数据来源；可为空串）
- * @returns 注册键（{type}:{impl}）；未知类型或已注册返回 null
+ * @returns 注册键（{type}:{impl}）；未知类型返回 null
  */
 function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string | null {
   const type = deriveWorkflowType(detail.tags);
@@ -276,7 +277,6 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
     return null;
   }
   const impl = `${IMPL_PREFIX}${detail.id}`;
-  if (getImpl(type, impl)) return null; // 幂等：已注册则跳过（防止重同步重复注册）
   const caps = deriveCapabilities(detail.tags, type);
   const expose = exposeFieldOf(detail.tags, tagId);
   const params = deriveParams(expose, detail.declaredParams);
@@ -288,6 +288,8 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
     capabilities: caps,
     submit: buildSubmit(impl, type, caps),
   };
+  // 替换语义：先注销旧定义再注册，保证重同步刷新 name/params/capabilities 且不重复
+  unregister(type, impl);
   register(def);
   return `${type}:${impl}`;
 }
