@@ -38,6 +38,18 @@ describe('resolveSeedreamSize', () => {
     expect(resolveSeedreamSize(1080)).toBe('2K');
     expect(resolveSeedreamSize(0, 1920)).toBe('2K');
   });
+
+  it('边界值包含两端', () => {
+    expect(resolveSeedreamSize(960, 960)).toBe('960x960');     // 总像素正好 921600
+    expect(resolveSeedreamSize(860, 5377)).toBe('860x5377');   // 总像素正好 4624220
+    expect(resolveSeedreamSize(3840, 240)).toBe('3840x240');   // 宽高比正好 16
+    expect(resolveSeedreamSize(240, 3840)).toBe('240x3840');   // 宽高比正好 1/16
+  });
+
+  it('边界外一像素回退 2K', () => {
+    expect(resolveSeedreamSize(959, 961)).toBe('2K');          // 921,599 低于下限
+    expect(resolveSeedreamSize(860, 5378)).toBe('2K');         // 4,625,080 高于上限
+  });
 });
 
 describe('submitSeedreamTextToImage', () => {
@@ -63,20 +75,43 @@ describe('submitSeedreamTextToImage', () => {
 describe('submitSeedreamImageEdit', () => {
   beforeEach(() => executeMock.mockReset());
 
-  it('单图 image 为字符串', async () => {
+  it('单图 image 为字符串（完整 body 断言）', async () => {
     executeMock.mockResolvedValue({ taskId: 't' });
     await submitSeedreamImageEdit(stubProvider, {
       model: 'm', prompt: 'x', images: ['data:image/jpeg;base64,QQ=='], size: '2K',
     });
-    const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
-    expect(call.params.image).toBe('data:image/jpeg;base64,QQ==');
+    expect(executeMock).toHaveBeenCalledWith({
+      workflowId: 'm',
+      params: {
+        model: 'm', prompt: 'x', image: 'data:image/jpeg;base64,QQ==', size: '2K',
+        output_format: 'jpeg', watermark: false, response_format: 'url',
+      },
+    });
   });
 
-  it('多图 image 为数组', async () => {
+  it('多图 image 为数组（完整 body 断言）', async () => {
     executeMock.mockResolvedValue({ taskId: 't' });
     await submitSeedreamImageEdit(stubProvider, { model: 'm', prompt: 'x', images: ['a', 'b'], size: '2K' });
-    const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
-    expect(call.params.image).toEqual(['a', 'b']);
+    expect(executeMock).toHaveBeenCalledWith({
+      workflowId: 'm',
+      params: {
+        model: 'm', prompt: 'x', image: ['a', 'b'], size: '2K',
+        output_format: 'jpeg', watermark: false, response_format: 'url',
+      },
+    });
+  });
+
+  it('10 张图合法（数组形式）', async () => {
+    executeMock.mockResolvedValue({ taskId: 't' });
+    const ten = Array.from({ length: 10 }, (_, i) => `data:${i}`);
+    await submitSeedreamImageEdit(stubProvider, { model: 'm', prompt: 'x', images: ten, size: '2K' });
+    expect(executeMock).toHaveBeenCalledWith({
+      workflowId: 'm',
+      params: {
+        model: 'm', prompt: 'x', image: ten, size: '2K',
+        output_format: 'jpeg', watermark: false, response_format: 'url',
+      },
+    });
   });
 
   it('0 张或超过 10 张抛错', async () => {

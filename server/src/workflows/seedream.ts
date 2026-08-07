@@ -9,20 +9,20 @@ const ARK_MAX_TOTAL_PIXELS = 4624220;
 
 /**
  * 把应用宽高映射为方舟 size。
- * - 宽高均有效且总像素在 [921600, 4624220]、宽高比在 [1/16, 16] → "{width}x{height}"
+ * - 宽高先四舍五入取整，再校验；总像素在 [921600, 4624220]、宽高比在 [1/16, 16] → "{width}x{height}"
  * - 否则回退 "2K"（两个模型均接受）
  * @param width 可选宽度（像素，number 或数字字符串）
  * @param height 可选高度（像素，number 或数字字符串）
  * @returns 方舟 size 值
  */
 export function resolveSeedreamSize(width?: string | number, height?: string | number): string {
-  const w = typeof width === 'number' ? width : Number(width);
-  const h = typeof height === 'number' ? height : Number(height);
+  const w = Math.round(typeof width === 'number' ? width : Number(width));
+  const h = Math.round(typeof height === 'number' ? height : Number(height));
   if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
     const total = w * h;
     const ratio = w / h;
     if (total >= ARK_MIN_TOTAL_PIXELS && total <= ARK_MAX_TOTAL_PIXELS && ratio >= 1 / 16 && ratio <= 16) {
-      return `${Math.round(w)}x${Math.round(h)}`;
+      return `${w}x${h}`;
     }
   }
   return '2K';
