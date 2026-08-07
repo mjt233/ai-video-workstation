@@ -644,7 +644,7 @@ function getDefaultBaseImage(v: VariantInfo): string {
 
 function openGenerate(v: VariantInfo) {
   genDialog.vars = {
-    desc: v.desc,
+    prompt: v.desc,
     imagePaths: JSON.stringify(buildImagePaths(v)),
     purpose: 'variant-edit',
     variantKind: props.kind,

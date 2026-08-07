@@ -500,7 +500,7 @@ const genConfig = computed(() => {
     workflowName: '角色声音生成（音色设计）',
     outputPath: `assert/character/${props.name}/voice.flac`,
     vars: {
-      desc: data.value?.voice?.trim() || '',
+      prompt: data.value?.voice?.trim() || '',
       text: `你好，我叫${props.name}`,
       purpose: 'character-voice',
       character: props.name,
@@ -638,12 +638,12 @@ async function onDeleteVoiceVariant(v: VoiceVariantInfo) {
   }
 }
 
-/** 打开声音变体生成对话框（tts-voice-design，desc 按模式拼接、text 为台词） */
+/** 打开声音变体生成对话框（tts-voice-design，prompt 按模式拼接、text 为台词） */
 function openVoiceVariantGenerate(v: VoiceVariantInfo) {
   voiceVariantGen.value = {
     show: true,
     vars: {
-      desc: buildVoiceVariantDesc(data.value?.voice ?? '', v.prompt, v.promptMode),
+      prompt: buildVoiceVariantDesc(data.value?.voice ?? '', v.prompt, v.promptMode),
       text: v.台词,
       purpose: 'character-voice',
       character: props.name,

@@ -5,11 +5,12 @@ import type { TaskRecord } from '../db.js';
 import type { WorkflowDefinition } from '../workflows/types.js';
 
 /** 注册一个最小假实现（与 capabilities.test.ts 一致），供 resolveImpl 用例使用 */
-function registerFake(type: string, impl: string): void {
+function registerFake(type: string, impl: string, provider?: string): void {
   register({
     type,
     name: type,
     impl,
+    provider,
     submit: async () => ({ taskId: 't' }),
   } as WorkflowDefinition);
 }
@@ -24,6 +25,20 @@ describe('resolveImpl', () => {
     // 该工作流类型只有 ltx（无 default 实现）→ 回退到 ltx
     expect(resolveImpl('resolve-impl-test', 'default')).toBe('ltx');
     expect(resolveImpl('resolve-impl-test', undefined)).toBe('ltx');
+  });
+
+  it('未显式指定时优先本地 Bridge 实现（provider=comfyui-bridge）', () => {
+    // 第一个实现是 volcengine-ark（付费云）、第二个是 comfyui-bridge（本地）→ 无显式 impl 返回 Bridge 实现
+    registerFake('resolve-impl-bridge-pref', 'seedream-5-pro', 'volcengine-ark');
+    registerFake('resolve-impl-bridge-pref', 'ceb-xx', 'comfyui-bridge');
+    expect(resolveImpl('resolve-impl-bridge-pref', undefined)).toBe('ceb-xx');
+    expect(resolveImpl('resolve-impl-bridge-pref', 'default')).toBe('ceb-xx');
+  });
+
+  it('无 comfyui-bridge 实现时回退到第一个实现', () => {
+    registerFake('resolve-impl-no-bridge', 'seedream-5-pro', 'volcengine-ark');
+    registerFake('resolve-impl-no-bridge', 'seedream-2.1', 'volcengine-ark');
+    expect(resolveImpl('resolve-impl-no-bridge', undefined)).toBe('seedream-5-pro');
   });
 
   it('未知工作流类型时回退 default', () => {

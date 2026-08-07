@@ -14,11 +14,16 @@ import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflo
 export const workflowRouter = Router();
 
 /**
- * 解析工作流实现：指定实现存在则用之，否则回退到该工作流类型的第一个实现。
+ * 解析工作流实现：指定实现存在则用之，否则回退到该工作流类型的实现。
  *
  * 画布【生成视频】节点新建时 workflowImpl 可能未初始化（提交 'default'），
  * 而部分工作流类型（如 image-to-video）没有名为 default 的实现；
  * 此处兜底保证任务总能落到一个真实实现上。
+ *
+ * 未显式指定时优先本地 Bridge 实现（provider=comfyui-bridge，即 ceb-*）：
+ * text-to-image / image-edit 等类型注册的第一个实现可能是付费云（volcengine-ark），
+ * 直接回退 impls[0] 会让批量生成静默切到云模型，因此优先选本地 Bridge，
+ * 仅当类型下不存在 Bridge 实现（如纯 seedream 类型）才回退第一个实现。
  *
  * @param workflowId 工作流类型 ID
  * @param impl 请求的实现标识（可能缺失或非法）
@@ -30,7 +35,9 @@ export function resolveImpl(workflowId: string, impl?: string): string {
   if (impls.some((w) => w.impl === requested)) {
     return requested;
   }
-  return impls[0]?.impl ?? 'default';
+  // 未显式指定时优先本地 Bridge 实现（provider=comfyui-bridge），避免批量默认切到付费云
+  const bridgeImpl = impls.find((w) => w.provider === 'comfyui-bridge');
+  return bridgeImpl?.impl ?? impls[0]?.impl ?? 'default';
 }
 
 // GET /api/providers — 列出所有 Provider 插件及其配置（secret 字段脱敏为 '__set__'）
@@ -62,6 +69,13 @@ workflowRouter.put('/providers/:id', async (req: Request, res: Response) => {
   }
   try {
     await setProviderConfig(id, config);
+    // Bridge 工作流动态重同步（仅 comfyui-bridge 配置变化触发；失败不阻塞响应）
+    if (id === 'comfyui-bridge') {
+      const { syncBridgeWorkflows } = await import('../workflows/bridge-sync.js');
+      syncBridgeWorkflows().catch((e) => {
+        console.error(`[bridge-sync] 配置变更重同步失败: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
     res.json({ success: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -341,8 +355,11 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
 
     for (const task of discovered) {
       const phase = ASSET_PHASE[task.assetType ?? ''] ?? 0;
-      // 用户手动传入的参数：按该任务实际实现（workflowId + impl）的声明规范化后合并进 vars
-      const implDef = getImpl(task.workflowId, task.impl);
+      // 任务不再携带默认 impl（发现阶段仅在按资产类型手动覆盖时设置）：
+      // 缺省或非法实现由 resolveImpl 回退到该工作流类型的第一个实现
+      const resolvedImpl = resolveImpl(task.workflowId, task.impl);
+      // 用户手动传入的参数：按该任务实际实现（workflowId + resolvedImpl）的声明规范化后合并进 vars
+      const implDef = getImpl(task.workflowId, resolvedImpl);
       const userVars = normalizeUserParams(
         implDef?.params,
         task.assetType ? userParamsByAssetType?.[task.assetType] : undefined,
@@ -351,7 +368,7 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
         id: uuidv4(),
         project,
         workflow_id: task.workflowId,
-        impl: task.impl,
+        impl: resolvedImpl,
         params: {
           vars: { ...task.vars, ...userVars },
           promptPaths: task.promptPaths,

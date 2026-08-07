@@ -22,7 +22,7 @@ describe('createComfyuiBridgeClient', () => {
     const client = createComfyuiBridgeClient({ baseUrl: 'http://my-bridge:9999/', password: 'pw' });
     const result = await client.execute({
       workflowId: 'text_to_image',
-      params: { imd_desc: '描述', width: 1080, height: 1920 },
+      params: { prompt: '描述', width: 1080, height: 1920 },
     });
 
     expect(result.taskId).toBe('t1');
@@ -41,13 +41,13 @@ describe('createComfyuiBridgeClient', () => {
 
     const file = new File(['dummy'], 'a.png', { type: 'image/png' });
     const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
-    await client.execute({ workflowId: 'qwen-edit-2509', params: { desc: '编辑' }, files: { img1: file } });
+    await client.execute({ workflowId: 'qwen-edit-2509', params: { desc: '编辑' }, files: { image_0: file } });
 
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.body).toBeInstanceOf(FormData);
     const form = init.body as FormData;
     expect(JSON.parse(form.get('params') as string)).toEqual({ desc: '编辑' });
-    expect(form.get('img1')).toBe(file);
+    expect(form.get('image_0')).toBe(file);
   });
 
   it('poll 自动登录获取 token，completed 视为 done，请求带 Bearer', async () => {
@@ -136,5 +136,41 @@ describe('createComfyuiBridgeClient', () => {
     await expect(
       client.execute({ workflowId: 'text_to_image', params: {} }),
     ).rejects.toThrow('Bridge submit failed (500): boom body');
+  });
+
+  describe('listWorkflows / getWorkflowDetail', () => {
+    beforeEach(() => {
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'tok' }) } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ([{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [] }]) } as unknown as Response);
+    });
+
+    it('listWorkflows 带标签时拼 tags 查询参数', async () => {
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      const list = await client.listWorkflows('auto');
+      expect(list[0].id).toBe('text_to_image');
+      const url = fetchMock.mock.calls[1][0] as string;
+      expect(url).toContain('/api/workflows?tags=auto');
+    });
+
+    it('listWorkflows 不带标签时不带查询参数', async () => {
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      await client.listWorkflows();
+      const url = fetchMock.mock.calls[1][0] as string;
+      expect(url).toBe('http://b/api/workflows');
+    });
+
+    it('getWorkflowDetail 返回解析数组并带 Bearer', async () => {
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'tok' }) } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'qwen-edit-2509', name: '编辑', declaredParams: [{ alias: 'prompt', label: '提示词', paramType: 'text' }], tags: [] }) } as unknown as Response);
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      const detail = await client.getWorkflowDetail('qwen-edit-2509');
+      expect(detail.declaredParams[0].alias).toBe('prompt');
+      const init = fetchMock.mock.calls[1][1] as RequestInit;
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+    });
   });
 });

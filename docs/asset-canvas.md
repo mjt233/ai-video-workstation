@@ -140,7 +140,7 @@
 
 1. `generateNode(nodeId)`：收集输入图路径（`collectInputPaths`，含顺序）→ `gen.setInputPaths` → `gen.generate`。
 2. `generate`：
-   - `image-edit`：`vars = { desc: prompt, imagePaths: JSON.stringify(inputPaths), purpose: 'canvas-image' }`；
+   - `image-edit`：`vars = { prompt, imagePaths: JSON.stringify(inputPaths), purpose: 'canvas-image' }`；
    - `text-to-image`：先把 prompt 写入节点目录的 `prompt.md`，`vars = { promptPath, purpose: 'canvas-image' }`。
    - 产物路径 `computeOutputPath`：版本号 = 历史长度 + 1。
 3. 轮询 `poll`（2s）：**服务端终态为 `completed` / `failed`**（无 success/error），`completed` 视为成功并回写 `current` + `history`；`failed/error/cancelled` 视为失败显示错误遮罩。

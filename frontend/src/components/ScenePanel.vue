@@ -728,7 +728,7 @@
       workflow-id="image-edit"
       workflow-name="分镜场景图生成（图片编辑）"
       :vars="{
-        desc: '',
+        prompt: '',
         imagePaths: '[]',
         purpose: 'scene-stage-image',
         episode: props.episode,
@@ -746,7 +746,7 @@
       workflow-id="tts-voice-design"
       workflow-name="分镜台词语音生成（音色设计）"
       :vars="{
-        desc: '',
+        prompt: '',
         text: '',
         purpose: 'scene-tts',
         episode: props.episode,
@@ -1079,7 +1079,7 @@ const stageAssetVars = computed((): Record<string, string> => {
   if (variantId) {
     return {
       promptPath: `prompt/stage/${name}/${label}.md`,
-      desc: '',
+      prompt: '',
       imagePaths: JSON.stringify([`assert/stage/${name}/${label}.jpg`]),
       purpose: 'stage-variant',
       stageName: name,

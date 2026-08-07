@@ -21,8 +21,8 @@ const DESIGN_DIR = path.resolve(__dirname, '../../../design');
 export interface DiscoveredTask {
   /** 工作流类型 ID */
   workflowId: string;
-  /** 实现标识 */
-  impl: string;
+  /** 实现标识（可缺省：批量创建端按资产类型解析，缺省时回退到该类型第一个实现） */
+  impl?: string;
   /** 业务变量 */
   vars: WorkflowVarsBase & Record<string, string>;
   /** 相关 prompt 路径（展示用） */
@@ -95,7 +95,6 @@ export async function discoverTasks(
             const promptPath = `prompt/character/${name}/appearance.md`;
             tasks.push({
               workflowId: 'text-to-image',
-              impl: 'default',
               assetType,
               vars: {
                 promptPath,
@@ -133,10 +132,9 @@ export async function discoverTasks(
             if (!voiceDesc) continue;
             tasks.push({
               workflowId: 'tts-voice-design',
-              impl: 'default',
               assetType,
               vars: {
-                desc: voiceDesc,
+                prompt: voiceDesc,
                 text: `你好，我叫${name}`,
                 purpose: 'character-voice',
                 character: name,
@@ -169,7 +167,6 @@ export async function discoverTasks(
               const promptPath = `prompt/stage/${stageName}/${label}.md`;
               tasks.push({
                 workflowId: 'text-to-image',
-                impl: 'default',
                 assetType,
                 vars: {
                   promptPath,
@@ -221,10 +218,9 @@ export async function discoverTasks(
               const baseImage = (meta.baseImage ?? `assert/character/${name}/appearance.jpg`).trim();
               tasks.push({
                 workflowId: 'image-edit',
-                impl: 'default',
                 assetType,
                 vars: {
-                  desc,
+                  prompt: desc,
                   imagePaths: JSON.stringify([baseImage]),
                   purpose: 'variant-edit',
                   variantKind: 'character',
@@ -283,10 +279,9 @@ export async function discoverTasks(
                 ).trim();
                 tasks.push({
                   workflowId: 'image-edit',
-                  impl: 'default',
                   assetType,
                   vars: {
-                    desc,
+                    prompt: desc,
                     imagePaths: JSON.stringify([baseImage]),
                     purpose: 'variant-edit',
                     variantKind: 'stage',
@@ -332,10 +327,9 @@ export async function discoverTasks(
                     if (await shouldSkipOutput(outputPath)) continue;
                     tasks.push({
                       workflowId: 'image-edit',
-                      impl: 'default',
                       assetType,
                       vars: {
-                        desc: '',
+                        prompt: '',
                         imagePaths: '[]',
                         purpose: 'scene-stage-image',
                         episode,
@@ -374,7 +368,6 @@ export async function discoverTasks(
                 }
                 tasks.push({
                   workflowId: 'image-to-video',
-                  impl: 'default',
                   assetType,
                   vars: { episode, shot } satisfies ImageToVideoVars,
                   promptPaths: [`prompt/scene/${episode}/${shot}/prompt.md`],
@@ -393,10 +386,9 @@ export async function discoverTasks(
                     if (await shouldSkipOutput(outputPath)) continue;
                     tasks.push({
                       workflowId: 'tts-voice-design',
-                      impl: 'default',
                       assetType,
                       vars: {
-                        desc: '',
+                        prompt: '',
                         text: '',
                         purpose: 'scene-tts',
                         episode,

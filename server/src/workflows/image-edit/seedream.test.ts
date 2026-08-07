@@ -16,7 +16,7 @@ const mkCtx = (overrides: Partial<WorkflowRunContext<ImageEditVars>> = {}): Work
   project: 'p',
   projectConfig: { width: 1080, height: 1920 },
   vars: {
-    desc: '把猫放进商场',
+    prompt: '把猫放进商场',
     imagePaths: JSON.stringify(['assert/stage/商场/白天.jpg', 'assert/character/张三/appearance.jpg']),
   },
   provider: stubProvider,
@@ -40,7 +40,7 @@ describe('image-edit/seedream', () => {
     expect(getImpl('image-edit', 'seedream-5-lite')).toBeDefined();
   });
 
-  it('多图：image 为 data URL 数组、prompt=desc、尺寸回退 2K', async () => {
+  it('多图：image 为 data URL 数组、prompt=编辑描述、尺寸回退 2K', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await impl.submit(mkCtx());
 
@@ -70,7 +70,7 @@ describe('image-edit/seedream', () => {
   it('单图：image 为字符串', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await impl.submit(mkCtx({
-      vars: { desc: 'x', imagePaths: JSON.stringify(['assert/stage/商场/白天.jpg']) },
+      vars: { prompt: 'x', imagePaths: JSON.stringify(['assert/stage/商场/白天.jpg']) },
     }));
     const call = executeMock.mock.calls[0][0] as { params: { image: string | string[] } };
     expect(typeof call.params.image).toBe('string');
@@ -80,35 +80,35 @@ describe('image-edit/seedream', () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     const many = Array.from({ length: 11 }, (_, i) => `assert/stage/商场/${i}.jpg`);
     await expect(
-      impl.submit(mkCtx({ vars: { desc: 'x', imagePaths: JSON.stringify(many) } })),
+      impl.submit(mkCtx({ vars: { prompt: 'x', imagePaths: JSON.stringify(many) } })),
     ).rejects.toThrow('最多支持 10 张参考图');
   });
 
-  it('desc 缺失抛错', async () => {
+  it('prompt 缺失抛错', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await expect(
-      impl.submit(mkCtx({ vars: { desc: '  ', imagePaths: '[]' } })),
-    ).rejects.toThrow('需要 vars.desc');
+      impl.submit(mkCtx({ vars: { prompt: '  ', imagePaths: '[]' } })),
+    ).rejects.toThrow('需要 vars.prompt');
   });
 
   it('无输入图抛错', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await expect(
-      impl.submit(mkCtx({ vars: { desc: 'x', imagePaths: '[]' } })),
+      impl.submit(mkCtx({ vars: { prompt: 'x', imagePaths: '[]' } })),
     ).rejects.toThrow('至少需要一张输入图片');
   });
 
   it('imagePaths 非法 JSON 抛错', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await expect(
-      impl.submit(mkCtx({ vars: { desc: 'x', imagePaths: 'not-json' } })),
+      impl.submit(mkCtx({ vars: { prompt: 'x', imagePaths: 'not-json' } })),
     ).rejects.toThrow('imagePaths 无效');
   });
 
   it('imagePaths 含非字符串元素抛错', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await expect(
-      impl.submit(mkCtx({ vars: { desc: 'x', imagePaths: JSON.stringify([1, 2]) } })),
+      impl.submit(mkCtx({ vars: { prompt: 'x', imagePaths: JSON.stringify([1, 2]) } })),
     ).rejects.toThrow('imagePaths 无效');
   });
 
@@ -117,7 +117,7 @@ describe('image-edit/seedream', () => {
     const big = new File([new Uint8Array(30 * 1024 * 1024 + 1)], 'big.jpg', { type: 'image/jpeg' });
     await expect(
       impl.submit(mkCtx({
-        vars: { desc: 'x', imagePaths: JSON.stringify(['assert/stage/商场/大图.jpg']) },
+        vars: { prompt: 'x', imagePaths: JSON.stringify(['assert/stage/商场/大图.jpg']) },
         readAssertFile: async () => big,
       })),
     ).rejects.toThrow('超过 30MB');
@@ -127,7 +127,7 @@ describe('image-edit/seedream', () => {
   it('空白路径被过滤后仍可提交', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await impl.submit(mkCtx({
-      vars: { desc: 'x', imagePaths: JSON.stringify(['   ', 'assert/stage/商场/白天.jpg']) },
+      vars: { prompt: 'x', imagePaths: JSON.stringify(['   ', 'assert/stage/商场/白天.jpg']) },
     }));
     const call = executeMock.mock.calls[0][0] as { params: { image: string | string[] } };
     expect(typeof call.params.image).toBe('string');
@@ -137,7 +137,7 @@ describe('image-edit/seedream', () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await expect(
       impl.submit(mkCtx({
-        vars: { desc: 'x', imagePaths: JSON.stringify(['assert/stage/不存在/缺图.jpg']) },
+        vars: { prompt: 'x', imagePaths: JSON.stringify(['assert/stage/不存在/缺图.jpg']) },
         readAssertFile: async () => { throw new Error('assert 文件不存在: assert/stage/不存在/缺图.jpg'); },
       })),
     ).rejects.toThrow('assert 文件不存在');

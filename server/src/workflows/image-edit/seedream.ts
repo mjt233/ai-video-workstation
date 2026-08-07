@@ -34,9 +34,9 @@ for (const def of SEEDREAM_MODELS) {
       },
     ],
     async submit(ctx: WorkflowRunContext<ImageEditVars>) {
-      const desc = (ctx.vars.desc ?? '').trim();
-      if (!desc) {
-        throw new Error('image-edit 需要 vars.desc（编辑描述）');
+      const prompt = (ctx.vars.prompt ?? '').trim();
+      if (!prompt) {
+        throw new Error('image-edit 需要 vars.prompt（编辑描述）');
       }
 
       let paths: string[] = [];
@@ -77,7 +77,7 @@ for (const def of SEEDREAM_MODELS) {
 
       return submitSeedreamImageEdit(ctx.provider, {
         model: def.model,
-        prompt: desc,
+        prompt,
         images: dataUrls,
         size,
       });

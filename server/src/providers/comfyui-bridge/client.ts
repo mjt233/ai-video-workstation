@@ -1,5 +1,48 @@
 import type { ProviderClient, ResolvedProviderConfig, WorkflowOutput } from '../types.js';
 
+/** Bridge 列表接口返回的工作流摘要（declaredParams 为 JSON 字符串） */
+export interface BridgeWorkflowSummary {
+  id: string;
+  name: string;
+  description?: string;
+  declaredParams: string;
+  tags: BridgeTagGroup[];
+}
+
+/** Bridge 详情接口返回的工作流详情（declaredParams 为解析数组） */
+export interface BridgeWorkflowDetail {
+  id: string;
+  name: string;
+  description?: string;
+  declaredParams: BridgeDeclaredParam[];
+  tags: BridgeTagGroup[];
+}
+
+/** 详情接口 declaredParams 元素 */
+export interface BridgeDeclaredParam {
+  alias: string;
+  label?: string | null;
+  paramType: 'text' | 'number' | 'boolean' | 'image' | 'video' | 'audio';
+  defaultValue?: string | null;
+}
+
+/** Bridge 标签分组（父/子嵌套；metadata 为合并默认值后的完整元数据） */
+export interface BridgeTagGroup {
+  id: string;
+  name?: string;
+  metadata?: Record<string, unknown>;
+  configuredMetadata?: Record<string, unknown>;
+  tags?: BridgeTagGroup[];
+}
+
+/** ComfyUI Bridge 客户端：传输能力 + 工作流列表/详情查询（后者供 bridge-sync 使用） */
+export interface ComfyuiBridgeClient extends ProviderClient {
+  /** 拉取工作流列表；tag 非空时按标签筛选（GET /api/workflows[?tags=]） */
+  listWorkflows(tag?: string): Promise<BridgeWorkflowSummary[]>;
+  /** 拉取单个工作流详情（GET /api/workflows/:id，declaredParams 为解析数组） */
+  getWorkflowDetail(id: string): Promise<BridgeWorkflowDetail>;
+}
+
 /**
  * 创建 ComfyUI Easy Bridge 传输客户端。
  *
@@ -8,9 +51,9 @@ import type { ProviderClient, ResolvedProviderConfig, WorkflowOutput } from '../
  * - 提交无需认证；poll / getOutput 首次调用时自动登录获取 token。
  *
  * @param config 已解析的 provider 配置（含 baseUrl / password）
- * @returns ProviderClient
+ * @returns ComfyuiBridgeClient
  */
-export function createComfyuiBridgeClient(config: ResolvedProviderConfig): ProviderClient {
+export function createComfyuiBridgeClient(config: ResolvedProviderConfig): ComfyuiBridgeClient {
   const baseUrl = String(config.baseUrl ?? 'http://localhost:10721').replace(/\/+$/, '');
   const password = String(config.password ?? '0d000721');
 
@@ -126,6 +169,29 @@ export function createComfyuiBridgeClient(config: ResolvedProviderConfig): Provi
         throw new Error(`Bridge cancel failed (${res.status}): ${text}`);
       }
       await res.json();
+    },
+
+    async listWorkflows(tag?: string) {
+      const token = await ensureToken();
+      const url = `${baseUrl}/api/workflows${tag ? `?tags=${encodeURIComponent(tag)}` : ''}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Bridge list workflows failed (${res.status}): ${text}`);
+      }
+      return (await res.json()) as BridgeWorkflowSummary[];
+    },
+
+    async getWorkflowDetail(id) {
+      const token = await ensureToken();
+      const res = await fetch(`${baseUrl}/api/workflows/${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Bridge workflow detail failed (${res.status}): ${text}`);
+      }
+      return (await res.json()) as BridgeWorkflowDetail;
     },
   };
 }
