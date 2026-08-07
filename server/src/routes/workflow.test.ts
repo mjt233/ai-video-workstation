@@ -120,6 +120,14 @@ describe('中断支持', () => {
     expect(result.code).toBe('no_remote_task');
   });
 
+  it('canCancelTask：running 无远端任务 ID + deferredCancel → ok（同步 provider 延迟生效）', () => {
+    const result = canCancelTask(
+      mkTask({ params: JSON.stringify({ vars: {} }) }),
+      { capabilities: { cancelable: true, deferredCancel: true } },
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it('canCancelTask：pending（本地排队）允许本地取消', () => {
     const result = canCancelTask(mkTask({ status: 'pending', params: JSON.stringify({ vars: {} }) }), { capabilities: { cancelable: true } });
     expect(result.ok).toBe(true);

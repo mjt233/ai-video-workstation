@@ -188,6 +188,11 @@ export interface WorkflowCapabilities {
   audio?: boolean;
   /** 是否支持中断（所有 Bridge 工作流声明 true） */
   cancelable?: boolean;
+  /**
+   * 取消是否延迟生效：该 provider 的执行是同步的（execute 阻塞到完成），无法中止在途请求；
+   * 取消请求被接受并写入任务标记（params.cancelRequested），任务在执行完成后持久化为失败（用户中断）而非完成。
+   */
+  deferredCancel?: boolean;
 }
 
 /** 资产分辨率 */

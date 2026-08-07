@@ -196,7 +196,7 @@ export function canCancelTask(
   if (task.status !== 'running') {
     return { ok: false, status: 400, code: 'invalid_status', message: `任务状态不是 pending 或 running（当前 ${task.status}）` };
   }
-  if (!getRemoteTaskId(task)) {
+  if (!getRemoteTaskId(task) && !wf?.capabilities?.deferredCancel) {
     return { ok: false, status: 400, code: 'no_remote_task', message: '任务尚未提交到远端，无法中断' };
   }
   return { ok: true };
