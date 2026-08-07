@@ -43,8 +43,10 @@ export function getPathLabel(path: string): string {
     return rest
       .replace('/appearance.jpg', '/外观')
       .replace('/voice.flac', '/音色')
+      // 声音变体：assert/character/{name}/voice-variants/{id}.flac → {name}/音色/{id}
+      .replace('/voice-variants/', '/音色/')
       .replace('/variants/', '/')
-      .replace(/\.jpg$/, '')
+      .replace(/\.(jpg|flac)$/, '')
   }
   if (path.startsWith('assert/stage/')) {
     const rest = path.slice('assert/stage/'.length)

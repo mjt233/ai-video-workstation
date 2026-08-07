@@ -71,6 +71,21 @@ assert/character/{角色名}/variants/{变体id}.jpg
 - 生成使用 **图片编辑** 工作流（`image-edit`，purpose=`variant-edit`）
 - 分镜引用：`{角色名}@{变体id}`
 
+#### 声音变体（角色，单层）
+
+```
+prompt/character/{角色名}/voice-variants/{变体id}.json
+assert/character/{角色名}/voice-variants/{变体id}.flac
+```
+
+- 声音变体是角色音色设计（`voice.md`）的衍生变体，仅支持单层结构（无父/子层级）
+- meta JSON：`{ id, prompt, promptMode, 台词, createdAt, updatedAt }`
+  - `prompt`：变体提示词（音色风格/语气描述），必填
+  - `promptMode`：`append`（在原描述后追加提示词，默认）/ `overwrite`（完全覆盖原描述）
+  - `台词`：变体朗读的文本，必填
+- 在角色详情「声音」页管理（新增/编辑/删除）；生成使用 **音色设计** 工作流（`tts-voice-design`，`desc` 按 `promptMode` 拼接、`text` 为台词），产物为 `{变体id}.flac`
+- 已生成音频的声音变体在资产选择器「角色」页签的「音色」分区下可选（`{角色名}/音色/{变体id}`），可被资产画布「加载音频」节点读取（`config.assetPath`）
+
 
 ### 2.2 场景 `prompt/stage/{场景名}/`
 

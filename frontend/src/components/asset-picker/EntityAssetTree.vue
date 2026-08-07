@@ -125,7 +125,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { existsFs, readFs, type DirEntry, type DirResponse } from '../../api/client'
-import { listCharacterVariants, listStageVariants } from '../../api/assets'
+import { listCharacterVariants, listCharacterVoiceVariants, listStageVariants } from '../../api/assets'
 import { flattenVariantTree, listAudioFilesRecursive, listImageFilesRecursive, thumbUrl } from './utils'
 import AssetThumb from './AssetThumb.vue'
 import type { AssetItem, EntityItem } from './types'
@@ -256,7 +256,8 @@ async function buildCharacterTree(project: string, name: string): Promise<AssetI
 }
 
 /**
- * 构建角色的「音色」分区条目：角色设计音色（assert/character/{name}/voice.flac）。
+ * 构建角色的「音色」分区条目：角色设计音色（assert/character/{name}/voice.flac）
+ * 与声音变体音频（assert/character/{name}/voice-variants/{id}.flac）。
  * 仅在该文件已生成且未被排除时返回分区标题 + 音频条目，否则返回空数组。
  *
  * @param project 项目名
@@ -264,11 +265,33 @@ async function buildCharacterTree(project: string, name: string): Promise<AssetI
  * @returns 音色分区标题与音频条目数组
  */
 async function buildVoiceSection(project: string, name: string): Promise<AssetItem[]> {
-  const voicePath = `assert/character/${name}/voice.flac`
-  if (props.exclude.includes(voicePath)) return []
-  const exists = await existsFs(project, voicePath)
-  if (!exists) return []
+  const items: AssetItem[] = []
 
+  // 角色设计音色（基础）
+  const voicePath = `assert/character/${name}/voice.flac`
+  const voiceExists = !props.exclude.includes(voicePath) && (await existsFs(project, voicePath))
+  if (voiceExists) {
+    items.push({ path: voicePath, label: `${name}/音色`, thumbnail: '', depth: 1, audio: true })
+  }
+
+  // 声音变体（单层）：仅列出已生成音频的变体
+  try {
+    const { variants } = await listCharacterVoiceVariants(project, name)
+    for (const v of variants) {
+      if (!v.hasAudio || props.exclude.includes(v.audioPath)) continue
+      items.push({
+        path: v.audioPath,
+        label: `${name}/音色/${v.id}`,
+        thumbnail: '',
+        depth: 1,
+        audio: true,
+      })
+    }
+  } catch {
+    // 单个角色加载失败不影响
+  }
+
+  if (!items.length) return []
   return [
     {
       path: '',
@@ -278,13 +301,7 @@ async function buildVoiceSection(project: string, name: string): Promise<AssetIt
       section: '音色',
       header: true,
     },
-    {
-      path: voicePath,
-      label: `${name}/音色`,
-      thumbnail: '',
-      depth: 1,
-      audio: true,
-    },
+    ...items,
   ]
 }
 

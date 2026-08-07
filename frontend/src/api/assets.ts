@@ -489,3 +489,91 @@ export async function renameStageVariant(
     return data as { success: boolean; variant: VariantInfo }
   } catch (e) { rethrow(e) }
 }
+
+// ── 角色声音变体（单层结构）──────────────────────────────────────────
+
+/** 提示词模式：append=在角色音色原描述后追加；overwrite=完全覆盖原描述 */
+export type VoicePromptMode = 'append' | 'overwrite'
+
+export interface VoiceVariantInfo {
+  id: string
+  /** 变体提示词（音色风格/语气描述） */
+  prompt: string
+  /** 提示词模式，默认 append */
+  promptMode: VoicePromptMode
+  /** 台词：变体朗读的文本 */
+  台词: string
+  createdAt?: string
+  updatedAt?: string
+  kind: 'character'
+  owner: string
+  metaPath: string
+  audioPath: string
+  hasAudio: boolean
+}
+
+export async function listCharacterVoiceVariants(project: string, name: string) {
+  try {
+    const { data } = await client.get(
+      `/assets/${project}/character/${encodeURIComponent(name)}/voice-variants`,
+    )
+    return data as { variants: VoiceVariantInfo[] }
+  } catch (e) { rethrow(e) }
+}
+
+export async function createCharacterVoiceVariant(
+  project: string,
+  name: string,
+  body: { id: string; prompt: string; promptMode?: VoicePromptMode; 台词: string },
+) {
+  try {
+    const { data } = await client.post(
+      `/assets/${project}/character/${encodeURIComponent(name)}/voice-variants`,
+      body,
+    )
+    return data as { success: boolean; variant: VoiceVariantInfo }
+  } catch (e) { rethrow(e) }
+}
+
+export async function updateCharacterVoiceVariant(
+  project: string,
+  name: string,
+  variantId: string,
+  body: { prompt?: string; promptMode?: VoicePromptMode; 台词?: string },
+) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/character/${encodeURIComponent(name)}/voice-variants/${encodeURIComponent(variantId)}`,
+      body,
+    )
+    return data as { success: boolean; variant: VoiceVariantInfo }
+  } catch (e) { rethrow(e) }
+}
+
+export async function renameCharacterVoiceVariant(
+  project: string,
+  name: string,
+  variantId: string,
+  newId: string,
+) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/character/${encodeURIComponent(name)}/voice-variants/${encodeURIComponent(variantId)}/rename`,
+      { newId },
+    )
+    return data as { success: boolean; variant: VoiceVariantInfo }
+  } catch (e) { rethrow(e) }
+}
+
+export async function deleteCharacterVoiceVariant(
+  project: string,
+  name: string,
+  variantId: string,
+) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/character/${encodeURIComponent(name)}/voice-variants/${encodeURIComponent(variantId)}`,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}

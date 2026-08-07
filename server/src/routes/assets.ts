@@ -44,6 +44,13 @@ import {
   updateCharacterVariant,
   updateStageVariant,
 } from '../assets/variants.js';
+import {
+  createCharacterVoiceVariant,
+  deleteCharacterVoiceVariant,
+  listCharacterVoiceVariants,
+  renameCharacterVoiceVariant,
+  updateCharacterVoiceVariant,
+} from '../assets/voice-variants.js';
 
 export const assetsRouter = Router();
 
@@ -637,6 +644,87 @@ assetsRouter.put('/assets/:project/character/:name/variants/:variantId/rename', 
     if (!newId) throw Object.assign(new Error('newId 必填'), { code: 'INVALID' });
     const variant = await renameCharacterVariant(project, name, variantId, newId);
     res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// ── 角色声音变体 API（单层结构，无层级）───────────────────────────────
+
+// GET 角色声音变体列表
+assetsRouter.get('/assets/:project/character/:name/voice-variants', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const variants = await listCharacterVoiceVariants(project, name);
+    res.json({ variants });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 创建角色声音变体
+assetsRouter.post('/assets/:project/character/:name/voice-variants', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const body = req.body as { id?: string; prompt?: string; promptMode?: 'append' | 'overwrite'; 台词?: string };
+    if (!body.id || !body.prompt || !body.台词) {
+      throw Object.assign(new Error('id、prompt 与台词必填'), { code: 'INVALID' });
+    }
+    const variant = await createCharacterVoiceVariant(project, name, {
+      id: body.id,
+      prompt: body.prompt,
+      promptMode: body.promptMode,
+      台词: body.台词,
+    });
+    res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT 更新角色声音变体
+assetsRouter.put('/assets/:project/character/:name/voice-variants/:variantId', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const variantId = req.params.variantId as string;
+    const body = req.body as { prompt?: string; promptMode?: 'append' | 'overwrite'; 台词?: string };
+    const variant = await updateCharacterVoiceVariant(project, name, variantId, {
+      prompt: body.prompt,
+      promptMode: body.promptMode,
+      台词: body.台词,
+    });
+    res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT /assets/:project/character/:name/voice-variants/:variantId/rename
+assetsRouter.put('/assets/:project/character/:name/voice-variants/:variantId/rename', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const variantId = req.params.variantId as string;
+    const { newId } = req.body as { newId?: string };
+    if (!newId) throw Object.assign(new Error('newId 必填'), { code: 'INVALID' });
+    const variant = await renameCharacterVoiceVariant(project, name, variantId, newId);
+    res.json({ success: true, variant });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE 删除角色声音变体
+assetsRouter.delete('/assets/:project/character/:name/voice-variants/:variantId', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const variantId = req.params.variantId as string;
+    await deleteCharacterVoiceVariant(project, name, variantId);
+    res.json({ success: true });
   } catch (err) {
     httpError(res, err);
   }
