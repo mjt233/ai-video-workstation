@@ -790,9 +790,15 @@ async function runTask(taskId: string): Promise<void> {
     // Step 1: Submit
     db.addLog(taskId, 'info', `Submitting task to AI API (provider: ${providerId})...`);
     const { taskId: remoteTaskId } = await wf.submit(runContext);
-    // 持久化远端任务 ID，供中断端点（/workflow/tasks/:id/cancel）使用
+    // 持久化远端任务 ID，供中断端点（/workflow/tasks/:id/cancel）使用。
+    // 基于最新 params 合并（勿用提交前快照）：同步 provider 执行期间取消请求可能已写入
+    // cancelRequested 标记，用旧快照会覆盖掉该标记，导致执行完成后无法识别取消。
     const taskParams = JSON.parse(task.params) as Record<string, unknown>;
-    db.updateTaskParams(taskId, { ...taskParams, remoteTaskId });
+    const latestTask = db.getTask(taskId);
+    const latestParams = latestTask
+      ? (JSON.parse(latestTask.params) as Record<string, unknown>)
+      : taskParams;
+    db.updateTaskParams(taskId, { ...latestParams, remoteTaskId });
     db.addLog(taskId, 'info', `Submitted, remote task ID: ${remoteTaskId}`);
 
     // Step 2: Poll
