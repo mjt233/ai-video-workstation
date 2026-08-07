@@ -1,0 +1,109 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createVolcengineArkClient, fileToDataUrl } from './client.js';
+
+describe('createVolcengineArkClient', () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('execute 同步提交 images/generations，url 响应缓存为 download 输出', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ url: 'https://tos/out.jpg' }] }),
+    } as unknown as Response);
+
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark/', timeout: 900 });
+    const { taskId } = await client.execute({
+      workflowId: 'doubao-seedream-5-0-pro-260628',
+      params: { prompt: '猫', size: '1080x1920', watermark: false, output_format: 'jpeg', response_format: 'url' },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('http://ark/images/generations');
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json', 'Authorization': 'Bearer k' });
+    const body = JSON.parse(init.body as string);
+    expect(body.model).toBe('doubao-seedream-5-0-pro-260628');
+    expect(body.watermark).toBe(false);
+
+    const out = await client.getOutput(taskId);
+    expect(out).toEqual({ type: 'download', url: 'https://tos/out.jpg', filename: 'output.jpg' });
+  });
+
+  it('b64_json 响应缓存为 body 输出', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ b64_json: 'QUJD' }] }),
+    } as unknown as Response);
+
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    const { taskId } = await client.execute({ workflowId: 'm', params: { prompt: 'x' } });
+    const out = await client.getOutput(taskId);
+    expect(out).toEqual({ type: 'body', contentType: 'image/jpeg', data: 'QUJD', filename: 'output.jpg' });
+  });
+
+  it('files 逐键转 data URL 合并进 body', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ url: 'https://tos/out.jpg' }] }),
+    } as unknown as Response);
+
+    const file = new File(['hello'], 'a.png', { type: 'image/png' });
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    await client.execute({ workflowId: 'm', params: { prompt: 'x' }, files: { image: file } });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.image).toBe('data:image/png;base64,aGVsbG8=');
+  });
+
+  it('poll 直接返回 completed（同步 API）', async () => {
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    const result = await client.poll('any');
+    expect(result.status).toBe('completed');
+    expect(result.done).toBe(true);
+  });
+
+  it('getOutput 无缓存返回 null', async () => {
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    expect(await client.getOutput('nope')).toBeNull();
+  });
+
+  it('cancel 为 no-op（不抛错）', async () => {
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    await expect(client.cancel('any')).resolves.toBeUndefined();
+  });
+
+  it('execute 非 2xx 抛带状态错误', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => '{"error":{"message":"bad key"}}',
+    } as unknown as Response);
+
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    await expect(client.execute({ workflowId: 'm', params: {} })).rejects.toThrow('火山方舟 API 错误 (401)');
+  });
+
+  it('execute 响应 data 为空数组抛错', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    } as unknown as Response);
+
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    await expect(client.execute({ workflowId: 'm', params: {} })).rejects.toThrow('火山方舟响应无图片数据');
+  });
+
+  it('fileToDataUrl 生成 data URL', async () => {
+    const file = new File(['hello'], 'a.png', { type: 'image/png' });
+    expect(await fileToDataUrl(file)).toBe('data:image/png;base64,aGVsbG8=');
+  });
+});
