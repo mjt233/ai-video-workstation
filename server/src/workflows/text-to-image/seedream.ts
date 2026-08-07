@@ -1,12 +1,6 @@
 import { register } from '../registry.js';
 import type { TextToImageVars, WorkflowRunContext } from '../types.js';
-import { resolveSeedreamSize, submitSeedreamTextToImage } from '../seedream.js';
-
-/** Seedream 文生图模型定义（impl → 阅读名 → 方舟模型 ID） */
-const SEEDREAM_MODELS = [
-  { impl: 'seedream-5-pro', name: 'Seedream 5.0 Pro（火山方舟）', model: 'doubao-seedream-5-0-pro-260628' },
-  { impl: 'seedream-5-lite', name: 'Seedream 5.0 Lite（火山方舟）', model: 'doubao-seedream-5-0-260128' },
-] as const;
+import { resolveSeedreamSize, SEEDREAM_MODELS, submitSeedreamTextToImage } from '../seedream.js';
 
 for (const def of SEEDREAM_MODELS) {
   register<TextToImageVars>({

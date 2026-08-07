@@ -97,4 +97,56 @@ describe('image-edit/seedream', () => {
       impl.submit(mkCtx({ vars: { desc: 'x', imagePaths: '[]' } })),
     ).rejects.toThrow('至少需要一张输入图片');
   });
+
+  it('imagePaths 非法 JSON 抛错', async () => {
+    const impl = getImpl('image-edit', 'seedream-5-pro')!;
+    await expect(
+      impl.submit(mkCtx({ vars: { desc: 'x', imagePaths: 'not-json' } })),
+    ).rejects.toThrow('imagePaths 无效');
+  });
+
+  it('imagePaths 含非字符串元素抛错', async () => {
+    const impl = getImpl('image-edit', 'seedream-5-pro')!;
+    await expect(
+      impl.submit(mkCtx({ vars: { desc: 'x', imagePaths: JSON.stringify([1, 2]) } })),
+    ).rejects.toThrow('imagePaths 无效');
+  });
+
+  it('单张超过 30MB 抛错且不调用 execute', async () => {
+    const impl = getImpl('image-edit', 'seedream-5-pro')!;
+    const big = new File([new Uint8Array(30 * 1024 * 1024 + 1)], 'big.jpg', { type: 'image/jpeg' });
+    await expect(
+      impl.submit(mkCtx({
+        vars: { desc: 'x', imagePaths: JSON.stringify(['assert/stage/商场/大图.jpg']) },
+        readAssertFile: async () => big,
+      })),
+    ).rejects.toThrow('超过 30MB');
+    expect(executeMock).not.toHaveBeenCalled();
+  });
+
+  it('空白路径被过滤后仍可提交', async () => {
+    const impl = getImpl('image-edit', 'seedream-5-pro')!;
+    await impl.submit(mkCtx({
+      vars: { desc: 'x', imagePaths: JSON.stringify(['   ', 'assert/stage/商场/白天.jpg']) },
+    }));
+    const call = executeMock.mock.calls[0][0] as { params: { image: string | string[] } };
+    expect(typeof call.params.image).toBe('string');
+  });
+
+  it('readAssertFile 抛错时透传（不吞掉）', async () => {
+    const impl = getImpl('image-edit', 'seedream-5-pro')!;
+    await expect(
+      impl.submit(mkCtx({
+        vars: { desc: 'x', imagePaths: JSON.stringify(['assert/stage/不存在/缺图.jpg']) },
+        readAssertFile: async () => { throw new Error('assert 文件不存在: assert/stage/不存在/缺图.jpg'); },
+      })),
+    ).rejects.toThrow('assert 文件不存在');
+  });
+
+  it('lite 实现提交使用 lite 模型 ID', async () => {
+    const impl = getImpl('image-edit', 'seedream-5-lite')!;
+    await impl.submit(mkCtx());
+    const call = executeMock.mock.calls[0][0] as { workflowId: string };
+    expect(call.workflowId).toBe('doubao-seedream-5-0-260128');
+  });
 });

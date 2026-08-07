@@ -3,6 +3,12 @@ import type { ProviderClient } from '../providers/types.js';
 
 export { fileToDataUrl };
 
+/** Seedream 模型定义（impl → 阅读名 → 方舟模型 ID），文生图/图片编辑实现共用 */
+export const SEEDREAM_MODELS = [
+  { impl: 'seedream-5-pro', name: 'Seedream 5.0 Pro（火山方舟）', model: 'doubao-seedream-5-0-pro-260628' },
+  { impl: 'seedream-5-lite', name: 'Seedream 5.0 Lite（火山方舟）', model: 'doubao-seedream-5-0-260128' },
+] as const;
+
 /** 方舟显式尺寸的总像素范围（pro 的约束，作为两个模型共享安全边界） */
 const ARK_MIN_TOTAL_PIXELS = 921600;
 const ARK_MAX_TOTAL_PIXELS = 4624220;
