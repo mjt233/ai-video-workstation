@@ -6,7 +6,7 @@ import type {
   BridgeWorkflowSummary,
   ComfyuiBridgeClient,
 } from '../providers/comfyui-bridge/client.js';
-import { register, unregister } from './registry.js';
+import { getAllWorkflows, getImpl, register, unregister } from './registry.js';
 import { deriveCapabilities, deriveParams, deriveWorkflowType, type BridgeDerivedType } from './bridge-derive.js';
 import {
   buildDirectorPayload,
@@ -31,27 +31,48 @@ const PROVIDER_ID = 'comfyui-bridge';
 /** 动态注册实现标识前缀：impl = ceb-{bridge workflow id} */
 const IMPL_PREFIX = 'ceb-';
 
-/**
- * 已注册的动态实现键（格式 {type}:{impl}），跨同步调用累积。
- * 重同步时据此清理陈旧项（本次未出现的历史 ceb-* 注册）。
- */
-const registeredKeys = new Set<string>();
+/** 并发同步串行化：重叠调用共享同一 promise（in-flight 完成后置空） */
+let inflight: Promise<void> | null = null;
 
 /**
  * 从自动注册标签元数据取 expose_field（逗号分隔的用户可配置参数字段别名）。
+ * 标签可能是顶层分组或某分组的子标签，两者都查。
  *
  * @param tags Bridge 工作流详情返回的标签分组数组
- * @param tagId 自动注册标签 id（expose_field 元数据挂在该标签上）
+ * @param tagId 自动注册标签 id（expose_field 元数据挂在该标签或其子标签上）
  * @returns expose_field 值（字符串）；标签或元数据缺失返回 undefined
  */
 function exposeFieldOf(tags: BridgeTagGroup[], tagId: string): string | undefined {
   for (const g of tags) {
     if (g.id === tagId) {
       const v = (g.metadata ?? {})['expose_field'];
-      return v == null ? undefined : String(v);
+      if (v != null) return String(v);
+    }
+    const child = (g.tags ?? []).find((c) => c.id === tagId);
+    if (child) {
+      const v = (child.metadata ?? {})['expose_field'];
+      if (v != null) return String(v);
     }
   }
   return undefined;
+}
+
+/**
+ * 以工作流 id 集合驱动陈旧清理：unregister 掉本次列表之外的所有 ceb-* 实现。
+ *
+ * 以 summaries 的 id 集合为准（而非注册键），详情拉取失败的工作流 id 仍在集合中，
+ * 因此其旧注册会被保留；列表不再出现的工作流才被清理。
+ *
+ * @param summaryIds 本次列表中出现的工作流 id 集合
+ */
+function cleanupStale(summaryIds: Set<string>): void {
+  for (const wf of getAllWorkflows()) {
+    for (const impl of wf.implementations) {
+      if (impl.provider !== PROVIDER_ID || !impl.impl.startsWith(IMPL_PREFIX)) continue;
+      const id = impl.impl.slice(IMPL_PREFIX.length);
+      if (!summaryIds.has(id)) unregister(wf.type, impl.impl);
+    }
+  }
 }
 
 /** TextToImageVars 形状（避免与业务 vars 强耦合，仅取本模块使用的字段） */
@@ -78,17 +99,30 @@ interface TextToImageVarsLike extends WorkflowVarsBase {
  * @param workflowId 注册后的实现标识（ceb-{id}），透传给 Bridge execute
  * @returns 动态工作流 submit 函数
  */
+/**
+ * 解析覆盖尺寸：仅接受有限正数（与 resolveImageEditSizeParams 行为一致），否则回退默认值。
+ *
+ * @param value 用户传入的尺寸字符串（可空）
+ * @param fallback 回退值（projectConfig 或缺省 1080/1920）
+ * @returns 有效覆盖尺寸或回退值
+ */
+function resolveOverrideSize(value: string | undefined, fallback: number): number {
+  if (!value || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function textToImageSubmit(workflowId: string): WorkflowDefinition['submit'] {
   return async (ctx: WorkflowRunContext<TextToImageVarsLike>) => {
     const promptPath = ctx.vars.promptPath?.trim();
     if (!promptPath) throw new Error('text-to-image 需要 vars.promptPath');
     const prompt = await ctx.readFile(promptPath);
     const specified = ctx.vars.enable_specified_size === 'true';
-    const width = specified && ctx.vars.width && ctx.vars.width !== ''
-      ? Number(ctx.vars.width)
+    const width = specified
+      ? resolveOverrideSize(ctx.vars.width, ctx.projectConfig.width || 1080)
       : (ctx.projectConfig.width || 1080);
-    const height = specified && ctx.vars.height && ctx.vars.height !== ''
-      ? Number(ctx.vars.height)
+    const height = specified
+      ? resolveOverrideSize(ctx.vars.height, ctx.projectConfig.height || 1920)
       : (ctx.projectConfig.height || 1920);
     const seed = ctx.vars.seed ? Number(ctx.vars.seed) : undefined;
     const enhance = ctx.vars.enhance_prompt === 'true';
@@ -226,14 +260,14 @@ export function buildSubmit(
 }
 
 /**
- * 从详情构建并注册一个动态工作流定义。
+ * 从详情构建并注册一个动态工作流定义（幂等）。
  *
- * 类型推导失败（未知类型）时告警并返回 null，由调用方跳过；成功时
- * 注册定义并返回注册键（{type}:{impl}），供调用方维护 nextKeys 集合。
+ * 类型推导失败（未知类型）时告警并返回 null，由调用方跳过；实现已注册
+ * （重同步时同 id 工作流再次出现）时直接跳过，避免重复注册。
  *
  * @param detail Bridge 工作流详情（含解析后的 declaredParams 与 tags）
  * @param tagId 自动注册标签 id（expose_field 元数据来源；可为空串）
- * @returns 注册键（{type}:{impl}）；未知类型返回 null
+ * @returns 注册键（{type}:{impl}）；未知类型或已注册返回 null
  */
 function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string | null {
   const type = deriveWorkflowType(detail.tags);
@@ -241,10 +275,11 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
     console.warn(`[bridge-sync] 跳过未知类型工作流: ${detail.id}（tags=${JSON.stringify(detail.tags)}）`);
     return null;
   }
+  const impl = `${IMPL_PREFIX}${detail.id}`;
+  if (getImpl(type, impl)) return null; // 幂等：已注册则跳过（防止重同步重复注册）
   const caps = deriveCapabilities(detail.tags, type);
   const expose = exposeFieldOf(detail.tags, tagId);
   const params = deriveParams(expose, detail.declaredParams);
-  const impl = `${IMPL_PREFIX}${detail.id}`;
   const def: WorkflowDefinition = {
     type, impl, name: detail.name || detail.id,
     description: detail.description || undefined,
@@ -254,24 +289,37 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
     submit: buildSubmit(impl, type, caps),
   };
   register(def);
-  const key = `${type}:${impl}`;
-  registeredKeys.add(key);
-  return key;
+  return `${type}:${impl}`;
 }
 
 /**
- * 从 Bridge 同步并注册工作流（核心集成入口）。
+ * 从 Bridge 同步并注册工作流（核心集成入口，并发安全）。
  *
- * 流程：
- * 1. 读 comfyui-bridge 配置取 autoRegisterTag；非空按标签筛选列表，空则拉取全部；
- * 2. 对每个工作流拉取详情 → 推导类型/能力/参数 → 注册（impl=ceb-{id}）；
- * 3. 清理陈旧 ceb-* 注册（本次未出现的历史实现）；
- * 4. 列表拉取失败（Bridge 不可达 / 鉴权失败）：记 error，保留既有注册不清空；
- *    单个详情拉取失败：告警并跳过该工作流，不影响其它注册。
+ * 并发调用串行化：重叠调用共享同一 in-flight promise，避免交错清理与重复注册。
+ * 内部逻辑见 {@link doSync}。
  *
  * @returns 同步完成（无返回值；失败不抛出，仅记录日志）
  */
-export async function syncBridgeWorkflows(): Promise<void> {
+export function syncBridgeWorkflows(): Promise<void> {
+  if (!inflight) {
+    inflight = doSync().finally(() => { inflight = null; });
+  }
+  return inflight;
+}
+
+/**
+ * 同步主流程。
+ *
+ * 流程：
+ * 1. 读 comfyui-bridge 配置取 autoRegisterTag；非空按标签筛选列表，空则拉取全部；
+ * 2. 对每个工作流拉取详情 → 推导类型/能力/参数 → 注册（impl=ceb-{id}，幂等）；
+ * 3. 以本次 summaries 的 id 集合驱动陈旧清理（cleanupStale）；
+ * 4. 列表拉取失败（Bridge 不可达 / 鉴权失败）：记 error，保留既有注册不清空；
+ *    单个详情拉取失败：告警并跳过该工作流（id 仍在 summaries 中 → 旧注册保留）。
+ *
+ * @returns 同步完成（无返回值；失败不抛出，仅记录日志）
+ */
+async function doSync(): Promise<void> {
   const config = await getProviderConfig(PROVIDER_ID);
   const providerDef = getProvider(PROVIDER_ID);
   if (!providerDef) throw new Error(`Provider 未注册: ${PROVIDER_ID}`);
@@ -286,25 +334,16 @@ export async function syncBridgeWorkflows(): Promise<void> {
     return;
   }
 
-  // 先注册新列表（本次出现的实现）
-  const nextKeys = new Set<string>();
+  // 先注册新列表（本次出现的实现，幂等）
   for (const s of summaries) {
     try {
       const detail = await client.getWorkflowDetail(s.id);
-      const key = buildAndRegister(detail, tagId);
-      if (key) nextKeys.add(key);
+      buildAndRegister(detail, tagId);
     } catch (e) {
       console.warn(`[bridge-sync] 工作流详情拉取失败，跳过: ${s.id}; ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  // 清理陈旧注册（本次未出现的历史 ceb-*）
-  for (const key of registeredKeys) {
-    if (nextKeys.has(key)) continue;
-    const idx = key.indexOf(':');
-    const type = key.slice(0, idx);
-    const impl = key.slice(idx + 1);
-    unregister(type, impl);
-    registeredKeys.delete(key);
-  }
+  // 清理陈旧注册（本次 summaries 之外的历史 ceb-*）
+  cleanupStale(new Set(summaries.map((s) => s.id)));
 }

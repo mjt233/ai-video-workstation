@@ -5,16 +5,18 @@ import type { BridgeWorkflowDetail } from '../providers/comfyui-bridge/client.js
 import type { WorkflowDefinition } from './types.js';
 
 // ── mock getProviderConfig / getProvider（避免真实配置与网络） ──
-// 注意：vi.mock 工厂被 hoist 到顶部，mock 客户端必须用 vi.hoisted 定义
-const { mockClient } = vi.hoisted(() => ({
+// 注意：vi.mock 工厂被 hoist 到顶部，mock 客户端与可变配置必须用 vi.hoisted 定义；
+// getProviderConfig 每次调用都读取 mockConfig 的当前值（测试可直接改 autoRegisterTag 等）
+const { mockClient, mockConfig } = vi.hoisted(() => ({
   mockClient: {
     listWorkflows: vi.fn(),
     getWorkflowDetail: vi.fn(),
   },
+  mockConfig: { baseUrl: 'http://b', password: 'pw', autoRegisterTag: 'auto' },
 }));
 
 vi.mock('../providers/config-store.js', () => ({
-  getProviderConfig: vi.fn(async () => ({ baseUrl: 'http://b', password: 'pw', autoRegisterTag: 'auto' })),
+  getProviderConfig: vi.fn(async () => ({ ...mockConfig })),
 }));
 vi.mock('../providers/registry.js', () => ({
   getProvider: vi.fn(() => ({ id: 'comfyui-bridge', createClient: () => mockClient })),
@@ -25,6 +27,8 @@ const detail = (over: Partial<BridgeWorkflowDetail> = {}): BridgeWorkflowDetail 
 });
 
 beforeEach(() => {
+  // vi.clearAllMocks 不清除 mockConfig 的字段变更，显式复位 autoRegisterTag
+  mockConfig.autoRegisterTag = 'auto';
   vi.clearAllMocks();
   // 清空动态注册（测试隔离）
   for (const t of ['text-to-image', 'image-edit', 'tts-voice-design', 'image-to-video']) {
@@ -56,6 +60,62 @@ describe('syncBridgeWorkflows', () => {
     await expect(syncBridgeWorkflows()).resolves.toBeUndefined();
     expect(getImpl('text-to-image', 'ceb-keep')).toBeDefined();
   });
+
+  it('重同步幂等：同一工作流不会重复注册', async () => {
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] }]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
+    await syncBridgeWorkflows();
+    await syncBridgeWorkflows();
+    expect(getImplementations('text-to-image').filter((w) => w.impl === 'ceb-text_to_image')).toHaveLength(1);
+  });
+
+  it('单详情拉取失败：跳过该工作流且保留其旧注册', async () => {
+    const list = [{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] }];
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue(list);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
+    await syncBridgeWorkflows(); // 第一次成功注册
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
+    await syncBridgeWorkflows(); // 第二次详情失败
+    expect(getImpl('text-to-image', 'ceb-text_to_image')).toBeDefined(); // 旧注册保留
+  });
+
+  it('陈旧清理：列表不再包含的工作流被 unregister', async () => {
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] },
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
+    await syncBridgeWorkflows();
+    expect(getImpl('text-to-image', 'ceb-text_to_image')).toBeDefined();
+    // 第二次列表为空 → 该工作流被清理
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    await syncBridgeWorkflows();
+    expect(getImpl('text-to-image', 'ceb-text_to_image')).toBeUndefined();
+  });
+
+  it('autoRegisterTag 为空时拉取全部（listWorkflows 无参）', async () => {
+    mockConfig.autoRegisterTag = '';
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    await syncBridgeWorkflows();
+    expect(mockClient.listWorkflows).toHaveBeenCalledWith();
+    mockConfig.autoRegisterTag = 'auto';
+  });
+
+  it('expose_field → params 接线进注册定义', async () => {
+    const d = detail({
+      declaredParams: [
+        { alias: 'steps', label: '步数', paramType: 'number' },
+        { alias: 'input_image', label: '输入图', paramType: 'image' },
+      ],
+      tags: [{ id: 'auto', metadata: { expose_field: 'steps' }, tags: [] }, { id: 'text-to-image', metadata: {}, tags: [] }],
+    });
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: d.tags },
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(d);
+    await syncBridgeWorkflows();
+    const w = getImpl('text-to-image', 'ceb-text_to_image');
+    expect(w!.params).toEqual([{ key: 'steps', name: '步数', type: 'integer', defaultValue: '' }]);
+  });
 });
 
 describe('buildSubmit（text-to-image）', () => {
@@ -73,5 +133,75 @@ describe('buildSubmit（text-to-image）', () => {
       workflowId: 'ceb-text_to_image',
       params: expect.objectContaining({ prompt: '一只猫', width: 1080, height: 1920 }),
     });
+  });
+});
+
+describe('buildSubmit（image-to-video 模式分发）', () => {
+  /**
+   * 构造视频提交上下文（provider.execute 由调用方传入以便断言；File 用占位对象）。
+   *
+   * @param execute provider.execute mock
+   * @param video ctx.video 自包含提交数据
+   * @returns 最小上下文对象（提交时强转，无需完整 WorkflowRunContext）
+   */
+  const mkVideoCtx = (execute: ReturnType<typeof vi.fn>, video: Record<string, unknown>) => ({
+    vars: {},
+    projectConfig: { width: 1080, height: 1920 },
+    readFile: async () => '',
+    readAssertFile: async () => new File([], 'f.png'),
+    provider: { execute },
+    video,
+  });
+
+  it('director 模式：buildDirectorPayload 形状载荷（workflowId 透传 + frame_define）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('ceb-x', 'image-to-video', { cancelable: true, video: { modes: ['director'] } });
+    await submit(mkVideoCtx(execute, {
+      mode: 'director',
+      resolution: { width: 1080, height: 1920 },
+      duration: 10,
+      prompt: '一只猫跑过',
+      fps: 24,
+      director: { frames: [{ file: new File([], 'a.png'), cursor: 0 }, { file: new File([], 'b.png'), cursor: 0.5 }] },
+      extraParams: {},
+    }) as never);
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: 'ceb-x',
+      params: expect.objectContaining({ prompt: '一只猫跑过', width: 1080, height: 1920, duration: 10, fps: 24, frame_define: expect.any(String) }),
+      files: expect.objectContaining({ image_0: expect.anything(), image_1: expect.anything() }),
+    }));
+  });
+
+  it('first-last-frame：帧数在 1~maxFrames 内执行，超出抛错', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('ceb-x', 'image-to-video', { cancelable: true, video: { modes: ['first-last-frame'], firstLastFrame: { maxFrames: 2 } } });
+    const frames = (n: number) => Array.from({ length: n }, (_, i) => ({ file: new File([], `${i}.png`), cursor: i / Math.max(n - 1, 1) }));
+    await submit(mkVideoCtx(execute, { mode: 'first-last-frame', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', fps: 24, director: { frames: frames(2) }, extraParams: {} }) as never);
+    expect(execute).toHaveBeenCalledTimes(1);
+    await expect(submit(mkVideoCtx(execute, { mode: 'first-last-frame', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', fps: 24, director: { frames: frames(3) }, extraParams: {} }) as never)).rejects.toThrow(/首尾帧模式需要 1~2 帧/);
+  });
+
+  it('reference 模式：buildReferencePayload 形状载荷', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('ceb-x', 'image-to-video', { cancelable: true, video: { modes: ['reference'] } });
+    await submit(mkVideoCtx(execute, {
+      mode: 'reference',
+      resolution: { width: 1080, height: 1920 },
+      duration: 10,
+      prompt: 'p',
+      references: [{ type: 'image', file: new File([], 'a.png') }, { type: 'video', file: new File([], 'v.mp4') }],
+      extraParams: {},
+    }) as never);
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: 'ceb-x',
+      params: expect.objectContaining({ prompt: 'p', width: 1080, height: 1920, duration: 10 }),
+      files: expect.objectContaining({ image_0: expect.anything(), video_0: expect.anything() }),
+    }));
+  });
+
+  it('不支持的模式抛错', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('ceb-x', 'image-to-video', { cancelable: true, video: { modes: ['director'] } });
+    await expect(submit(mkVideoCtx(execute, { mode: 'upscale', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', extraParams: {} }) as never)).rejects.toThrow(/不支持生成模式/);
   });
 });
