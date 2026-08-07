@@ -222,7 +222,7 @@ async function enrichSceneTtsParams(
 
   const outputPath = `assert/scene/${episode}/${shot}/voice/${index}-${character}.flac`;
 
-  const desc = emotion
+  const prompt = emotion
     ? `${voiceDesc}\n当前情绪：${emotion}`
     : voiceDesc;
 
@@ -237,7 +237,7 @@ async function enrichSceneTtsParams(
       text,
       voiceDesc,
       emotion,
-      desc,
+      prompt,
     },
     outputPath,
   };
@@ -348,7 +348,7 @@ function resolveCharacterAssetPath(character: string): string {
 }
 
 /**
- * image-edit / scene-stage-image：由引擎读取 stage.json，组装 desc 与 imagePaths。
+ * image-edit / scene-stage-image：由引擎读取 stage.json，组装 prompt 与 imagePaths。
  * 直接引用（无角色且无 prompt）由 tryHandleSceneStageDirectReference 处理，不应进入本函数。
  */
 async function enrichSceneStageImageParams(
@@ -422,7 +422,7 @@ async function enrichSceneStageImageParams(
       episode,
       shot,
       index: String(index),
-      desc: prompt,
+      prompt,
       imagePaths: JSON.stringify(imagePaths),
     },
   };
@@ -558,7 +558,7 @@ async function runTask(taskId: string): Promise<void> {
     && (
       paramsObj.vars?.purpose === 'scene-tts'
       || (
-        !paramsObj.vars?.desc
+        !paramsObj.vars?.prompt
         && !!paramsObj.vars?.episode
         && !!paramsObj.vars?.shot
         && paramsObj.vars?.index != null
@@ -571,11 +571,11 @@ async function runTask(taskId: string): Promise<void> {
     paramsObj.outputPath = enriched.outputPath;
   }
 
-  // tts-voice-design + purpose=character-voice：若未提供 desc，从 voice.md 读取
+  // tts-voice-design + purpose=character-voice：若未提供 prompt，从 voice.md 读取
   if (
     task.workflow_id === 'tts-voice-design'
     && paramsObj.vars?.purpose === 'character-voice'
-    && !(paramsObj.vars?.desc ?? '').trim()
+    && !(paramsObj.vars?.prompt ?? '').trim()
   ) {
     const name = (paramsObj.vars?.character || paramsObj.vars?.name || '').trim();
     if (!name) {
@@ -601,12 +601,12 @@ async function runTask(taskId: string): Promise<void> {
       purpose: 'character-voice',
       character: name,
       name,
-      desc: voiceDesc,
+      prompt: voiceDesc,
       text: (paramsObj.vars?.text ?? '').trim() || `你好，我叫${name}`,
     };
   }
 
-  // image-edit + purpose=scene-stage-image：直接引用或组装 desc/imagePaths
+  // image-edit + purpose=scene-stage-image：直接引用或组装 prompt/imagePaths
   if (
     task.workflow_id === 'image-edit'
     && paramsObj.vars?.purpose === 'scene-stage-image'
@@ -729,7 +729,7 @@ async function runTask(taskId: string): Promise<void> {
             try {
               const ttsResult = await provider.execute({
                 workflowId: 'tts_voice_design',
-                params: { desc: voiceDesc, text },
+                params: { prompt: voiceDesc, text },
               });
               let ttsOk = false;
               while (true) {

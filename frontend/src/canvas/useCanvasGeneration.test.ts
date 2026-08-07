@@ -62,7 +62,7 @@ describe('useCanvasGeneration', () => {
       expect.objectContaining({
         workflowId: 'image-edit',
         params: expect.objectContaining({
-          vars: expect.objectContaining({ desc: '改成夜景', imagePaths: '["assert/stage/街角/白天.jpg"]' }),
+          vars: expect.objectContaining({ prompt: '改成夜景', imagePaths: '["assert/stage/街角/白天.jpg"]' }),
         }),
       }),
     )

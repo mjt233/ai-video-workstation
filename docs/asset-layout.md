@@ -83,7 +83,7 @@ assert/character/{角色名}/voice-variants/{变体id}.flac
   - `prompt`：变体提示词（音色风格/语气描述），必填
   - `promptMode`：`append`（在原描述后追加提示词，默认）/ `overwrite`（完全覆盖原描述）
   - `台词`：变体朗读的文本，必填
-- 在角色详情「声音」页管理（新增/编辑/删除）；生成使用 **音色设计** 工作流（`tts-voice-design`，`desc` 按 `promptMode` 拼接、`text` 为台词），产物为 `{变体id}.flac`
+- 在角色详情「声音」页管理（新增/编辑/删除）；生成使用 **音色设计** 工作流（`tts-voice-design`，`prompt` 按 `promptMode` 拼接、`text` 为台词），产物为 `{变体id}.flac`
 - 已生成音频的声音变体在资产选择器「角色」页签的「音色」分区下可选（`{角色名}/音色/{变体id}`），可被资产画布「加载音频」节点读取（`config.assetPath`）
 
 

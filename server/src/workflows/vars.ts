@@ -22,7 +22,7 @@ export interface WorkflowVarsBase {
  * 文生图工作流变量。
  *
  * 用于角色外观、场景图等纯文本生成图片的场景。
- * 调用方提供 promptPath；引擎/工作流读取该路径作为 imd_desc。
+ * 调用方提供 promptPath；引擎/工作流读取该路径作为 prompt。
  * 可选 width/height 覆盖 projectConfig 默认分辨率。
  */
 export interface TextToImageVars extends WorkflowVarsBase {
@@ -72,18 +72,18 @@ export interface TextToImageVars extends WorkflowVarsBase {
  * 图片编辑工作流变量。
  *
  * 用于分镜场景图合成、衍生变体编辑等。
- * 调用方提供 desc 与输入图路径列表；引擎加载 assert 文件后提交。
+ * 调用方提供 prompt 与输入图路径列表；引擎加载 assert 文件后提交。
  */
 export interface ImageEditVars extends WorkflowVarsBase {
   /**
    * 编辑描述 / 合成提示词。
    * 图像编号约定：图像1=第一张输入图，图像2=第二张，以此类推。
    */
-  desc: string;
+  prompt: string;
   /**
    * 输入图片相对路径列表（JSON 数组字符串）。
    * 例：`["assert/stage/现代商场/xxx.jpg","assert/character/陈书文/appearance.jpg"]`
-   * 顺序与 desc 中的图像编号一致。
+   * 顺序与 prompt 中的图像编号一致。
    */
   imagePaths: string;
   /**
@@ -128,7 +128,7 @@ export interface ImageEditVars extends WorkflowVarsBase {
  * 音色设计 / TTS 工作流变量。
  *
  * 用于角色声音样本、分镜台词语音等。
- * 调用方提供 desc（声线描述）与 text（朗读文本）。
+ * 调用方提供 prompt（声线描述）与 text（朗读文本）。
  */
 export interface TtsVoiceDesignVars extends WorkflowVarsBase {
   /**
@@ -136,7 +136,7 @@ export interface TtsVoiceDesignVars extends WorkflowVarsBase {
    * 角色声音：来自 voice.md；
    * 分镜台词：voice.md + 可选情绪后缀（可由引擎注入）。
    */
-  desc: string;
+  prompt: string;
   /**
    * 待合成的朗读文本。
    * 角色声音：固定试听句；分镜台词：script.json 中的台词。

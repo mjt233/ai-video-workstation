@@ -143,7 +143,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
 
     let vars: Record<string, string>
     if (workflowId === 'image-edit') {
-      vars = { desc: prompt, imagePaths: JSON.stringify(inputPaths), purpose: 'canvas-image' }
+      vars = { prompt, imagePaths: JSON.stringify(inputPaths), purpose: 'canvas-image' }
     } else {
       const promptPath = computePromptPath(nodeId)
       await writeFs(project, promptPath, prompt)

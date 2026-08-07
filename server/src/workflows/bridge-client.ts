@@ -54,7 +54,7 @@ export function createProviderWorkflow<TVars extends WorkflowVarsBase = Workflow
 
 export interface SubmitTextToImageParams {
   /** 图片描述提示词 */
-  imd_desc: string;
+  prompt: string;
   /** 图片宽度（像素） */
   width: number;
   /** 图片高度（像素） */
@@ -76,7 +76,7 @@ export async function submitTextToImage(
   params: SubmitTextToImageParams,
 ): Promise<{ taskId: string }> {
   const body: Record<string, unknown> = {
-    imd_desc: params.imd_desc,
+    prompt: params.prompt,
     width: params.width,
     height: params.height,
   };
@@ -93,7 +93,7 @@ export async function submitTextToImage(
 
 interface SubmitImageEditParams {
   imgs: File[];
-  desc: string;
+  prompt: string;
   seed?: string | number;
   /** 启用多机位旋转 LoRA */
   enable_multiple_angles_lora?: boolean;
@@ -136,7 +136,7 @@ export function resolveImageEditSizeParams(
 }
 
 /**
- * 提交图片编辑任务（qwen-edit-2509 工作流，多图动态键 img1/img2/...）。
+ * 提交图片编辑任务（qwen-edit-2509 工作流，多图动态键 image_0/image_1/...）。
  * @param client Provider 客户端
  * @param params 图片编辑参数
  * @returns 远端任务 ID
@@ -146,12 +146,12 @@ export async function submitImageEdit(
   params: SubmitImageEditParams,
 ): Promise<{ taskId: string }> {
   const files: Record<string, File> = {};
-  // 多个图片时，直接以 img${图片序号} 命名，触发动态构建工作流实现多图参考编辑
+  // 多个图片时，直接以 image${图片序号}（0-based）命名，触发动态构建工作流实现多图参考编辑
   params.imgs.forEach((f, idx) => {
-    files[`img${idx + 1}`] = f;
+    files[`image_${idx}`] = f;
   });
   const textParams: Record<string, unknown> = {
-    desc: params.desc,
+    prompt: params.prompt,
     enable_multiple_angles_lora: params.enable_multiple_angles_lora ?? true,
   };
   if (params.seed != null) {
@@ -231,21 +231,21 @@ export async function submitImageToVideo(
   const frameCount = params.frames.length;
 
   if (frameCount === 1) {
-    files.first_frame = params.frames[0];
+    files.image_0 = params.frames[0];
     return client.execute({ workflowId: 'I2V', params: body, files });
   }
 
   if (frameCount === 2) {
-    files.first_frame = params.frames[0];
-    files.last_frame = params.frames[1];
+    files.image_0 = params.frames[0];
+    files.image_1 = params.frames[1];
     return client.execute({ workflowId: 'FL2V', params: body, files });
   }
 
   if (frameCount === 3) {
     body.mid_frame_cursor = 0.5;
-    files.first_frame = params.frames[0];
-    files.mid_frame = params.frames[1];
-    files.last_frame = params.frames[2];
+    files.image_0 = params.frames[0];
+    files.image_1 = params.frames[1];
+    files.image_2 = params.frames[2];
     return client.execute({ workflowId: 'FML2V', params: body, files });
   }
 
@@ -264,7 +264,7 @@ export async function submitImageToVideo(
  */
 export interface FrameDefine {
   /**
-   * 关键帧图像序号，对应上传文件的动态键 `frame_{frameSeq}`（如 frame_0、frame_1）。
+   * 关键帧图像序号，对应上传文件的动态键 `image_{frameSeq}`（如 image_0、image_1）。
    */
   frameSeq: number;
   /**
@@ -309,7 +309,7 @@ export interface LtxDirectorImageToVideoSubmitParams {
  *
  * - 关键帧序号由内部按数组顺序自动生成（0、1、2…）；
  * - body 中 `frame_define` 为 JSON.stringify(FrameDefine[]) 字符串；
- * - 文件以动态键 `frame_{frameSeq}` 上传，走 multipart/form-data；
+ * - 文件以动态键 `image_{frameSeq}` 上传，走 multipart/form-data；
  * - 提供 `params.audio` 时以 `audio` 键上传背景音频并将 auto_generate_audio 置 false。
  *
  * @param client Provider 客户端
@@ -341,7 +341,7 @@ export async function submitLtxDirectorImageToVideo(
 
   const files: Record<string, File> = {};
   params.frames.forEach((f, idx) => {
-    files[`frame_${idx}`] = f.file;
+    files[`image_${idx}`] = f.file;
   });
   if (params.audio) {
     files.audio = params.audio;
@@ -472,7 +472,7 @@ export interface TextToImageWorkflowConfig<TVars extends WorkflowVarsBase = Work
   description?: string;
   /** 可由用户手动传入的参数声明（可选，前端据此渲染输入表单） */
   params?: WorkflowUserParamDeclaration[];
-  /** 返回文生图的提示词（imd_desc） */
+  /** 返回文生图的提示词（prompt） */
   getPrompt(ctx: WorkflowRunContext<TVars>): Promise<string> | string;
   /** 返回图片宽度，默认 1080 */
   getWidth?(ctx: WorkflowRunContext<TVars>): number;
@@ -508,7 +508,7 @@ export function createTextToImageWorkflow<TVars extends WorkflowVarsBase = Workf
       // enhance_prompt 仅作为布尔值提交给 ComfyUI 工作流，不修改提示词内容
       const enhancePrompt = (ctx.vars as Record<string, unknown>).enhance_prompt === 'true';
       const result = await submitTextToImage(ctx.provider, {
-        imd_desc: prompt,
+        prompt,
         width,
         height,
         seed,
@@ -530,7 +530,7 @@ export interface ImageEditWorkflowConfig<TVars extends WorkflowVarsBase = Workfl
   /** 可由用户手动传入的参数声明（可选，前端据此渲染输入表单） */
   params?: WorkflowUserParamDeclaration[];
   getParams(ctx: WorkflowRunContext<TVars>): Promise<{
-    desc: string;
+    prompt: string;
     imgs: File[];
     seed?: string | number;
   }>;
@@ -539,7 +539,7 @@ export interface ImageEditWorkflowConfig<TVars extends WorkflowVarsBase = Workfl
 /**
  * 创建图片编辑工作流的快捷工厂。
  *
- * 调用方只需提供 getParams（返回 desc / imgs / seed）；
+ * 调用方只需提供 getParams（返回 prompt / imgs / seed）；
  * 内部通过 ctx.provider 以 multipart 提交到 qwen-edit-2509 工作流。
  */
 export function createImageEditWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>(
@@ -554,12 +554,12 @@ export function createImageEditWorkflow<TVars extends WorkflowVarsBase = Workflo
       params: config.params,
     },
     async submit(ctx) {
-      const { desc, imgs, seed } = await config.getParams(ctx);
+      const { prompt, imgs, seed } = await config.getParams(ctx);
       if (!imgs.length) {
         throw new Error('Image edit workflow requires at least one input image');
       }
       const size = resolveImageEditSizeParams(ctx.vars as unknown as Record<string, string | undefined>);
-      const result = await submitImageEdit(ctx.provider, { imgs, desc, seed, ...size });
+      const result = await submitImageEdit(ctx.provider, { imgs, prompt, seed, ...size });
       return { taskId: result.taskId };
     },
   });
@@ -568,7 +568,7 @@ export function createImageEditWorkflow<TVars extends WorkflowVarsBase = Workflo
 // ── TTS 音色设计工作流快捷工厂 ───────────────────────────────────────
 
 export interface TtsWorkflowParam {
-  desc: string;
+  prompt: string;
   text: string;
   seed?: string;
 }
@@ -576,7 +576,7 @@ export interface TtsWorkflowParam {
 /**
  * 创建 TTS 音色设计工作流的快捷工厂。
  *
- * 调用方只需提供 getTtsWorkflowParams（返回 desc / text / seed）；
+ * 调用方只需提供 getTtsWorkflowParams（返回 prompt / text / seed）；
  * submit 通过 ctx.provider 提交到 tts_voice_design 工作流。
  */
 export function createTtsDesignWorkflow<TVars extends WorkflowVarsBase = WorkflowVarsBase>(

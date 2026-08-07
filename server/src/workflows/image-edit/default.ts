@@ -9,7 +9,7 @@ import type { ImageEditVars } from '../types.js';
  * - 分镜场景图合成（基础场景 + 角色外观 + prompt）
  * - 衍生变体编辑（基础图 + 衍生描述）
  *
- * vars.imagePaths 为 JSON 数组字符串；vars.desc 为编辑描述。
+ * vars.imagePaths 为 JSON 数组字符串；vars.prompt 为编辑描述。
  */
 register(createImageEditWorkflow<ImageEditVars>({
   type: 'image-edit',
@@ -47,9 +47,9 @@ register(createImageEditWorkflow<ImageEditVars>({
     }
   ],
   async getParams(ctx) {
-    const desc = (ctx.vars.desc ?? '').trim();
-    if (!desc) {
-      throw new Error('image-edit 需要 vars.desc（编辑描述）');
+    const prompt = (ctx.vars.prompt ?? '').trim();
+    if (!prompt) {
+      throw new Error('image-edit 需要 vars.prompt（编辑描述）');
     }
 
     let paths: string[] = [];
@@ -74,7 +74,7 @@ register(createImageEditWorkflow<ImageEditVars>({
     }
 
     return {
-      desc,
+      prompt,
       imgs,
       seed: ctx.vars.seed,
     };

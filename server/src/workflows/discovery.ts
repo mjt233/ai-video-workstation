@@ -136,7 +136,7 @@ export async function discoverTasks(
               impl: 'default',
               assetType,
               vars: {
-                desc: voiceDesc,
+                prompt: voiceDesc,
                 text: `你好，我叫${name}`,
                 purpose: 'character-voice',
                 character: name,
@@ -224,7 +224,7 @@ export async function discoverTasks(
                 impl: 'default',
                 assetType,
                 vars: {
-                  desc,
+                  prompt: desc,
                   imagePaths: JSON.stringify([baseImage]),
                   purpose: 'variant-edit',
                   variantKind: 'character',
@@ -286,7 +286,7 @@ export async function discoverTasks(
                   impl: 'default',
                   assetType,
                   vars: {
-                    desc,
+                    prompt: desc,
                     imagePaths: JSON.stringify([baseImage]),
                     purpose: 'variant-edit',
                     variantKind: 'stage',
@@ -335,7 +335,7 @@ export async function discoverTasks(
                       impl: 'default',
                       assetType,
                       vars: {
-                        desc: '',
+                        prompt: '',
                         imagePaths: '[]',
                         purpose: 'scene-stage-image',
                         episode,
@@ -396,7 +396,7 @@ export async function discoverTasks(
                       impl: 'default',
                       assetType,
                       vars: {
-                        desc: '',
+                        prompt: '',
                         text: '',
                         purpose: 'scene-tts',
                         episode,

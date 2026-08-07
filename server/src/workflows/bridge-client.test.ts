@@ -89,9 +89,9 @@ describe('submitLtxDirectorImageToVideo', () => {
         { frameSeq: 1, cursor: 0.5 },
       ]),
     );
-    expect(Object.keys(arg.files)).toEqual(['frame_0', 'frame_1']);
-    expect(arg.files.frame_0).toBe(file0);
-    expect(arg.files.frame_1).toBe(file1);
+    expect(Object.keys(arg.files)).toEqual(['image_0', 'image_1']);
+    expect(arg.files.image_0).toBe(file0);
+    expect(arg.files.image_1).toBe(file1);
   });
 
   it('提供 audio 时以 audio 键上传并关闭自动生成音频', async () => {
@@ -121,6 +121,6 @@ describe('submitLtxDirectorImageToVideo', () => {
     };
     expect(arg.params.auto_generate_audio).toBe(false);
     expect(arg.files.audio).toBe(audio);
-    expect(arg.files.frame_0).toBe(file0);
+    expect(arg.files.image_0).toBe(file0);
   });
 });

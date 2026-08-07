@@ -22,7 +22,7 @@ describe('createComfyuiBridgeClient', () => {
     const client = createComfyuiBridgeClient({ baseUrl: 'http://my-bridge:9999/', password: 'pw' });
     const result = await client.execute({
       workflowId: 'text_to_image',
-      params: { imd_desc: '描述', width: 1080, height: 1920 },
+      params: { prompt: '描述', width: 1080, height: 1920 },
     });
 
     expect(result.taskId).toBe('t1');
@@ -41,13 +41,13 @@ describe('createComfyuiBridgeClient', () => {
 
     const file = new File(['dummy'], 'a.png', { type: 'image/png' });
     const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
-    await client.execute({ workflowId: 'qwen-edit-2509', params: { desc: '编辑' }, files: { img1: file } });
+    await client.execute({ workflowId: 'qwen-edit-2509', params: { desc: '编辑' }, files: { image_0: file } });
 
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.body).toBeInstanceOf(FormData);
     const form = init.body as FormData;
     expect(JSON.parse(form.get('params') as string)).toEqual({ desc: '编辑' });
-    expect(form.get('img1')).toBe(file);
+    expect(form.get('image_0')).toBe(file);
   });
 
   it('poll 自动登录获取 token，completed 视为 done，请求带 Bearer', async () => {
