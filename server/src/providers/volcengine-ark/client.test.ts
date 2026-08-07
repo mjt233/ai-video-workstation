@@ -102,6 +102,25 @@ describe('createVolcengineArkClient', () => {
     await expect(client.execute({ workflowId: 'm', params: {} })).rejects.toThrow('火山方舟响应无图片数据');
   });
 
+  it('execute 响应图片缺少 url/b64_json 抛错', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: [{}] }) } as unknown as Response);
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    await expect(client.execute({ workflowId: 'm', params: {} })).rejects.toThrow('缺少 url/b64_json');
+  });
+
+  it('execute 超时（AbortError）重映射为中文超时错误', async () => {
+    fetchMock.mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    await expect(client.execute({ workflowId: 'm', params: {} })).rejects.toThrow('火山方舟请求超时（900s）');
+  });
+
+  it('execute 非超时异常原样抛出', async () => {
+    const boom = new Error('network down');
+    fetchMock.mockRejectedValue(boom);
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    await expect(client.execute({ workflowId: 'm', params: {} })).rejects.toThrow('network down');
+  });
+
   it('fileToDataUrl 生成 data URL', async () => {
     const file = new File(['hello'], 'a.png', { type: 'image/png' });
     expect(await fileToDataUrl(file)).toBe('data:image/png;base64,aGVsbG8=');

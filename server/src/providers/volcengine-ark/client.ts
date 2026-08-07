@@ -47,7 +47,7 @@ export function createVolcengineArkClient(config: ResolvedProviderConfig): Provi
           signal: controller.signal,
         });
         if (!res.ok) {
-          const text = await res.text();
+          const text = (await res.text()).trim() || '(empty body)';
           throw new Error(`火山方舟 API 错误 (${res.status}): ${text}`);
         }
         const data = (await res.json()) as { data?: ArkImageData[] };
@@ -67,7 +67,7 @@ export function createVolcengineArkClient(config: ResolvedProviderConfig): Provi
         return { taskId };
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') {
-          throw new Error(`火山方舟请求超时（${Math.round(timeoutMs / 1000)}s）`);
+          throw new Error(`火山方舟请求超时（${Math.round(timeoutMs / 1000)}s）`, { cause: e });
         }
         throw e;
       } finally {
@@ -81,7 +81,10 @@ export function createVolcengineArkClient(config: ResolvedProviderConfig): Provi
     },
 
     async getOutput(taskId): Promise<WorkflowOutput | null> {
-      return outputs.get(taskId) ?? null;
+      // 引擎在任务完成后只读取一次输出，读取即删除防止 Map 无界增长
+      const out = outputs.get(taskId);
+      outputs.delete(taskId);
+      return out ?? null;
     },
 
     async cancel() {
