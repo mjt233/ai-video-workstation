@@ -22,7 +22,9 @@ interface ArkImageData {
 export function createVolcengineArkClient(config: ResolvedProviderConfig): ProviderClient {
   const apiKey = String(config.apiKey ?? '');
   const baseUrl = String(config.baseUrl ?? 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/+$/, '');
-  const timeoutMs = Number(config.timeout ?? 900) * 1000;
+  // 超时下限钳制：非法/非正数回退默认 900s，防止 0/NaN 导致 setTimeout 立即触发
+  const timeoutSec = Number(config.timeout ?? 900);
+  const timeoutMs = (Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec : 900) * 1000;
 
   const outputs = new Map<string, WorkflowOutput>();
 

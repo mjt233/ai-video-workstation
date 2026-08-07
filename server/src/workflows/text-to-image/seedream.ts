@@ -25,9 +25,9 @@ for (const def of SEEDREAM_MODELS) {
         throw new Error('text-to-image 需要 vars.promptPath');
       }
       const prompt = await ctx.readFile(promptPath);
-      // 尺寸：vars.width/height 优先，否则 projectConfig；经 resolveSeedreamSize 校验/回退
-      const width = ctx.vars.width ?? ctx.projectConfig.width;
-      const height = ctx.vars.height ?? ctx.projectConfig.height;
+      // 尺寸：vars.width/height 非空时优先，否则 projectConfig（空串视为未提供，与 default.ts 一致）；经 resolveSeedreamSize 校验/回退
+      const width = (ctx.vars.width != null && ctx.vars.width !== '') ? ctx.vars.width : ctx.projectConfig.width;
+      const height = (ctx.vars.height != null && ctx.vars.height !== '') ? ctx.vars.height : ctx.projectConfig.height;
       const optimizeMode = ctx.userParams?.enhance_prompt === 'true' ? ('standard' as const) : undefined;
       return submitSeedreamTextToImage(ctx.provider, {
         model: def.model,

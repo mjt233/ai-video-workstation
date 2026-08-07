@@ -274,7 +274,7 @@ workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: 
       // 由引擎在 execute 完成后检查并持久化为失败（用户中断）；不立即标记 failed（避免引擎完成后覆盖）
       if (wf?.capabilities?.deferredCancel) {
         db.updateTaskParams(task.id, markCancelRequested(JSON.parse(task.params)));
-        db.addLog(task.id, 'info', 'Cancellation requested; will take effect after execution completes');
+        db.addLog(task.id, 'info', '已请求取消，将在执行完成后生效');
         res.json({ taskId: task.id, status: 'cancelling' });
         return;
       }

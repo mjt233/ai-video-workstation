@@ -76,6 +76,18 @@ describe('createVolcengineArkClient', () => {
     expect(await client.getOutput('nope')).toBeNull();
   });
 
+  it('getOutput 删除即读：二次读取返回 null（防止缓存无界增长）', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ url: 'https://tos/out.jpg' }] }),
+    } as unknown as Response);
+
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    const { taskId } = await client.execute({ workflowId: 'm', params: { prompt: 'x' } });
+    expect(await client.getOutput(taskId)).toEqual({ type: 'download', url: 'https://tos/out.jpg', filename: 'output.jpg' });
+    expect(await client.getOutput(taskId)).toBeNull();
+  });
+
   it('cancel 为 no-op（不抛错）', async () => {
     const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
     await expect(client.cancel('any')).resolves.toBeUndefined();
