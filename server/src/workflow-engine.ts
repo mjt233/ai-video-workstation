@@ -17,6 +17,7 @@ import { getProvider } from './providers/registry.js';
 import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
 import { archiveExistingAsset } from './assets/history.js';
+import { isCancelRequested } from './workflows/cancel.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../design');
@@ -824,6 +825,13 @@ async function runTask(taskId: string): Promise<void> {
     }
     const assertFullPath = resolveProjectAssertPath(task.project, outputPath);
     const assertDir = path.dirname(assertFullPath);
+
+    // 同步 provider（deferredCancel）取消回调：execute 完成后检查取消标记，
+    // 已请求取消 → 持久化失败（用户中断），不归档已有资产、不写产物
+    const freshTask = db.getTask(taskId);
+    if (freshTask && isCancelRequested(JSON.parse(freshTask.params))) {
+      throw new Error('用户中断');
+    }
 
     // 重复生成时，将已有资产归档到历史版本
     const archived = await archiveExistingAsset(task.project, outputPath);

@@ -6,6 +6,7 @@ import { getAllWorkflows } from '../workflow-engine.js';
 import { getImpl, getImplementations } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
+import { markCancelRequested, stripCancelRequested } from '../workflows/cancel.js';
 import { getProviderConfig, getProviderConfigMasked, setProviderConfig } from '../providers/config-store.js';
 import { getAllProviders, getProvider } from '../providers/registry.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
@@ -243,7 +244,7 @@ workflowRouter.post('/workflow/retry/:taskId', (req: Request, res: Response) => 
     project: existing.project,
     workflow_id: existing.workflow_id,
     impl: existing.impl,
-    params: JSON.parse(existing.params),
+    params: stripCancelRequested(JSON.parse(existing.params)),
     batch_id: existing.batch_id ?? undefined,
     phase: existing.phase,
   });
@@ -269,6 +270,14 @@ workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: 
 
   try {
     if (task.status === 'running') {
+      // 同步执行 provider（deferredCancel）：无法中止在途请求 → 写取消标记，
+      // 由引擎在 execute 完成后检查并持久化为失败（用户中断）；不立即标记 failed（避免引擎完成后覆盖）
+      if (wf?.capabilities?.deferredCancel) {
+        db.updateTaskParams(task.id, markCancelRequested(JSON.parse(task.params)));
+        db.addLog(task.id, 'info', 'Cancellation requested; will take effect after execution completes');
+        res.json({ taskId: task.id, status: 'cancelling' });
+        return;
+      }
       const providerId = wf?.provider ?? 'comfyui-bridge';
       const providerDef = getProvider(providerId);
       if (!providerDef) {
