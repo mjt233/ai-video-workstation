@@ -43,6 +43,23 @@ export function getAllWorkflowTypes(): string[] {
 }
 
 /**
+ * 注销一个工作流实现（动态重同步时清理陈旧注册）。
+ *
+ * @param type 工作流类型
+ * @param impl 实现标识；不存在时静默忽略
+ */
+export function unregister(type: string, impl: string): void {
+  const list = registry.get(type);
+  if (!list) return;
+  const next = list.filter((w) => w.impl !== impl);
+  if (next.length === 0) {
+    registry.delete(type);
+  } else {
+    registry.set(type, next);
+  }
+}
+
+/**
  * 获取全部工作流类型及其实现（/api/workflows 透传结构）。
  *
  * 顶层为工作流类型（type）；具体工作流的唯一 ID 是 implementations[].impl，
