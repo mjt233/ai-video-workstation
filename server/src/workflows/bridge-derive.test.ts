@@ -45,6 +45,28 @@ describe('deriveCapabilities', () => {
     const caps = deriveCapabilities([group('image-to-video', [group('first-frame')])], 'image-to-video');
     expect(caps.video?.firstLastFrame?.maxFrames).toBe(1);
   });
+  it('reference 子标签缺省元数据时使用默认上限', () => {
+    const caps = deriveCapabilities([group('image-to-video', [group('reference')])], 'image-to-video');
+    expect(caps.video?.reference).toEqual({
+      maxTotal: 12,
+      types: { image: { max: 9 }, video: { max: 3 }, audio: { max: 3 } },
+    });
+  });
+  it('reference 子标签读取用户配置的非默认上限', () => {
+    const caps = deriveCapabilities(
+      [group('image-to-video', [group('reference', [], { maxImageCount: 5, maxTotalCount: 20 })])],
+      'image-to-video',
+    );
+    expect(caps.video?.reference?.maxTotal).toBe(20);
+    expect(caps.video?.reference?.types?.image?.max).toBe(5);
+    // 未配置的 video/audio 仍用默认值
+    expect(caps.video?.reference?.types?.video?.max).toBe(3);
+    expect(caps.video?.reference?.types?.audio?.max).toBe(3);
+  });
+  it('audio-output 子标签 → audio=true', () => {
+    const caps = deriveCapabilities([group('image-to-video', [group('audio-output')])], 'image-to-video');
+    expect(caps.video?.audio).toBe(true);
+  });
   it('非视频类型 → 无 video 能力、cancelable=true', () => {
     const caps = deriveCapabilities([group('text-to-image')], 'text-to-image');
     expect(caps.video).toBeUndefined();
@@ -73,5 +95,9 @@ describe('deriveParams', () => {
   it('image/video/audio 类型跳过', () => {
     const params = deriveParams('prompt,input_image', declared);
     expect(params.map((p) => p.key)).toEqual(['prompt']);
+  });
+  it('expose_field 含空白与尾逗号时正确解析', () => {
+    const params = deriveParams('steps, enhance ,', declared);
+    expect(params.map((p) => p.key)).toEqual(['steps', 'enhance']);
   });
 });
