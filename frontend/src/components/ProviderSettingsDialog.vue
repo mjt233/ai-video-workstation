@@ -89,7 +89,7 @@
                 :label="f.label"
                 :type="fieldInputType(p, f)"
                 :append-inner-icon="f.type === 'password' ? (showSecret[p.id + '/' + f.key] ? 'mdi-eye-off' : 'mdi-eye') : undefined"
-                :placeholder="f.type === 'password' && forms[p.id][f.key] === MASKED_SECRET ? '已设置（留空保持不变）' : f.placeholder"
+                :placeholder="f.placeholder"
                 :hint="f.description"
                 persistent-hint
                 density="comfortable"
@@ -120,7 +120,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import {
-  MASKED_SECRET,
   getProviders,
   saveProviderConfig,
   type ProviderConfigField,
@@ -142,11 +141,13 @@ const error = ref('')
 const showSecret = ref<Record<string, boolean>>({})
 const forms = ref<Record<string, Record<string, string | number | boolean>>>({})
 
-/** 构建表单初始值：已保存值（secret 为 '__set__' 时保持占位），否则 defaultValue */
+/** 构建表单初始值：secret 字段恒为空（不回显真实值/占位符，保存空串 = 服务端保留原值）；其余用已保存值或 defaultValue */
 function buildForm(p: ProviderInfo): Record<string, string | number | boolean> {
   const form: Record<string, string | number | boolean> = {}
   for (const f of p.configSchema) {
-    if (p.config[f.key] !== undefined) {
+    if (f.secret) {
+      form[f.key] = ''
+    } else if (p.config[f.key] !== undefined) {
       form[f.key] = p.config[f.key]
     } else if (f.defaultValue !== undefined) {
       form[f.key] = f.defaultValue
@@ -204,14 +205,9 @@ async function save(p: ProviderInfo) {
   error.value = ''
   try {
     const payload: Record<string, unknown> = { ...forms.value[p.id] }
-    // secret 占位符不上送（服务端空串 = 保留原值）
-    for (const f of p.configSchema) {
-      if (f.secret && payload[f.key] === MASKED_SECRET) {
-        delete payload[f.key]
-      }
-    }
+    // secret 字段为空串 = 不修改（服务端保留原值），直接上送即可
     await saveProviderConfig(p.id, payload)
-    // 保存成功后重新加载，刷新 '__set__' 占位
+    // 保存成功后重新加载，刷新敏感字段回显（保持为空）
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)

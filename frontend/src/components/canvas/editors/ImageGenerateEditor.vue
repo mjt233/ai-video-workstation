@@ -74,15 +74,28 @@
 
     <v-select
       :model-value="workflowId"
-      :items="workflowItems"
+      :items="workflowTypeItems"
       item-title="label"
-      item-value="id"
-      label="工作流"
+      item-value="value"
+      label="工作流类型"
       density="compact"
       variant="outlined"
       hide-details
       class="mb-2"
-      @update:model-value="(v) => emit('update:config', { workflowId: v, workflowImpl: undefined, workflowParams: {} })"
+      @update:model-value="onTypeChange"
+    />
+
+    <v-select
+      :model-value="currentImplId"
+      :items="implItems"
+      item-title="label"
+      item-value="value"
+      label="工作流实现"
+      density="compact"
+      variant="outlined"
+      hide-details
+      class="mb-2"
+      @update:model-value="onImplChange"
     />
 
     <WorkflowParamsForm
@@ -253,16 +266,46 @@ function onDrop() {
 }
 
 const currentWorkflow = computed(() => workflows.value.find((w) => w.type === workflowId.value))
-const currentDeclarations = computed(() => {
-  const impl = currentWorkflow.value?.implementations.find((i) => i.impl === (props.node.config.workflowImpl || 'default'))
-  return impl?.params ?? []
-})
 
-const workflowItems = computed(() =>
+/** 工作流类型下拉（文生图 / 图片编辑） */
+const workflowTypeItems = computed(() =>
   workflows.value
     .filter((w) => w.type === 'text-to-image' || w.type === 'image-edit')
-    .map((w) => ({ id: w.type, label: w.implementations[0]?.name ?? w.type })),
+    .map((w) => ({ value: w.type, label: w.type === 'text-to-image' ? '文生图' : '图片编辑' })),
 )
+
+/** 当前类型下的所有实现（如 ComfyUI default / Seedream pro / Seedream lite） */
+const implItems = computed(() =>
+  (currentWorkflow.value?.implementations ?? []).map((i) => ({ value: i.impl, label: i.name })),
+)
+
+/** 当前选择的工作流实现标识（config.workflowImpl；非法/未初始化时回退第一个实现） */
+const currentImplId = computed(() => {
+  const impl = props.node.config.workflowImpl
+  if (typeof impl === 'string' && implItems.value.some((i) => i.value === impl)) return impl
+  return implItems.value[0]?.value ?? ''
+})
+
+/**
+ * 切换工作流类型：显式写入 workflowId，重置实现与参数（实现回退到新类型第一个）。
+ * @param v 工作流类型（text-to-image / image-edit）
+ */
+function onTypeChange(v: string) {
+  emit('update:config', { workflowId: v, workflowImpl: undefined, workflowParams: {} })
+}
+
+/**
+ * 切换工作流实现（如 ComfyUI default / Seedream pro/lite），重置参数为默认。
+ * @param v 实现标识（impl）
+ */
+function onImplChange(v: string) {
+  emit('update:config', { workflowImpl: v, workflowParams: {} })
+}
+
+const currentDeclarations = computed(() => {
+  const impl = (currentWorkflow.value?.implementations ?? []).find((i) => i.impl === currentImplId.value)
+  return impl?.params ?? []
+})
 
 watch(
   () => props.node.config.workflowParams,

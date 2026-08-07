@@ -74,17 +74,19 @@ describe('config-store', () => {
     expect(config.flag).toBe(true);
   });
 
-  it('secret 字段在 getProviderConfigMasked 中脱敏为 MASKED_SECRET', async () => {
+  it('secret 字段在 getProviderConfigMasked 中脱敏为空串', async () => {
     await setProviderConfig('test-store', { apiKey: 'sk-secret' }, configPath);
     const masked = await getProviderConfigMasked('test-store', configPath);
-    expect(masked.apiKey).toBe(MASKED_SECRET);
+    expect(masked.apiKey).toBe('');
   });
 
-  it('secret 传空串时保留原值', async () => {
+  it('secret 传空串时保留原值（脱敏读取为空串）', async () => {
     await setProviderConfig('test-store', { apiKey: 'sk-original' }, configPath);
     await setProviderConfig('test-store', { apiKey: '' }, configPath);
+    const config = await getProviderConfig('test-store', configPath);
+    expect(config.apiKey).toBe('sk-original');
     const masked = await getProviderConfigMasked('test-store', configPath);
-    expect(masked.apiKey).toBe(MASKED_SECRET);
+    expect(masked.apiKey).toBe('');
   });
 
   it('未知键被忽略', async () => {

@@ -17,7 +17,7 @@ export interface ProviderConfigField {
   defaultValue?: string | number | boolean
   /** 输入框占位文案 */
   placeholder?: string
-  /** 敏感字段：已保存时服务端返回 '__set__' 占位 */
+  /** 敏感字段：已保存时服务端返回空串（不回显真实值，也不使用占位符） */
   secret?: boolean
   /** select 类型可选项 */
   options?: { label: string; value: string }[]
@@ -33,12 +33,9 @@ export interface ProviderInfo {
   name: string
   description?: string
   configSchema: ProviderConfigField[]
-  /** 当前已保存配置；secret 字段有值时为 '__set__' 占位 */
+  /** 当前已保存配置；secret 字段有值时为空串（不回显，保存空串 = 服务端保留原值） */
   config: Record<string, string | number | boolean>
 }
-
-/** 敏感字段占位符（与服务端 MASKED_SECRET 对齐） */
-export const MASKED_SECRET = '__set__'
 
 /** GET /api/providers — 列出所有 provider 及其配置（secret 脱敏） */
 export async function getProviders(): Promise<ProviderInfo[]> {

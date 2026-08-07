@@ -84,8 +84,10 @@ export async function getProviderConfig(
 }
 
 /**
- * 读取 provider 配置用于前端展示：secret 字段有值则脱敏为 MASKED_SECRET；
+ * 读取 provider 配置用于前端展示：secret 字段有值则脱敏为空串（不回显真实值、也不用占位符）；
  * 未在文件中配置的字段不返回（前端回退到 defaultValue 展示）。
+ *
+ * 空串语义：前端保存时 secret 字段为空串 = 不修改（服务端保留原值）。
  * @param providerId provider id
  * @param configPath 配置文件路径（默认 CONFIG_PATH；测试可注入）
  */
@@ -101,7 +103,7 @@ export async function getProviderConfigMasked(
   for (const field of provider.configSchema) {
     const val = fileValues[field.key];
     if (val === undefined) continue;
-    out[field.key] = field.secret ? MASKED_SECRET : val;
+    out[field.key] = field.secret ? '' : val;
   }
   return out;
 }
