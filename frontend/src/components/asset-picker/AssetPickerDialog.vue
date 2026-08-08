@@ -63,6 +63,12 @@
         >
           音频
         </v-tab>
+        <v-tab
+          v-if="visibleTabs.includes('video')"
+          value="video"
+        >
+          分镜视频
+        </v-tab>
       </v-tabs>
 
       <v-divider />
@@ -129,6 +135,18 @@
           :selected-paths="selectedPaths"
           @select="onSelect"
         />
+
+        <!-- 分镜视频：分镜视频 / 分镜自定义 / 全局自定义 -->
+        <VideoPicker
+          v-else-if="activeTab === 'video' && visibleTabs.includes('video')"
+          :reload-key="reloadKey"
+          :project="project"
+          :context-episode="contextEpisode"
+          :context-shot="contextShot"
+          :exclude="exclude"
+          :selected-paths="selectedPaths"
+          @select="onSelect"
+        />
       </v-card-text>
 
       <v-divider v-if="!parentMode" />
@@ -172,6 +190,7 @@ import EntityAssetTree from './EntityAssetTree.vue'
 import CustomAssetsGrid from './CustomAssetsGrid.vue'
 import SceneStagePicker from './SceneStagePicker.vue'
 import AudioPicker from './AudioPicker.vue'
+import VideoPicker from './VideoPicker.vue'
 import SelectedAssetsBar from './SelectedAssetsBar.vue'
 
 /**

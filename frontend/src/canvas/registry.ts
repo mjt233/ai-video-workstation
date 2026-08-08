@@ -6,11 +6,13 @@ import TextNode from '../components/canvas/nodes/TextNode.vue'
 import AudioLoaderNode from '../components/canvas/nodes/AudioLoaderNode.vue'
 import VideoLoaderNode from '../components/canvas/nodes/VideoLoaderNode.vue'
 import VideoGenerateNode from '../components/canvas/nodes/VideoGenerateNode.vue'
+import ExtractFrameNode from '../components/canvas/nodes/ExtractFrameNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
 import VideoLoaderEditor from '../components/canvas/editors/VideoLoaderEditor.vue'
 import VideoGenerateEditor from '../components/canvas/editors/VideoGenerateEditor.vue'
+import ExtractFrameEditor from '../components/canvas/editors/ExtractFrameEditor.vue'
 
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
 export interface NodePrototype {
@@ -32,6 +34,23 @@ export interface NodePrototype {
   editorComponent?: Component
   /** 创建节点时的默认配置（可选） */
   defaultConfig?: NodeConfig
+  /**
+   * 输出资产路径解析：由节点自身配置推导当前输出资产（项目内相对路径），无则 undefined。
+   * 未声明时 getNodeCurrentAssetPath 按画布约定默认读 config.current.path。
+   */
+  getOutputAssetPath?: (config: NodeConfig) => string | undefined
+}
+
+/** 加载类节点输出资产：config.assetPath（非空字符串） */
+function loaderOutput(config: NodeConfig): string | undefined {
+  const ap = config.assetPath
+  return typeof ap === 'string' && ap ? ap : undefined
+}
+
+/** 生成类节点输出资产：config.current.path（生成产物回写 current/history 是画布约定） */
+function generateOutput(config: NodeConfig): string | undefined {
+  const cur = config.current as { path?: string } | undefined
+  return cur?.path
 }
 
 /** 内置节点原型注册表 */
@@ -45,6 +64,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     resizeable: false,
     bodyComponent: ImageLoaderNode,
     editorComponent: ImageLoaderEditor,
+    getOutputAssetPath: loaderOutput,
   },
   {
     id: 'audio-loader',
@@ -55,6 +75,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     resizeable: false,
     bodyComponent: AudioLoaderNode,
     editorComponent: AudioLoaderEditor,
+    getOutputAssetPath: loaderOutput,
   },
   {
     id: 'video-loader',
@@ -65,6 +86,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     resizeable: false,
     bodyComponent: VideoLoaderNode,
     editorComponent: VideoLoaderEditor,
+    getOutputAssetPath: loaderOutput,
   },
   {
     id: 'image-generate',
@@ -75,6 +97,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     resizeable: true,
     bodyComponent: ImageGenerateNode,
     editorComponent: ImageGenerateEditor,
+    getOutputAssetPath: generateOutput,
   },
   {
     id: 'text',
@@ -95,6 +118,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     resizeable: true,
     bodyComponent: VideoGenerateNode,
     editorComponent: VideoGenerateEditor,
+    getOutputAssetPath: generateOutput,
     defaultConfig: {
       workflowId: 'image-to-video',
       workflowImpl: undefined,
@@ -103,6 +127,22 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       prompt: '',
       director: { duration: 0, width: 0, height: 0, fps: 0, imageClips: [], audioClips: [] },
       inputOrder: [],
+    },
+  },
+  {
+    id: 'video-frame-extract',
+    name: '获取视频帧',
+    icon: 'mdi-camera-outline',
+    // 输入视频类型、输出图片类型；手动点击提取（服务端 ffmpeg）
+    inputPorts: [{ id: 'in', type: 'video', label: '视频' }],
+    outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
+    resizeable: true,
+    bodyComponent: ExtractFrameNode,
+    editorComponent: ExtractFrameEditor,
+    getOutputAssetPath: generateOutput,
+    defaultConfig: {
+      frameIndex: 0,
+      history: [],
     },
   },
 ]

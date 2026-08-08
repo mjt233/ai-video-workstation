@@ -233,6 +233,15 @@
         >
           历史
         </v-btn>
+        <v-btn
+          v-if="kind === 'scene' && node.config.current && !isRunning"
+          size="small"
+          variant="tonal"
+          color="primary"
+          @click="emit('set-as-video', node.id)"
+        >
+          设为分镜视频
+        </v-btn>
       </div>
     </div>
   </Teleport>
@@ -297,6 +306,8 @@ const emit = defineEmits<{
   (e: 'open-history', nodeId: string): void
   (e: 'set-as-scene', nodeId: string): void
   (e: 'open-picker', nodeId: string): void
+  (e: 'extract', nodeId: string): void
+  (e: 'set-as-video', nodeId: string): void
 }>()
 
 // ── 全屏显示 ─────────────────────────────────────────────

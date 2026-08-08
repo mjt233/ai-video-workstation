@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含六个内置节点', () => {
+  it('包含七个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'image-generate',
       'image-loader',
       'text',
+      'video-frame-extract',
       'video-generate',
       'video-loader',
     ])
@@ -38,5 +39,30 @@ describe('音频/视频加载节点原型', () => {
     expect(audio?.outputPorts[0]?.type).toBe('audio')
     expect(video?.name).toBe('加载视频')
     expect(video?.outputPorts[0]?.type).toBe('video')
+  })
+})
+
+describe('getOutputAssetPath（各节点自实现输出资产解析）', () => {
+  it('加载类节点解析 config.assetPath，空值返回 undefined', () => {
+    expect(getPrototype('image-loader')!.getOutputAssetPath?.({ assetPath: 'assert/custom/foo.jpg' })).toBe('assert/custom/foo.jpg')
+    expect(getPrototype('audio-loader')!.getOutputAssetPath?.({ assetPath: 'a.flac' })).toBe('a.flac')
+    expect(getPrototype('video-loader')!.getOutputAssetPath?.({ assetPath: 'a.mp4' })).toBe('a.mp4')
+    expect(getPrototype('image-loader')!.getOutputAssetPath?.({})).toBeUndefined()
+  })
+
+  it('生成类节点解析 config.current.path', () => {
+    expect(getPrototype('image-generate')!.getOutputAssetPath?.({ current: { path: 'x.jpg' } })).toBe('x.jpg')
+    expect(getPrototype('video-generate')!.getOutputAssetPath?.({ current: { path: 'x.mp4' } })).toBe('x.mp4')
+  })
+
+  it('文本节点不声明解析器（无文件输出）', () => {
+    expect(getPrototype('text')!.getOutputAssetPath).toBeUndefined()
+  })
+
+  it('获取视频帧节点：video 输入、image 输出、解析 current.path', () => {
+    const p = getPrototype('video-frame-extract')!
+    expect(p.inputPorts[0]?.type).toBe('video')
+    expect(p.outputPorts[0]?.type).toBe('image')
+    expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/ef/v1.png' } })).toBe('assert/scene/1/1/canvas/ef/v1.png')
   })
 })

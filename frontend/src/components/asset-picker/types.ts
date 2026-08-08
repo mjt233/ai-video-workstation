@@ -6,7 +6,7 @@
  */
 
 /** 资产分类标签 */
-export type AssetTab = 'character' | 'stage' | 'custom' | 'audio' | 'scene-stage'
+export type AssetTab = 'character' | 'stage' | 'custom' | 'audio' | 'scene-stage' | 'video'
 
 /** 树形资产条目（角色/场景树、自定义资产网格、分镜场景图等通用条目） */
 export interface AssetItem {
@@ -24,6 +24,8 @@ export interface AssetItem {
   header?: boolean
   /** 是否为音频条目（渲染音频图标行而非图片缩略图） */
   audio?: boolean
+  /** 是否为视频条目（渲染视频图标行而非图片缩略图） */
+  video?: boolean
 }
 
 /** 角色/场景页签左侧实体列表条目 */

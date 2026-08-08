@@ -1,4 +1,4 @@
-import { readFs, writeFs } from '../api/client'
+import client, { readFs, writeFs } from '../api/client'
 import { migrateCanvasData, type CanvasData, type CanvasKind } from './types'
 import { sceneCanvasRelPath, stageCanvasRelPath } from './paths'
 
@@ -66,4 +66,30 @@ export async function loadCanvas(project: string, target: CanvasTarget): Promise
 export async function saveCanvas(project: string, target: CanvasTarget, data: CanvasData): Promise<void> {
   const rel = canvasRelPath(target)
   await writeFs(project, rel, JSON.stringify(data, null, 2))
+}
+
+/**
+ * 提取视频帧：调用服务端 ffmpeg 接口，把输入视频的指定帧输出为图片（png）。
+ *
+ * 帧索引语义：0=首帧、1=第二帧、-1=尾帧、-2=倒数第二帧，以此类推（越界服务端返回错误）。
+ *
+ * @param project 项目名
+ * @param videoPath 输入视频相对路径（assert/ 下）
+ * @param frameIndex 帧索引（整数，可负）
+ * @param outputPath 输出图片相对路径（assert/ 下，.png）
+ * @returns 服务端执行结果（含输出相对路径）
+ */
+export async function extractVideoFrame(
+  project: string,
+  videoPath: string,
+  frameIndex: number,
+  outputPath: string,
+): Promise<{ success: boolean; path: string }> {
+  const { data } = await client.post<{ success: boolean; path: string }>('/canvas/extract-frame', {
+    project,
+    videoPath,
+    frameIndex,
+    outputPath,
+  })
+  return data
 }

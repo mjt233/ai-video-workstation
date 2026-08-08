@@ -44,6 +44,16 @@
       >
         选择资产
       </v-btn>
+      <v-spacer />
+      <v-btn
+        v-if="kind === 'scene' && !!assetPath"
+        size="small"
+        variant="tonal"
+        color="primary"
+        @click="emit('set-as-video', node.id)"
+      >
+        设为分镜视频
+      </v-btn>
     </div>
 
     <!-- 当前资产路径提示 -->
@@ -59,7 +69,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { CanvasNodeData } from '../../../canvas/types'
+import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { uploadFs } from '../../../api/client'
 
@@ -67,11 +77,14 @@ import { uploadFs } from '../../../api/client'
 const props = defineProps<{
   project: string
   node: CanvasNodeData
+  /** 画布类型：仅分镜画布（scene）显示「设为分镜视频」 */
+  kind: CanvasKind
 }>()
 
 const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
   (e: 'open-picker', nodeId: string): void
+  (e: 'set-as-video', nodeId: string): void
 }>()
 
 const assetUrl = ref('')

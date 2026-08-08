@@ -25,10 +25,28 @@
           v-else
           class="history-body"
         >
-          <!-- 左侧大图预览 -->
+          <!-- 左侧大图/视频/音频预览（按选中条目媒体类型渲染） -->
           <div class="history-preview">
+            <video
+              v-if="previewKind === 'video' && !previewBroken"
+              :src="previewUrl"
+              controls
+              class="history-preview__media"
+              @error="previewBroken = true"
+            >
+              您的浏览器不支持视频预览
+            </video>
+            <audio
+              v-else-if="previewKind === 'audio' && !previewBroken"
+              :src="previewUrl"
+              controls
+              class="history-preview__audio"
+              @error="previewBroken = true"
+            >
+              您的浏览器不支持音频预览
+            </audio>
             <img
-              v-if="!previewBroken"
+              v-else-if="!previewBroken"
               :src="previewUrl"
               class="history-preview__img"
               @error="previewBroken = true"
@@ -37,7 +55,7 @@
               v-else
               class="history-preview__img history-preview__img--empty"
             >
-              <v-icon icon="mdi-image-off-outline" />
+              <v-icon :icon="emptyIcon" />
             </div>
             <div class="history-preview__label">
               {{ selectedLabel }}
@@ -55,8 +73,25 @@
               @click="selectEntry(h)"
             >
               <template #prepend>
+                <video
+                  v-if="thumbKind(h) === 'video' && !isBroken(h)"
+                  :src="thumbUrl(h)"
+                  muted
+                  preload="metadata"
+                  class="history-item__thumb"
+                  @error="markBroken(h)"
+                />
+                <div
+                  v-else-if="thumbKind(h) === 'audio' && !isBroken(h)"
+                  class="history-item__thumb history-item__thumb--audio"
+                >
+                  <v-icon
+                    icon="mdi-music-note"
+                    size="small"
+                  />
+                </div>
                 <img
-                  v-if="!isBroken(h)"
+                  v-else-if="!isBroken(h)"
                   :src="thumbUrl(h)"
                   class="history-item__thumb"
                   @error="markBroken(h)"
@@ -129,6 +164,7 @@ import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../canvas/types'
 import { getHistory, type HistoryEntry } from '../../canvas/generate'
 import { buildPreviewUrl } from '../../canvas/preview'
+import { getPreviewKind, isAudioFile, isVideoFile, type PreviewKind } from '../../utils/customAssetFile'
 
 /** 组件 props：显隐、项目名、生成节点数据（null 时空态） */
 const props = defineProps<{
@@ -190,6 +226,31 @@ const selectedLabel = computed(() => {
   const s = selected.value
   return s ? `v${s.version} · ${formatDate(s.date)}` : ''
 })
+
+/** 大图预览媒体类型（按选中条目路径扩展名推断；无选中时为 none） */
+const previewKind = computed<PreviewKind>(() => {
+  const s = selected.value
+  return s ? getPreviewKind(s.path) : 'none'
+})
+
+/** 大图/缩略图加载失败或空态占位图标（按媒体类型） */
+const emptyIcon = computed(() => {
+  if (previewKind.value === 'video') return 'mdi-video-off-outline'
+  if (previewKind.value === 'audio') return 'mdi-music-off-outline'
+  return 'mdi-image-off-outline'
+})
+
+/**
+ * 条目缩略图媒体类型（视频用 muted 视频缩略、音频用图标占位、其余按图片）。
+ *
+ * @param h 历史条目
+ * @returns 媒体类型
+ */
+function thumbKind(h: HistoryEntry): 'image' | 'video' | 'audio' {
+  if (isVideoFile(h.path)) return 'video'
+  if (isAudioFile(h.path)) return 'audio'
+  return 'image'
+}
 
 /** 缩略图 URL */
 function thumbUrl(h: HistoryEntry): string {
@@ -282,6 +343,20 @@ watch(entries, (list) => {
   background: rgba(0, 0, 0, 0.04);
 }
 
+.history-preview__media {
+  width: 300px;
+  height: 300px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #000;
+}
+
+.history-preview__audio {
+  width: 100%;
+  margin-top: 132px;
+}
+
 .history-preview__img--empty {
   display: flex;
   align-items: center;
@@ -326,5 +401,12 @@ watch(entries, (list) => {
   align-items: center;
   justify-content: center;
   color: rgba(0, 0, 0, 0.38);
+}
+
+.history-item__thumb--audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.54);
 }
 </style>

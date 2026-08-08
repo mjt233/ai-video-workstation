@@ -210,6 +210,8 @@
               @open-history="openHistory"
               @set-as-scene="openSetAsScene"
               @open-picker="openAssetPicker"
+              @extract="extractNodeFrame"
+              @set-as-video="openSetAsShotVideo"
             />
           </div>
         </Transition>
@@ -221,7 +223,7 @@
           :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
         >
           <div
-            v-if="contextMenuNode?.prototypeId === 'image-generate'"
+            v-if="isGeneratePrototype(contextMenuNode?.prototypeId)"
             class="canvas-context-menu__item"
             @click="contextGenerate"
           >
@@ -234,7 +236,7 @@
             重新生成
           </div>
           <div
-            v-if="contextMenuNode?.prototypeId === 'image-generate'"
+            v-if="isGeneratePrototype(contextMenuNode?.prototypeId)"
             class="canvas-context-menu__item"
             @click="contextHistory"
           >
@@ -245,6 +247,19 @@
               mdi-history
             </v-icon>
             历史
+          </div>
+          <div
+            v-if="canSaveAsAsset(contextMenuNode)"
+            class="canvas-context-menu__item"
+            @click="contextSaveAsset"
+          >
+            <v-icon
+              size="small"
+              class="mr-2"
+            >
+              mdi-content-save-outline
+            </v-icon>
+            保存为自定义资产
           </div>
           <div
             v-if="contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
@@ -377,6 +392,20 @@
         :node="historyNode"
         @activate="onActivateHistory"
         @delete="onDeleteHistory"
+      />
+
+      <!-- 保存为自定义资产对话框（场景/分镜双根 + 新建目录） -->
+      <SaveAssetDialog
+        v-model="saveDialog.show"
+        :project="props.project"
+        :kind="target.kind"
+        :stage="props.stage"
+        :episode="props.episode"
+        :shot="props.shot"
+        :node-name="saveDialogNode?.name ?? ''"
+        :source-path="saveSourcePath"
+        @saved="(p: string) => showSnackbar(`已保存到 ${p}`, 'success')"
+        @save-error="(msg: string) => showSnackbar(msg, 'error')"
       />
 
       <!-- 设为分镜场景图对话框 -->
@@ -557,6 +586,7 @@ import { confirm } from '../../utils/confirm'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import type { AssetTab } from '../asset-picker/types'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
+import SaveAssetDialog from './SaveAssetDialog.vue'
 
 /** 组件 props：定位一张画布 */
 const props = defineProps<{
@@ -862,6 +892,19 @@ async function deleteNode(nodeId: string) {
 
 // ── 右键菜单 ────────────────────────────────────────────
 
+/** 生成类节点原型 id 集合（右键菜单提供「重新生成/历史」；含获取视频帧节点） */
+const GENERATE_PROTOTYPES = new Set(['image-generate', 'video-generate', 'video-frame-extract'])
+
+/**
+ * 判断原型 id 是否属于生成类节点（有重新生成/历史能力的节点）。
+ *
+ * @param id 原型 id（可为 undefined）
+ * @returns 属于生成类返回 true
+ */
+function isGeneratePrototype(id: string | undefined): boolean {
+  return !!id && GENERATE_PROTOTYPES.has(id)
+}
+
 const contextMenu = reactive({ show: false, x: 0, y: 0, nodeId: '' })
 
 /** 当前右键菜单对应的节点 */
@@ -895,6 +938,26 @@ function contextHistory() {
   const id = contextMenu.nodeId
   contextMenu.show = false
   if (id) openHistory(id)
+}
+
+/** 菜单：保存为自定义资产 */
+function contextSaveAsset() {
+  const id = contextMenu.nodeId
+  contextMenu.show = false
+  if (id) openSaveAsset(id)
+}
+
+/**
+ * 节点是否可保存为自定义资产：输出类型为图片/音频/视频且有当前资产。
+ *
+ * @param node 右键菜单对应节点
+ * @returns 可保存返回 true
+ */
+function canSaveAsAsset(node: CanvasNodeData | undefined): boolean {
+  if (!node || !contextMenu.nodeId) return false
+  const out = getNodeOutputType(contextMenu.nodeId, store.nodes.value)
+  if (out !== 'image' && out !== 'video' && out !== 'audio') return false
+  return !!getNodeCurrentAssetPath(node)
 }
 
 /** 菜单：重命名（双击节点名称也可进入内联编辑） */
@@ -1080,6 +1143,29 @@ const historyDialog = reactive({ show: false, nodeId: '' })
 /** 历史对话框对应节点（store 更新后自动刷新，激活后「当前」标记随之更新） */
 const historyNode = computed(() => nodeMap.value[historyDialog.nodeId] ?? null)
 
+// ── 保存为自定义资产 ────────────────────────────────────
+
+/** 保存为自定义资产对话框状态 */
+const saveDialog = reactive({ show: false, nodeId: '' })
+
+/** 保存对话框对应节点 */
+const saveDialogNode = computed(() => (saveDialog.nodeId ? nodeMap.value[saveDialog.nodeId] : undefined))
+
+/** 保存对话框源资产路径（节点当前输出资产） */
+const saveSourcePath = computed(() => (saveDialogNode.value ? getNodeCurrentAssetPath(saveDialogNode.value) ?? '' : ''))
+
+/**
+ * 打开「保存为自定义资产」对话框：把节点当前输出资产复制到自定义资产目录。
+ *
+ * @param nodeId 节点 id
+ */
+function openSaveAsset(nodeId: string) {
+  const node = nodeMap.value[nodeId]
+  if (!node || !getNodeCurrentAssetPath(node)) return
+  saveDialog.nodeId = nodeId
+  saveDialog.show = true
+}
+
 /** 打开版本历史对话框 */
 function openHistory(nodeId: string) {
   historyDialog.nodeId = nodeId
@@ -1135,6 +1221,11 @@ async function generateNode(nodeId: string) {
   const node = nodeMap.value[nodeId]
   if (!node) return
   gen.clearStatus(nodeId)
+  if (node.prototypeId === 'video-frame-extract') {
+    // 获取视频帧：本地 ffmpeg 提取（不走工作流）
+    await extractNodeFrame(nodeId)
+    return
+  }
   if (node.prototypeId === 'video-generate') {
     const videoParams = buildVideoSubmitParams(node, {
       images: videoInputsOf(nodeId, 'image'),
@@ -1161,6 +1252,26 @@ async function generateNode(nodeId: string) {
 /** 中断生成 */
 function onInterrupt(nodeId: string) {
   void gen.interrupt(nodeId)
+}
+
+/**
+ * 获取视频帧节点：收集输入视频路径并触发帧提取（服务端 ffmpeg）。
+ *
+ * @param nodeId 节点 id
+ */
+async function extractNodeFrame(nodeId: string) {
+  const node = nodeMap.value[nodeId]
+  if (!node) return
+  const videos = videoInputsOf(nodeId, 'video')
+  const videoPath = videos[0]?.path
+  if (!videoPath) {
+    showSnackbar('请先连接视频输入', 'primary')
+    return
+  }
+  gen.clearStatus(nodeId)
+  await gen.extractFrame(node, videoPath, (config) => {
+    store.updateNode(nodeId, { config })
+  })
 }
 
 /** 节点当前是否在生成中（供编辑器显示） */
@@ -1368,6 +1479,34 @@ async function applySetAsScene(frame: SceneFrameOption | null) {
   }
 }
 
+/**
+ * 设为分镜视频：把视频输出节点（生成视频/加载视频）的当前视频设为分镜视频。
+ * 分镜视频为单文件 assert/scene/{集数}/{分镜}/video.mp4，确认后直接覆盖。
+ *
+ * @param nodeId 节点 id
+ */
+async function openSetAsShotVideo(nodeId: string) {
+  if (target.value.kind !== 'scene') return
+  const node = nodeMap.value[nodeId]
+  const source = node ? getNodeCurrentAssetPath(node) : undefined
+  if (!node || !source) return
+  const ep = target.value.episode
+  const shot = target.value.shot
+  const ok = await confirm({
+    title: '设为分镜视频',
+    content: `将当前视频设为分镜视频（覆盖 assert/scene/${ep}/${shot}/video.mp4）？`,
+    confirmText: '确认',
+    confirmColor: 'primary',
+  })
+  if (!ok) return
+  try {
+    await copyFs(props.project, source, `assert/scene/${ep}/${shot}/video.mp4`)
+    showSnackbar('已设为分镜视频', 'success')
+  } catch (e) {
+    showSnackbar(e instanceof Error ? e.message : '设为分镜视频失败', 'error')
+  }
+}
+
 // ── 配置回写 ────────────────────────────────────────────
 
 /**
@@ -1386,12 +1525,17 @@ function onUpdateConfig(nodeId: string, patch: Record<string, unknown>) {
 
 const picker = reactive({ show: false, nodeId: '', showVoice: false })
 
-/** 资产选择器页签：音频加载节点额外提供「音频」页签（台词音频/自定义音频） */
-const pickerTabs = computed<AssetTab[]>(() =>
-  picker.showVoice
-    ? ['character', 'stage', 'custom', 'audio', 'scene-stage']
-    : ['stage', 'character', 'custom', 'scene-stage'],
-)
+/**
+ * 资产选择器页签：按节点类型定制——
+ * 音频加载节点提供「音频」页签（台词音频/自定义音频）；
+ * 视频加载节点提供「分镜视频」页签（分镜视频/自定义视频）。
+ */
+const pickerTabs = computed<AssetTab[]>(() => {
+  const node = picker.nodeId ? nodeMap.value[picker.nodeId] : undefined
+  if (node?.prototypeId === 'audio-loader') return ['character', 'stage', 'custom', 'audio', 'scene-stage']
+  if (node?.prototypeId === 'video-loader') return ['stage', 'character', 'custom', 'video', 'scene-stage']
+  return ['stage', 'character', 'custom', 'scene-stage']
+})
 
 /** 打开资产选择器（绑定到某加载节点；音频节点启用角色音色与音频页签） */
 function openAssetPicker(nodeId: string) {
