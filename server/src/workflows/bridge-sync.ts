@@ -34,6 +34,35 @@ const IMPL_PREFIX = 'ceb-';
 /** 并发同步串行化：重叠调用共享同一 promise（in-flight 完成后置空） */
 let inflight: Promise<void> | null = null;
 
+/** text-to-image 提交按结构字段处理的用户参数键（从透传排除） */
+const TEXT_TO_IMAGE_STRUCTURAL_KEYS = new Set(['seed', 'enhance_prompt', 'enable_specified_size', 'width', 'height']);
+/** image-edit 提交按结构字段处理的用户参数键（从透传排除） */
+const IMAGE_EDIT_STRUCTURAL_KEYS = new Set(['seed', 'enable_specified_size', 'width', 'height']);
+/** tts 提交按结构字段处理的用户参数键（从透传排除） */
+const TTS_STRUCTURAL_KEYS = new Set(['seed']);
+/** image-to-video 提交按结构字段处理的用户参数键（从透传排除） */
+const VIDEO_STRUCTURAL_KEYS = new Set(['seed', 'width', 'height', 'duration', 'fps', 'auto_generate_audio', 'mid_frame_cursor', 'frame_define']);
+
+/**
+ * 提取待透传的用户参数：从 ctx.userParams（引擎按声明类型转换后的原生值）中排除
+ * 本提交函数按结构字段组装（seed/尺寸等）的键，其余（Bridge 动态声明的用户参数，
+ * 如 enable_multiple_angles_lora）原样返回，供 payload 构建器合并进 Bridge 请求。
+ *
+ * @param ctx 工作流运行上下文
+ * @param exclude 本提交函数结构处理的字段键集合
+ * @returns 透传参数（原生类型值）
+ */
+function passthroughParams(
+  ctx: WorkflowRunContext<WorkflowVarsBase>,
+  exclude: Set<string>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(ctx.userParams ?? {})) {
+    if (!exclude.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 /**
  * 从自动注册标签元数据取 expose_field（逗号分隔的用户可配置参数字段别名）。
  * 标签可能是顶层分组或某分组的子标签，两者都查。
@@ -126,7 +155,8 @@ function textToImageSubmit(workflowId: string): WorkflowDefinition['submit'] {
       : (ctx.projectConfig.height || 1920);
     const seed = ctx.vars.seed ? Number(ctx.vars.seed) : undefined;
     const enhance = ctx.vars.enhance_prompt === 'true';
-    return ctx.provider.execute(buildTextToImagePayload({ workflowId, prompt, width, height, seed, enhance_prompt: enhance }));
+    const extraParams = passthroughParams(ctx, TEXT_TO_IMAGE_STRUCTURAL_KEYS);
+    return ctx.provider.execute(buildTextToImagePayload({ workflowId, prompt, width, height, seed, enhance_prompt: enhance, extraParams }));
   };
 }
 
@@ -145,7 +175,8 @@ function ttsSubmit(workflowId: string): WorkflowDefinition['submit'] {
     const text = (vars.text ?? '').trim();
     if (!prompt) throw new Error('tts-voice-design 需要 vars.prompt（声线描述）');
     if (!text) throw new Error('tts-voice-design 需要 vars.text（朗读文本）');
-    return ctx.provider.execute(buildTtsPayload({ workflowId, prompt, text, seed: vars.seed }));
+    const extraParams = passthroughParams(ctx, TTS_STRUCTURAL_KEYS);
+    return ctx.provider.execute(buildTtsPayload({ workflowId, prompt, text, seed: vars.seed, extraParams }));
   };
 }
 
@@ -175,7 +206,11 @@ function imageEditSubmit(workflowId: string): WorkflowDefinition['submit'] {
     const imgs: File[] = [];
     for (const rel of paths) imgs.push(await ctx.readAssertFile(rel));
     const size = resolveImageEditSizeParams(vars);
-    return ctx.provider.execute(buildImageEditPayload({ workflowId, prompt, imgs, seed: vars.seed, size }));
+    // 动态用户参数（如 enable_multiple_angles_lora）经 ctx.userParams 透传，不在本层硬编码
+    const extraParams = passthroughParams(ctx, IMAGE_EDIT_STRUCTURAL_KEYS);
+    return ctx.provider.execute(buildImageEditPayload({
+      workflowId, prompt, imgs, seed: vars.seed, size, extraParams,
+    }));
   };
 }
 
@@ -206,6 +241,7 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
       return ctx.provider.execute(buildDirectorPayload({
         workflowId, prompt: video.prompt, width: video.resolution.width, height: video.resolution.height,
         duration: video.duration, fps: video.fps ?? 24, seed, frameDefines: defines, frameFiles: files,
+        extraParams: passthroughParams(ctx, VIDEO_STRUCTURAL_KEYS),
         ...(video.director?.audio ? { audio: video.director.audio } : {}),
       }));
     }
@@ -217,6 +253,7 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
         workflowId, prompt: video.prompt, width: video.resolution.width, height: video.resolution.height,
         duration: video.duration, fps: video.fps ?? 24, seed,
         frames: frames.map((f) => f.file),
+        extraParams: passthroughParams(ctx, VIDEO_STRUCTURAL_KEYS),
         ...(video.director?.audio ? { audio: video.director.audio } : {}),
       }));
     }
@@ -250,6 +287,7 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
       return ctx.provider.execute(buildReferencePayload({
         workflowId, prompt: video.prompt, width: video.resolution.width, height: video.resolution.height,
         duration: video.duration, seed, imageRefs, videoRefs, audioRefs,
+        extraParams: passthroughParams(ctx, VIDEO_STRUCTURAL_KEYS),
       }));
     }
     throw new Error(`不支持生成模式: ${video.mode}`);
@@ -284,7 +322,7 @@ export function buildSubmit(
  * 先注销旧定义再注册（unregister + register），保证重同步刷新
  * name/params/capabilities 且不会重复注册。
  *
- * @param detail Bridge 工作流详情（含解析后的 declaredParams 与 tags）
+ * @param detail Bridge 工作流详情（含解析后的 params/declaredParams 与 tags）
  * @param tagId 自动注册标签 id（expose_field 元数据来源；可为空串）
  * @returns 注册键（{type}:{impl}）；未知类型返回 null
  */
@@ -299,7 +337,8 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
   const impl = `${IMPL_PREFIX}${bridgeId}`;
   const caps = deriveCapabilities(detail.tags, type);
   const expose = exposeFieldOf(detail.tags, tagId);
-  const params = deriveParams(expose, detail.declaredParams);
+  // expose_field 字段信息：params 优先（工作流固定参数字段），declaredParams 兜底
+  const params = deriveParams(expose, detail.params, detail.declaredParams);
   const def: WorkflowDefinition = {
     type, impl, name: detail.name || detail.id,
     description: detail.description || undefined,

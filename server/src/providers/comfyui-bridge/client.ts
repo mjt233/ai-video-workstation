@@ -14,7 +14,16 @@ export interface BridgeWorkflowDetail {
   id: string;
   name: string;
   description?: string;
+  /**
+   * 额外声明的动态构建字段示例
+   */
   declaredParams: BridgeDeclaredParam[];
+
+  /**
+   * 工作流本身固定参数字段
+   */
+  params: BridgeDeclaredParam[]
+
   tags: BridgeTagGroup[];
 }
 

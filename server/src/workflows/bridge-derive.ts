@@ -128,20 +128,35 @@ function mapParamType(t: BridgeDeclaredParam['paramType']): WorkflowUserParamDec
 }
 
 /**
- * 按 expose_field（逗号分隔别名）过滤 declaredParams 映射为用户参数声明。
+ * 按 expose_field（逗号分隔别名）过滤工作流参数字段映射为用户参数声明。
+ *
+ * 字段信息来源：params 优先（工作流本身固定参数字段），declaredParams（额外声明的
+ * 动态构建字段）兜底——同一别名以 params 为准，仅存在于 declaredParams 的别名仍可用。
  *
  * @param exposeField 自动注册标签元数据 expose_field（可为 undefined；空串/缺省返回空数组）
- * @param declaredParams Bridge 详情接口的解析数组（BridgeDeclaredParam[]）
+ * @param params 工作流本身固定参数字段（BridgeWorkflowDetail.params，优先）
+ * @param declaredParams 额外声明的动态构建字段（BridgeWorkflowDetail.declaredParams，兜底）
  * @returns 用户参数声明数组（仅含 expose_field 命中的非文件类型参数）
  */
 export function deriveParams(
   exposeField: string | undefined,
+  params: BridgeDeclaredParam[],
   declaredParams: BridgeDeclaredParam[],
 ): WorkflowUserParamDeclaration[] {
   const names = new Set((exposeField ?? '').split(',').map((s) => s.trim()).filter(Boolean));
   if (names.size === 0) return [];
+  // params 优先合并：同一别名 params 在前，declaredParams 仅补充缺失别名
+  const seen = new Set<string>();
+  const merged: BridgeDeclaredParam[] = [];
+  for (const src of [params, declaredParams]) {
+    for (const p of src) {
+      if (seen.has(p.alias)) continue;
+      seen.add(p.alias);
+      merged.push(p);
+    }
+  }
   const out: WorkflowUserParamDeclaration[] = [];
-  for (const p of declaredParams) {
+  for (const p of merged) {
     if (!names.has(p.alias)) continue;
     const type = mapParamType(p.paramType);
     if (!type) continue;

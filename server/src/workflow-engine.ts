@@ -18,6 +18,7 @@ import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
 import { archiveExistingAsset } from './assets/history.js';
 import { isCancelRequested } from './workflows/cancel.js';
+import { toNativeUserParams } from './workflows/user-params.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../design');
@@ -767,14 +768,16 @@ async function runTask(taskId: string): Promise<void> {
     }
 
     // 用户手动传入的工作流参数：任务创建时已由路由（normalizeUserParams）合并进 vars，
-    // 此处按所选实现声明的参数 key 从 vars 中提取并透传给上下文，便于工作流区分用户参数与引擎注入值
-    const userParams: Record<string, string> = {};
+    // 此处按所选实现声明的参数 key 从 vars 中提取，并按声明类型转换为原生值
+    // （boolean/number/string）注入上下文，供工作流 submit 透传给 Bridge payload
+    const userParamsVars: Record<string, string> = {};
     for (const decl of wf.params ?? []) {
       const v = vars[decl.key];
       if (v !== undefined && v !== '') {
-        userParams[decl.key] = v;
+        userParamsVars[decl.key] = v;
       }
     }
+    const userParams = toNativeUserParams(wf.params ?? [], userParamsVars);
 
     const runContext: WorkflowRunContext = {
       project: task.project,

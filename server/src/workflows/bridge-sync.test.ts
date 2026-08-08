@@ -23,7 +23,7 @@ vi.mock('../providers/registry.js', () => ({
 }));
 
 const detail = (over: Partial<BridgeWorkflowDetail> = {}): BridgeWorkflowDetail => ({
-  id: 'text_to_image', name: '文生图', description: '', declaredParams: [], tags: [{ id: 'text-to-image', metadata: {}, tags: [] }], ...over,
+  id: 'text_to_image', name: '文生图', description: '', declaredParams: [], params: [], tags: [{ id: 'text-to-image', metadata: {}, tags: [] }], ...over,
 });
 
 beforeEach(() => {
@@ -112,8 +112,11 @@ describe('syncBridgeWorkflows', () => {
     mockConfig.autoRegisterTag = 'auto';
   });
 
-  it('expose_field → params 接线进注册定义', async () => {
+  it('expose_field → params 接线进注册定义（params 优先，declaredParams 兜底）', async () => {
     const d = detail({
+      params: [
+        { alias: 'steps', label: '步数V2', paramType: 'number' },
+      ],
       declaredParams: [
         { alias: 'steps', label: '步数', paramType: 'number' },
         { alias: 'input_image', label: '输入图', paramType: 'image' },
@@ -126,7 +129,8 @@ describe('syncBridgeWorkflows', () => {
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(d);
     await syncBridgeWorkflows();
     const w = getImpl('text-to-image', 'ceb-text_to_image');
-    expect(w!.params).toEqual([{ key: 'steps', name: '步数', type: 'integer', defaultValue: '' }]);
+    // 同一别名 steps 在 params（步数V2）与 declaredParams（步数）中都存在 → 以 params 为准
+    expect(w!.params).toEqual([{ key: 'steps', name: '步数V2', type: 'integer', defaultValue: '' }]);
   });
 });
 
@@ -145,6 +149,41 @@ describe('buildSubmit（text-to-image）', () => {
       workflowId: 'text_to_image',
       params: expect.objectContaining({ prompt: '一只猫', width: 1080, height: 1920 }),
     });
+  });
+});
+
+describe('buildSubmit（image-edit）', () => {
+  it('动态用户参数经 ctx.userParams 透传（含布尔原生类型），结构字段排除', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('qwen-edit-2509', 'image-edit', { cancelable: true });
+    const ctx = (vars: Record<string, string | undefined>, userParams: Record<string, boolean | number | string> | undefined) => ({
+      vars,
+      projectConfig: { width: 1080, height: 1920 },
+      readAssertFile: async () => new File([], 'a.png'),
+      provider: { execute },
+      userParams,
+    } as never);
+    const baseVars = { prompt: 'p', imagePaths: '["assert/a.png"]' };
+    // 用户配置 true → 透传布尔 true（经 ctx.userParams，不再硬编码）
+    await submit(ctx(baseVars, { enable_multiple_angles_lora: true }) as never);
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
+      workflowId: 'qwen-edit-2509',
+      params: expect.objectContaining({ prompt: 'p', enable_multiple_angles_lora: true }),
+    }));
+    // 用户配置 false → 透传布尔 false
+    await submit(ctx(baseVars, { enable_multiple_angles_lora: false }) as never);
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
+      params: expect.objectContaining({ enable_multiple_angles_lora: false }),
+    }));
+    // 未配置 → 不带上送（Bridge 默认值兜底）
+    await submit(ctx(baseVars, undefined) as never);
+    const last = (execute as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as { params: Record<string, unknown> };
+    expect('enable_multiple_angles_lora' in last.params).toBe(false);
+    // 结构字段（尺寸）从透传排除：即使 userParams 带 width，也以结构处理为准
+    await submit(ctx({ ...baseVars, enable_specified_size: 'true', width: '640', height: '960' }, { width: 999 }) as never);
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
+      params: expect.objectContaining({ width: 640, height: 960 }),
+    }));
   });
 });
 

@@ -38,8 +38,10 @@ export function buildTextToImagePayload(args: {
   height: number;
   seed?: number;
   enhance_prompt?: boolean;
+  extraParams?: Record<string, unknown>;
 }): BridgeExecutePayload {
   const params: Record<string, unknown> = {
+    ...(args.extraParams ?? {}),
     prompt: args.prompt,
     width: args.width,
     height: args.height,
@@ -61,8 +63,9 @@ export function buildTtsPayload(args: {
   prompt: string;
   text: string;
   seed?: string;
+  extraParams?: Record<string, unknown>;
 }): BridgeExecutePayload {
-  const params: Record<string, unknown> = { prompt: args.prompt, text: args.text };
+  const params: Record<string, unknown> = { ...(args.extraParams ?? {}), prompt: args.prompt, text: args.text };
   if (args.seed != null) params.seed = args.seed;
   return { workflowId: args.workflowId, params };
 }
@@ -101,12 +104,17 @@ export function resolveImageEditSizeParams(
 
 /**
  * 图片编辑提交载荷（多图动态 key image_0/image_1/...，0-based）。
- * 注：不再默认发送 enable_multiple_angles_lora（由动态注册按 expose_field 暴露为用户可配置参数；Bridge 默认值兜底）。
+ *
+ * 结构字段（prompt/seed/尺寸）由本构建器组装；其余动态用户参数（如 Bridge 经
+ * expose_field 暴露的 enable_multiple_angles_lora）经 extraParams 透传合并，
+ * 结构字段优先。
+ *
  * @param args.workflowId Bridge 工作流 id
  * @param args.prompt 编辑描述
  * @param args.imgs 输入图片（按数组顺序映射 image_{n}）
  * @param args.seed 随机种子（可选）
  * @param args.size 尺寸参数（仅 enable_specified_size 为 true 时透传，见 resolveImageEditSizeParams）
+ * @param args.extraParams 额外透传的用户参数（结构字段优先，可选）
  */
 export function buildImageEditPayload(args: {
   workflowId: string;
@@ -114,10 +122,11 @@ export function buildImageEditPayload(args: {
   imgs: File[];
   seed?: string | number;
   size?: ImageEditSizeParams;
+  extraParams?: Record<string, unknown>;
 }): BridgeExecutePayload {
   const files: Record<string, File> = {};
   args.imgs.forEach((f, idx) => { files[`image_${idx}`] = f; });
-  const params: Record<string, unknown> = { prompt: args.prompt };
+  const params: Record<string, unknown> = { ...(args.extraParams ?? {}), prompt: args.prompt };
   if (args.seed != null) params.seed = args.seed;
   if (args.size?.enable_specified_size != null) params.enable_specified_size = args.size.enable_specified_size;
   if (args.size?.width != null) params.width = args.size.width;
@@ -155,8 +164,10 @@ export function buildFirstLastFramePayload(args: {
   seed?: number;
   frames: File[];
   audio?: File;
+  extraParams?: Record<string, unknown>;
 }): BridgeExecutePayload {
   const params: Record<string, unknown> = {
+    ...(args.extraParams ?? {}),
     prompt: args.prompt,
     width: args.width,
     height: args.height,
@@ -207,8 +218,10 @@ export function buildDirectorPayload(args: {
   frameDefines: FrameDefine[];
   frameFiles: File[];
   audio?: File;
+  extraParams?: Record<string, unknown>;
 }): BridgeExecutePayload {
   const params: Record<string, unknown> = {
+    ...(args.extraParams ?? {}),
     prompt: args.prompt,
     width: args.width,
     height: args.height,
@@ -254,8 +267,10 @@ export function buildReferencePayload(args: {
   imageRefs?: File[];
   videoRefs?: File[];
   audioRefs?: File[];
+  extraParams?: Record<string, unknown>;
 }): BridgeExecutePayload {
   const params: Record<string, unknown> = {
+    ...(args.extraParams ?? {}),
     prompt: args.prompt,
     width: args.width,
     height: args.height,

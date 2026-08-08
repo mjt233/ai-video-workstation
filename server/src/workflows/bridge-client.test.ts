@@ -21,6 +21,10 @@ describe('buildTextToImagePayload', () => {
     const p = buildTextToImagePayload({ workflowId: 'text_to_image', prompt: '猫', width: 1080, height: 1920 });
     expect(p.params).toEqual({ prompt: '猫', width: 1080, height: 1920 });
   });
+  it('extraParams 透传合并', () => {
+    const p = buildTextToImagePayload({ workflowId: 'text_to_image', prompt: '猫', width: 1080, height: 1920, extraParams: { foo: 'bar' } });
+    expect(p.params).toMatchObject({ prompt: '猫', width: 1080, height: 1920, foo: 'bar' });
+  });
 });
 
 describe('buildTtsPayload', () => {
@@ -41,6 +45,14 @@ describe('buildImageEditPayload', () => {
     expect(p.params).toMatchObject({ enable_specified_size: true, width: 720, height: 1280 });
     const p2 = buildImageEditPayload({ workflowId: 'qwen-edit-2509', prompt: 'x', imgs: [img('a.jpg')], size: {} });
     expect(p2.params).toEqual({ prompt: 'x' });
+  });
+  it('extraParams 透传合并，结构字段优先', () => {
+    const p = buildImageEditPayload({
+      workflowId: 'qwen-edit-2509', prompt: 'x', imgs: [img('a.jpg')],
+      size: { enable_specified_size: true, width: 720, height: 1280 },
+      extraParams: { enable_multiple_angles_lora: true, width: 100 },
+    });
+    expect(p.params).toMatchObject({ enable_multiple_angles_lora: true, width: 720, height: 1280, enable_specified_size: true });
   });
 });
 

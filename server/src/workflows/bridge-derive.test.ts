@@ -75,29 +75,46 @@ describe('deriveCapabilities', () => {
 });
 
 describe('deriveParams', () => {
-  const declared: BridgeDeclaredParam[] = [
+  const fixed: BridgeDeclaredParam[] = [
     { alias: 'prompt', label: '提示词', paramType: 'text' },
     { alias: 'steps', label: '步数', paramType: 'number' },
     { alias: 'enhance', label: '增强', paramType: 'boolean' },
     { alias: 'input_image', label: '输入图', paramType: 'image' },
   ];
-  it('按 expose_field 过滤并映射', () => {
-    const params = deriveParams('steps,enhance', declared);
+  it('按 expose_field 过滤并映射（params 优先）', () => {
+    const params = deriveParams('steps,enhance', fixed, []);
     expect(params).toEqual([
       { key: 'steps', name: '步数', type: 'integer', defaultValue: '' },
       { key: 'enhance', name: '增强', type: 'boolean', defaultValue: false },
     ]);
   });
   it('expose_field 为空 → 空数组', () => {
-    expect(deriveParams(undefined, declared)).toEqual([]);
-    expect(deriveParams('', declared)).toEqual([]);
+    expect(deriveParams(undefined, fixed, [])).toEqual([]);
+    expect(deriveParams('', fixed, [])).toEqual([]);
   });
   it('image/video/audio 类型跳过', () => {
-    const params = deriveParams('prompt,input_image', declared);
+    const params = deriveParams('prompt,input_image', fixed, []);
     expect(params.map((p) => p.key)).toEqual(['prompt']);
   });
   it('expose_field 含空白与尾逗号时正确解析', () => {
-    const params = deriveParams('steps, enhance ,', declared);
+    const params = deriveParams('steps, enhance ,', fixed, []);
     expect(params.map((p) => p.key)).toEqual(['steps', 'enhance']);
+  });
+  it('params 优先：同一别名以 params 字段信息为准，declaredParams 兜底缺失别名', () => {
+    const declared: BridgeDeclaredParam[] = [
+      { alias: 'steps', label: '步数(旧)', paramType: 'number' },
+      { alias: 'extra_field', label: '额外字段', paramType: 'text' },
+    ];
+    const params = deriveParams('steps,extra_field', fixed, declared);
+    expect(params).toEqual([
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: '' }, // params 优先（label=步数）
+      { key: 'extra_field', name: '额外字段', type: 'string', defaultValue: '' }, // declaredParams 兜底
+    ]);
+  });
+  it('declaredParams 兜底：别名仅存在于 declaredParams 时仍映射', () => {
+    const declared: BridgeDeclaredParam[] = [{ alias: 'extra_field', label: '额外字段', paramType: 'text' }];
+    expect(deriveParams('extra_field', [], declared)).toEqual([
+      { key: 'extra_field', name: '额外字段', type: 'string', defaultValue: '' },
+    ]);
   });
 });

@@ -71,9 +71,11 @@ syncBridgeWorkflows()
 - `audio-input` / `audio-output` → `audio: true`
 - `cancelable: true`
 
-**用户参数**（`expose_field` + 详情 `declaredParams`）：
+**用户参数**（`expose_field` + 详情 `params`，`declaredParams` 兜底）：
 - 取自动注册标签元数据 `expose_field`（逗号分隔别名）；为空 → 无额外用户参数。
-- 过滤 `declaredParams` 中 `alias ∈ expose_field` 的项，映射 `WorkflowUserParamDeclaration`：
+- 字段信息按别名匹配：**`params` 优先**（工作流本身固定参数字段），同一别名以 `params` 为准；
+  仅存在于 `declaredParams`（额外声明的动态构建字段）的别名兜底使用。
+- 过滤 `alias ∈ expose_field` 的项，映射 `WorkflowUserParamDeclaration`：
   - `key = alias`，`name = label ?? alias`
   - `text → string`、`number → integer`、`boolean → boolean`
   - `image/video/audio` 类型跳过（文件由 payload 构建器处理，不作为用户参数）。

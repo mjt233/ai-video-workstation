@@ -55,3 +55,29 @@ export function coerceUserParamValue(
       return String(val);
   }
 }
+
+/**
+ * 将 vars 中的用户参数字符串值按声明类型还原为原生值（boolean / number / string）。
+ *
+ * 与 {@link normalizeUserParams}（原生 → 字符串）互为反向：vars 均为字符串，
+ * 透传给工作流 submit（进而进入 Bridge payload）时需要还原为声明类型，
+ * 保证布尔 / 数字语义正确（如 enable_multiple_angles_lora 应为 boolean 而非 "true"）。
+ *
+ * @param declarations 工作流参数声明（可为空）
+ * @param raw 用户参数字符串值（key → 字符串，通常来自 vars）
+ * @returns 原生类型值映射（未声明键按字符串保留）
+ */
+export function toNativeUserParams(
+  declarations: WorkflowUserParamDeclaration[] | undefined,
+  raw: Record<string, string> | undefined,
+): Record<string, boolean | number | string> {
+  const typeByKey = new Map((declarations ?? []).map((d) => [d.key, d.type]));
+  const out: Record<string, boolean | number | string> = {};
+  for (const [k, v] of Object.entries(raw ?? {})) {
+    const t = typeByKey.get(k);
+    if (t === 'boolean') out[k] = v === 'true';
+    else if (t === 'integer' || t === 'float') out[k] = Number(v);
+    else out[k] = v;
+  }
+  return out;
+}
