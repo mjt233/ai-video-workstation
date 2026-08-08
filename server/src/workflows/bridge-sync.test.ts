@@ -131,9 +131,9 @@ describe('syncBridgeWorkflows', () => {
 });
 
 describe('buildSubmit（text-to-image）', () => {
-  it('读取 promptPath 并执行 execute（workflowId 透传）', async () => {
+  it('读取 promptPath 并执行 execute（workflowId 透传原始 Bridge id）', async () => {
     const execute = vi.fn(async () => ({ taskId: 't1' }));
-    const submit = buildSubmit('ceb-text_to_image', 'text-to-image', { cancelable: true });
+    const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
     const ctx = {
       vars: { promptPath: 'p.md' },
       projectConfig: { width: 1080, height: 1920 },
@@ -142,7 +142,7 @@ describe('buildSubmit（text-to-image）', () => {
     } as never;
     await submit(ctx as never);
     expect(execute).toHaveBeenCalledWith({
-      workflowId: 'ceb-text_to_image',
+      workflowId: 'text_to_image',
       params: expect.objectContaining({ prompt: '一只猫', width: 1080, height: 1920 }),
     });
   });
@@ -165,9 +165,9 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
     video,
   });
 
-  it('director 模式：buildDirectorPayload 形状载荷（workflowId 透传 + frame_define）', async () => {
+  it('director 模式：buildDirectorPayload 形状载荷（workflowId 透传原始 Bridge id + frame_define）', async () => {
     const execute = vi.fn(async () => ({ taskId: 't' }));
-    const submit = buildSubmit('ceb-x', 'image-to-video', { cancelable: true, video: { modes: ['director'] } });
+    const submit = buildSubmit('x', 'image-to-video', { cancelable: true, video: { modes: ['director'] } });
     await submit(mkVideoCtx(execute, {
       mode: 'director',
       resolution: { width: 1080, height: 1920 },
@@ -178,7 +178,7 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
       extraParams: {},
     }) as never);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      workflowId: 'ceb-x',
+      workflowId: 'x',
       params: expect.objectContaining({ prompt: '一只猫跑过', width: 1080, height: 1920, duration: 10, fps: 24, frame_define: expect.any(String) }),
       files: expect.objectContaining({ image_0: expect.anything(), image_1: expect.anything() }),
     }));
@@ -186,7 +186,7 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
 
   it('first-last-frame：帧数在 1~maxFrames 内执行，超出抛错', async () => {
     const execute = vi.fn(async () => ({ taskId: 't' }));
-    const submit = buildSubmit('ceb-x', 'image-to-video', { cancelable: true, video: { modes: ['first-last-frame'], firstLastFrame: { maxFrames: 2 } } });
+    const submit = buildSubmit('x', 'image-to-video', { cancelable: true, video: { modes: ['first-last-frame'], firstLastFrame: { maxFrames: 2 } } });
     const frames = (n: number) => Array.from({ length: n }, (_, i) => ({ file: new File([], `${i}.png`), cursor: i / Math.max(n - 1, 1) }));
     await submit(mkVideoCtx(execute, { mode: 'first-last-frame', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', fps: 24, director: { frames: frames(2) }, extraParams: {} }) as never);
     expect(execute).toHaveBeenCalledTimes(1);
@@ -195,7 +195,7 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
 
   it('reference 模式：buildReferencePayload 形状载荷', async () => {
     const execute = vi.fn(async () => ({ taskId: 't' }));
-    const submit = buildSubmit('ceb-x', 'image-to-video', { cancelable: true, video: { modes: ['reference'] } });
+    const submit = buildSubmit('x', 'image-to-video', { cancelable: true, video: { modes: ['reference'] } });
     await submit(mkVideoCtx(execute, {
       mode: 'reference',
       resolution: { width: 1080, height: 1920 },
@@ -205,7 +205,7 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
       extraParams: {},
     }) as never);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      workflowId: 'ceb-x',
+      workflowId: 'x',
       params: expect.objectContaining({ prompt: 'p', width: 1080, height: 1920, duration: 10 }),
       files: expect.objectContaining({ image_0: expect.anything(), video_0: expect.anything() }),
     }));
@@ -222,20 +222,20 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
 
   it('reference 模式：参考素材超过 maxTotal 抛错', async () => {
     const execute = vi.fn(async () => ({ taskId: 't' }));
-    const submit = buildSubmit('ceb-x', 'image-to-video', refCaps);
+    const submit = buildSubmit('x', 'image-to-video', refCaps);
     const refs = Array.from({ length: 13 }, (_, i) => ({ type: 'image', file: new File([], `${i}.png`) }));
     await expect(submit(mkVideoCtx(execute, { mode: 'reference', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', references: refs, extraParams: {} }) as never)).rejects.toThrow(/参考素材总数量超过上限（12）/);
   });
 
   it('reference 模式：音频唯一输入抛错（不能作为唯一输入）', async () => {
     const execute = vi.fn(async () => ({ taskId: 't' }));
-    const submit = buildSubmit('ceb-x', 'image-to-video', refCaps);
+    const submit = buildSubmit('x', 'image-to-video', refCaps);
     await expect(submit(mkVideoCtx(execute, { mode: 'reference', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', references: [{ type: 'audio', file: new File([], 'a.mp3') }], extraParams: {} }) as never)).rejects.toThrow(/音频参考必须与图片或视频参考一同输入/);
   });
 
   it('reference 模式：合法参考（image+audio）执行 execute', async () => {
     const execute = vi.fn(async () => ({ taskId: 't' }));
-    const submit = buildSubmit('ceb-x', 'image-to-video', refCaps);
+    const submit = buildSubmit('x', 'image-to-video', refCaps);
     await submit(mkVideoCtx(execute, {
       mode: 'reference',
       resolution: { width: 1080, height: 1920 },
@@ -245,7 +245,7 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
       extraParams: {},
     }) as never);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      workflowId: 'ceb-x',
+      workflowId: 'x',
       params: expect.objectContaining({ prompt: 'p', width: 1080, height: 1920, duration: 10 }),
       files: expect.objectContaining({ image_0: expect.anything(), audio_0: expect.anything() }),
     }));
@@ -253,7 +253,7 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
 
   it('不支持的模式抛错', async () => {
     const execute = vi.fn(async () => ({ taskId: 't' }));
-    const submit = buildSubmit('ceb-x', 'image-to-video', { cancelable: true, video: { modes: ['director'] } });
+    const submit = buildSubmit('x', 'image-to-video', { cancelable: true, video: { modes: ['director'] } });
     await expect(submit(mkVideoCtx(execute, { mode: 'upscale', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', extraParams: {} }) as never)).rejects.toThrow(/不支持生成模式/);
   });
 });

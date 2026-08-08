@@ -90,16 +90,6 @@ interface TextToImageVarsLike extends WorkflowVarsBase {
 }
 
 /**
- * 文生图提交实现。
- *
- * 读取 vars.promptPath 对应的提示词文件内容作为 prompt；输出尺寸按
- * enable_specified_size 门控：为 "true" 且 width/height 非空时覆盖 projectConfig，
- * 否则回退 projectConfig（缺省 1080×1920）。
- *
- * @param workflowId 注册后的实现标识（ceb-{id}），透传给 Bridge execute
- * @returns 动态工作流 submit 函数
- */
-/**
  * 解析覆盖尺寸：仅接受有限正数（与 resolveImageEditSizeParams 行为一致），否则回退默认值。
  *
  * @param value 用户传入的尺寸字符串（可空）
@@ -112,6 +102,16 @@ function resolveOverrideSize(value: string | undefined, fallback: number): numbe
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/**
+ * 文生图提交实现。
+ *
+ * 读取 vars.promptPath 对应的提示词文件内容作为 prompt；输出尺寸按
+ * enable_specified_size 门控：为 "true" 且 width/height 非空时覆盖 projectConfig，
+ * 否则回退 projectConfig（缺省 1080×1920）。
+ *
+ * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
+ * @returns 动态工作流 submit 函数
+ */
 function textToImageSubmit(workflowId: string): WorkflowDefinition['submit'] {
   return async (ctx: WorkflowRunContext<TextToImageVarsLike>) => {
     const promptPath = ctx.vars.promptPath?.trim();
@@ -135,7 +135,7 @@ function textToImageSubmit(workflowId: string): WorkflowDefinition['submit'] {
  *
  * 声线描述与朗读文本均来自 vars（prompt / text），任一项缺失即报错。
  *
- * @param workflowId 注册后的实现标识（ceb-{id}），透传给 Bridge execute
+ * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
  * @returns 动态工作流 submit 函数
  */
 function ttsSubmit(workflowId: string): WorkflowDefinition['submit'] {
@@ -155,7 +155,7 @@ function ttsSubmit(workflowId: string): WorkflowDefinition['submit'] {
  * vars.imagePaths 为 JSON 字符串数组（相对 design/{project}/ 的 assert/ 路径）；
  * 逐个经 ctx.readAssertFile 解析为 File 后按顺序映射 image_{n} 上传。
  *
- * @param workflowId 注册后的实现标识（ceb-{id}），透传给 Bridge execute
+ * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
  * @returns 动态工作流 submit 函数
  */
 function imageEditSubmit(workflowId: string): WorkflowDefinition['submit'] {
@@ -187,7 +187,7 @@ function imageEditSubmit(workflowId: string): WorkflowDefinition['submit'] {
  * - reference：按 references 类型分拣图片/视频/音频组装参考载荷；
  * - 模式不在工作流能力声明（caps.video.modes）内时报错。
  *
- * @param workflowId 注册后的实现标识（ceb-{id}），透传给 Bridge execute
+ * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
  * @param caps 推导的工作流能力（决定支持的模式与首尾帧上限）
  * @returns 动态工作流 submit 函数
  */
@@ -259,7 +259,7 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
 /**
  * 构建动态工作流的 submit（供同步主流程与单测直接使用）。
  *
- * @param workflowId 注册后的实现标识（ceb-{id}）
+ * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀）
  * @param type 推导的工作流类型（BridgeDerivedType）
  * @param caps 推导的工作流能力（仅 image-to-video 使用）
  * @returns 对应类型的 submit 函数（type 恒为四类之一，无需默认分支）
@@ -294,7 +294,9 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
     console.warn(`[bridge-sync] 跳过未知类型工作流: ${detail.id}（tags=${JSON.stringify(detail.tags)}）`);
     return null;
   }
-  const impl = `${IMPL_PREFIX}${detail.id}`;
+  // 系统注册键：impl = ceb-{bridgeId}（ceb- 前缀防止与其它提供商工作流 id 冲突）
+  const bridgeId = detail.id;
+  const impl = `${IMPL_PREFIX}${bridgeId}`;
   const caps = deriveCapabilities(detail.tags, type);
   const expose = exposeFieldOf(detail.tags, tagId);
   const params = deriveParams(expose, detail.declaredParams);
@@ -304,7 +306,8 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
     provider: PROVIDER_ID,
     params,
     capabilities: caps,
-    submit: buildSubmit(impl, type, caps),
+    // 提交载荷使用 Bridge 原始工作流 id（不含 ceb- 前缀）；前缀仅存在于系统注册键 impl
+    submit: buildSubmit(bridgeId, type, caps),
   };
   // 替换语义：先注销旧定义再注册，保证重同步刷新 name/params/capabilities 且不重复
   unregister(type, impl);
