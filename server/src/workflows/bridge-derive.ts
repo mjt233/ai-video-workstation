@@ -128,10 +128,42 @@ function mapParamType(t: BridgeDeclaredParam['paramType']): WorkflowUserParamDec
 }
 
 /**
+ * 将 Bridge 参数字段的原始默认值转换为系统参数类型的默认值。
+ *
+ * 默认值来源：defaultValue 非 null 时优先使用；为 null 时取 nodeRawValue；
+ * 两者均缺省（undefined/null）时返回类型缺省值（布尔 false，其余空串表示“不传”）。
+ * 原始值一律是字符串，number/boolean 需要做类型转换：
+ * - integer：Number(raw)，非法数值回退 0；
+ * - boolean：'true' / '1' 视为 true，其余 false；
+ * - string：原样返回（缺省空串）。
+ *
+ * @param type 系统参数类型（string / integer / boolean）
+ * @param raw 原始默认值字符串（defaultValue ?? nodeRawValue，可为 null/undefined）
+ * @returns 转换后的默认值
+ */
+function coerceDefaultValue(
+  type: WorkflowUserParamDeclaration['type'],
+  raw: string | null | undefined,
+): boolean | number | string {
+  if (raw == null) {
+    return type === 'boolean' ? false : '';
+  }
+  if (type === 'boolean') {
+    return raw === 'true' || raw === '1';
+  }
+  if (type === 'integer') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return raw;
+}
+
+/**
  * 按 expose_field（逗号分隔别名）过滤工作流参数字段映射为用户参数声明。
  *
  * 字段信息来源：params 优先（工作流本身固定参数字段），declaredParams（额外声明的
  * 动态构建字段）兜底——同一别名以 params 为准，仅存在于 declaredParams 的别名仍可用。
+ * 默认值：defaultValue 非 null 优先；为 null 时取 nodeRawValue；number/boolean 做类型转换。
  *
  * @param exposeField 自动注册标签元数据 expose_field（可为 undefined；空串/缺省返回空数组）
  * @param params 工作流本身固定参数字段（BridgeWorkflowDetail.params，优先）
@@ -164,7 +196,7 @@ export function deriveParams(
       key: p.alias,
       name: p.label ?? p.alias,
       type,
-      defaultValue: type === 'boolean' ? false : '',
+      defaultValue: coerceDefaultValue(type, p.defaultValue ?? p.nodeRawValue),
     });
   }
   return out;

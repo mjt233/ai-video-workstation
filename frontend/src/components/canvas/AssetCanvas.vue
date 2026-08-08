@@ -1494,13 +1494,13 @@ async function openSetAsShotVideo(nodeId: string) {
   const shot = target.value.shot
   const ok = await confirm({
     title: '设为分镜视频',
-    content: `将当前视频设为分镜视频（覆盖 assert/scene/${ep}/${shot}/video.mp4）？`,
+    content: `将当前视频设为分镜视频（覆盖 assert/scene/${ep}/${shot}/video/0.mp4）？`,
     confirmText: '确认',
     confirmColor: 'primary',
   })
   if (!ok) return
   try {
-    await copyFs(props.project, source, `assert/scene/${ep}/${shot}/video.mp4`)
+    await copyFs(props.project, source, `assert/scene/${ep}/${shot}/video/0.mp4`)
     showSnackbar('已设为分镜视频', 'success')
   } catch (e) {
     showSnackbar(e instanceof Error ? e.message : '设为分镜视频失败', 'error')

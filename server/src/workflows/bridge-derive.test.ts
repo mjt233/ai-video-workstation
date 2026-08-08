@@ -117,4 +117,56 @@ describe('deriveParams', () => {
       { key: 'extra_field', name: '额外字段', type: 'string', defaultValue: '' },
     ]);
   });
+  it('defaultValue 非 null 时使用并做类型转换（number→整数、boolean→布尔）', () => {
+    const fields: BridgeDeclaredParam[] = [
+      { alias: 'steps', label: '步数', paramType: 'number', defaultValue: '20' },
+      { alias: 'enhance', label: '增强', paramType: 'boolean', defaultValue: 'true' },
+      { alias: 'keep_bg', label: '保留背景', paramType: 'boolean', defaultValue: 'false' },
+      { alias: 'prompt', label: '提示词', paramType: 'text', defaultValue: '一只猫' },
+    ];
+    const params = deriveParams('steps,enhance,keep_bg,prompt', fields, []);
+    expect(params).toEqual([
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: 20 },
+      { key: 'enhance', name: '增强', type: 'boolean', defaultValue: true },
+      { key: 'keep_bg', name: '保留背景', type: 'boolean', defaultValue: false },
+      { key: 'prompt', name: '提示词', type: 'string', defaultValue: '一只猫' },
+    ]);
+  });
+  it('defaultValue 为 null 时取 nodeRawValue（number/boolean 同样类型转换）', () => {
+    const fields: BridgeDeclaredParam[] = [
+      { alias: 'steps', label: '步数', paramType: 'number', defaultValue: null, nodeRawValue: '30' },
+      { alias: 'enhance', label: '增强', paramType: 'boolean', defaultValue: null, nodeRawValue: '1' },
+      { alias: 'prompt', label: '提示词', paramType: 'text', defaultValue: null, nodeRawValue: '一只猫' },
+    ];
+    const params = deriveParams('steps,enhance,prompt', fields, []);
+    expect(params).toEqual([
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: 30 },
+      { key: 'enhance', name: '增强', type: 'boolean', defaultValue: true },
+      { key: 'prompt', name: '提示词', type: 'string', defaultValue: '一只猫' },
+    ]);
+  });
+  it('number 默认值非法数值时回退 0；boolean 非 true/1 视为 false', () => {
+    const fields: BridgeDeclaredParam[] = [
+      { alias: 'steps', label: '步数', paramType: 'number', defaultValue: 'abc' },
+      { alias: 'enhance', label: '增强', paramType: 'boolean', defaultValue: 'yes' },
+    ];
+    const params = deriveParams('steps,enhance', fields, []);
+    expect(params).toEqual([
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: 0 },
+      { key: 'enhance', name: '增强', type: 'boolean', defaultValue: false },
+    ]);
+  });
+  it('defaultValue 与 nodeRawValue 均缺省时回退类型缺省值（布尔 false，其余空串）', () => {
+    const fields: BridgeDeclaredParam[] = [
+      { alias: 'steps', label: '步数', paramType: 'number' },
+      { alias: 'enhance', label: '增强', paramType: 'boolean' },
+      { alias: 'prompt', label: '提示词', paramType: 'text' },
+    ];
+    const params = deriveParams('steps,enhance,prompt', fields, []);
+    expect(params).toEqual([
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: '' },
+      { key: 'enhance', name: '增强', type: 'boolean', defaultValue: false },
+      { key: 'prompt', name: '提示词', type: 'string', defaultValue: '' },
+    ]);
+  });
 });

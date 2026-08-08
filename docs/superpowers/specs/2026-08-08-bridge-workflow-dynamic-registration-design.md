@@ -79,6 +79,7 @@ syncBridgeWorkflows()
   - `key = alias`，`name = label ?? alias`
   - `text → string`、`number → integer`、`boolean → boolean`
   - `image/video/audio` 类型跳过（文件由 payload 构建器处理，不作为用户参数）。
+- **默认值**：`defaultValue` 非 null 时优先使用；为 null 时取 `nodeRawValue`；两者均缺省回退类型缺省值（布尔 `false`，其余空串表示“不传”）。原始值均为字符串，`number → Number()`（非法回退 0）、`boolean → 'true'/'1' 为 true`、`text` 原样。
 
 ### 4.3 payload 构建器（`bridge-client.ts` 重构，纯函数）
 
