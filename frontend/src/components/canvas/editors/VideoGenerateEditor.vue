@@ -120,6 +120,28 @@
           </template>
         </VideoRefInputGroup>
 
+        <!-- 首尾帧模式：音频输入（仅所选实现支持音频输入时显示；提交时取第一条音频） -->
+        <VideoRefInputGroup
+          v-if="mode === 'first-last-frame' && audioEnabled"
+          title="音频"
+          prefix="音"
+          :inputs="audiosInputs"
+          @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+        >
+          <template #thumb>
+            <div class="canvas-input-item__audio">
+              <v-icon icon="mdi-music-note" />
+            </div>
+          </template>
+          <template #zoom="{ input }">
+            <audio
+              class="canvas-input-zoom"
+              :src="previewUrls[input.nodeId]"
+              controls
+            />
+          </template>
+        </VideoRefInputGroup>
+
         <!-- 参考模式：图片 / 视频 / 音频分组预览 -->
         <template v-if="mode === 'reference'">
           <VideoRefInputGroup
@@ -276,7 +298,8 @@ import VideoRefInputGroup from './VideoRefInputGroup.vue'
  * 支持三种生成模式（由所选工作流实现的能力声明决定）：
  * - director：仅此模式加载 VideoDirector 导演台（编辑结果实时写回 config.director，内含 prompt 输入）
  * - first-last-frame：按 config.inputOrder 排列帧图片（首帧 0、尾帧 1，中间均匀分布），
- *   编辑输出规格（时长/尺寸）与提示词
+ *   编辑输出规格（时长/尺寸）与提示词；所选实现支持音频输入（video.audio）时额外显示
+ *   音频分组（提交时取第一条音频输入）
  * - reference：参考模式，按图片/视频/音频三组展示输入并支持组内拖拽排序，
  *   可编辑输出规格（时长/尺寸）并校验参考素材数量上限
  */
@@ -408,6 +431,9 @@ const refVideoMax = computed(() => currentImpl.value?.capabilities?.video?.refer
 const refAudioMax = computed(() => currentImpl.value?.capabilities?.video?.reference?.types?.audio?.max)
 /** 首尾帧模式最大帧数（能力未声明时默认 3，如 LTX 3 帧 / MiniMax H3 2 帧） */
 const flfMaxFrames = computed(() => currentImpl.value?.capabilities?.video?.firstLastFrame?.maxFrames ?? 3)
+
+/** 当前实现是否支持音频输入（video.audio；首尾帧模式据此显示音频输入分组） */
+const audioEnabled = computed(() => currentImpl.value?.capabilities?.video?.audio === true)
 
 /** 工作流下拉选项（图生视频类型下的所有实现，直接选择实现） */
 const workflowItems = computed(() =>
