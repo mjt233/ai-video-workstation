@@ -69,6 +69,8 @@ export function getPathLabel(path: string): string {
   if (path.startsWith('assert/scene/')) {
     const m = path.match(/\/stage\/(\d+)\.jpg$/)
     if (m) return `分镜场景图 ${Number(m[1]) + 1}`
+    const vi = path.match(/^assert\/scene\/(\d+)\/(\d+)\/video\/(.+)\.mp4$/)
+    if (vi) return `分镜视频（第${vi[1]}集 分镜${vi[2]}）#${vi[3]}`
     const vm = path.match(/^assert\/scene\/(\d+)\/(\d+)\/video\.mp4$/)
     if (vm) return `分镜视频（第${vm[1]}集 分镜${vm[2]}）`
     return path.split('/').pop() ?? path

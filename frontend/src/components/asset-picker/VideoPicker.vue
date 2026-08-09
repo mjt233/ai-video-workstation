@@ -21,7 +21,7 @@
       </v-tab>
     </v-tabs>
 
-    <!-- 分镜视频：集数/分镜选择 + 该分镜的 video.mp4 -->
+    <!-- 分镜视频：集数/分镜选择 + 该分镜 video/ 目录下的视频列表 -->
     <div v-show="videoSection === 'shot'">
       <div class="d-flex align-center ga-2 mb-2">
         <v-select
@@ -53,10 +53,11 @@
       </div>
       <template v-else>
         <div
-          v-if="shotVideo"
+          v-for="video in shotVideos"
+          :key="video.path"
           class="video-item d-flex align-center ga-2 px-2 py-1 rounded"
-          :class="{ 'asset-card--selected': isSelected(shotVideo.path) }"
-          @click="$emit('select', shotVideo)"
+          :class="{ 'asset-card--selected': isSelected(video.path) }"
+          @click="$emit('select', video)"
         >
           <v-icon
             color="secondary"
@@ -66,13 +67,13 @@
           </v-icon>
           <span
             class="text-body-small text-truncate"
-            :title="shotVideo.label"
+            :title="video.label"
           >
-            {{ shotVideo.label }}
+            {{ video.label }}
           </span>
           <v-spacer />
           <v-icon
-            v-if="isSelected(shotVideo.path)"
+            v-if="isSelected(video.path)"
             color="primary"
             size="18"
           >
@@ -80,13 +81,13 @@
           </v-icon>
         </div>
         <div
-          v-else-if="!shotEp || !shotNo"
+          v-if="!shotEp || !shotNo"
           class="text-grey text-body-medium text-center py-8"
         >
           请选择集数与分镜
         </div>
         <div
-          v-else
+          v-else-if="shotVideos.length === 0"
           class="text-grey text-body-medium text-center py-8"
         >
           该分镜暂无视频
@@ -130,12 +131,13 @@ import { computed, ref, watch } from 'vue'
 import { existsFs, readFs, type DirEntry, type DirResponse } from '../../api/client'
 import AudioFileBrowser from './AudioFileBrowser.vue'
 import type { AssetItem } from './types'
+import { isVideoFile } from './utils'
 
 /**
  * 分镜视频页签（视频加载节点资产选择器）。
  *
  * 内部包含 3 个子页签：
- * - 分镜视频：集数/分镜下拉，展示所选分镜的 video.mp4（若存在）；
+ * - 分镜视频：集数/分镜下拉，展示所选分镜 video/ 目录下的全部视频（兼容旧版 video.mp4）；
  * - 分镜自定义：视频文件浏览器（根目录 assert/custom/scene/{ep}/{shot}）；
  * - 全局自定义：视频文件浏览器（根目录 assert/custom）。
  * 子区段通过 v-show 常驻挂载以保留各自的浏览目录状态，数据在激活时重新加载。
@@ -185,8 +187,8 @@ const episodeOptions = ref<string[]>([])
 /** 分镜选项（prompt/scene/{ep}/ 下的目录名） */
 const shotOptions = ref<string[]>([])
 
-/** 当前所选分镜的 video.mp4 条目（不存在时为 null） */
-const shotVideo = ref<AssetItem | null>(null)
+/** 当前所选分镜的视频条目列表（video/ 目录下全部视频；目录为空时回退旧版 video.mp4） */
+const shotVideos = ref<AssetItem[]>([])
 const tabLoading = ref(false)
 
 /**
@@ -200,23 +202,48 @@ function isSelected(path: string): boolean {
 }
 
 /**
- * 加载所选分镜的 video.mp4（存在才显示为可选条目）。
+ * 加载所选分镜的视频资产列表：
+ * - 优先列出 assert/scene/{集}/{分镜}/video/ 目录下的全部视频文件（按序号排序）；
+ * - 目录不存在或为空时回退检查旧版单文件路径 video.mp4（兼容历史批量生成数据）。
  */
-async function loadShotVideo() {
+async function loadShotVideos() {
   tabLoading.value = true
-  shotVideo.value = null
+  shotVideos.value = []
   try {
     if (shotEp.value && shotNo.value) {
-      const p = `assert/scene/${shotEp.value}/${shotNo.value}/video.mp4`
-      if (await existsFs(props.project, p)) {
-        shotVideo.value = {
-          path: p,
-          label: `分镜视频（第${shotEp.value}集 分镜${shotNo.value}）`,
-          thumbnail: '',
-          depth: 0,
-          video: true,
+      const ep = shotEp.value
+      const shot = shotNo.value
+      const videos: AssetItem[] = []
+      try {
+        const res = await readFs(props.project, `assert/scene/${ep}/${shot}/video`) as DirResponse
+        videos.push(
+          ...(res?.entries ?? [])
+            .filter((e: DirEntry) => e.type === 'file' && isVideoFile(e.name))
+            .map((e: DirEntry): AssetItem => ({
+              path: `assert/scene/${ep}/${shot}/video/${e.name}`,
+              label: `分镜视频（第${ep}集 分镜${shot}）#${e.name.replace(/\.[^.]+$/, '')}`,
+              thumbnail: '',
+              depth: 0,
+              video: true,
+            }))
+            .sort((a, b) => a.path.localeCompare(b.path, 'zh', { numeric: true })),
+        )
+      } catch {
+        // video/ 目录不存在时忽略，走旧版 video.mp4 回退
+      }
+      if (videos.length === 0) {
+        const legacy = `assert/scene/${ep}/${shot}/video.mp4`
+        if (await existsFs(props.project, legacy)) {
+          videos.push({
+            path: legacy,
+            label: `分镜视频（第${ep}集 分镜${shot}）`,
+            thumbnail: '',
+            depth: 0,
+            video: true,
+          })
         }
       }
+      shotVideos.value = videos
     }
   } finally {
     tabLoading.value = false
@@ -262,12 +289,12 @@ async function onShotEpChange() {
   if (shotNo.value && !shotOptions.value.includes(shotNo.value)) {
     shotNo.value = undefined
   }
-  await loadShotVideo()
+  await loadShotVideos()
 }
 
 /** 分镜变化：加载该分镜视频 */
 watch(shotNo, () => {
-  void loadShotVideo()
+  void loadShotVideos()
 })
 
 /** 弹窗打开（reloadKey 变化）或上下文变化时重新初始化分镜视频选择 */
