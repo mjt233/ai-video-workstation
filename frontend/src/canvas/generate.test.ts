@@ -19,6 +19,12 @@ const gen: CanvasNodeData = {
 const text: CanvasNodeData = {
   id: 't1', prototypeId: 'text', name: '文本', x: 0, y: 0, width: 10, height: 10, config: {},
 }
+const videoGen: CanvasNodeData = {
+  id: 'v1', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 10, height: 10,
+  config: {
+    current: { version: 1, path: 'assert/scene/1/1/canvas/v1/v1.mp4', date: '2026-01-01T00:00:00.000Z' },
+  },
+}
 
 describe('getHistory', () => {
   it('无 history 返回空数组', () => {
@@ -38,6 +44,10 @@ describe('getNodeCurrentAssetPath', () => {
 
   it('生成图片取 current.path', () => {
     expect(getNodeCurrentAssetPath(gen)).toBe('assert/scene/1/1/canvas/g1/v2.jpg')
+  })
+
+  it('生成视频取 current.path', () => {
+    expect(getNodeCurrentAssetPath(videoGen)).toBe('assert/scene/1/1/canvas/v1/v1.mp4')
   })
 
   it('文本/无节点返回 undefined', () => {

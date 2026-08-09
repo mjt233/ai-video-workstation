@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { fsRouter } from './routes/fs.js';
 import { assetsRouter } from './routes/assets.js';
 import { workflowRouter } from './routes/workflow.js';
+import { canvasRouter } from './routes/canvas.js';
 import { discoverProviders } from './providers/index.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
 import { syncBridgeWorkflows } from './workflows/bridge-sync.js';
@@ -17,6 +18,7 @@ app.use(express.json());
 app.use('/api', fsRouter);
 app.use('/api', assetsRouter);
 app.use('/api', workflowRouter);
+app.use('/api', canvasRouter);
 
 const distPath = path.resolve(__dirname, '../../frontend/dist');
 app.use(express.static(distPath));

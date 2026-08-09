@@ -52,7 +52,7 @@
           color="secondary"
           size="20"
         >
-          mdi-music-note
+          {{ fileIcon }}
         </v-icon>
         <span
           class="text-body-small text-truncate"
@@ -74,7 +74,7 @@
       v-else
       class="text-grey text-body-medium text-center py-8"
     >
-      该目录暂无音频文件
+      {{ emptyText }}
     </div>
   </div>
 </template>
@@ -82,16 +82,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { readFs, type DirEntry, type DirResponse } from '../../api/client'
-import { isAudioFile } from './utils'
+import { isAudioFile, isVideoFile } from './utils'
 import type { AssetItem } from './types'
 
 /**
- * 音频文件浏览器子页签。
+ * 媒体文件浏览器子页签（音频/视频通用）。
  *
  * 以给定根目录（相对项目路径）为起点，支持进入子目录与返回上级目录，
- * 仅展示子目录与受支持的音频文件。组件常驻挂载以保留浏览目录状态。
+ * 仅展示子目录与受支持的媒体文件（media='audio' 过滤音频、media='video' 过滤视频）。
+ * 组件常驻挂载以保留浏览目录状态。
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   /** 项目名 */
   project: string
   /** 根目录（相对项目路径），如 assert/custom 或 assert/custom/scene/{ep}/{shot} */
@@ -106,12 +107,25 @@ const props = defineProps<{
   active: boolean
   /** 弹窗打开时递增的重新加载信号 */
   reloadKey: number
-}>()
+  /** 媒体类型：audio 过滤音频 / video 过滤视频（默认 audio） */
+  media?: 'audio' | 'video'
+}>(), {
+  media: 'audio',
+})
 
 defineEmits<{
-  /** 点击音频文件，携带该条目 */
+  /** 点击媒体文件，携带该条目 */
   select: [item: AssetItem]
 }>()
+
+/** 是否为视频模式 */
+const isVideoMode = computed(() => props.media === 'video')
+
+/** 文件行图标（视频/音频） */
+const fileIcon = computed(() => (isVideoMode.value ? 'mdi-video-outline' : 'mdi-music-note'))
+
+/** 空目录提示文案 */
+const emptyText = computed(() => (isVideoMode.value ? '该目录暂无视频文件' : '该目录暂无音频文件'))
 
 /** 加载中标记 */
 const tabLoading = ref(false)
@@ -159,13 +173,14 @@ async function load() {
       .map((e: DirEntry) => e.name)
       .sort((a, b) => a.localeCompare(b, 'zh'))
     files.value = entries
-      .filter((e: DirEntry) => e.type === 'file' && isAudioFile(e.name))
+      .filter((e: DirEntry) => e.type === 'file' && (isVideoMode.value ? isVideoFile(e.name) : isAudioFile(e.name)))
       .filter((e: DirEntry) => !props.exclude.includes(`${fullCwd.value}/${e.name}`))
       .map((e: DirEntry) => ({
         path: `${fullCwd.value}/${e.name}`,
         label: e.name,
         thumbnail: '',
         depth: 0,
+        ...(isVideoMode.value ? { video: true as const } : { audio: true as const }),
       }))
   } finally {
     tabLoading.value = false

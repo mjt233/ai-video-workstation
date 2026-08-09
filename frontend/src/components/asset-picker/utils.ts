@@ -17,6 +17,20 @@ const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
 /** 支持的音频扩展名集合 */
 const AUDIO_EXTS = new Set(['flac', 'mp3', 'wav', 'm4a', 'ogg', 'opus'])
 
+/** 支持的视频扩展名集合 */
+const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'])
+
+/**
+ * 判断文件名是否为支持的视频文件。
+ *
+ * @param name 文件名
+ * @returns true 表示视频文件
+ */
+export function isVideoFile(name: string): boolean {
+  const ext = name.toLowerCase().split('.').pop()
+  return !!ext && VIDEO_EXTS.has(ext)
+}
+
 /**
  * 生成资产缩略图直链（带缓存破坏参数）。
  *
@@ -55,6 +69,10 @@ export function getPathLabel(path: string): string {
   if (path.startsWith('assert/scene/')) {
     const m = path.match(/\/stage\/(\d+)\.jpg$/)
     if (m) return `分镜场景图 ${Number(m[1]) + 1}`
+    const vi = path.match(/^assert\/scene\/(\d+)\/(\d+)\/video\/(.+)\.mp4$/)
+    if (vi) return `分镜视频（第${vi[1]}集 分镜${vi[2]}）#${vi[3]}`
+    const vm = path.match(/^assert\/scene\/(\d+)\/(\d+)\/video\.mp4$/)
+    if (vm) return `分镜视频（第${vm[1]}集 分镜${vm[2]}）`
     return path.split('/').pop() ?? path
   }
   return path.split('/').pop() ?? path
@@ -147,6 +165,38 @@ export async function listAudioFilesRecursive(project: string, dirRelPath: strin
       if (entry.type === 'dir') {
         await walk(childRel)
       } else if (isAudioFile(entry.name)) {
+        results.push(childRel)
+      }
+    }
+  }
+
+  try {
+    await walk(dirRelPath)
+  } catch {
+    // 目录不存在时静默处理
+  }
+  return results
+}
+
+/**
+ * 递归列出目录下的所有视频文件路径。
+ * 服务端目前不支持 recursive 参数，故客户端递归实现。
+ *
+ * @param project 项目名
+ * @param dirRelPath 目录相对路径（project 根）
+ * @returns 目录下所有视频文件的相对路径列表（目录不存在时返回空数组）
+ */
+export async function listVideoFilesRecursive(project: string, dirRelPath: string): Promise<string[]> {
+  const results: string[] = []
+
+  async function walk(relPath: string) {
+    const res = await readFs(project, relPath) as DirResponse
+    const entries = res.entries ?? []
+    for (const entry of entries) {
+      const childRel = relPath.endsWith('/') ? `${relPath}${entry.name}` : `${relPath}/${entry.name}`
+      if (entry.type === 'dir') {
+        await walk(childRel)
+      } else if (isVideoFile(entry.name)) {
         results.push(childRel)
       }
     }

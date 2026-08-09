@@ -70,6 +70,14 @@
         />
       </div>
 
+      <!-- 自定义工作流参数：所选实现声明 params 时展示（尺寸类参数已剔除，由上方 WorkflowSizePicker 处理） -->
+      <WorkflowParamsForm
+        v-model="workflowParams"
+        :declarations="currentDeclarations"
+        :project="props.project"
+        class="mb-2"
+      />
+
       <!-- 导演台模式：嵌入导演台（仅导演台加载 VideoDirector，内含 prompt 输入） -->
       <template v-if="mode === 'director'">
         <VideoDirector
@@ -109,6 +117,28 @@
               :src="previewUrls[input.nodeId]"
               :alt="input.label"
             >
+          </template>
+        </VideoRefInputGroup>
+
+        <!-- 首尾帧模式：音频输入（仅所选实现支持音频输入时显示；提交时取第一条音频） -->
+        <VideoRefInputGroup
+          v-if="mode === 'first-last-frame' && audioEnabled"
+          title="音频"
+          prefix="音"
+          :inputs="audiosInputs"
+          @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+        >
+          <template #thumb>
+            <div class="canvas-input-item__audio">
+              <v-icon icon="mdi-music-note" />
+            </div>
+          </template>
+          <template #zoom="{ input }">
+            <audio
+              class="canvas-input-zoom"
+              :src="previewUrls[input.nodeId]"
+              controls
+            />
           </template>
         </VideoRefInputGroup>
 
@@ -233,6 +263,15 @@
         >
           历史
         </v-btn>
+        <v-btn
+          v-if="kind === 'scene' && node.config.current && !isRunning"
+          size="small"
+          variant="tonal"
+          color="primary"
+          @click="emit('set-as-video', node.id)"
+        >
+          设为分镜视频
+        </v-btn>
       </div>
     </div>
   </Teleport>
@@ -246,7 +285,9 @@ import type { CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { canvasDirectorToProject, projectToCanvasDirector } from '../../../canvas/videoDirectorBridge'
 import type { CanvasDirectorConfig, VideoGenerateMode } from '../../../canvas/videoTypes'
-import type { WorkflowUserParamValue } from '../../../api/workflow'
+import type { WorkflowUserParamDeclaration, WorkflowUserParamValue } from '../../../api/workflow'
+import { findSizeParamKeys } from '../../../utils/workflowSize'
+import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
 import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
 import VideoDirector from '../../video-director/VideoDirector.vue'
 import VideoRefInputGroup from './VideoRefInputGroup.vue'
@@ -257,7 +298,8 @@ import VideoRefInputGroup from './VideoRefInputGroup.vue'
  * 支持三种生成模式（由所选工作流实现的能力声明决定）：
  * - director：仅此模式加载 VideoDirector 导演台（编辑结果实时写回 config.director，内含 prompt 输入）
  * - first-last-frame：按 config.inputOrder 排列帧图片（首帧 0、尾帧 1，中间均匀分布），
- *   编辑输出规格（时长/尺寸）与提示词
+ *   编辑输出规格（时长/尺寸）与提示词；所选实现支持音频输入（video.audio）时额外显示
+ *   音频分组（提交时取第一条音频输入）
  * - reference：参考模式，按图片/视频/音频三组展示输入并支持组内拖拽排序，
  *   可编辑输出规格（时长/尺寸）并校验参考素材数量上限
  */
@@ -297,6 +339,8 @@ const emit = defineEmits<{
   (e: 'open-history', nodeId: string): void
   (e: 'set-as-scene', nodeId: string): void
   (e: 'open-picker', nodeId: string): void
+  (e: 'extract', nodeId: string): void
+  (e: 'set-as-video', nodeId: string): void
 }>()
 
 // ── 全屏显示 ─────────────────────────────────────────────
@@ -388,10 +432,29 @@ const refAudioMax = computed(() => currentImpl.value?.capabilities?.video?.refer
 /** 首尾帧模式最大帧数（能力未声明时默认 3，如 LTX 3 帧 / MiniMax H3 2 帧） */
 const flfMaxFrames = computed(() => currentImpl.value?.capabilities?.video?.firstLastFrame?.maxFrames ?? 3)
 
+/** 当前实现是否支持音频输入（video.audio；首尾帧模式据此显示音频输入分组） */
+const audioEnabled = computed(() => currentImpl.value?.capabilities?.video?.audio === true)
+
 /** 工作流下拉选项（图生视频类型下的所有实现，直接选择实现） */
 const workflowItems = computed(() =>
   impls.value.map((i) => ({ value: i.impl, label: i.name })),
 )
+
+/** 自定义工作流参数（key → 值；与 config.workflowParams 双向同步） */
+const workflowParams = ref<Record<string, WorkflowUserParamValue>>({})
+
+/**
+ * 当前实现的自定义参数声明（剔除尺寸相关 key：本编辑器尺寸由上方专用 WorkflowSizePicker 处理，
+ * 避免与 WorkflowParamsForm 内置的尺寸组件重复展示）。
+ */
+const currentDeclarations = computed<WorkflowUserParamDeclaration[]>(() => {
+  const params = currentImpl.value?.params ?? []
+  const sizeKeys = findSizeParamKeys(params)
+  if (!sizeKeys) return params
+  const excluded = new Set([sizeKeys.widthKey, sizeKeys.heightKey])
+  if (sizeKeys.enableKey) excluded.add(sizeKeys.enableKey)
+  return params.filter((d) => !excluded.has(d.key))
+})
 
 /** 生成模式下拉选项（按当前实现支持的模式生成中文标签） */
 const modeItems = computed(() =>
@@ -410,6 +473,27 @@ const modeItems = computed(() =>
 function onWorkflowChange(v: string) {
   emit('update:config', { workflowImpl: v, workflowParams: {} })
 }
+
+// config.workflowParams → 本地（外部初始化/回显，如画布配置面板重挂载后恢复已保存参数）
+watch(
+  () => props.node.config.workflowParams,
+  (v) => {
+    if (v && typeof v === 'object') {
+      workflowParams.value = { ...(v as Record<string, WorkflowUserParamValue>) }
+    }
+  },
+  { immediate: true, deep: true },
+)
+
+// 本地 → config.workflowParams（相等性守卫：与 config 一致时不再回写，避免「本地 → emit → config → 本地」循环）
+watch(
+  workflowParams,
+  (v) => {
+    const cur = props.node.config.workflowParams
+    const same = cur != null && typeof cur === 'object' && JSON.stringify(cur) === JSON.stringify(v)
+    if (!same) emit('update:config', { workflowParams: v })
+  },
+)
 
 /**
  * 切换生成模式（director / first-last-frame / reference）。

@@ -347,7 +347,7 @@ export async function discoverTasks(
                   // skip
                 }
               } else if (assetType === 'video-generate') {
-                const outputPath = `assert/scene/${episode}/${shot}/video.mp4`;
+                const outputPath = `assert/scene/${episode}/${shot}/video/0.mp4`;
                 if (await shouldSkipOutput(outputPath)) continue;
                 // 所有场景帧均被禁用时不生成视频任务（禁用的场景帧不参与视频生成）
                 try {

@@ -8,9 +8,11 @@ vi.mock('../api/workflow', () => ({
   getTaskLogs: vi.fn(),
   cancelWorkflow: vi.fn(),
 }))
+vi.mock('./api', () => ({ extractVideoFrame: vi.fn() }))
 
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow } from '../api/workflow'
+import { extractVideoFrame } from './api'
 import type { CanvasNodeData } from './types'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
@@ -143,5 +145,35 @@ describe('useCanvasGeneration', () => {
     ;(cancelWorkflow as Mock).mockRejectedValueOnce(new Error('boom'))
     await expect(gen.interrupt('n1')).resolves.toBeUndefined()
     expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
+  })
+
+  it('获取视频帧：调用 extractVideoFrame 并回写 current/history（.png 产物路径）', async () => {
+    ;(extractVideoFrame as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/ef/v1.png' })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
+      config: { frameIndex: -1 },
+    }
+    let savedConfig: Record<string, unknown> | null = null
+    await gen.extractFrame(node, 'assert/scene/1/1/canvas/vg/v1.mp4', (c) => { savedConfig = c })
+    expect(extractVideoFrame).toHaveBeenCalledWith('p', 'assert/scene/1/1/canvas/vg/v1.mp4', -1, 'assert/scene/1/1/canvas/ef/v1.png')
+    expect(gen.statusByNode.value.ef?.status).toBe('success')
+    const cfg = savedConfig as unknown as { current: { path: string }; history: unknown[] }
+    expect(cfg.current.path).toBe('assert/scene/1/1/canvas/ef/v1.png')
+    expect(cfg.history).toHaveLength(1)
+  })
+
+  it('获取视频帧：提取失败进入 error 状态且不回写配置', async () => {
+    ;(extractVideoFrame as Mock).mockRejectedValueOnce(new Error('帧索引越界'))
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
+      config: { frameIndex: 999 },
+    }
+    let savedConfig: Record<string, unknown> | null = null
+    await gen.extractFrame(node, 'assert/v.mp4', (c) => { savedConfig = c })
+    expect(gen.statusByNode.value.ef?.status).toBe('error')
+    expect(gen.statusByNode.value.ef?.errorMsg).toBe('帧索引越界')
+    expect(savedConfig).toBeNull()
   })
 })

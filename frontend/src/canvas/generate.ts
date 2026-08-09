@@ -1,4 +1,5 @@
 import type { CanvasConnection, CanvasNodeData, NodeConfig } from './types'
+import { getPrototype } from './registry'
 
 /**
  * 资产生成辅助纯函数：输入路径收集、节点资产读取、版本号计算。
@@ -58,28 +59,21 @@ export function removeHistoryEntry(config: NodeConfig, version: number): NodeCon
 }
 
 /**
- * 获取节点当前的资产相对路径：
- * - 加载图片/音频/视频：config.assetPath
- * - 生成图片：config.current.path
+ * 获取节点当前的资产相对路径。
+ *
+ * 输出资产解析由各节点原型自实现（registry 的 getOutputAssetPath）：
+ * 加载类读 config.assetPath，生成类读 config.current.path；
+ * 未声明解析器的节点按画布约定默认读 config.current.path（无则 undefined）。
  *
  * @param node 节点数据（可为 undefined）
  * @returns 项目内相对路径或 undefined
  */
 export function getNodeCurrentAssetPath(node: CanvasNodeData | undefined): string | undefined {
   if (!node) return undefined
-  if (node.prototypeId === 'image-loader') {
-    const ap = node.config.assetPath
-    return typeof ap === 'string' && ap ? ap : undefined
-  }
-  if (node.prototypeId === 'audio-loader' || node.prototypeId === 'video-loader') {
-    const ap = node.config.assetPath
-    return typeof ap === 'string' && ap ? ap : undefined
-  }
-  if (node.prototypeId === 'image-generate') {
-    const cur = node.config.current as { path?: string } | undefined
-    return cur?.path
-  }
-  return undefined
+  const resolver = getPrototype(node.prototypeId)?.getOutputAssetPath
+  if (resolver) return resolver(node.config)
+  const cur = node.config.current as { path?: string } | undefined
+  return cur?.path
 }
 
 /**

@@ -33,6 +33,7 @@ export interface BridgeDeclaredParam {
   label?: string | null;
   paramType: 'text' | 'number' | 'boolean' | 'image' | 'video' | 'audio';
   defaultValue?: string | null;
+  nodeRawValue?: string
 }
 
 /** Bridge 标签分组（父/子嵌套；metadata 为合并默认值后的完整元数据） */
