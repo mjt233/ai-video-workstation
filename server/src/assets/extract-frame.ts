@@ -55,6 +55,22 @@ export function parseFps(rate: string | number | undefined): number {
   return Number.isFinite(num) ? num : 0;
 }
 
+/** ffprobe 探测结果中的视频流字段（本模块用到的子集） */
+interface ProbeVideoStream {
+  codec_type?: string;
+  nb_frames?: string | number;
+  avg_frame_rate?: string | number;
+  width?: number;
+  height?: number;
+  duration?: string | number;
+}
+
+/** ffprobe 探测结果（本模块用到的字段子集） */
+interface ProbeData {
+  streams?: ProbeVideoStream[];
+  format?: { duration?: number };
+}
+
 /**
  * 获取视频总帧数：优先读 ffprobe 的视频流 nb_frames，缺失时按 时长 × 帧率 估算。
  *
@@ -63,7 +79,7 @@ export function parseFps(rate: string | number | undefined): number {
  */
 export function getTotalFrames(filePath: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    Ffmpeg.ffprobe(filePath, (err: Error | null, data?: { streams?: Array<{ codec_type?: string; nb_frames?: string | number; avg_frame_rate?: string | number }>; format?: { duration?: number } }) => {
+    Ffmpeg.ffprobe(filePath, (err: Error | null, data?: ProbeData) => {
       if (err) {
         reject(err);
         return;
@@ -84,6 +100,64 @@ export function getTotalFrames(filePath: string): Promise<number> {
       reject(new FrameIndexError('无法读取视频帧数'));
     });
   });
+}
+
+/** 视频基础信息（供「提取当前帧」把播放时间换算为帧索引） */
+export interface VideoInfo {
+  /** 时长（秒） */
+  duration: number;
+  /** 帧率（每秒帧数，avg_frame_rate 解析；不可用为 0） */
+  fps: number;
+  /** 视频宽度（像素） */
+  width: number;
+  /** 视频高度（像素） */
+  height: number;
+}
+
+/**
+ * 探测视频基础信息：时长、帧率、分辨率（一次 ffprobe）。
+ *
+ * @param filePath 视频绝对路径
+ * @returns 视频信息
+ * @throws Error ffprobe 失败或未找到视频流
+ */
+export function getVideoInfo(filePath: string): Promise<VideoInfo> {
+  return new Promise((resolve, reject) => {
+    Ffmpeg.ffprobe(filePath, (err: Error | null, data?: ProbeData) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      const stream = data?.streams?.find((s) => s.codec_type === 'video');
+      if (!stream) {
+        reject(new Error('未找到视频流'));
+        return;
+      }
+      const duration = Number(data?.format?.duration ?? stream.duration ?? 0);
+      resolve({
+        duration: Number.isFinite(duration) ? duration : 0,
+        fps: parseFps(stream.avg_frame_rate),
+        width: Number(stream.width) || 0,
+        height: Number(stream.height) || 0,
+      });
+    });
+  });
+}
+
+/**
+ * 读取项目内视频的基础信息（含路径解析与存在性检查）。
+ *
+ * @param project 项目名
+ * @param videoPath 视频相对路径（assert/ 下）
+ * @returns 视频信息
+ * @throws Error 视频不存在（code=NOT_FOUND）或 ffprobe 失败
+ */
+export async function readVideoInfo(project: string, videoPath: string): Promise<VideoInfo> {
+  const videoAbs = resolveProjectPath(project, videoPath);
+  if (!(await pathExists(videoAbs))) {
+    throw Object.assign(new Error('视频文件不存在'), { code: 'NOT_FOUND' });
+  }
+  return getVideoInfo(videoAbs);
 }
 
 /**
@@ -121,6 +195,62 @@ export async function extractVideoFrame(
         // select=eq(n,N)：n 为解码帧序号（0 基），帧精确选取第 N 帧
         `-vf`,
         `select=eq(n\\,${frameNo})`,
+        `-frames:v`,
+        `1`,
+        `-vsync`,
+        `vfr`,
+      ])
+      .on('end', () => resolve())
+      .on('error', (err: Error) => reject(err))
+      .save(outputAbs);
+  });
+
+  return outputPath;
+}
+
+/**
+ * 从视频中按时间点提取帧并输出为图片（png）。
+ *
+ * 使用 ffmpeg 输出端 `-ss {time}`：输出第一帧 PTS ≥ time 的帧（按呈现时间精确选帧，
+ * 与浏览器预览按时间定位的画面一致；区别于按解码序索引 select=eq(n,N) 的 extractVideoFrame）。
+ *
+ * @param project 项目名
+ * @param videoPath 视频相对路径（assert/ 下）
+ * @param timeSec 时间点（秒，须在 [0, 时长] 内）
+ * @param outputPath 输出图片相对路径（assert/ 下）
+ * @returns 输出图片相对路径
+ * @throws Error 视频不存在（code=NOT_FOUND）、路径越权（code=INVALID）、时间越界（FrameIndexError）或 ffmpeg 执行失败
+ */
+export async function extractVideoFrameAtTime(
+  project: string,
+  videoPath: string,
+  timeSec: number,
+  outputPath: string,
+): Promise<string> {
+  const videoAbs = resolveProjectPath(project, videoPath);
+  const outputAbs = resolveProjectPath(project, outputPath);
+  if (!(await pathExists(videoAbs))) {
+    throw Object.assign(new Error('视频文件不存在'), { code: 'NOT_FOUND' });
+  }
+  await fs.mkdir(path.dirname(outputAbs), { recursive: true });
+
+  // 校验时间在时长范围内（ffprobe 探测失败视为无法校验）
+  let info: VideoInfo;
+  try {
+    info = await getVideoInfo(videoAbs);
+  } catch {
+    throw new FrameIndexError('无法读取视频信息');
+  }
+  if (!(info.duration > 0) || timeSec < 0 || timeSec > info.duration) {
+    throw new FrameIndexError(`时间越界：时长 ${info.duration}s，时间 ${timeSec}s 不可用`);
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    Ffmpeg(videoAbs)
+      .outputOptions([
+        // -ss（输出端）：从时间点起输出，第一帧 PTS ≥ time 即目标帧（帧精确、按呈现序）
+        `-ss`,
+        String(timeSec),
         `-frames:v`,
         `1`,
         `-vsync`,

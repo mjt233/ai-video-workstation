@@ -28,22 +28,27 @@ vi.mock('fs/promises', async (importOriginal) => {
 import {
   FrameIndexError,
   extractVideoFrame,
+  extractVideoFrameAtTime,
   getTotalFrames,
+  getVideoInfo,
   parseFps,
+  readVideoInfo,
   resolveFrameNumber,
 } from './extract-frame.js';
 
-/** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录 -vf 过滤器与保存路径 */
+/** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录输出选项与保存路径 */
 function mockRun() {
   const state: {
     vf: string;
     saved: string;
+    outputs: string[];
     end?: () => void;
     err?: (e: Error) => void;
     failOnSave?: boolean;
-  } = { vf: '', saved: '' };
+  } = { vf: '', saved: '', outputs: [] };
   const chain = {
     outputOptions: (opts: string[]) => {
+      state.outputs = opts;
       state.vf = opts[opts.indexOf('-vf') + 1] ?? '';
       return chain;
     },
@@ -127,6 +132,100 @@ describe('getTotalFrames', () => {
       cb(new Error('probe 失败'), undefined);
     });
     await expect(getTotalFrames('/x.mp4')).rejects.toThrow();
+  });
+});
+
+describe('getVideoInfo', () => {
+  it('解析时长、帧率与分辨率（avg_frame_rate 分数形式）', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, {
+        streams: [{ codec_type: 'video', avg_frame_rate: '24000/1001', width: 1280, height: 720 }],
+        format: { duration: 4.17 },
+      });
+    });
+    const info = await getVideoInfo('/x.mp4');
+    expect(info.duration).toBeCloseTo(4.17);
+    expect(info.fps).toBeCloseTo(23.976);
+    expect(info.width).toBe(1280);
+    expect(info.height).toBe(720);
+  });
+
+  it('未找到视频流时 reject', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, { streams: [] });
+    });
+    await expect(getVideoInfo('/x.mp4')).rejects.toThrow('未找到视频流');
+  });
+
+  it('ffprobe 失败时 reject', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(new Error('probe 失败'), undefined);
+    });
+    await expect(getVideoInfo('/x.mp4')).rejects.toThrow('probe 失败');
+  });
+});
+
+describe('readVideoInfo', () => {
+  it('视频不存在时抛 NOT_FOUND', async () => {
+    mockPathExists.mockResolvedValueOnce(false);
+    await expect(readVideoInfo('p', 'assert/video/missing.mp4')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('存在时返回视频信息', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, {
+        streams: [{ codec_type: 'video', avg_frame_rate: '25/1', width: 1920, height: 1080 }],
+        format: { duration: 8 },
+      });
+    });
+    const info = await readVideoInfo('p', 'assert/video/a.mp4');
+    expect(info.fps).toBe(25);
+    expect(info.duration).toBe(8);
+  });
+});
+
+describe('extractVideoFrameAtTime', () => {
+  it('按时间点提取：输出端 -ss {time} 并保存', async () => {
+    const { chain, state } = mockRun();
+    mockFfmpeg.mockReturnValue(chain);
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, { streams: [{ codec_type: 'video', avg_frame_rate: '25/1' }], format: { duration: 4 } });
+    });
+    const result = await extractVideoFrameAtTime('p', 'assert/video/a.mp4', 1.5, 'assert/frames/f.png');
+    expect(result).toBe('assert/frames/f.png');
+    expect(mockFfmpeg).toHaveBeenCalledWith(expect.stringContaining('a.mp4'));
+    expect(state.outputs).toContain('-ss');
+    expect(state.outputs[state.outputs.indexOf('-ss') + 1]).toBe('1.5');
+    expect(state.saved).toMatch(/f\.png$/);
+  });
+
+  it('时间越界（超出时长 / 负数）抛 FrameIndexError（不执行 ffmpeg）', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, { streams: [{ codec_type: 'video' }], format: { duration: 4 } });
+    });
+    await expect(
+      extractVideoFrameAtTime('p', 'assert/video/a.mp4', 4.5, 'assert/frames/f.png'),
+    ).rejects.toBeInstanceOf(FrameIndexError);
+    await expect(
+      extractVideoFrameAtTime('p', 'assert/video/a.mp4', -0.1, 'assert/frames/f.png'),
+    ).rejects.toBeInstanceOf(FrameIndexError);
+    expect(mockFfmpeg).not.toHaveBeenCalled();
+  });
+
+  it('视频不存在时抛 NOT_FOUND', async () => {
+    mockPathExists.mockResolvedValueOnce(false);
+    await expect(
+      extractVideoFrameAtTime('p', 'assert/video/missing.mp4', 0, 'assert/frames/f.png'),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('时长探测失败时抛 FrameIndexError', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(new Error('probe 失败'), undefined);
+    });
+    await expect(
+      extractVideoFrameAtTime('p', 'assert/video/a.mp4', 1, 'assert/frames/f.png'),
+    ).rejects.toBeInstanceOf(FrameIndexError);
   });
 });
 

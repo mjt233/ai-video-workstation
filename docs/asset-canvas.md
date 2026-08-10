@@ -210,7 +210,16 @@ frontend/src/
     └── editors/                  # 配置组件（ImageLoaderEditor / ImageGenerateEditor）
 ```
 
-服务端无画布专属路由：仅使用既有 `GET/POST /api/fs/:project/*`（读写 `canvas.json`）与 `/assets/.../stage`（设为分镜场景图新增帧）。
+服务端画布专属路由（`server/src/routes/canvas.ts`，前缀 `/api/canvas`）：
+- `POST /canvas/extract-frame`——「获取视频帧」节点：body 可带 `frameIndex`（0=首帧、-1=尾帧…，解码序 select 选帧）或 `time`（秒，按呈现时间精确选帧 `-ss`，与预览画面一致）；
+- `GET /canvas/video-info`——返回视频时长/帧率/分辨率（ffprobe），供编辑器「提取当前帧」回显近似帧索引。
+其余画布读写仍走既有 `GET/POST /api/fs/:project/*`（读写 `canvas.json`）与 `/assets/.../stage`（设为分镜场景图新增帧）。
+
+「获取视频帧」编辑器（`editors/ExtractFrameEditor.vue`）：
+- 预览输入视频时提供「提取当前帧」按钮：把预览当前 `currentTime` 写入 `config.frameTime` 并立即提取（服务端 `-ss` 按呈现时间精确选帧，拖拽进度条后也与画面一致）；有帧率时同时回显近似 `frameIndex`；
+- 手动修改「帧索引」会清除 `frameTime`（改回按帧索引提取）；「提取/重新提取」按钮内置于帧索引输入框右侧；
+- 该节点**已移除「历史」功能**（编辑器无历史按钮、右键菜单不显示「历史」项）；config 仍会累积 history 字段但无 UI 展示；
+- 预览 URL 按输入路径缓存，修改帧索引等触发重渲染不会导致视频重载。
 
 ---
 

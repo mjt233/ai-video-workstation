@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow, type WorkflowUserParamValue } from '../api/workflow'
-import { extractVideoFrame } from './api'
+import { extractVideoFrame, extractVideoFrameAtTime } from './api'
 import type { VideoSubmitParams } from './videoSubmit'
 import type { CanvasNodeData, CanvasKind } from './types'
 import { canvasNodeAssetPath, sceneCanvasRelPath } from './paths'
@@ -245,7 +245,8 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
   /**
    * 获取视频帧节点的帧提取：调用服务端 ffmpeg 接口，成功后回写 current/history。
    *
-   * 帧索引语义（config.frameIndex）：0=首帧、1=第二帧、-1=尾帧、-2=倒数第二帧，以此类推。
+   * 提取方式：优先按时间点（config.frameTime，「提取当前帧」写入，ffmpeg -ss 呈现序精确选帧）；
+   * 无 frameTime 时按帧索引（config.frameIndex，0=首帧、1=第二帧、-1=尾帧、-2=倒数第二帧，解码序 select）。
    *
    * @param node 获取视频帧节点数据
    * @param videoPath 输入视频相对路径（来自连线输入）
@@ -261,9 +262,13 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     statusByNode.value[nodeId] = { status: 'running' }
     try {
       const outputPath = computeOutputPath(node)
+      const time = node.config.frameTime
+      const hasTime = typeof time === 'number' && Number.isFinite(time)
       const raw = node.config.frameIndex
       const frameIndex = typeof raw === 'number' && Number.isInteger(raw) ? raw : 0
-      const res = await extractVideoFrame(project, videoPath, frameIndex, outputPath)
+      const res = hasTime
+        ? await extractVideoFrameAtTime(project, videoPath, time as number, outputPath)
+        : await extractVideoFrame(project, videoPath, frameIndex, outputPath)
       const version = nextVersion(getHistory(node.config))
       const now = new Date().toISOString()
       const history: HistoryEntry[] = [
@@ -277,7 +282,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
       })
       statusByNode.value[nodeId] = {
         status: 'success',
-        lastLog: `已提取第 ${frameIndex} 帧`,
+        lastLog: hasTime ? `已提取第 ${time} 秒处画面` : `已提取第 ${frameIndex} 帧`,
       }
     } catch (e) {
       statusByNode.value[nodeId] = {

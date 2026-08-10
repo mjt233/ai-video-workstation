@@ -236,7 +236,7 @@
             重新生成
           </div>
           <div
-            v-if="isGeneratePrototype(contextMenuNode?.prototypeId)"
+            v-if="hasHistoryPrototype(contextMenuNode?.prototypeId)"
             class="canvas-context-menu__item"
             @click="contextHistory"
           >
@@ -892,17 +892,30 @@ async function deleteNode(nodeId: string) {
 
 // ── 右键菜单 ────────────────────────────────────────────
 
-/** 生成类节点原型 id 集合（右键菜单提供「重新生成/历史」；含获取视频帧节点） */
+/** 生成类节点原型 id 集合（右键菜单提供「重新生成」；含获取视频帧节点） */
 const GENERATE_PROTOTYPES = new Set(['image-generate', 'video-generate', 'video-frame-extract'])
 
+/** 有版本历史功能的节点原型 id 集合（右键菜单提供「历史」；获取视频帧节点已移除历史） */
+const HISTORY_PROTOTYPES = new Set(['image-generate', 'video-generate'])
+
 /**
- * 判断原型 id 是否属于生成类节点（有重新生成/历史能力的节点）。
+ * 判断原型 id 是否属于生成类节点（有重新生成能力的节点）。
  *
  * @param id 原型 id（可为 undefined）
  * @returns 属于生成类返回 true
  */
 function isGeneratePrototype(id: string | undefined): boolean {
   return !!id && GENERATE_PROTOTYPES.has(id)
+}
+
+/**
+ * 判断原型 id 是否支持版本历史（右键菜单「历史」入口；获取视频帧节点无历史）。
+ *
+ * @param id 原型 id（可为 undefined）
+ * @returns 支持历史返回 true
+ */
+function hasHistoryPrototype(id: string | undefined): boolean {
+  return !!id && HISTORY_PROTOTYPES.has(id)
 }
 
 const contextMenu = reactive({ show: false, x: 0, y: 0, nodeId: '' })

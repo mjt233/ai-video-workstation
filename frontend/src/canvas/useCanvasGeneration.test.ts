@@ -8,11 +8,11 @@ vi.mock('../api/workflow', () => ({
   getTaskLogs: vi.fn(),
   cancelWorkflow: vi.fn(),
 }))
-vi.mock('./api', () => ({ extractVideoFrame: vi.fn() }))
+vi.mock('./api', () => ({ extractVideoFrame: vi.fn(), extractVideoFrameAtTime: vi.fn() }))
 
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow } from '../api/workflow'
-import { extractVideoFrame } from './api'
+import { extractVideoFrame, extractVideoFrameAtTime } from './api'
 import type { CanvasNodeData } from './types'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
@@ -161,6 +161,22 @@ describe('useCanvasGeneration', () => {
     const cfg = savedConfig as unknown as { current: { path: string }; history: unknown[] }
     expect(cfg.current.path).toBe('assert/scene/1/1/canvas/ef/v1.png')
     expect(cfg.history).toHaveLength(1)
+  })
+
+  it('获取视频帧：config.frameTime 存在时按时间点提取（extractVideoFrameAtTime）', async () => {
+    ;(extractVideoFrameAtTime as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/ef/v1.png' })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
+      config: { frameIndex: 12, frameTime: 2.5 },
+    }
+    let savedConfig: Record<string, unknown> | null = null
+    await gen.extractFrame(node, 'assert/v.mp4', (c) => { savedConfig = c })
+    expect(extractVideoFrameAtTime).toHaveBeenCalledWith('p', 'assert/v.mp4', 2.5, 'assert/scene/1/1/canvas/ef/v1.png')
+    expect(extractVideoFrame).not.toHaveBeenCalled()
+    expect(gen.statusByNode.value.ef?.status).toBe('success')
+    const cfg = savedConfig as unknown as { current: { path: string } }
+    expect(cfg.current.path).toBe('assert/scene/1/1/canvas/ef/v1.png')
   })
 
   it('获取视频帧：提取失败进入 error 状态且不回写配置', async () => {

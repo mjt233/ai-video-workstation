@@ -93,3 +93,58 @@ export async function extractVideoFrame(
   })
   return data
 }
+
+/**
+ * 按时间点提取视频帧：调用服务端 ffmpeg 接口，把输入视频 time 秒处的帧输出为图片（png）。
+ *
+ * 服务端按呈现时间精确选帧（ffmpeg -ss），与浏览器预览画面一致；
+ * 「提取当前帧」用它避免帧索引换算误差（尤其拖拽进度条后）。
+ *
+ * @param project 项目名
+ * @param videoPath 输入视频相对路径（assert/ 下）
+ * @param time 时间点（秒，须在 [0, 时长] 内）
+ * @param outputPath 输出图片相对路径（assert/ 下，.png）
+ * @returns 服务端执行结果（含输出相对路径）
+ */
+export async function extractVideoFrameAtTime(
+  project: string,
+  videoPath: string,
+  time: number,
+  outputPath: string,
+): Promise<{ success: boolean; path: string }> {
+  const { data } = await client.post<{ success: boolean; path: string }>('/canvas/extract-frame', {
+    project,
+    videoPath,
+    time,
+    outputPath,
+  })
+  return data
+}
+
+/** 视频基础信息（服务端 ffprobe，供「提取当前帧」把播放时间换算为帧索引） */
+export interface VideoInfo {
+  /** 时长（秒） */
+  duration: number
+  /** 帧率（每秒帧数） */
+  fps: number
+  /** 视频宽度（像素） */
+  width: number
+  /** 视频高度（像素） */
+  height: number
+}
+
+/**
+ * 获取视频基础信息：时长 / 帧率 / 分辨率。
+ *
+ * 供「提取当前帧」：无 requestVideoFrameCallback 环境按 播放时间 × 帧率 换算当前帧索引。
+ *
+ * @param project 项目名
+ * @param videoPath 视频相对路径（assert/ 下）
+ * @returns 视频信息
+ */
+export async function getVideoInfo(project: string, videoPath: string): Promise<VideoInfo> {
+  const { data } = await client.get<{ success: boolean } & VideoInfo>('/canvas/video-info', {
+    params: { project, path: videoPath },
+  })
+  return { duration: data.duration, fps: data.fps, width: data.width, height: data.height }
+}
