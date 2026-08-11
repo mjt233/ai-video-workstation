@@ -148,3 +148,49 @@ export async function getVideoInfo(project: string, videoPath: string): Promise<
   })
   return { duration: data.duration, fps: data.fps, width: data.width, height: data.height }
 }
+
+/** 音频基础信息（服务端 ffprobe，供连线音频时按真实时长回填素材块） */
+export interface AudioInfo {
+  /** 时长（秒） */
+  duration: number
+}
+
+/**
+ * 获取音频基础信息：时长。
+ *
+ * 画布连线音频到生成视频节点后，用真实时长回填导演台音频素材块，
+ * 避免占位时长（2s）截断音频。
+ *
+ * @param project 项目名
+ * @param audioPath 音频相对路径（assert/ 下）
+ * @returns 音频信息
+ */
+export async function getAudioInfo(project: string, audioPath: string): Promise<AudioInfo> {
+  const { data } = await client.get<{ success: boolean } & AudioInfo>('/canvas/audio-info', {
+    params: { project, path: audioPath },
+  })
+  return { duration: data.duration }
+}
+
+/**
+ * 拼接视频：调用服务端 ffmpeg 接口，把多段视频按顺序无损拼接为单个视频。
+ *
+ * 服务端用 concat demuxer + `-c copy`（各段编码/分辨率/帧率/音轨结构须一致，否则报错）。
+ *
+ * @param project 项目名
+ * @param videoPaths 视频相对路径数组（assert/ 下，按拼接顺序，至少 2 段）
+ * @param outputPath 输出视频相对路径（assert/ 下，.mp4）
+ * @returns 服务端执行结果（含输出相对路径）
+ */
+export async function concatVideo(
+  project: string,
+  videoPaths: string[],
+  outputPath: string,
+): Promise<{ success: boolean; path: string }> {
+  const { data } = await client.post<{ success: boolean; path: string }>('/canvas/concat-video', {
+    project,
+    videoPaths,
+    outputPath,
+  })
+  return data
+}

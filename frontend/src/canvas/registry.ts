@@ -7,12 +7,14 @@ import AudioLoaderNode from '../components/canvas/nodes/AudioLoaderNode.vue'
 import VideoLoaderNode from '../components/canvas/nodes/VideoLoaderNode.vue'
 import VideoGenerateNode from '../components/canvas/nodes/VideoGenerateNode.vue'
 import ExtractFrameNode from '../components/canvas/nodes/ExtractFrameNode.vue'
+import ConcatVideoNode from '../components/canvas/nodes/ConcatVideoNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
 import VideoLoaderEditor from '../components/canvas/editors/VideoLoaderEditor.vue'
 import VideoGenerateEditor from '../components/canvas/editors/VideoGenerateEditor.vue'
 import ExtractFrameEditor from '../components/canvas/editors/ExtractFrameEditor.vue'
+import ConcatVideoEditor from '../components/canvas/editors/ConcatVideoEditor.vue'
 
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
 export interface NodePrototype {
@@ -142,6 +144,22 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     getOutputAssetPath: generateOutput,
     defaultConfig: {
       frameIndex: 0,
+      history: [],
+    },
+  },
+  {
+    id: 'video-concat',
+    name: '拼接视频',
+    icon: 'mdi-video-switch-outline',
+    // 单一 video 输入连接点：同一端口可连接多段视频（无输入上限校验），拼接顺序由 config.inputOrder 决定
+    inputPorts: [{ id: 'in', type: 'video', label: '视频' }],
+    outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
+    resizeable: true,
+    bodyComponent: ConcatVideoNode,
+    editorComponent: ConcatVideoEditor,
+    getOutputAssetPath: generateOutput,
+    defaultConfig: {
+      inputOrder: [],
       history: [],
     },
   },

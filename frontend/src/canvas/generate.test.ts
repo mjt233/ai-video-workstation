@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { activateHistory, collectInputs, collectInputPaths, getHistory, getNodeCurrentAssetPath, removeHistoryEntry, type HistoryEntry } from './generate'
+import { activateHistory, collectInputs, collectInputPaths, getHistory, getNodeCurrentAssetPath, mergeInputOrder, removeHistoryEntry, type HistoryEntry } from './generate'
 
 const loader: CanvasNodeData = {
   id: 'l1', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,
@@ -53,6 +53,22 @@ describe('getNodeCurrentAssetPath', () => {
   it('文本/无节点返回 undefined', () => {
     expect(getNodeCurrentAssetPath(text)).toBeUndefined()
     expect(getNodeCurrentAssetPath(undefined)).toBeUndefined()
+  })
+})
+
+describe('mergeInputOrder', () => {
+  it('组内重排后：移除本组旧位置，新顺序排末尾，其他组相对顺序不变', () => {
+    const inputOrder = ['imgA', 'audB', 'vidC', 'vidD']
+    // 视频组原顺序 [vidC, vidD]，重排为 [vidD, vidC]
+    expect(mergeInputOrder(inputOrder, ['vidD', 'vidC'])).toEqual(['imgA', 'audB', 'vidD', 'vidC'])
+  })
+
+  it('本组未记录在全局顺序中 → 直接追加新顺序', () => {
+    expect(mergeInputOrder(['imgA'], ['vidD', 'vidC'])).toEqual(['imgA', 'vidD', 'vidC'])
+  })
+
+  it('空全局顺序 → 仅返回本组新顺序', () => {
+    expect(mergeInputOrder([], ['vidC', 'vidD'])).toEqual(['vidC', 'vidD'])
   })
 })
 

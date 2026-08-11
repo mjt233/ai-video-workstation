@@ -4,6 +4,7 @@ import { loadCanvas, saveCanvas, type CanvasTarget } from './api'
 import { canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
 import { getPrototype } from './registry'
 import { applyConnectionSync } from './connectionSync'
+import type { CanvasDirectorConfig } from './videoTypes'
 
 /** 自动保存防抖毫秒数 */
 const SAVE_DEBOUNCE_MS = 800
@@ -288,6 +289,38 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
+   * 更新生成视频节点导演台音频轨中指定来源节点的素材块时长（连线后按真实时长回填）。
+   *
+   * 不 pushHistory：这是 connect 操作的异步补全（connect 已在结构变更前快照），
+   * 单次撤销即可同时回退「连线 + 时长回填」；redo 会把时长还原为占位值，属可接受边缘。
+   * 未找到节点/导演台配置/匹配音频块，或时长无变化时不做任何修改（幂等）。
+   *
+   * @param nodeId 生成视频节点 id
+   * @param sourceNodeId 音频来源节点 id（audio-loader）
+   * @param duration 音频真实时长（秒）
+   */
+  function updateDirectorAudioClipDuration(nodeId: string, sourceNodeId: string, duration: number): void {
+    const node = data.value.nodes.find((n) => n.id === nodeId)
+    if (!node || node.prototypeId !== 'video-generate') return
+    const director = node.config.director
+    if (!director || typeof director !== 'object') return
+    const d = director as Partial<CanvasDirectorConfig>
+    const audioClips = d.audioClips ?? []
+    const clip = audioClips.find((c) => c.sourceNodeId === sourceNodeId)
+    if (!clip || Math.abs(clip.duration - duration) < 0.01) return
+    node.config = {
+      ...node.config,
+      director: {
+        ...d,
+        audioClips: audioClips.map((c) =>
+          c.sourceNodeId === sourceNodeId ? { ...c, duration } : c,
+        ),
+      },
+    }
+    markDirty()
+  }
+
+  /**
    * 切换画布目标（如切换分镜/场景）：先落盘当前未保存修改，再重置全部状态并加载新画布。
    *
    * @param newTarget 新画布目标
@@ -330,6 +363,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     addNode,
     removeNode,
     updateNode,
+    updateDirectorAudioClipDuration,
     connect,
     disconnect,
     onConnectionsChanged,

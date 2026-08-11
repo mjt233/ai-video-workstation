@@ -299,6 +299,7 @@ const {
   resizeClip,
   applyImageBoundary,
   trimClip,
+  correctAudioClipDuration,
   select,
   copySelected,
   paste,
@@ -371,6 +372,8 @@ async function ensureAudioData(path: string): Promise<void> {
   }
   const peaks = extractPeaks(buf, 200)
   audioData[path] = { buffer: buf, peaks }
+  // 兜底：素材块时长以文件真实时长为准（连线/旧数据可能为占位 2s）；幂等，emit 后 props 回传相等不循环
+  correctAudioClipDuration(path, buf.duration)
 }
 
 /**

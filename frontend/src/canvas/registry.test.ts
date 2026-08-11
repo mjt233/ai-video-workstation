@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含七个内置节点', () => {
+  it('包含八个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'image-generate',
       'image-loader',
       'text',
+      'video-concat',
       'video-frame-extract',
       'video-generate',
       'video-loader',
@@ -64,5 +65,15 @@ describe('getOutputAssetPath（各节点自实现输出资产解析）', () => {
     expect(p.inputPorts[0]?.type).toBe('video')
     expect(p.outputPorts[0]?.type).toBe('image')
     expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/ef/v1.png' } })).toBe('assert/scene/1/1/canvas/ef/v1.png')
+  })
+
+  it('拼接视频节点：video 输入、video 输出、解析 current.path', () => {
+    const p = getPrototype('video-concat')!
+    expect(p.name).toBe('拼接视频')
+    expect(p.inputPorts[0]?.type).toBe('video')
+    expect(p.outputPorts[0]?.type).toBe('video')
+    expect(p.defaultConfig).toMatchObject({ inputOrder: [], history: [] })
+    expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/vc/v1.mp4' } })).toBe('assert/scene/1/1/canvas/vc/v1.mp4')
+    expect(p.getOutputAssetPath?.({})).toBeUndefined()
   })
 })

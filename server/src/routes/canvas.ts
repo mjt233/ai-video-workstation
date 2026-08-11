@@ -3,8 +3,10 @@ import {
   extractVideoFrame,
   extractVideoFrameAtTime,
   FrameIndexError,
+  readAudioInfo,
   readVideoInfo,
 } from '../assets/extract-frame.js';
+import { concatVideos, ConcatError } from '../assets/concat-video.js';
 import { isUnderAssert } from './fs-path.js';
 
 /**
@@ -103,6 +105,78 @@ canvasRouter.get('/canvas/video-info', async (req: Request, res: Response) => {
       return;
     }
     console.error('Failed to get video info:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * 获取音频信息：GET /api/canvas/audio-info
+ *
+ * query: { project, path }
+ * 返回 { success, duration }，供画布连线音频时按真实时长回填素材块。
+ * path 须位于 assert/ 前缀下。
+ */
+canvasRouter.get('/canvas/audio-info', async (req: Request, res: Response) => {
+  try {
+    const project = String(req.query.project ?? '');
+    const audioPath = String(req.query.path ?? '');
+    if (!project || !audioPath) {
+      res.status(400).json({ error: 'project / path 必填' });
+      return;
+    }
+    const audioNorm = audioPath.replace(/\\/g, '/');
+    if (!isUnderAssert(audioNorm)) {
+      res.status(403).json({ error: '仅支持 assert/ 下的音频路径' });
+      return;
+    }
+    const info = await readAudioInfo(project, audioNorm);
+    res.json({ success: true, ...info });
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    if (e?.code === 'NOT_FOUND') {
+      res.status(404).json({ error: e.message, code: 'NOT_FOUND' });
+      return;
+    }
+    console.error('Failed to get audio info:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * 拼接视频：POST /api/canvas/concat-video
+ *
+ * body: { project, videoPaths: string[], outputPath }
+ * 按 videoPaths 顺序用 ffmpeg 无损拼接（concat demuxer + `-c copy`，各段规格须一致），
+ * 产物写入 outputPath。videoPaths 与 outputPath 均须位于 assert/ 前缀下。
+ */
+canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) => {
+  try {
+    const project = String(req.body?.project ?? '');
+    const rawPaths = Array.isArray(req.body?.videoPaths) ? req.body.videoPaths : [];
+    const outputPath = String(req.body?.outputPath ?? '');
+    const videoPaths = rawPaths.map((p: unknown) => String(p).replace(/\\/g, '/'));
+    const outputNorm = outputPath.replace(/\\/g, '/');
+    if (!project || videoPaths.length === 0 || !outputNorm) {
+      res.status(400).json({ error: 'project / videoPaths / outputPath 必填' });
+      return;
+    }
+    if (!isUnderAssert(outputNorm) || videoPaths.some((p: string) => !isUnderAssert(p))) {
+      res.status(403).json({ error: '仅支持 assert/ 下的视频路径' });
+      return;
+    }
+    const result = await concatVideos(project, videoPaths, outputNorm);
+    res.json({ success: true, path: result });
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    if (e?.code === 'NOT_FOUND') {
+      res.status(404).json({ error: e.message, code: 'NOT_FOUND' });
+      return;
+    }
+    if (e instanceof ConcatError || e?.code === 'INVALID') {
+      res.status(400).json({ error: e.message, code: e.code ?? 'INVALID' });
+      return;
+    }
+    console.error('Failed to concat videos:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

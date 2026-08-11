@@ -8,11 +8,11 @@ vi.mock('../api/workflow', () => ({
   getTaskLogs: vi.fn(),
   cancelWorkflow: vi.fn(),
 }))
-vi.mock('./api', () => ({ extractVideoFrame: vi.fn(), extractVideoFrameAtTime: vi.fn() }))
+vi.mock('./api', () => ({ extractVideoFrame: vi.fn(), extractVideoFrameAtTime: vi.fn(), concatVideo: vi.fn() }))
 
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow } from '../api/workflow'
-import { extractVideoFrame, extractVideoFrameAtTime } from './api'
+import { extractVideoFrame, extractVideoFrameAtTime, concatVideo } from './api'
 import type { CanvasNodeData } from './types'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
@@ -124,6 +124,32 @@ describe('useCanvasGeneration', () => {
     expect(runWorkflow).not.toHaveBeenCalled()
     expect(gen.statusByNode.value.vg?.status).toBe('error')
     expect(gen.statusByNode.value.vg?.errorMsg).toBe('缺少视频提交参数')
+  })
+
+  it('拼接视频节点：调用服务端 concat-video 并回写 .mp4 产物', async () => {
+    ;(concatVideo as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/vc/v1.mp4' })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vc', prototypeId: 'video-concat', name: '拼接视频', x: 0, y: 0, width: 240, height: 160,
+      config: {},
+    }
+    let savedConfig: Record<string, unknown> | null = null
+    await gen.concatVideo(node, ['assert/a.mp4', 'assert/b.mp4'], (c) => { savedConfig = c })
+    expect(concatVideo).toHaveBeenCalledWith('p', ['assert/a.mp4', 'assert/b.mp4'], 'assert/scene/1/1/canvas/vc/v1.mp4')
+    expect(gen.statusByNode.value.vc?.status).toBe('success')
+    expect((savedConfig as unknown as { current: { path: string } }).current.path).toBe('assert/scene/1/1/canvas/vc/v1.mp4')
+  })
+
+  it('拼接视频节点：失败进入 error 状态', async () => {
+    ;(concatVideo as Mock).mockRejectedValue(new Error('各段规格不一致，无法无损拼接'))
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vc', prototypeId: 'video-concat', name: '拼接视频', x: 0, y: 0, width: 240, height: 160,
+      config: {},
+    }
+    await gen.concatVideo(node, ['assert/a.mp4', 'assert/b.mp4'], () => {})
+    expect(gen.statusByNode.value.vc?.status).toBe('error')
+    expect(gen.statusByNode.value.vc?.errorMsg).toContain('各段规格不一致')
   })
 
   it('中断：停止轮询并调用 cancelWorkflow', async () => {

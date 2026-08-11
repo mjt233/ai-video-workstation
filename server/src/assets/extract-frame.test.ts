@@ -29,9 +29,11 @@ import {
   FrameIndexError,
   extractVideoFrame,
   extractVideoFrameAtTime,
+  getAudioInfo,
   getTotalFrames,
   getVideoInfo,
   parseFps,
+  readAudioInfo,
   readVideoInfo,
   resolveFrameNumber,
 } from './extract-frame.js';
@@ -181,6 +183,56 @@ describe('readVideoInfo', () => {
     const info = await readVideoInfo('p', 'assert/video/a.mp4');
     expect(info.fps).toBe(25);
     expect(info.duration).toBe(8);
+  });
+});
+
+describe('getAudioInfo', () => {
+  it('解析音频流时长（format.duration 优先）', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, {
+        streams: [{ codec_type: 'audio', duration: '3.2' }],
+        format: { duration: 5 },
+      });
+    });
+    const info = await getAudioInfo('/x.flac');
+    expect(info.duration).toBe(5);
+  });
+
+  it('format 无 duration 时回退流 duration', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, { streams: [{ codec_type: 'audio', duration: '2.5' }] });
+    });
+    const info = await getAudioInfo('/x.flac');
+    expect(info.duration).toBeCloseTo(2.5);
+  });
+
+  it('未找到音频流时 reject', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, { streams: [] });
+    });
+    await expect(getAudioInfo('/x.flac')).rejects.toThrow('未找到音频流');
+  });
+
+  it('ffprobe 失败时 reject', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(new Error('probe 失败'), undefined);
+    });
+    await expect(getAudioInfo('/x.flac')).rejects.toThrow('probe 失败');
+  });
+});
+
+describe('readAudioInfo', () => {
+  it('音频不存在时抛 NOT_FOUND', async () => {
+    mockPathExists.mockResolvedValueOnce(false);
+    await expect(readAudioInfo('p', 'assert/audio/missing.flac')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('存在时返回音频信息', async () => {
+    mockFfprobe.mockImplementation((_p: string, cb: (err: Error | null, data: unknown) => void) => {
+      cb(null, { streams: [{ codec_type: 'audio' }], format: { duration: 6 } });
+    });
+    const info = await readAudioInfo('p', 'assert/audio/a.flac');
+    expect(info.duration).toBe(6);
   });
 });
 

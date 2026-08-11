@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow, type WorkflowUserParamValue } from '../api/workflow'
-import { extractVideoFrame, extractVideoFrameAtTime } from './api'
+import { extractVideoFrame, extractVideoFrameAtTime, concatVideo as requestConcatVideo } from './api'
 import type { VideoSubmitParams } from './videoSubmit'
 import type { CanvasNodeData, CanvasKind } from './types'
 import { canvasNodeAssetPath, sceneCanvasRelPath } from './paths'
@@ -75,6 +75,10 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     if (node.prototypeId === 'video-frame-extract') {
       // 帧提取产物为 .png（图片路径助手默认 .jpg）
       return base.replace(/\.jpg$/, '.png')
+    }
+    if (node.prototypeId === 'video-concat') {
+      // 拼接视频产物扩展名替换为 .mp4（图片路径助手默认 .jpg）
+      return base.replace(/\.jpg$/, '.mp4')
     }
     return base
   }
@@ -293,6 +297,49 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
   }
 
 
+  /**
+   * 拼接视频节点的视频拼接：调用服务端 ffmpeg 接口，成功后回写 current/history。
+   *
+   * 同步路由（ffmpeg 阻塞等待），无轮询；各段视频规格须一致（服务端校验，否则报错）。
+   *
+   * @param node 拼接视频节点数据
+   * @param videoPaths 输入视频相对路径数组（assert/ 下，按拼接顺序）
+   * @param updateConfig 更新节点配置的回调（回写 current/history）
+   */
+  async function concatVideo(
+    node: CanvasNodeData,
+    videoPaths: string[],
+    updateConfig: (config: Record<string, unknown>) => void,
+  ): Promise<void> {
+    const nodeId = node.id
+    if (statusByNode.value[nodeId]?.status === 'running') return
+    statusByNode.value[nodeId] = { status: 'running' }
+    try {
+      const outputPath = computeOutputPath(node)
+      const res = await requestConcatVideo(project, videoPaths, outputPath)
+      const version = nextVersion(getHistory(node.config))
+      const now = new Date().toISOString()
+      const history: HistoryEntry[] = [
+        ...getHistory(node.config),
+        { version, path: res.path, date: now },
+      ]
+      updateConfig({
+        ...node.config,
+        current: { version, path: res.path, date: now },
+        history,
+      })
+      statusByNode.value[nodeId] = {
+        status: 'success',
+        lastLog: `已拼接 ${videoPaths.length} 段视频`,
+      }
+    } catch (e) {
+      statusByNode.value[nodeId] = {
+        status: 'error',
+        errorMsg: e instanceof Error ? e.message : String(e),
+      }
+    }
+  }
+
   /** 重置全部生成状态与轮询（切换画布目标时调用） */
   function reset(): void {
     for (const id of Object.keys(pollTimers)) {
@@ -314,5 +361,5 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     reset()
   }
 
-  return { statusByNode, setInputPaths, generate, extractFrame, interrupt, clearStatus, computeOutputPath, switchTarget }
+  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, interrupt, clearStatus, computeOutputPath, switchTarget }
 }

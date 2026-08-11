@@ -131,3 +131,20 @@ export function collectInputPaths(
 ): string[] {
   return collectInputs(nodeId, connections, nodes, config, portId).map((i) => i.path)
 }
+
+/**
+ * 组内拖拽重排后合并回全局 inputOrder：保持其他组相对顺序不变，仅把本组新顺序排到末尾。
+ *
+ * 视频生成/拼接等节点把图片/视频/音频各自分组展示并支持组内拖拽排序，各组共享一个
+ * config.inputOrder（全局 nodeId 顺序）。重排本组时，先把本组 nodeId 从原顺序中移除，
+ * 再把新顺序追加到末尾，从而只影响本组相对顺序、不影响其他组。
+ *
+ * @param inputOrder 全局输入顺序（config.inputOrder）
+ * @param orderedIds 本组重排后的 nodeId 顺序
+ * @returns 合并后的全局输入顺序
+ */
+export function mergeInputOrder(inputOrder: string[], orderedIds: string[]): string[] {
+  const groupIds = new Set(orderedIds)
+  const rest = inputOrder.filter((id) => !groupIds.has(id))
+  return [...rest, ...orderedIds]
+}

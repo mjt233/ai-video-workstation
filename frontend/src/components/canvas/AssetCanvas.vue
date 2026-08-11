@@ -567,6 +567,7 @@ import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
 import { canConnectNodes, getNodeOutputType } from '../../canvas/connection'
+import { getAudioInfo } from '../../canvas/api'
 import { activateHistory, collectInputPaths, collectInputs, getNodeCurrentAssetPath, removeHistoryEntry, type CanvasInputInfo, type HistoryEntry } from '../../canvas/generate'
 import { buildVideoSubmitParams } from '../../canvas/videoSubmit'
 import {
@@ -731,7 +732,25 @@ function isValidConnection(conn: Connection): boolean {
 /** 连接成功：写入 store（记录端口 id；store 内部再次校验，失败忽略） */
 function onConnect(conn: Connection) {
   if (!conn.source || !conn.target) return
-  store.connect(conn.source, conn.target, conn.sourceHandle ?? undefined, conn.targetHandle ?? undefined)
+  const ok = store.connect(conn.source, conn.target, conn.sourceHandle ?? undefined, conn.targetHandle ?? undefined)
+  if (!ok) return
+  // 音频来源 → 生成视频节点：连线后探测音频真实时长回填导演台素材块（修复占位 2s 截断）
+  const target = nodeMap.value[conn.target]
+  const source = nodeMap.value[conn.source]
+  if (target?.prototypeId === 'video-generate' && getNodeOutputType(conn.source, store.nodes.value) === 'audio') {
+    const path = getNodeCurrentAssetPath(source)
+    if (path) {
+      getAudioInfo(props.project, path)
+        .then((info) => {
+          if (Number.isFinite(info.duration) && info.duration > 0) {
+            store.updateDirectorAudioClipDuration(conn.target!, conn.source!, info.duration)
+          }
+        })
+        .catch(() => {
+          // 探测失败保留占位时长，不打扰用户
+        })
+    }
+  }
 }
 
 /**
@@ -893,7 +912,7 @@ async function deleteNode(nodeId: string) {
 // ── 右键菜单 ────────────────────────────────────────────
 
 /** 生成类节点原型 id 集合（右键菜单提供「重新生成」；含获取视频帧节点） */
-const GENERATE_PROTOTYPES = new Set(['image-generate', 'video-generate', 'video-frame-extract'])
+const GENERATE_PROTOTYPES = new Set(['image-generate', 'video-generate', 'video-frame-extract', 'video-concat'])
 
 /** 有版本历史功能的节点原型 id 集合（右键菜单提供「历史」；获取视频帧节点已移除历史） */
 const HISTORY_PROTOTYPES = new Set(['image-generate', 'video-generate'])
@@ -1239,6 +1258,11 @@ async function generateNode(nodeId: string) {
     await extractNodeFrame(nodeId)
     return
   }
+  if (node.prototypeId === 'video-concat') {
+    // 拼接视频：本地 ffmpeg 拼接（不走工作流）
+    await concatNodeVideos(nodeId)
+    return
+  }
   if (node.prototypeId === 'video-generate') {
     const videoParams = buildVideoSubmitParams(node, {
       images: videoInputsOf(nodeId, 'image'),
@@ -1287,6 +1311,25 @@ async function extractNodeFrame(nodeId: string) {
   })
 }
 
+/**
+ * 拼接视频节点：收集有序视频输入并触发服务端 ffmpeg 拼接。
+ *
+ * @param nodeId 节点 id
+ */
+async function concatNodeVideos(nodeId: string) {
+  const node = nodeMap.value[nodeId]
+  if (!node) return
+  const videos = videoInputsOf(nodeId, 'video')
+  if (videos.length < 2) {
+    showSnackbar('请至少连接两段视频', 'primary')
+    return
+  }
+  gen.clearStatus(nodeId)
+  await gen.concatVideo(node, videos.map((v) => v.path), (config) => {
+    store.updateNode(nodeId, { config })
+  })
+}
+
 /** 节点当前是否在生成中（供编辑器显示） */
 function isNodeRunning(nodeId: string): boolean {
   return statusByNode.value[nodeId]?.status === 'running'
@@ -1314,9 +1357,10 @@ function videoInputsOf(nodeId: string, type: 'image' | 'video' | 'audio'): Canva
   return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === type)
 }
 
-/** 视频生成节点三组输入（非 video-generate 节点为空数组；按 config.inputOrder 排序） */
+/** 视频生成/拼接节点三组输入（非这两类节点为空数组；按 config.inputOrder 排序） */
 const videoInputGroups = computed(() => {
-  if (!editorPanel.value || editorPanel.value.node.prototypeId !== 'video-generate') {
+  const proto = editorPanel.value?.node.prototypeId
+  if (!editorPanel.value || (proto !== 'video-generate' && proto !== 'video-concat')) {
     return { images: [] as CanvasInputInfo[], videos: [] as CanvasInputInfo[], audios: [] as CanvasInputInfo[] }
   }
   const id = editorPanel.value.node.id

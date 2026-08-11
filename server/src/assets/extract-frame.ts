@@ -58,6 +58,7 @@ export function parseFps(rate: string | number | undefined): number {
 /** ffprobe 探测结果中的视频流字段（本模块用到的子集） */
 interface ProbeVideoStream {
   codec_type?: string;
+  codec_name?: string;
   nb_frames?: string | number;
   avg_frame_rate?: string | number;
   width?: number;
@@ -102,7 +103,7 @@ export function getTotalFrames(filePath: string): Promise<number> {
   });
 }
 
-/** 视频基础信息（供「提取当前帧」把播放时间换算为帧索引） */
+/** 视频基础信息（供「提取当前帧」把播放时间换算为帧索引、拼接前规格校验等使用） */
 export interface VideoInfo {
   /** 时长（秒） */
   duration: number;
@@ -112,6 +113,8 @@ export interface VideoInfo {
   width: number;
   /** 视频高度（像素） */
   height: number;
+  /** 视频编码（如 h264/hevc；不可用为空串） */
+  codec?: string;
 }
 
 /**
@@ -139,6 +142,7 @@ export function getVideoInfo(filePath: string): Promise<VideoInfo> {
         fps: parseFps(stream.avg_frame_rate),
         width: Number(stream.width) || 0,
         height: Number(stream.height) || 0,
+        codec: String(stream.codec_name ?? ''),
       });
     });
   });
@@ -158,6 +162,53 @@ export async function readVideoInfo(project: string, videoPath: string): Promise
     throw Object.assign(new Error('视频文件不存在'), { code: 'NOT_FOUND' });
   }
   return getVideoInfo(videoAbs);
+}
+
+/** 音频基础信息（供连线时按真实时长回填、拼接前规格校验等使用） */
+export interface AudioInfo {
+  /** 时长（秒） */
+  duration: number;
+}
+
+/**
+ * 探测音频基础信息：时长（一次 ffprobe）。
+ *
+ * @param filePath 音频绝对路径
+ * @returns 音频信息
+ * @throws Error ffprobe 失败或未找到音频流
+ */
+export function getAudioInfo(filePath: string): Promise<AudioInfo> {
+  return new Promise((resolve, reject) => {
+    Ffmpeg.ffprobe(filePath, (err: Error | null, data?: ProbeData) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      const stream = data?.streams?.find((s) => s.codec_type === 'audio');
+      if (!stream) {
+        reject(new Error('未找到音频流'));
+        return;
+      }
+      const duration = Number(data?.format?.duration ?? stream.duration ?? 0);
+      resolve({ duration: Number.isFinite(duration) ? duration : 0 });
+    });
+  });
+}
+
+/**
+ * 读取项目内音频的基础信息（含路径解析与存在性检查）。
+ *
+ * @param project 项目名
+ * @param audioPath 音频相对路径（assert/ 下）
+ * @returns 音频信息
+ * @throws Error 音频不存在（code=NOT_FOUND）或 ffprobe 失败
+ */
+export async function readAudioInfo(project: string, audioPath: string): Promise<AudioInfo> {
+  const audioAbs = resolveProjectPath(project, audioPath);
+  if (!(await pathExists(audioAbs))) {
+    throw Object.assign(new Error('音频文件不存在'), { code: 'NOT_FOUND' });
+  }
+  return getAudioInfo(audioAbs);
 }
 
 /**

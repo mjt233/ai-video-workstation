@@ -193,4 +193,51 @@ describe('useCanvasStore', () => {
     store.removeNode(a.id)
     expect(events.map((e) => e.type)).toEqual(['connect', 'disconnect'])
   })
+
+  /** 构造带指定音频块导演台配置的 video-generate 节点 */
+  function setupVideoGenerate(store: ReturnType<typeof useCanvasStore>, clips: Array<{ sourceNodeId: string; duration: number }>) {
+    const vg = store.addNode('video-generate', 0, 0)
+    store.updateNode(vg.id, {
+      config: {
+        director: {
+          duration: 10, width: 1080, height: 1920, fps: 24,
+          imageClips: [],
+          audioClips: clips.map((c, i) => ({ id: `a${i}`, sourceNodeId: c.sourceNodeId, startOffset: 0, trimStart: 0, trimEnd: 0, duration: c.duration })),
+        },
+      },
+    })
+    return vg
+  }
+
+  it('updateDirectorAudioClipDuration：命中匹配音频块并更新时长、置脏', () => {
+    const store = useCanvasStore('p', TARGET)
+    const vg = setupVideoGenerate(store, [{ sourceNodeId: 'aud1', duration: 2 }])
+    store.updateDirectorAudioClipDuration(vg.id, 'aud1', 5)
+    const clips = (store.nodes.value[0].config.director as { audioClips: Array<{ duration: number }> }).audioClips
+    expect(clips[0].duration).toBe(5)
+    expect(store.dirty.value).toBe(true)
+  })
+
+  it('updateDirectorAudioClipDuration：未找到匹配来源节点时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    const vg = setupVideoGenerate(store, [{ sourceNodeId: 'aud1', duration: 2 }])
+    store.updateDirectorAudioClipDuration(vg.id, 'aud-other', 5)
+    const clips = (store.nodes.value[0].config.director as { audioClips: Array<{ duration: number }> }).audioClips
+    expect(clips[0].duration).toBe(2)
+  })
+
+  it('updateDirectorAudioClipDuration：时长无变化时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    const vg = setupVideoGenerate(store, [{ sourceNodeId: 'aud1', duration: 5 }])
+    store.updateDirectorAudioClipDuration(vg.id, 'aud1', 5)
+    const clips = (store.nodes.value[0].config.director as { audioClips: Array<{ duration: number }> }).audioClips
+    expect(clips[0].duration).toBe(5)
+  })
+
+  it('updateDirectorAudioClipDuration：非 video-generate 节点 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    const img = store.addNode('image-generate', 0, 0)
+    store.updateDirectorAudioClipDuration(img.id, 'aud1', 5)
+    expect(store.nodes.value).toHaveLength(1)
+  })
 })

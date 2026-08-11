@@ -283,6 +283,7 @@ import { getWorkflows, type WorkflowInfo } from '../../../api/workflow'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
+import { mergeInputOrder as mergeGlobalInputOrder } from '../../../canvas/generate'
 import { canvasDirectorToProject, projectToCanvasDirector } from '../../../canvas/videoDirectorBridge'
 import type { CanvasDirectorConfig, VideoGenerateMode } from '../../../canvas/videoTypes'
 import type { WorkflowUserParamDeclaration, WorkflowUserParamValue } from '../../../api/workflow'
@@ -514,6 +515,21 @@ watch(
   },
 )
 
+/**
+ * 切入导演台模式时初始化时长：config.director.duration 为 0/缺失时，
+ * 继承其它模式设定的 config.duration（>0 用其值，否则回退 5），保持导演台
+ * 「总长」与「时长(秒)」输入框一致。不 immediate——节点直接以导演台模式
+ * 新建/加载时只靠显示层回退，不自动写盘；用户编辑导演台后才持久化。
+ */
+watch(mode, (m) => {
+  if (m !== 'director') return
+  const dur = directorConfig.value.duration
+  if (typeof dur === 'number' && dur > 0) return
+  const inherit = Number(props.node.config.duration)
+  const target = Number.isFinite(inherit) && inherit > 0 ? inherit : 5
+  emit('update:config', { director: { ...directorConfig.value, duration: target } })
+})
+
 /** 全部输入的预览 URL（nodeId → URL；输入或项目变化时重建） */
 const previewUrls = computed<Record<string, string>>(() => {
   const m: Record<string, string> = {}
@@ -537,9 +553,16 @@ const pathToSource = computed<Record<string, string>>(() => {
   return m
 })
 
-/** 导演台项目数据（供 VideoDirector 渲染；素材路径由 sourceToPath 解析，缺失时为空串） */
+/**
+ * 导演台项目数据（供 VideoDirector 渲染；素材路径由 sourceToPath 解析，缺失时为空串）。
+ * 时长缺省回退 5：与「时长(秒)」输入框（同为 || 5 回退）保持一致，避免
+ * config.director.duration 为 0 时导演台「总长」显示 0.0s 而输入框显示 5s 的割裂。
+ */
 const directorProject = computed(() =>
-  canvasDirectorToProject(directorConfig.value, sourceToPath.value),
+  canvasDirectorToProject(
+    { ...directorConfig.value, duration: Number(directorConfig.value.duration) || 5 },
+    sourceToPath.value,
+  ),
 )
 
 /**
@@ -568,15 +591,14 @@ const inputOrder = computed<string[]>(() =>
 )
 
 /**
- * 组内重排后合并回全局 inputOrder：保持其他组相对顺序不变，仅调整本组顺序。
+ * 组内重排后合并回全局 inputOrder（共享纯函数 generate.mergeInputOrder 的薄封装，
+ * 自动带入当前全局 inputOrder）。
  *
  * @param orderedIds 本组重排后的 nodeId 顺序
  * @returns 新的全局 inputOrder
  */
 function mergeInputOrder(orderedIds: string[]): string[] {
-  const groupIds = new Set(orderedIds)
-  const rest = inputOrder.value.filter((id) => !groupIds.has(id))
-  return [...rest, ...orderedIds]
+  return mergeGlobalInputOrder(inputOrder.value, orderedIds)
 }
 
 /** 当前输出时长（秒）：导演台存 config.director.duration；首尾帧/参考存 config.duration，缺省 5 */

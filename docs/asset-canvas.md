@@ -66,12 +66,14 @@
 | `image-loader`（加载图片） | 无 | `out: image` | 否 | `nodes/ImageLoaderNode.vue` | `editors/ImageLoaderEditor.vue` |
 | `image-generate`（生成图片） | `in: image` | `out: image` | 是 | `nodes/ImageGenerateNode.vue` | `editors/ImageGenerateEditor.vue` |
 | `text`（文本） | 无 | `out: text` | 是 | `nodes/TextNode.vue` | 无 |
+| `video-concat`（拼接视频） | `in: video`（可多段连线） | `out: video` | 是 | `nodes/ConcatVideoNode.vue` | `editors/ConcatVideoEditor.vue` |
 
 - **加载图片**：`config.assetPath` 绑定一张既有资产（上传到 `assert/custom/canvas/` 或从资产选择器选择）；点击节点出现的配置组件可预览当前图并「上传图片 / 选择资产」。
 - **加载音频**：`config.assetPath` 绑定一段音频（上传到 `assert/custom/canvas/` 或从资产选择器选择）。该节点打开的资产选择器额外提供「音频」页签（台词音频/分镜自定义/全局自定义），且「角色」页签在选择角色后会展示**音色**分区（`assert/character/{角色}/voice.flac` 由 character-voice 任务生成；`assert/character/{角色}/voice-variants/{变体id}.flac` 为角色**声音变体**，见 `docs/asset-layout.md`，均已生成才列出），与外观图一起可选；图片类节点（image-loader）的选择器不显示音色与音频页签（`AssetCanvas.openAssetPicker` 按 `prototypeId === 'audio-loader'` 决定 `showVoice` 与页签列表）。
 - **加载视频**：`config.assetPath` 绑定一段视频（上传到 `assert/custom/canvas/` 或从资产选择器选择）。该节点打开的资产选择器额外提供「分镜视频」页签（`VideoPicker`）：列出 `assert/scene/{集}/{分镜}/video/` 目录下的全部视频（`{index}.mp4`），目录为空时兼容回退旧版 `video.mp4`；分镜画布（`kind === 'scene'`）下编辑器提供「设为分镜视频」，把当前视频复制为 `assert/scene/{集}/{分镜}/video/0.mp4`（服务端批量生成 `discovery.ts` 也输出到该路径）。
 - **生成图片**：`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（默认有输入图用 `image-edit`，否则 `text-to-image`）、`workflowParams`（用户参数）、`inputOrder`（输入图顺序，见 §7）、`current` / `history`。
 - **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`workflowParams`、`inputOrder`、`current` / `history`。单一 `media` 输入口，素材类型由来源节点自动归类；编辑器内嵌导演台（仅 director 模式）或参考素材分组；分镜画布下提供「设为分镜视频」（把 `config.current` 复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。
+- **拼接视频**：`config` 含 `inputOrder`（拼接顺序，编辑器内 `VideoRefInputGroup` 拖拽排序）、`current` / `history`。单一 `video` 输入口，同一端口可连多段视频（无输入上限校验）；编辑器「拼接」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/concat-video`（本地 ffmpeg，concat demuxer + `-c copy` 无损拼接，各段编码/分辨率/帧率/音轨结构须一致，不一致返回清晰中文错误）；产物为版本化 `assert/{scope}/canvas/{nodeId}/v{n}.mp4`，回写 `current` / `history`。
 - **文本**：`config.text`，可编辑纯文本；当前仅作为 text 类型数据流锚点。
 
 ---

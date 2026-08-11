@@ -421,6 +421,27 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
   }
 
   /**
+   * 校正音频块时长（来自解码后的真实时长）。
+   *
+   * 音频块 `duration` 的语义是「音频原始时长」，应始终与文件实际一致；连线/旧数据可能写入
+   * 占位值（如 2s）导致素材块显示被截断。仅当 `path` 匹配且差值 ≥ 0.01s 时校正并 commit（幂等）。
+   *
+   * @param path 音频文件路径（相对项目资产路径）
+   * @param duration 音频真实时长（秒）
+   */
+  function correctAudioClipDuration(path: string, duration: number): void {
+    let changed = false
+    const audioClips = project.value.audioClips.map((c) => {
+      if (c.path !== path || Math.abs(c.duration - duration) < 0.01) return c
+      changed = true
+      return { ...c, duration }
+    })
+    if (!changed) return
+    project.value = { ...project.value, audioClips }
+    commit()
+  }
+
+  /**
    * 选中指定素材块（仅记录选中 id，不修改项目、不触发 onChange）。
    *
    * @param id 素材块 id
@@ -557,6 +578,7 @@ export function useVideoDirector(options: UseVideoDirectorOptions = {}) {
     resizeClip,
     applyImageBoundary,
     trimClip,
+    correctAudioClipDuration,
     select,
     copySelected,
     paste,
