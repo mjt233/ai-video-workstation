@@ -1278,6 +1278,15 @@ async function generateNode(nodeId: string) {
     )
     return
   }
+  if (node.prototypeId === 'tts-generate') {
+    // TTS 声音生成：收集音频输入路径（克隆模式参考音色）后走通用生成流程
+    const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config)
+    gen.setInputPaths(nodeId, paths)
+    await gen.generate(node, (config) => {
+      store.updateNode(nodeId, { config })
+    })
+    return
+  }
   if (node.prototypeId !== 'image-generate') return
   const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config)
   gen.setInputPaths(nodeId, paths)
