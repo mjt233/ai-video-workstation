@@ -70,6 +70,27 @@ export function buildTtsPayload(args: {
   return { workflowId: args.workflowId, params };
 }
 
+/**
+ * TTS 音色克隆提交载荷。
+ * @param args.workflowId Bridge 工作流 id
+ * @param args.text 朗读文本
+ * @param args.refText 参考音频的语音内容文字
+ * @param args.refAudio 参考音频文件（multipart 文件 key audio_0）
+ * @param args.seed 随机种子（可选）
+ */
+export function buildTtsClonePayload(args: {
+  workflowId: string;
+  text: string;
+  refText: string;
+  refAudio: File;
+  seed?: string;
+  extraParams?: Record<string, unknown>;
+}): BridgeExecutePayload {
+  const params: Record<string, unknown> = { ...(args.extraParams ?? {}), text: args.text, ref_text: args.refText };
+  if (args.seed != null) params.seed = args.seed;
+  return { workflowId: args.workflowId, params, files: { audio_0: args.refAudio } };
+}
+
 // ── 图片编辑构建器 ───────────────────────────────────────────────────
 
 export interface ImageEditSizeParams {
