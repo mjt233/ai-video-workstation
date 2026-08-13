@@ -296,3 +296,35 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
     await expect(submit(mkVideoCtx(execute, { mode: 'upscale', resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', extraParams: {} }) as never)).rejects.toThrow(/不支持生成模式/);
   });
 });
+
+describe('buildSubmit（tts-voice-clone）', () => {
+  it('读取 text/refText/refAudioPath 并执行 execute（文件 audio_0）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('tts_voice_clone', 'tts-voice-clone', { cancelable: true });
+    const refAudio = new File([], 'ref.flac');
+    const ctx = {
+      vars: { text: '你好', refText: '参考文本', refAudioPath: '["assert/custom/ref.flac"]' },
+      projectConfig: { width: 1080, height: 1920 },
+      readAssertFile: async () => refAudio,
+      provider: { execute },
+    } as never;
+    await submit(ctx as never);
+    expect(execute).toHaveBeenCalledWith({
+      workflowId: 'tts_voice_clone',
+      params: expect.objectContaining({ text: '你好', ref_text: '参考文本' }),
+      files: { audio_0: refAudio },
+    });
+  });
+
+  it('缺少 text/refText/refAudioPath 报错', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('tts_voice_clone', 'tts-voice-clone', { cancelable: true });
+    const mk = (vars: Record<string, string | undefined>) => ({
+      vars, projectConfig: { width: 1080, height: 1920 }, readAssertFile: async () => new File([], 'a.flac'), provider: { execute },
+    } as never);
+    await expect(submit(mk({ text: '', refText: 'r', refAudioPath: '["a.flac"]' }) as never)).rejects.toThrow(/需要 vars.text/);
+    await expect(submit(mk({ text: 't', refText: '', refAudioPath: '["a.flac"]' }) as never)).rejects.toThrow(/需要 vars.refText/);
+    await expect(submit(mk({ text: 't', refText: 'r', refAudioPath: '["a.flac","b.flac"]' }) as never)).rejects.toThrow(/恰好 1 个参考音频/);
+    await expect(submit(mk({ text: 't', refText: 'r', refAudioPath: '[]' }) as never)).rejects.toThrow(/恰好 1 个参考音频/);
+  });
+});

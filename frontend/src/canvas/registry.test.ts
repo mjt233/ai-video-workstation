@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含八个内置节点', () => {
+  it('包含九个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'image-generate',
       'image-loader',
       'text',
+      'tts-generate',
       'video-concat',
       'video-frame-extract',
       'video-generate',
@@ -40,6 +41,18 @@ describe('音频/视频加载节点原型', () => {
     expect(audio?.outputPorts[0]?.type).toBe('audio')
     expect(video?.name).toBe('加载视频')
     expect(video?.outputPorts[0]?.type).toBe('video')
+  })
+})
+
+describe('TTS 声音生成节点原型', () => {
+  it('audio 输入、audio 输出、默认配置与 current.path 解析', () => {
+    const p = getPrototype('tts-generate')!
+    expect(p.name).toBe('TTS声音生成')
+    expect(p.inputPorts[0]?.type).toBe('audio')
+    expect(p.outputPorts[0]?.type).toBe('audio')
+    expect(p.defaultConfig).toMatchObject({ mode: 'design', text: '', refText: '', prompt: '' })
+    expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/tts/v1.flac' } })).toBe('assert/scene/1/1/canvas/tts/v1.flac')
+    expect(p.getOutputAssetPath?.({})).toBeUndefined()
   })
 })
 

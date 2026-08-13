@@ -126,6 +126,57 @@ describe('useCanvasGeneration', () => {
     expect(gen.statusByNode.value.vg?.errorMsg).toBe('缺少视频提交参数')
   })
 
+  it('TTS 声音生成（设计模式）：tts-voice-design + prompt/text + .flac 产物', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'tg', prototypeId: 'tts-generate', name: 'TTS声音生成', x: 0, y: 0, width: 240, height: 160,
+      config: { mode: 'design', text: '你好', prompt: '温柔女声', workflowImpl: 'ceb-tts_voice_design' },
+    }
+    await gen.generate(node, () => {})
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: 'tts-voice-design',
+        impl: 'ceb-tts_voice_design',
+        params: expect.objectContaining({
+          vars: expect.objectContaining({ text: '你好', prompt: '温柔女声' }),
+          outputPath: 'assert/scene/1/1/canvas/tg/v1.flac',
+        }),
+      }),
+    )
+  })
+
+  it('TTS 声音生成（克隆模式）：tts-voice-clone + refAudioPath + .flac 产物', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'tg', prototypeId: 'tts-generate', name: 'TTS声音生成', x: 0, y: 0, width: 240, height: 160,
+      config: { mode: 'clone', text: '你好', refText: '参考文本', workflowImpl: 'ceb-tts_voice_clone' },
+    }
+    gen.setInputPaths('tg', ['assert/custom/ref.flac'])
+    await gen.generate(node, () => {})
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: 'tts-voice-clone',
+        impl: 'ceb-tts_voice_clone',
+        params: expect.objectContaining({
+          vars: expect.objectContaining({ text: '你好', refText: '参考文本', refAudioPath: '["assert/custom/ref.flac"]' }),
+          outputPath: 'assert/scene/1/1/canvas/tg/v1.flac',
+        }),
+      }),
+    )
+  })
+
+  it('TTS 声音生成（克隆模式）无音频输入：error 且不调用 runWorkflow', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'tg', prototypeId: 'tts-generate', name: 'TTS声音生成', x: 0, y: 0, width: 240, height: 160,
+      config: { mode: 'clone', text: '你好', refText: '参考文本' },
+    }
+    await gen.generate(node, () => {})
+    expect(runWorkflow).not.toHaveBeenCalled()
+    expect(gen.statusByNode.value.tg?.status).toBe('error')
+    expect(gen.statusByNode.value.tg?.errorMsg).toContain('需先连接音频输入')
+  })
+
   it('拼接视频节点：调用服务端 concat-video 并回写 .mp4 产物', async () => {
     ;(concatVideo as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/vc/v1.mp4' })
     const gen = useCanvasGeneration('p', TARGET)

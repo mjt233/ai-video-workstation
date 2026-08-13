@@ -5,6 +5,7 @@
  * - text-to-image（文生图）
  * - image-edit（图片编辑）
  * - tts-voice-design（音色设计）
+ * - tts-voice-clone（音色克隆）
  * - image-to-video（图生视频）
  *
  * 各类型声明专用 interface；调用方通过 vars 字段区分具体资产用途。
@@ -164,6 +165,25 @@ export interface TtsVoiceDesignVars extends WorkflowVarsBase {
   index?: string;
   /** 可选：情绪（purpose=scene-tts，引擎可注入） */
   emotion?: string;
+}
+
+// ── 音色克隆 tts-voice-clone ────────────────────────────────────────
+
+/**
+ * 音色克隆 / TTS 工作流变量。
+ *
+ * 用于资产画布「TTS声音生成」节点音色克隆模式。
+ * 调用方提供 text（朗读文本）、refText（参考音频文字内容）与 refAudioPath（参考音频路径）。
+ */
+export interface TtsVoiceCloneVars extends WorkflowVarsBase {
+  /** 待合成的朗读文本 */
+  text: string;
+  /** 参考音频的语音内容文字 */
+  refText: string;
+  /** 参考音频文件相对路径（JSON 数组字符串，与 imagePaths 同约定） */
+  refAudioPath: string;
+  /** 可选：资产用途标签，如 `canvas-tts` */
+  purpose?: string;
 }
 
 // ── 图生视频 image-to-video ─────────────────────────────────────────

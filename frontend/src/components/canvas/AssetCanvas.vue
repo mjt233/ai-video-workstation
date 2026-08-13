@@ -912,10 +912,10 @@ async function deleteNode(nodeId: string) {
 // ── 右键菜单 ────────────────────────────────────────────
 
 /** 生成类节点原型 id 集合（右键菜单提供「重新生成」；含获取视频帧节点） */
-const GENERATE_PROTOTYPES = new Set(['image-generate', 'video-generate', 'video-frame-extract', 'video-concat'])
+const GENERATE_PROTOTYPES = new Set(['image-generate', 'video-generate', 'video-frame-extract', 'video-concat', 'tts-generate'])
 
 /** 有版本历史功能的节点原型 id 集合（右键菜单提供「历史」；获取视频帧节点已移除历史） */
-const HISTORY_PROTOTYPES = new Set(['image-generate', 'video-generate'])
+const HISTORY_PROTOTYPES = new Set(['image-generate', 'video-generate', 'tts-generate'])
 
 /**
  * 判断原型 id 是否属于生成类节点（有重新生成能力的节点）。
@@ -1276,6 +1276,15 @@ async function generateNode(nodeId: string) {
       },
       videoParams,
     )
+    return
+  }
+  if (node.prototypeId === 'tts-generate') {
+    // TTS 声音生成：收集音频输入路径（克隆模式参考音色）后走通用生成流程
+    const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config)
+    gen.setInputPaths(nodeId, paths)
+    await gen.generate(node, (config) => {
+      store.updateNode(nodeId, { config })
+    })
     return
   }
   if (node.prototypeId !== 'image-generate') return

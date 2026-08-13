@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTextToImagePayload,
   buildTtsPayload,
+  buildTtsClonePayload,
   buildImageEditPayload,
   buildFirstLastFramePayload,
   buildDirectorPayload,
@@ -31,6 +32,21 @@ describe('buildTtsPayload', () => {
   it('prompt/text/seed', () => {
     const p = buildTtsPayload({ workflowId: 'tts_voice_design', prompt: '温柔女声', text: '你好', seed: '1' });
     expect(p).toEqual({ workflowId: 'tts_voice_design', params: { prompt: '温柔女声', text: '你好', seed: '1' } });
+  });
+});
+
+describe('buildTtsClonePayload', () => {
+  it('params text/ref_text + 文件 audio_0', () => {
+    const p = buildTtsClonePayload({ workflowId: 'tts_voice_clone', text: '你好', refText: '参考文本', refAudio: aud, seed: '1' });
+    expect(p).toEqual({
+      workflowId: 'tts_voice_clone',
+      params: { text: '你好', ref_text: '参考文本', seed: '1' },
+      files: { audio_0: aud },
+    });
+  });
+  it('省略 seed 不上送', () => {
+    const p = buildTtsClonePayload({ workflowId: 'tts_voice_clone', text: '你好', refText: '参考文本', refAudio: aud });
+    expect(p.params).toEqual({ text: '你好', ref_text: '参考文本' });
   });
 });
 

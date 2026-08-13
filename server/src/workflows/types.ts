@@ -6,6 +6,7 @@ export type {
   TextToImageVars,
   ImageEditVars,
   TtsVoiceDesignVars,
+  TtsVoiceCloneVars,
   ImageToVideoVars,
   // 兼容旧名
   CharacterAppearanceVars,
@@ -25,12 +26,14 @@ export type { WorkflowOutput } from '../providers/types.js';
  * - text-to-image：文生图
  * - image-edit：图片编辑
  * - tts-voice-design：音色设计 / TTS
+ * - tts-voice-clone：音色克隆 / TTS
  * - image-to-video：图生视频
  */
 export type WorkflowTypeId =
   | 'text-to-image'
   | 'image-edit'
   | 'tts-voice-design'
+  | 'tts-voice-clone'
   | 'image-to-video';
 
 /** Project-level structured config from design/{project}/project.json */

@@ -15,6 +15,7 @@ import {
   buildReferencePayload,
   buildTextToImagePayload,
   buildTtsPayload,
+  buildTtsClonePayload,
   resolveImageEditSizeParams,
 } from './bridge-client.js';
 import type {
@@ -181,6 +182,38 @@ function ttsSubmit(workflowId: string): WorkflowDefinition['submit'] {
 }
 
 /**
+ * TTS 音色克隆提交实现。
+ *
+ * text（朗读文本）与 refText（参考音频文字内容）来自 vars；refAudioPath 为 JSON 数组
+ * 字符串（与 imagePaths 同约定），须恰好 1 个音频路径，经 ctx.readAssertFile 读取后
+ * 以文件 key audio_0 上传。
+ *
+ * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
+ * @returns 动态工作流 submit 函数
+ */
+function ttsCloneSubmit(workflowId: string): WorkflowDefinition['submit'] {
+  return async (ctx: WorkflowRunContext<WorkflowVarsBase>) => {
+    const vars = ctx.vars as Record<string, string | undefined>;
+    const text = (vars.text ?? '').trim();
+    const refText = (vars.refText ?? '').trim();
+    if (!text) throw new Error('tts-voice-clone 需要 vars.text（朗读文本）');
+    if (!refText) throw new Error('tts-voice-clone 需要 vars.refText（参考音频文字内容）');
+    let paths: string[] = [];
+    try {
+      const parsed = JSON.parse(vars.refAudioPath ?? '[]') as unknown;
+      if (!Array.isArray(parsed) || !parsed.every((p) => typeof p === 'string')) throw new Error('refAudioPath 须为字符串数组');
+      paths = parsed.map((p) => p.trim()).filter(Boolean);
+    } catch (e) {
+      throw new Error(`tts-voice-clone refAudioPath 无效: ${vars.refAudioPath}; ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (paths.length !== 1) throw new Error('tts-voice-clone 需要恰好 1 个参考音频（vars.refAudioPath）');
+    const refAudio = await ctx.readAssertFile(paths[0]);
+    const extraParams = passthroughParams(ctx, TTS_STRUCTURAL_KEYS);
+    return ctx.provider.execute(buildTtsClonePayload({ workflowId, text, refText, refAudio, seed: vars.seed, extraParams }));
+  };
+}
+
+/**
  * 图片编辑提交实现。
  *
  * vars.imagePaths 为 JSON 字符串数组（相对 design/{project}/ 的 assert/ 路径）；
@@ -311,6 +344,7 @@ export function buildSubmit(
     case 'text-to-image': return textToImageSubmit(workflowId);
     case 'image-edit': return imageEditSubmit(workflowId);
     case 'tts-voice-design': return ttsSubmit(workflowId);
+    case 'tts-voice-clone': return ttsCloneSubmit(workflowId);
     case 'image-to-video': return videoSubmit(workflowId, caps);
   }
 }

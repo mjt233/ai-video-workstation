@@ -80,6 +80,10 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
       // 拼接视频产物扩展名替换为 .mp4（图片路径助手默认 .jpg）
       return base.replace(/\.jpg$/, '.mp4')
     }
+    if (node.prototypeId === 'tts-generate') {
+      // TTS 产物扩展名替换为 .flac（音频）
+      return base.replace(/\.jpg$/, '.flac')
+    }
     return base
   }
 
@@ -98,8 +102,10 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
    *
    * - 图片节点：走既有 prompt/inputPaths 逻辑（text-to-image / image-edit）
    * - 视频节点（video-generate）：走自包含提交参数（videoParams，组装后传入）
+   * - TTS 节点（tts-generate）：按模式组装 vars（design：text/prompt；clone：text/refText/refAudioPath），
+   *   克隆模式需先连接音频输入作为参考音色，产物为 .flac
    *
-   * @param node 生成节点数据（图片或视频）
+   * @param node 生成节点数据（图片、视频或 TTS）
    * @param updateConfig 更新节点配置的回调（由调用方写入 current/history）
    * @param videoParams 视频生成节点的自包含提交参数（仅 video-generate 需要）
    */
@@ -130,6 +136,42 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
             userParams: (node.config.workflowParams as Record<string, WorkflowUserParamValue> | undefined) ?? {},
             video: videoParams,
           },
+        })
+        taskIdByNode.value[nodeId] = taskId
+        poll(taskId, node, outputPath, updateConfig)
+      } catch (e) {
+        statusByNode.value[nodeId] = {
+          status: 'error',
+          errorMsg: e instanceof Error ? e.message : String(e),
+        }
+      }
+      return
+    }
+
+    // ── TTS 声音生成节点：按模式组装 vars ──
+    if (node.prototypeId === 'tts-generate') {
+      const mode = node.config.mode === 'clone' ? 'clone' : 'design'
+      const text = String(node.config.text ?? '')
+      const inputPaths = inputPathsRef.value[nodeId] ?? []
+      if (mode === 'clone' && inputPaths.length < 1) {
+        statusByNode.value[nodeId] = { status: 'error', errorMsg: '音色克隆需先连接音频输入作为参考音色' }
+        return
+      }
+      const workflowId = mode === 'clone' ? 'tts-voice-clone' : 'tts-voice-design'
+      const vars: Record<string, string> =
+        mode === 'clone'
+          ? { text, refText: String(node.config.refText ?? ''), refAudioPath: JSON.stringify(inputPaths) }
+          : { text, prompt: String(node.config.prompt ?? '') }
+      const impl = String(node.config.workflowImpl ?? '')
+      const outputPath = computeOutputPath(node)
+      const userParams = (node.config.workflowParams as Record<string, WorkflowUserParamValue> | undefined) ?? {}
+      statusByNode.value[nodeId] = { status: 'running' }
+      try {
+        const { taskId } = await runWorkflow({
+          project,
+          workflowId,
+          impl,
+          params: { vars, outputPath, userParams },
         })
         taskIdByNode.value[nodeId] = taskId
         poll(taskId, node, outputPath, updateConfig)

@@ -17,6 +17,9 @@ describe('deriveWorkflowType', () => {
   it('image-to-video → image-to-video', () => {
     expect(deriveWorkflowType([group('image-to-video')])).toBe('image-to-video');
   });
+  it('tts-voice-clone 父标签 → tts-voice-clone', () => {
+    expect(deriveWorkflowType([group('tts-voice-clone')])).toBe('tts-voice-clone');
+  });
   it('未知类型 → null', () => {
     expect(deriveWorkflowType([group('text-to-video')])).toBeNull();
   });
