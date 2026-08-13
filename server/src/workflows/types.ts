@@ -26,6 +26,7 @@ export type { WorkflowOutput } from '../providers/types.js';
  * - text-to-image：文生图
  * - image-edit：图片编辑
  * - tts-voice-design：音色设计 / TTS
+ * - tts-voice-clone：音色克隆 / TTS
  * - image-to-video：图生视频
  */
 export type WorkflowTypeId =

@@ -5,6 +5,7 @@
  * - text-to-image（文生图）
  * - image-edit（图片编辑）
  * - tts-voice-design（音色设计）
+ * - tts-voice-clone（音色克隆）
  * - image-to-video（图生视频）
  *
  * 各类型声明专用 interface；调用方通过 vars 字段区分具体资产用途。
