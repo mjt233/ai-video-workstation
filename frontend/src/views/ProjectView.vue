@@ -4,48 +4,84 @@
     style="height: calc(100vh - 64px); overflow: hidden;"
   >
     <v-col
-      cols="3"
-      class="pa-2 border-e bg-surface"
-      style="overflow-y: auto; height: 100%;"
+      :cols="sidebarCollapsed ? 'auto' : '3'"
+      class="border-e bg-surface"
+      :class="sidebarCollapsed ? 'pa-1 d-flex flex-column align-center' : 'pa-2'"
+      :style="sidebarCollapsed ? 'height: 100%; overflow: hidden;' : 'overflow-y: auto; height: 100%;'"
     >
-      <div class="d-flex align-center mb-2 text-primary font-weight-bold">
-        <v-icon
-          icon="mdi-file-tree"
-          class="mr-1"
-          color="primary"
-          size="small"
-        />
-        资产浏览器
-        <v-spacer />
-        <v-btn
-          size="x-small"
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-lightning-bolt"
-          @click="showBatchDialog = true"
+      <!-- 收起状态：仅保留展开按钮 -->
+      <template v-if="sidebarCollapsed">
+        <v-tooltip
+          text="展开资产浏览器"
+          location="right"
         >
-          一键生成
-        </v-btn>
-      </div>
-      <v-divider class="mb-2" />
-      <AssetTree
-        :key="treeKey"
-        :project="project"
-        @refresh="refreshTree"
-      />
-      <BatchGenerateDialog
-        v-model="showBatchDialog"
-        :project="project"
-        :batch-id="activeBatchId"
-        :summary="summary"
-        :tasks="tasks"
-        @update:batch-id="activeBatchId = $event"
-        @refresh="refreshTree"
-        @clear-batch="clearBatch"
-      />
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              icon="mdi-chevron-right"
+              variant="text"
+              class="mt-1"
+              @click="sidebarCollapsed = false"
+            />
+          </template>
+        </v-tooltip>
+      </template>
+      <!-- 展开状态：完整内容 -->
+      <template v-else>
+        <div class="d-flex align-center mb-2 text-primary font-weight-bold">
+          <v-icon
+            icon="mdi-file-tree"
+            class="mr-1"
+            color="primary"
+            size="small"
+          />
+          资产浏览器
+          <v-spacer />
+          <v-btn
+            size="x-small"
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-lightning-bolt"
+            @click="showBatchDialog = true"
+          >
+            一键生成
+          </v-btn>
+          <v-tooltip
+            text="收起资产浏览器"
+            location="bottom"
+          >
+            <template #activator="{ props }">
+              <v-btn
+                v-bind="props"
+                icon="mdi-chevron-left"
+                size="small"
+                variant="text"
+                class="ml-1"
+                @click="sidebarCollapsed = true"
+              />
+            </template>
+          </v-tooltip>
+        </div>
+        <v-divider class="mb-2" />
+        <AssetTree
+          :key="treeKey"
+          :project="project"
+          @refresh="refreshTree"
+        />
+        <BatchGenerateDialog
+          v-model="showBatchDialog"
+          :project="project"
+          :batch-id="activeBatchId"
+          :summary="summary"
+          :tasks="tasks"
+          @update:batch-id="activeBatchId = $event"
+          @refresh="refreshTree"
+          @clear-batch="clearBatch"
+        />
+      </template>
     </v-col>
     <v-col
-      cols="9"
+      :cols="sidebarCollapsed ? false : 9"
       class="pa-4 d-flex flex-column"
       style="overflow: hidden; height: 100%;"
     >
@@ -135,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AssetTree from '../components/AssetTree.vue'
 import ProjectPanel from '../components/ProjectPanel.vue'
@@ -156,6 +192,16 @@ const shot = computed(() => route.query.shot as string)
 
 const showBatchDialog = ref(false)
 const treeKey = ref(0)
+/**
+ * 左侧资产浏览器是否已收起。状态持久化到 localStorage，
+ * 便于用户在不同项目详情页间切换时保持偏好。
+ */
+const sidebarCollapsed = ref(
+  localStorage.getItem('project-view:sidebar-collapsed') === '1',
+)
+watch(sidebarCollapsed, (v) => {
+  localStorage.setItem('project-view:sidebar-collapsed', v ? '1' : '0')
+})
 const activeBatchId = ref<string | null>(null)
 const { summary, tasks } = useBatchTask(activeBatchId)
 
