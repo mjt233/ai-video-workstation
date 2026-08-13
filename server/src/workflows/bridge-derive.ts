@@ -8,13 +8,14 @@ import type {
 } from './types.js';
 
 /** 动态注册可映射的工作流类型（与 types.js 的 WorkflowTypeId 一致的子集） */
-export type BridgeDerivedType = 'text-to-image' | 'image-edit' | 'tts-voice-design' | 'image-to-video';
+export type BridgeDerivedType = 'text-to-image' | 'image-edit' | 'tts-voice-design' | 'tts-voice-clone' | 'image-to-video';
 
 /** 预设类型标签 → 系统工作流类型（优先级即数组顺序，靠前命中优先） */
 const TYPE_TAGS: Array<{ tag: string; type: BridgeDerivedType }> = [
   { tag: 'text-to-image', type: 'text-to-image' },
   { tag: 'image-edit', type: 'image-edit' },
   { tag: 'tts-voice-design', type: 'tts-voice-design' },
+  { tag: 'tts-voice-clone', type: 'tts-voice-clone' },
   { tag: 'image-to-video', type: 'image-to-video' },
 ];
 
