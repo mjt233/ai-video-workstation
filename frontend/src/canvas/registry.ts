@@ -8,6 +8,7 @@ import VideoLoaderNode from '../components/canvas/nodes/VideoLoaderNode.vue'
 import VideoGenerateNode from '../components/canvas/nodes/VideoGenerateNode.vue'
 import ExtractFrameNode from '../components/canvas/nodes/ExtractFrameNode.vue'
 import ConcatVideoNode from '../components/canvas/nodes/ConcatVideoNode.vue'
+import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
@@ -15,6 +16,7 @@ import VideoLoaderEditor from '../components/canvas/editors/VideoLoaderEditor.vu
 import VideoGenerateEditor from '../components/canvas/editors/VideoGenerateEditor.vue'
 import ExtractFrameEditor from '../components/canvas/editors/ExtractFrameEditor.vue'
 import ConcatVideoEditor from '../components/canvas/editors/ConcatVideoEditor.vue'
+import TtsGenerateEditor from '../components/canvas/editors/TtsGenerateEditor.vue'
 
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
 export interface NodePrototype {
@@ -129,6 +131,26 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       prompt: '',
       director: { duration: 0, width: 0, height: 0, fps: 0, imageClips: [], audioClips: [] },
       inputOrder: [],
+    },
+  },
+  {
+    id: 'tts-generate',
+    name: 'TTS声音生成',
+    icon: 'mdi-voice',
+    // 音频输入（可选）：音色克隆模式下作为参考音色；音色设计模式无需输入
+    inputPorts: [{ id: 'in', type: 'audio', label: '参考音频' }],
+    outputPorts: [{ id: 'out', type: 'audio', label: '音频' }],
+    resizeable: true,
+    bodyComponent: TtsGenerateNode,
+    editorComponent: TtsGenerateEditor,
+    getOutputAssetPath: generateOutput,
+    defaultConfig: {
+      mode: 'design', // 'clone' | 'design'，编辑器切换
+      workflowImpl: undefined,
+      workflowParams: {},
+      text: '',
+      refText: '',
+      prompt: '',
     },
   },
   {
