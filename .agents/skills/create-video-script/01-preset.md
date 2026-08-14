@@ -38,9 +38,9 @@
 
 > 用户选定画面比例与分辨率后，依次运行以下命令写入 `project.json`（项目属性脚本，与分镜 JSON 工具同属 `scripts/`；分镜相关工具见 [`04-script-tools.md`](./04-script-tools.md)）：
 > ```bash
-> python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" aspectRatio "{用户选择的比例}"
-> python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" width {画面宽度}
-> python .claude/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" height {画面高度}
+> python .agents/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" aspectRatio "{用户选择的比例}"
+> python .agents/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" width {画面宽度}
+> python .agents/skills/create-video-script/scripts/set_project_property.py --project "{项目名称}" height {画面高度}
 > ```
 
 6. **剧情方向** — 在确定以上基调后，准备 2-3 个不同的剧情概念方向供用户选择

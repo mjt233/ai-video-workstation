@@ -223,9 +223,9 @@ async submit(params) {
 如果项目暂无 `project.json`，`width` 和 `height` 会返回 `0`，`fps` 默认 `24`。建议在 `design/{项目}/` 下创建：
 
 ```bash
-python .claude/skills/create-video-script/scripts/set_project_property.py --project "项目名" width 1080
-python .claude/skills/create-video-script/scripts/set_project_property.py --project "项目名" height 1920
-python .claude/skills/create-video-script/scripts/set_project_property.py --project "项目名" fps 24
+python .agents/skills/create-video-script/scripts/set_project_property.py --project "项目名" width 1080
+python .agents/skills/create-video-script/scripts/set_project_property.py --project "项目名" height 1920
+python .agents/skills/create-video-script/scripts/set_project_property.py --project "项目名" fps 24
 ```
 
 ---

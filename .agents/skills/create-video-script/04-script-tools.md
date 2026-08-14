@@ -1,6 +1,6 @@
 # 分镜脚本工具参考
 
-项目 `.claude/skills/create-video-script/scripts/` 目录下提供了一套 Python 脚本，用于以命令行方式管理分镜 JSON 资产，避免直接编辑 JSON 字符串。所有脚本均支持 `--help` 查看详细用法。
+项目 `.agents/skills/create-video-script/scripts/` 目录下提供了一套 Python 脚本，用于以命令行方式管理分镜 JSON 资产，避免直接编辑 JSON 字符串。所有脚本均支持 `--help` 查看详细用法。
 
 ## 环境要求
 
@@ -12,15 +12,15 @@
 ## 列出项目
 
 ```bash
-python .claude/skills/create-video-script/scripts/validate.py --list-projects
+python .agents/skills/create-video-script/scripts/validate.py --list-projects
 ```
 
 ## 分镜总览（overview.json）
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python .claude/skills/create-video-script/scripts/set_shot_overview.py` | 创建/更新分镜总览字段 | `python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --title "书生初临" --duration 4` |
-| `python .claude/skills/create-video-script/scripts/migrate_shot_overview.py` | 将旧 `overview.md` 迁移为 `overview.json` | `python .claude/skills/create-video-script/scripts/migrate_shot_overview.py -p 古人在现代` |
+| `python .agents/skills/create-video-script/scripts/set_shot_overview.py` | 创建/更新分镜总览字段 | `python .agents/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --title "书生初临" --duration 4` |
+| `python .agents/skills/create-video-script/scripts/migrate_shot_overview.py` | 将旧 `overview.md` 迁移为 `overview.json` | `python .agents/skills/create-video-script/scripts/migrate_shot_overview.py -p 古人在现代` |
 
 ### `set_shot_overview.py` 参数说明
 
@@ -37,19 +37,19 @@ python .claude/skills/create-video-script/scripts/validate.py --list-projects
 至少指定一个字段。文件不存在时会按默认值创建完整 `overview.json`，再应用本次更新。
 
 ```bash
-python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --title "书生初临" --beat "建立镜头" --visual "..." --camera "slow zoom in" --duration 4 --mood "困惑"
-python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --duration 5
+python .agents/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --title "书生初临" --beat "建立镜头" --visual "..." --camera "slow zoom in" --duration 4 --mood "困惑"
+python .agents/skills/create-video-script/scripts/set_shot_overview.py -p 古人在现代 -e 1 1 --duration 5
 ```
 
 ## 场景管理（stage.json）
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python .claude/skills/create-video-script/scripts/add_stage.py` | 添加一条场景定义 | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
-| `python .claude/skills/create-video-script/scripts/add_stage.py` | 直接引用基础场景（无角色/无修改） | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "" ""` |
-| `python .claude/skills/create-video-script/scripts/add_stage.py` | 直接引用上一分镜最后场景（`prev`） | `python .claude/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 2 prev "" ""` |
-| `python .claude/skills/create-video-script/scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python .claude/skills/create-video-script/scripts/remove_stage.py -p 古人在现代 -e 1 1 0` |
-| `python .claude/skills/create-video-script/scripts/update_stage.py` | 更新场景定义的字段 | `python .claude/skills/create-video-script/scripts/update_stage.py -p 古人在现代 -e 1 1 0 --prompt "新提示词"` |
+| `python .agents/skills/create-video-script/scripts/add_stage.py` | 添加一条场景定义 | `python .agents/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "陈书文" "图像1为背景：..."` |
+| `python .agents/skills/create-video-script/scripts/add_stage.py` | 直接引用基础场景（无角色/无修改） | `python .agents/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 1 "现代商场/现代商场-白天-平视-晴-中央扶梯" "" ""` |
+| `python .agents/skills/create-video-script/scripts/add_stage.py` | 直接引用上一分镜最后场景（`prev`） | `python .agents/skills/create-video-script/scripts/add_stage.py -p 古人在现代 -e 1 2 prev "" ""` |
+| `python .agents/skills/create-video-script/scripts/remove_stage.py` | 移除一条场景定义（按索引） | `python .agents/skills/create-video-script/scripts/remove_stage.py -p 古人在现代 -e 1 1 0` |
+| `python .agents/skills/create-video-script/scripts/update_stage.py` | 更新场景定义的字段 | `python .agents/skills/create-video-script/scripts/update_stage.py -p 古人在现代 -e 1 1 0 --prompt "新提示词"` |
 
 ### `add_stage.py` 参数说明
 
@@ -70,8 +70,8 @@ python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `python .claude/skills/create-video-script/scripts/add_script.py` | 添加一条台词 | `python .claude/skills/create-video-script/scripts/add_script.py -p 古人在现代 -e 1 1 "陈书文" "你好，请问这里有人吗？" "期待"` |
-| `python .claude/skills/create-video-script/scripts/remove_script.py` | 移除一条台词（按索引） | `python .claude/skills/create-video-script/scripts/remove_script.py -p 古人在现代 -e 1 1 0` |
+| `python .agents/skills/create-video-script/scripts/add_script.py` | 添加一条台词 | `python .agents/skills/create-video-script/scripts/add_script.py -p 古人在现代 -e 1 1 "陈书文" "你好，请问这里有人吗？" "期待"` |
+| `python .agents/skills/create-video-script/scripts/remove_script.py` | 移除一条台词（按索引） | `python .agents/skills/create-video-script/scripts/remove_script.py -p 古人在现代 -e 1 1 0` |
 
 ### `add_script.py` 参数说明
 
@@ -85,12 +85,12 @@ python .claude/skills/create-video-script/scripts/set_shot_overview.py -p 古人
 ## 完整性校验
 
 ```bash
-python .claude/skills/create-video-script/scripts/validate.py                                        # 自动检测项目并校验所有分镜
-python .claude/skills/create-video-script/scripts/validate.py -p 古人在现代                           # 指定项目校验
-python .claude/skills/create-video-script/scripts/validate.py -p 古人在现代 -e 1                     # 校验第1集所有分镜
-python .claude/skills/create-video-script/scripts/validate.py -e 1 1 2 3                             # 校验第1集的指定分镜
-python .claude/skills/create-video-script/scripts/validate.py --fix                                  # 尝试自动修复
-python .claude/skills/create-video-script/scripts/validate.py --list-projects                        # 列出所有可用项目
+python .agents/skills/create-video-script/scripts/validate.py                                        # 自动检测项目并校验所有分镜
+python .agents/skills/create-video-script/scripts/validate.py -p 古人在现代                           # 指定项目校验
+python .agents/skills/create-video-script/scripts/validate.py -p 古人在现代 -e 1                     # 校验第1集所有分镜
+python .agents/skills/create-video-script/scripts/validate.py -e 1 1 2 3                             # 校验第1集的指定分镜
+python .agents/skills/create-video-script/scripts/validate.py --fix                                  # 尝试自动修复
+python .agents/skills/create-video-script/scripts/validate.py --list-projects                        # 列出所有可用项目
 ```
 
 ### `validate.py` 参数说明

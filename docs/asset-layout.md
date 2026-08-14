@@ -479,6 +479,6 @@ design/AI的第一天/
 
 ## 8. 相关文档
 
-- 原型内容模板与写作规范：`.claude/skills/create-video-script/03-asset-output.md`
+- 原型内容模板与写作规范：`.agents/skills/create-video-script/03-asset-output.md`
 - 工作流适配与输出约定：`docs/workflow-adaptation-guide.md`
 - 资产 CRUD / 分镜排序设计：`docs/superpowers/specs/2026-07-28-asset-crud-and-shot-ordering-design.md`

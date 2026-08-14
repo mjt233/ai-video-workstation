@@ -42,6 +42,6 @@ overview.md
 - 所有 UI 文字、文档、资产和提交信息使用**中文**
 - 服务端开发时使用 `tsx watch` 自动重启（支持 TypeScript）
 - 图片/音频文件以二进制流传输；文本/markdown/JSON 以 UTF-8 传输
-- 资产管理 Python 脚本位于 `.claude/skills/create-video-script/scripts/`
+- 资产管理 Python 脚本位于 `.agents/skills/create-video-script/scripts/`
 - `design` 目录下的整体资产约定见 [./docs/asset-layout.md](./docs/asset-layout.md)
 - **资产画布**（分镜/场景详情页「资产画布」Tab）的业务逻辑、数据模型与开发指南见 [./docs/asset-canvas.md](./docs/asset-canvas.md)：包括节点类型、连线规则、画布交互、配置面板、输入图拖拽排序、生成流程、自动搭画布、设为分镜场景图、切换分镜跟随加载及常见坑

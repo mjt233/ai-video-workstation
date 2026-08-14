@@ -73,7 +73,7 @@ npm start          # Express serve frontend/dist/ + API，端口 3001
 ├── design/                # 项目资产（文件系统即数据库）
 │   ├── 古人在现代/          # 示例项目 1
 │   └── AI的第一天/          # 示例项目 2
-├── .claude/skills/        # Claude Code 技能
+├── .agents/skills/       # Agent 技能
 │   └── create-video-script/ # 剧本创作技能 + 分镜管理 Python 脚本
 └── docs/
     ├── plans/             # 开发计划
@@ -113,13 +113,13 @@ design/{project}/
 
 ## 剧本创作
 
-使用 Claude Code 的 `create-video-script` 技能进行 AI 辅助剧本创作，包括：
+使用 `.agents/skills/` 下的 `create-video-script` 技能进行 AI 辅助剧本创作，包括：
 
 1. **前置设定** — 目标受众、情感/色彩基调、美术风格、画面比例
 2. **内容设计** — 剧情概要、世界观、角色设计（适配 qwen-image + qwen-3-tts）、场景设计、分镜设计
 3. **资产输出** — 自动生成 `design/` 下的结构化资产文件
 
-分镜管理 Python 脚本位于 `.claude/skills/create-video-script/scripts/`。
+分镜管理 Python 脚本位于 `.agents/skills/create-video-script/scripts/`。
 
 ## 相关文档
 
