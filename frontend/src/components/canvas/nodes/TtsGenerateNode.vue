@@ -94,11 +94,16 @@ watch(
   position: relative;
   width: 100%;
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .tts-generate-node__audio {
   width: 100%;
-  max-height: 200px;
+  height: 48px;
 }
 
 .tts-generate-node__empty {

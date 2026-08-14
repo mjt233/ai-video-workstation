@@ -45,9 +45,21 @@ watch(
 </script>
 
 <style scoped>
+.video-generate-node {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.03);
+}
+
 .video-generate-node__video {
   width: 100%;
-  max-height: 200px;
+  height: 100%;
+  object-fit: contain;
 }
 
 .video-generate-node__empty {

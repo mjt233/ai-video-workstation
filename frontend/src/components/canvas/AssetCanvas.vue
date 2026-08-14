@@ -123,6 +123,8 @@
               class="canvas-node"
               :class="{ 'canvas-node--selected': selected }"
               @contextmenu.prevent="openContextMenu($event, id)"
+              @mouseenter="hoveredNodeId = id"
+              @mouseleave="hoveredNodeId = hoveredNodeId === id ? '' : hoveredNodeId"
             >
               <!-- 节点名称头部（双击名称进入内联编辑） -->
               <div class="canvas-node__header">
@@ -182,6 +184,17 @@
                   :style="handleStyle(protoOf(id)?.outputPorts.length ?? 1, idx)"
                 />
               </template>
+              <!-- 缩放控制点：悬浮/选中/缩放中显示，拖拽边缘或四角调整节点大小（全部节点类型） -->
+              <NodeResizer
+                v-if="protoOf(id)?.resizeable"
+                :node-id="id"
+                :is-visible="selected || hoveredNodeId === id || resizingNodeId === id"
+                :min-width="MIN_NODE_WIDTH"
+                :min-height="MIN_NODE_HEIGHT"
+                color="#1976d2"
+                @resize-start="onNodeResizeStart(id)"
+                @resize-end="onNodeResizeEnd(id, $event)"
+              />
             </div>
           </template>
         </VueFlow>
@@ -563,6 +576,9 @@ import {
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
+import { NodeResizer } from '@vue-flow/node-resizer'
+import type { OnResizeEnd } from '@vue-flow/node-resizer'
+import '@vue-flow/node-resizer/dist/style.css'
 import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from '../../canvas/registry'
@@ -638,6 +654,15 @@ const flowEl = ref<HTMLDivElement | null>(null)
 
 // ── 节点/连线渲染 ───────────────────────────────────────
 
+/** 节点最小宽度（像素，拖拽缩放的下限） */
+const MIN_NODE_WIDTH = 120
+/** 节点最小高度（像素，拖拽缩放的下限） */
+const MIN_NODE_HEIGHT = 80
+/** 当前鼠标悬浮的节点 id（悬浮时显示缩放控制点） */
+const hoveredNodeId = ref('')
+/** 正在缩放的节点 id（缩放过程中保持控制点可见，防止拖出节点边界时控制点卸载中断缩放） */
+const resizingNodeId = ref('')
+
 /** 节点 id → 节点数据（模板内直接索引） */
 const nodeMap = computed<Record<string, CanvasNodeData>>(() => {
   const m: Record<string, CanvasNodeData> = {}
@@ -707,6 +732,38 @@ function onNodeDragStop({ nodes: dragged }: NodeDragEvent) {
   for (const n of dragged) {
     store.updateNode(n.id, { x: Math.round(n.position.x), y: Math.round(n.position.y) })
   }
+}
+
+/**
+ * 节点缩放开始：记录缩放中的节点，保证控制点在拖出节点边界后仍保持可见
+ * （缩放控制点随悬浮状态显隐，若不锁定，拖出边界触发 mouseleave 卸载控制点会中断缩放）。
+ *
+ * @param nodeId 被缩放的节点 id
+ */
+function onNodeResizeStart(nodeId: string) {
+  resizingNodeId.value = nodeId
+}
+
+/**
+ * 节点缩放结束：把最终尺寸/坐标回写 store（置脏并保存，进入撤销栈）。
+ * 缩放过程中 Vue Flow 仅更新内部节点样式实现实时预览，结束才回写业务数据，
+ * 避免在 resize 事件中高频写入历史栈与触发保存。
+ * 尺寸/坐标无变化时（如仅点击控制点未拖动）跳过，避免产生无意义的撤销条目。
+ *
+ * @param nodeId 被缩放的节点 id
+ * @param payload 缩放结束事件（params 含最终 x/y/width/height）
+ */
+function onNodeResizeEnd(nodeId: string, payload: OnResizeEnd) {
+  resizingNodeId.value = ''
+  const { params } = payload
+  const node = nodeMap.value[nodeId]
+  if (!node) return
+  const x = Math.round(params.x)
+  const y = Math.round(params.y)
+  const width = Math.round(params.width)
+  const height = Math.round(params.height)
+  if (node.x === x && node.y === y && node.width === width && node.height === height) return
+  store.updateNode(nodeId, { x, y, width, height })
 }
 
 // ── 连线交互 ────────────────────────────────────────────
@@ -1933,7 +1990,8 @@ watch([panelEl, flowEl], ([panel, flow]) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: text;
+  /* 悬浮显示普通指针；文字编辑光标仅在内联重命名输入框（.canvas-node__name-input）出现 */
+  cursor: default;
 }
 
 .canvas-node__name-input {
@@ -1992,6 +2050,30 @@ watch([panelEl, flowEl], ([panel, flow]) => {
   height: 20px;
   min-width: 20px;
   min-height: 20px;
+}
+
+/* ── 节点缩放控制点（@vue-flow/node-resizer）──
+   控制点渲染在节点内部（绝对定位），提升到节点内容之上但仍低于连接点（z-index 10），
+   保证视频控件等主体内容不遮挡缩放交互；四角控制点加大尺寸并用 ::after 扩大命中区域。 */
+.canvas-node :deep(.vue-flow__resize-control) {
+  z-index: 5;
+}
+
+.canvas-node :deep(.vue-flow__resize-control.handle) {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  background-color: #1976d2;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+  transform: translate(-50%, -50%);
+}
+
+/* 扩大控制点命中区域（伪元素命中同样归属于控制点元素，缩放拖拽可直接抓取） */
+.canvas-node :deep(.vue-flow__resize-control.handle)::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
 }
 
 .canvas-node-editor-panel {

@@ -63,10 +63,15 @@
 
 | 原型 | 输入端口 | 输出端口 | 可缩放 | 卡片主体 | 配置组件（editorComponent） |
 |------|----------|----------|--------|----------|------------------------------|
-| `image-loader`（加载图片） | 无 | `out: image` | 否 | `nodes/ImageLoaderNode.vue` | `editors/ImageLoaderEditor.vue` |
+| `image-loader`（加载图片） | 无 | `out: image` | 是 | `nodes/ImageLoaderNode.vue` | `editors/ImageLoaderEditor.vue` |
+| `audio-loader`（加载音频） | 无 | `out: audio` | 是 | `nodes/AudioLoaderNode.vue` | `editors/AudioLoaderEditor.vue` |
+| `video-loader`（加载视频） | 无 | `out: video` | 是 | `nodes/VideoLoaderNode.vue` | `editors/VideoLoaderEditor.vue` |
 | `image-generate`（生成图片） | `in: image` | `out: image` | 是 | `nodes/ImageGenerateNode.vue` | `editors/ImageGenerateEditor.vue` |
 | `text`（文本） | 无 | `out: text` | 是 | `nodes/TextNode.vue` | 无 |
-| `video-concat`（拼接视频） | `in: video`（可多段连线） | `out: video` | 是 | `nodes/ConcatVideoNode.vue` | `editors/ConcatVideoEditor.vue` |
+| `video-generate`（生成视频） | `in: media` | `out: video` | 是 | `nodes/VideoGenerateNode.vue` | `editors/VideoGenerateEditor.vue` |
+| `tts-generate`（TTS声音生成） | `in: audio` | `out: audio` | 是 | `nodes/TtsGenerateNode.vue` | `editors/TtsGenerateEditor.vue` |
+| `video-frame-extract`（获取视频帧） | `in: video` | `out: image` | 是 | `nodes/ExtractFrameNode.vue` | `editors/ExtractFrameEditor.vue` |
+| `video-concat`（拼接视频） | `in: video` | `out: video` | 是 | `nodes/ConcatVideoNode.vue` | `editors/ConcatVideoEditor.vue` |
 
 - **加载图片**：`config.assetPath` 绑定一张既有资产（上传到 `assert/custom/canvas/` 或从资产选择器选择）；点击节点出现的配置组件可预览当前图并「上传图片 / 选择资产」。
 - **加载音频**：`config.assetPath` 绑定一段音频（上传到 `assert/custom/canvas/` 或从资产选择器选择）。该节点打开的资产选择器额外提供「音频」页签（台词音频/分镜自定义/全局自定义），且「角色」页签在选择角色后会展示**音色**分区（`assert/character/{角色}/voice.flac` 由 character-voice 任务生成；`assert/character/{角色}/voice-variants/{变体id}.flac` 为角色**声音变体**，见 `docs/asset-layout.md`，均已生成才列出），与外观图一起可选；图片类节点（image-loader）的选择器不显示音色与音频页签（`AssetCanvas.openAssetPicker` 按 `prototypeId === 'audio-loader'` 决定 `showVoice` 与页签列表）。
@@ -74,7 +79,7 @@
 - **生成图片**：`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（默认有输入图用 `image-edit`，否则 `text-to-image`）、`workflowParams`（用户参数）、`inputOrder`（输入图顺序，见 §7）、`current` / `history`。
 - **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`workflowParams`、`inputOrder`、`current` / `history`。单一 `media` 输入口，素材类型由来源节点自动归类；编辑器内嵌导演台（仅 director 模式）或参考素材分组；分镜画布下提供「设为分镜视频」（把 `config.current` 复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。
 - **拼接视频**：`config` 含 `inputOrder`（拼接顺序，编辑器内 `VideoRefInputGroup` 拖拽排序）、`current` / `history`。单一 `video` 输入口，同一端口可连多段视频（无输入上限校验）；编辑器「拼接」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/concat-video`（本地 ffmpeg，concat demuxer + `-c copy` 无损拼接，各段编码/分辨率/帧率/音轨结构须一致，不一致返回清晰中文错误）；产物为版本化 `assert/{scope}/canvas/{nodeId}/v{n}.mp4`，回写 `current` / `history`。
-- **文本**：`config.text`，可编辑纯文本；当前仅作为 text 类型数据流锚点。
+- **文本**：`config.text`，可编辑纯文本；当前仅作为 text 类型数据流锚点。文本域带 Vue Flow 约定类 `nodrag` / `nowheel`：在文本域内拖拽是选择文本（不移动节点），滚轮滚动是滚动文本内容（不缩放画布）。
 
 ---
 
@@ -97,11 +102,13 @@
 | 点击节点 | 选中 + 显示配置面板（有 editorComponent 时） |
 | 双击节点名称 | 内联重命名（回车/失焦提交、Esc 取消、空名放弃） |
 | 拖拽节点 | 移动位置，结束回写 store（防误触：拖拽中隐藏配置面板） |
+| 悬浮/选中节点后拖拽边缘或四角 | 调整节点大小（**全部节点类型**可缩放，最小 120×80px，`@vue-flow/node-resizer` 渲染控制点；缩放中控制点保持可见，结束才回写 store） |
 | 右键节点 | 菜单：重新生成 / 历史 / 断开连接 / 重命名 / 复制 / 删除（删除需 `confirm` 确认） |
 | 右键连线 | 菜单：断开连接 |
 | 单击空白 | 取消选中、关闭菜单 |
 | 双击空白 | 在鼠标双击处弹出「添加节点」VMenu（选择节点原型后在该处添加节点） |
 | 适应视图 / 放大 / 缩小 | 工具栏按钮（`fitView` / `zoomIn` / `zoomOut`） |
+| 滚轮 | 空白/节点上滚动 = 缩放画布；文本节点文本域上滚动 = 滚动文本（`nowheel` 类豁免缩放） |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | 撤销 / 重做（输入框聚焦时跳过） |
 | `Ctrl+C` / `Ctrl+V` / `Ctrl+D` | 复制 / 粘贴 / 复制粘贴（重复节点） |
 | `Delete` / `Backspace` | 删除选中节点（确认）或选中连线 |
@@ -249,5 +256,8 @@ frontend/src/
 - **eslint computed 副作用**：`vue/no-side-effects-in-computed-properties` 禁止在 computed 内写缓存/状态，改用 `watch`。
 - **面板钳制**：用 `flowEl.clientHeight/Width` 实测尺寸，勿依赖 Vue Flow `dimensions`。
 - **连线右键**：`@edge-context-menu` 需手动 `event.preventDefault()` 阻止浏览器默认菜单叠加。
+- **节点缩放**：核心包不含缩放组件，控制点由独立包 `@vue-flow/node-resizer` 提供；缩放中的实时尺寸只写在 Vue Flow 内部节点样式上，业务 `width/height`（及左侧/上侧缩放时的 `x/y`）在 `resizeEnd` 事件统一回写 store——勿在 `resize` 事件里回写，会高频压入撤销栈并反复触发保存。
+- **缩放控制点显隐**：`NodeResizer` 的 `isVisible` 需包含「缩放中」状态（悬浮/选中/缩放中任一为真），否则拖出节点边界触发 mouseleave 卸载控制点会中断缩放。
+- **滚轮缩放豁免**：Vue Flow 按 `noWheelClassName`（默认 `nowheel`）判定是否拦截滚轮缩放；文本节点 textarea 必须带 `nowheel` 类才能在节点内滚动文本。同理节点拖拽豁免用 `nodrag`（textarea 上拖拽选择文本不移动节点）。
 - **删除类操作**：必须走 `confirm` 工具弹窗确认（AGENTS.md 约束）。
 - **提交信息**：中文提交信息在 PowerShell 下用 `-m` 会乱码，用 UTF-8 临时文件 `--amend -F` 方式提交。

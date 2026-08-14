@@ -104,7 +104,8 @@ function openPicker() {
 
 .video-loader-node__video {
   width: 100%;
-  max-height: 200px;
+  height: 100%;
+  object-fit: contain;
 }
 
 .video-loader-node__empty {
