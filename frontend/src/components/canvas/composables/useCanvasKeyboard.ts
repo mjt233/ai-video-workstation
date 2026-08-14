@@ -1,7 +1,9 @@
 /**
  * 键盘快捷键组合式：撤销/重做/复制/粘贴兜底/复制粘贴/删除/Esc。
  * 焦点在输入框/textarea 内时跳过（保留原生编辑行为）。
- * Ctrl+V 不 preventDefault（放行原生 paste 事件），由粘贴组合式兜底处理剪贴板为空的情况。
+ * Ctrl+V 不 preventDefault（放行原生 paste 事件），由粘贴组合式统一分派
+ * （节点复制标记 → 粘贴节点；文件 → 加载节点；文本 → 文本节点）；
+ * 剪贴板为空不派发 paste 事件时，由 keydown 置兜底标记粘贴画布内复制的节点。
  */
 
 import type { WritableStringRef } from './types'
@@ -66,7 +68,7 @@ export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
       return
     }
     if (mod && e.key.toLowerCase() === 'v') {
-      // Ctrl+V 由全局 paste 事件统一处理（文件→加载节点、文本→文本节点、画布内复制→粘贴节点），
+      // Ctrl+V 由全局 paste 事件统一处理（节点复制标记→粘贴节点、文件→加载节点、文本→文本节点），
       // 此处不 preventDefault 以放行原生 paste 事件。剪贴板为空时浏览器不派发 paste 事件：
       // 置兜底标记，下一轮事件循环仍未处理则粘贴画布内复制的节点。
       handleCtrlV()

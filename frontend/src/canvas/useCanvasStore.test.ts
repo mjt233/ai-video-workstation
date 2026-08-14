@@ -122,6 +122,19 @@ describe('useCanvasStore', () => {
     expect(store.nodes.value).toHaveLength(2)
   })
 
+  it('pasteNode(source)：外部节点源（如系统剪贴板标记）粘贴为新节点', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('text', 0, 0)
+    const b = store.pasteNode({ ...a, id: 'external', x: 100, y: 100 })
+    expect(b).toBeTruthy()
+    expect(b!.id).not.toBe('external')
+    expect(b!.x).toBe(130)
+    expect(store.nodes.value).toHaveLength(2)
+    // 外部源不写入内部剪贴板
+    expect(store.canPaste.value).toBe(false)
+    expect(store.pasteNode()).toBeUndefined()
+  })
+
   it('switchTarget：切换分镜后重置状态并加载新画布', async () => {
     const raw2 = {
       version: 1,

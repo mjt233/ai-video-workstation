@@ -1,14 +1,17 @@
 /**
  * 剪贴板粘贴组合式：全局 paste 事件处理与 Ctrl+V 兜底。
- * 剪贴板内容分派：文件（图片/视频/音频）→ 上传为自定义资产并创建加载节点；
- * 文本 → 创建文本节点；画布内复制的节点 → 粘贴节点。
- * 文件识别纯函数在 canvas/clipboard.ts。
+ * 剪贴板内容分派：画布内复制的节点标记 → 粘贴节点（最高优先级，复制节点已覆盖系统剪贴板）；
+ * 文件（图片/视频/音频）→ 上传为自定义资产并创建加载节点；
+ * 文本 → 创建文本节点；无内容时兜底粘贴画布内复制的节点。
+ * 文件识别纯函数在 canvas/clipboard.ts，节点复制标记解析在 canvas/nodeClipboard.ts。
  */
 
 import { nextTick } from 'vue'
 import type { Ref } from 'vue'
 import { collectPastedMedia, buildClipboardAssetDest, type PastedMedia } from '../../../canvas/clipboard'
+import { parseNodeClipboardText } from '../../../canvas/nodeClipboard'
 import { uploadFs } from '../../../api/client'
+import type { CanvasNodeData } from '../../../canvas/types'
 import type { CanvasStoreApi, ScreenToFlow, FindNode, AddSelectedNodes, ShowSnackbar } from './types'
 
 /** useCanvasPaste 参数 */
@@ -132,9 +135,11 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
 
   /**
    * 粘贴画布内复制的节点并聚焦（选中显示边框，不自动打开配置面板）。
+   *
+   * @param source 外部节点源（如系统剪贴板标记解析出的节点）；缺省用 store 内部剪贴板
    */
-  async function pasteNodeAndFocus(): Promise<void> {
-    const node = store.pasteNode()
+  async function pasteNodeAndFocus(source?: CanvasNodeData): Promise<void> {
+    const node = store.pasteNode(source)
     if (!node) return
     await focusPastedNodes([node.id])
   }
@@ -157,10 +162,12 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
 
   /**
    * 全局粘贴事件（Ctrl+V）：按剪贴板内容类型分派——
-   * 1. 焦点在输入框/文本域内 → 放行原生粘贴（如粘贴进文本节点/编辑器输入框）；
-   * 2. 含图片/视频/音频文件 → 上传为自定义资产并创建对应加载节点；
-   * 3. 含非空文本 → 创建文本节点并写入文本；
-   * 4. 无可用内容但有画布内复制的节点 → 粘贴该节点。
+   * 1. 画布内复制的节点标记 → 粘贴节点（最高优先级；复制节点已把「标记 + JSON」写入系统剪贴板，
+   *    因此不会被剪贴板中残留的旧文本/文件抢占；输入框内也拦截，防止标记 JSON 被原生插入）；
+   * 2. 焦点在输入框/文本域内 → 放行原生粘贴（如粘贴进文本节点/编辑器输入框）；
+   * 3. 含图片/视频/音频文件 → 上传为自定义资产并创建对应加载节点；
+   * 4. 含非空文本 → 创建文本节点并写入文本；
+   * 5. 无可用内容但有画布内复制的节点 → 粘贴该节点。
    *
    * @param e 剪贴板事件
    */
@@ -168,6 +175,17 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
     const el = e.target as HTMLElement | null
     const tag = el?.tagName
     const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable === true
+
+    // 画布内复制的节点标记：任何焦点目标下都拦截（含输入框，避免标记 JSON 被当作普通文本粘贴）
+    const text = e.clipboardData?.getData('text/plain') ?? ''
+    const copiedNode = parseNodeClipboardText(text)
+    if (copiedNode) {
+      e.preventDefault()
+      nodePasteFallbackArmed = false
+      // 输入框内粘贴节点标记：仅吞掉，不在画布上粘贴节点（避免输入时误操作）
+      if (!inInput) void pasteNodeAndFocus(copiedNode)
+      return
+    }
     if (inInput) return
 
     const { media, unsupported } = collectPastedMedia(e.clipboardData)
@@ -178,7 +196,7 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
       void pasteClipboardAssets(media, unsupported)
       return
     }
-    const text = e.clipboardData?.getData('text/plain') ?? ''
+    // text 在上方已读取（节点标记检测共用）
     if (text.trim()) {
       e.preventDefault()
       nodePasteFallbackArmed = false

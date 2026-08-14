@@ -4,6 +4,7 @@ import { loadCanvas, saveCanvas, type CanvasTarget } from './api'
 import { canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
 import { getPrototype } from './registry'
 import { applyConnectionSync } from './connectionSync'
+import { serializeNodeClipboard } from './nodeClipboard'
 import type { CanvasDirectorConfig } from './videoTypes'
 
 /** 自动保存防抖毫秒数 */
@@ -250,7 +251,12 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   const canPaste = computed(() => clipboard.value !== null)
 
   /**
-   * 复制节点到内部剪贴板。
+   * 复制节点到内部剪贴板，并同步写入系统剪贴板（标记前缀 + 节点 JSON）。
+   *
+   * 写入系统剪贴板的目的：让 Ctrl+V 的全局 paste 事件能优先识别节点复制标记
+   * 并粘贴节点，而不被剪贴板中残留的旧文本/文件抢占（复制节点会覆盖系统剪贴板，
+   * 与主流节点编辑器的复制语义一致）。写入失败（无剪贴板 API/无权限等）静默忽略，
+   * 内部剪贴板仍可用作兜底（剪贴板为空不派发 paste 事件时由 keydown 兜底粘贴）。
    *
    * @param nodeId 节点 id
    */
@@ -258,16 +264,25 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     const node = data.value.nodes.find((n) => n.id === nodeId)
     if (!node) return
     clipboard.value = JSON.parse(JSON.stringify(node)) as CanvasNodeData
+    try {
+      void navigator.clipboard?.writeText(serializeNodeClipboard(clipboard.value))?.catch(() => {})
+    } catch {
+      // 剪贴板 API 不可用（非安全上下文等）：静默降级为仅内部剪贴板
+    }
   }
 
   /**
-   * 粘贴剪贴板节点（偏移 30px）。
+   * 粘贴剪贴板节点（偏移 30px），生成全新 id。
+   * 可传入外部节点源（如从系统剪贴板标记解析出的节点，支持跨画布/刷新后粘贴）：
+   * 未传入时使用内部剪贴板内容。
    *
-   * @returns 新节点或 undefined
+   * @param source 外部节点源（缺省用内部剪贴板）
+   * @returns 新节点或 undefined（无可粘贴内容）
    */
-  function pasteNode(): CanvasNodeData | undefined {
-    if (!clipboard.value) return undefined
-    const copy = JSON.parse(JSON.stringify(clipboard.value)) as CanvasNodeData
+  function pasteNode(source?: CanvasNodeData): CanvasNodeData | undefined {
+    const base = source ?? clipboard.value
+    if (!base) return undefined
+    const copy = JSON.parse(JSON.stringify(base)) as CanvasNodeData
     copy.id = newId()
     copy.x += 30
     copy.y += 30
