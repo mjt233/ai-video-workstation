@@ -202,7 +202,7 @@
         <!-- 节点配置悬浮面板（独立于节点，位于节点正下方，随视图联动；带淡入淡出） -->
         <Transition name="editor-panel">
           <div
-            v-if="editorPanel && !suppressEditor"
+            v-if="editorPanel && !suppressEditor && !suppressPanelOnSelect"
             ref="panelEl"
             class="canvas-node-editor-panel"
             :style="editorPanelStyle"
@@ -569,6 +569,7 @@ import {
   type Edge as FlowEdge,
   type EdgeChange,
   type EdgeMouseEvent,
+  type GraphNode,
   type Node as FlowNode,
   type NodeDragEvent,
   type NodeMouseEvent,
@@ -595,7 +596,7 @@ import {
   type AutoBuildRef,
   type StageVariantRef,
 } from '../../canvas/autobuild'
-import { copyFs, deleteFs, existsFs, readFs, type DirResponse } from '../../api/client'
+import { copyFs, deleteFs, existsFs, readFs, uploadFs, type DirResponse } from '../../api/client'
 import { createSceneStageFrame } from '../../api/assets'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
@@ -635,8 +636,8 @@ const gen = useCanvasGeneration(props.project, target.value)
 const { statusByNode } = gen
 const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo } = store
 
-/** Vue Flow 视图控制：适应/缩放/屏幕坐标换算 */
-const { fitView, zoomIn, zoomOut, screenToFlowCoordinate, viewport } = useVueFlow()
+/** Vue Flow 视图控制：适应/缩放/屏幕坐标换算/程序化选中 */
+const { fitView, zoomIn, zoomOut, screenToFlowCoordinate, viewport, findNode, addSelectedNodes } = useVueFlow()
 
 /** 画布根节点 DOM（用于自动计算高度铺满页面） */
 const canvasRef = ref<HTMLElement | null>(null)
@@ -865,6 +866,8 @@ const selectedNodeId = ref('')
 const selectedEdgeId = ref('')
 /** 拖拽进行中：抑制配置面板显示（拖拽不触发配置） */
 const suppressEditor = ref(false)
+/** 程序化选中（如粘贴自动聚焦）后抑制配置面板自动弹出；用户点击节点后恢复 */
+const suppressPanelOnSelect = ref(false)
 
 /** 当前选中的节点数据 */
 const selectedNode = computed(() => store.nodes.value.find((n) => n.id === selectedNodeId.value) ?? null)
@@ -936,6 +939,7 @@ watch(editorPanelStyle, (style) => {
 /** 点击节点：选中并关闭右键菜单/添加节点菜单（允许显示配置面板） */
 function onNodeClick({ node }: NodeMouseEvent) {
   suppressEditor.value = false
+  suppressPanelOnSelect.value = false
   selectedNodeId.value = node.id
   contextMenu.show = false
   edgeMenu.show = false
@@ -1113,8 +1117,18 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   if (mod && e.key.toLowerCase() === 'v') {
-    e.preventDefault()
-    store.pasteNode()
+    // Ctrl+V 由全局 paste 事件统一处理（文件→加载节点、文本→文本节点、画布内复制→粘贴节点），
+    // 此处不 preventDefault 以放行原生 paste 事件。剪贴板为空时浏览器不派发 paste 事件：
+    // 置兜底标记，下一轮事件循环仍未处理则粘贴画布内复制的节点。
+    if (store.canPaste.value) {
+      nodePasteFallbackArmed = true
+      setTimeout(() => {
+        if (nodePasteFallbackArmed) {
+          nodePasteFallbackArmed = false
+          void pasteNodeAndFocus()
+        }
+      }, 0)
+    }
     return
   }
   if (mod && e.key.toLowerCase() === 'd') {
@@ -1138,6 +1152,201 @@ function onKeydown(e: KeyboardEvent) {
     } else if (selectedEdgeId.value) {
       store.disconnect(selectedEdgeId.value)
     }
+  }
+}
+
+// ── 剪贴板粘贴（Ctrl+V：文件→加载节点 / 文本→文本节点 / 内部复制→粘贴节点）──────
+
+/** 粘贴媒体文件对应的加载节点原型（加载图片/加载视频/加载音频） */
+type PastedMediaPrototype = 'image-loader' | 'video-loader' | 'audio-loader'
+
+/** 剪贴板中的媒体文件项：文件对象 + 对应节点原型 */
+interface PastedMedia {
+  /** 剪贴板文件（图片/视频/音频） */
+  file: File
+  /** 对应创建的加载节点原型 id */
+  prototypeId: PastedMediaPrototype
+}
+
+/** 粘贴上传结果：成功携带产物路径与原型，失败携带文件名 */
+type PastedUploadResult =
+  | { ok: true; path: string; prototypeId: PastedMediaPrototype }
+  | { ok: false; name: string }
+
+/** 粘贴兜底标记：剪贴板为空时浏览器不派发 paste 事件，由 keydown 置位、宏任务兜底粘贴内部复制的节点 */
+let nodePasteFallbackArmed = false
+
+/** 常见图片扩展名（剪贴板文件 MIME 为空时按文件名兜底识别） */
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'])
+/** 常见视频扩展名 */
+const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'])
+/** 常见音频扩展名 */
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus'])
+
+/**
+ * 识别剪贴板文件对应的加载节点原型：优先 MIME 类型，MIME 为空时按扩展名兜底。
+ *
+ * @param file 剪贴板文件
+ * @returns 加载节点原型 id；无法识别返回 undefined
+ */
+function classifyPastedFile(file: File): PastedMediaPrototype | undefined {
+  const type = file.type.toLowerCase()
+  if (type.startsWith('image/')) return 'image-loader'
+  if (type.startsWith('video/')) return 'video-loader'
+  if (type.startsWith('audio/')) return 'audio-loader'
+  const ext = (file.name.toLowerCase().split('.').pop() ?? '').trim()
+  if (IMAGE_EXTS.has(ext)) return 'image-loader'
+  if (VIDEO_EXTS.has(ext)) return 'video-loader'
+  if (AUDIO_EXTS.has(ext)) return 'audio-loader'
+  return undefined
+}
+
+/**
+ * 从剪贴板数据收集可识别的媒体文件（不支持的记录文件名供提示）。
+ *
+ * @param data 剪贴板数据（可为 null）
+ * @returns 媒体文件列表与不支持的文件名列表
+ */
+function collectPastedMedia(data: DataTransfer | null): { media: PastedMedia[]; unsupported: string[] } {
+  const media: PastedMedia[] = []
+  const unsupported: string[] = []
+  if (!data?.items) return { media, unsupported }
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (!file) continue
+    const prototypeId = classifyPastedFile(file)
+    if (prototypeId) media.push({ file, prototypeId })
+    else unsupported.push(file.name)
+  }
+  return { media, unsupported }
+}
+
+/**
+ * 计算画布可视区中心对应的流坐标（再减去默认节点尺寸一半，使新节点落在可视区正中）。
+ *
+ * @returns 新节点放置的流坐标
+ */
+function viewportCenterNodePosition(): { x: number; y: number } {
+  const rect = flowEl.value?.getBoundingClientRect()
+  if (rect) {
+    const p = screenToFlowCoordinate({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+    return { x: Math.round(p.x - 120), y: Math.round(p.y - 80) }
+  }
+  return { x: 80, y: 80 }
+}
+
+/**
+ * 粘贴媒体文件：逐个上传到自定义资产目录（assert/custom/canvas/），
+ * 成功后创建对应加载节点（加载图片/视频/音频），多个节点依次错位摆放，
+ * 新节点全部自动聚焦（选中显示边框，不自动打开配置面板）。
+ *
+ * @param items 剪贴板媒体文件列表
+ * @param unsupportedNames 不支持的文件名列表（仅用于反馈提示）
+ */
+async function pasteClipboardAssets(items: PastedMedia[], unsupportedNames: string[]) {
+  const base = viewportCenterNodePosition()
+  const results: PastedUploadResult[] = await Promise.all(
+    items.map(async (m, index) => {
+      const dest = `assert/custom/canvas/${Date.now()}-${index}-${m.file.name}`
+      try {
+        const res = await uploadFs(props.project, dest, m.file)
+        if (res.success && res.path) return { ok: true as const, path: res.path, prototypeId: m.prototypeId }
+        return { ok: false as const, name: m.file.name }
+      } catch {
+        return { ok: false as const, name: m.file.name }
+      }
+    }),
+  )
+  const ok = results.filter((r): r is Extract<PastedUploadResult, { ok: true }> => r.ok)
+  const failed = results.filter((r): r is Extract<PastedUploadResult, { ok: false }> => !r.ok)
+  const createdIds: string[] = []
+  ok.forEach((r, i) => {
+    const node = store.addNode(r.prototypeId, base.x + i * 28, base.y + i * 28, { assetPath: r.path })
+    createdIds.push(node.id)
+  })
+  if (createdIds.length > 0) await focusPastedNodes(createdIds)
+  const parts: string[] = []
+  if (ok.length > 0) parts.push(`已创建 ${ok.length} 个资产节点`)
+  if (failed.length > 0) parts.push(`${failed.map((f) => f.name).join('、')} 上传失败`)
+  if (unsupportedNames.length > 0) parts.push(`不支持的文件：${unsupportedNames.join('、')}`)
+  if (parts.length > 0) {
+    showSnackbar(parts.join('；'), ok.length > 0 && failed.length === 0 && unsupportedNames.length === 0 ? 'success' : 'error')
+  }
+}
+
+/**
+ * 粘贴文本：在画布可视区中心创建文本节点并写入文本内容，聚焦新节点。
+ *
+ * @param text 剪贴板文本
+ */
+async function pasteClipboardText(text: string) {
+  const pos = viewportCenterNodePosition()
+  const node = store.addNode('text', pos.x, pos.y, { text })
+  await focusPastedNodes([node.id])
+}
+
+/**
+ * 程序化选中（聚焦）新粘贴的节点：
+ * - 写入 Vue Flow 内部选中态 → 节点显示选中边框与可调整大小的缩放控制点；
+ * - 设置应用级选中（Delete/复制等快捷键指向新节点）；
+ * - 抑制配置面板自动弹出（仅用户点击节点才打开配置面板）。
+ *
+ * @param nodeIds 新节点 id 列表（全部选中）
+ */
+async function focusPastedNodes(nodeIds: string[]) {
+  if (nodeIds.length === 0) return
+  // 等 Vue Flow 应用新节点（内部 nodeLookup 更新）后再写入选中态
+  await nextTick()
+  const flowNodeObjs = nodeIds.map((id) => findNode(id)).filter((n): n is GraphNode => !!n)
+  if (flowNodeObjs.length > 0) addSelectedNodes(flowNodeObjs)
+  selectedNodeId.value = nodeIds[nodeIds.length - 1] ?? ''
+  suppressPanelOnSelect.value = true
+}
+
+/**
+ * 粘贴画布内复制的节点并聚焦（选中显示边框，不自动打开配置面板）。
+ */
+async function pasteNodeAndFocus() {
+  const node = store.pasteNode()
+  if (!node) return
+  await focusPastedNodes([node.id])
+}
+
+/**
+ * 全局粘贴事件（Ctrl+V）：按剪贴板内容类型分派——
+ * 1. 焦点在输入框/文本域内 → 放行原生粘贴（如粘贴进文本节点/编辑器输入框）；
+ * 2. 含图片/视频/音频文件 → 上传为自定义资产并创建对应加载节点；
+ * 3. 含非空文本 → 创建文本节点并写入文本；
+ * 4. 无可用内容但有画布内复制的节点 → 粘贴该节点。
+ *
+ * @param e 剪贴板事件
+ */
+function onPaste(e: ClipboardEvent) {
+  const el = e.target as HTMLElement | null
+  const tag = el?.tagName
+  const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable === true
+  if (inInput) return
+
+  const { media, unsupported } = collectPastedMedia(e.clipboardData)
+  if (media.length > 0 || unsupported.length > 0) {
+    // 剪贴板含文件：一律按文件处理（忽略附带文本，如复制网页图片同时携带的 html 片段）
+    e.preventDefault()
+    nodePasteFallbackArmed = false
+    void pasteClipboardAssets(media, unsupported)
+    return
+  }
+  const text = e.clipboardData?.getData('text/plain') ?? ''
+  if (text.trim()) {
+    e.preventDefault()
+    nodePasteFallbackArmed = false
+    pasteClipboardText(text)
+    return
+  }
+  if (store.canPaste.value) {
+    e.preventDefault()
+    nodePasteFallbackArmed = false
+    void pasteNodeAndFocus()
   }
 }
 
@@ -1178,6 +1387,7 @@ function onPaneClick(event: MouseEvent) {
   edgeMenu.show = false
   addMenu.show = false
   suppressEditor.value = false
+  suppressPanelOnSelect.value = false
   selectedNodeId.value = ''
   selectedEdgeId.value = ''
   if (event.detail >= 2) {
@@ -1881,6 +2091,7 @@ function showSnackbar(text: string, color: 'success' | 'error' | 'primary' = 'pr
 /** 切换分镜/场景时：重置选中与菜单状态，并让 store/生成组合式切换到新目标加载 */
 watch(target, async (newTarget) => {
   suppressEditor.value = false
+  suppressPanelOnSelect.value = false
   selectedNodeId.value = ''
   selectedEdgeId.value = ''
   renamingNodeId.value = ''
@@ -1892,12 +2103,14 @@ watch(target, async (newTarget) => {
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('paste', onPaste)
   window.addEventListener('resize', updateHeight)
   void store.load()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('paste', onPaste)
   window.removeEventListener('resize', updateHeight)
   panelResizeObserver?.disconnect()
   panelResizeObserver = null

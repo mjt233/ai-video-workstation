@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { createCanvasData, newId, type CanvasConnection, type CanvasData, type CanvasNodeData } from './types'
+import { createCanvasData, newId, type CanvasConnection, type CanvasData, type CanvasNodeData, type NodeConfig } from './types'
 import { loadCanvas, saveCanvas, type CanvasTarget } from './api'
 import { canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
 import { getPrototype } from './registry'
@@ -122,10 +122,11 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
    * @param prototypeId 节点原型 id
    * @param x 画布 x 坐标
    * @param y 画布 y 坐标
+   * @param configPatch 初始配置补丁（合并到原型 defaultConfig 之上；如粘贴资产时写入 assetPath、粘贴文本时写入 text）
    * @returns 新节点
    * @throws Error 未知原型时
    */
-  function addNode(prototypeId: string, x: number, y: number): CanvasNodeData {
+  function addNode(prototypeId: string, x: number, y: number, configPatch?: NodeConfig): CanvasNodeData {
     const proto = getPrototype(prototypeId)
     if (!proto) throw new Error(`未知节点类型: ${prototypeId}`)
     const node: CanvasNodeData = {
@@ -136,7 +137,10 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
       y,
       width: 240,
       height: 160,
-      config: proto.defaultConfig ? JSON.parse(JSON.stringify(proto.defaultConfig)) : {},
+      config: {
+        ...(proto.defaultConfig ? JSON.parse(JSON.stringify(proto.defaultConfig)) : {}),
+        ...(configPatch ?? {}),
+      },
     }
     pushHistory()
     data.value.nodes.push(node)

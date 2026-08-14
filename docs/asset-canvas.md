@@ -110,7 +110,8 @@
 | 适应视图 / 放大 / 缩小 | 工具栏按钮（`fitView` / `zoomIn` / `zoomOut`） |
 | 滚轮 | 空白/节点上滚动 = 缩放画布；文本节点文本域上滚动 = 滚动文本（`nowheel` 类豁免缩放） |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | 撤销 / 重做（输入框聚焦时跳过） |
-| `Ctrl+C` / `Ctrl+V` / `Ctrl+D` | 复制 / 粘贴 / 复制粘贴（重复节点） |
+| `Ctrl+C` / `Ctrl+D` | 复制选中节点到画布内部剪贴板 / 复制粘贴（重复节点） |
+| `Ctrl+V` | 粘贴剪贴板内容：图片/视频/音频文件 → 上传到 `assert/custom/canvas/` 并创建对应加载节点（可视区中心错位摆放）；文本 → 创建文本节点并写入文本；画布内复制的节点 → 粘贴节点（剪贴板为空不派发 paste 事件时由 keydown 兜底粘贴节点）。粘贴的新节点**自动聚焦**（全部选中，显示可调整大小的边框与缩放控制点，应用级选中使 Delete/复制快捷键可用），且**不自动打开配置面板**（仅用户点击节点才打开） |
 | `Delete` / `Backspace` | 删除选中节点（确认）或选中连线 |
 | `Esc` | 关闭右键菜单 / 取消内联重命名 |
 
@@ -125,6 +126,7 @@
 - **边界钳制**：优先放节点下方；放不下且上方有空间则翻转到节点上方；仍放不下则把面板底部钳到画布可视区内（必要时与节点重叠）。钳制用 `flowEl.clientHeight/Width`（ResizeObserver 监听 `flowEl` + `panelEl`）测量，勿用 Vue Flow `dimensions`（不可靠）。
 - **淡入淡出**：`<Transition name="editor-panel">` + CSS（opacity 0.18s + `translateY(6px)`）；关闭淡出期间用 `lastPanelStyle` 缓存保持原位不跳位（缓存写在 `watch(editorPanelStyle)`，勿在 computed 内写副作用，会触发 eslint `vue/no-side-effects-in-computed-properties`）。
 - 拖拽节点时 `suppressEditor=true` 隐藏面板，仅点击节点才显示。
+- 程序化选中（粘贴自动聚焦等）置 `suppressPanelOnSelect=true` 抑制面板自动弹出；`onNodeClick`/`onPaneClick`/切换目标时复位。粘贴聚焦通过 `addSelectedNodes`（`useVueFlow`）写入 Vue Flow 内部选中态，需先 `await nextTick()` 等内部 nodeLookup 应用新节点。
 - 面板根元素需绑定 `ref="panelEl"`（高度测量）。
 
 ### 编辑器组件（editorComponent）约定
@@ -259,5 +261,6 @@ frontend/src/
 - **节点缩放**：核心包不含缩放组件，控制点由独立包 `@vue-flow/node-resizer` 提供；缩放中的实时尺寸只写在 Vue Flow 内部节点样式上，业务 `width/height`（及左侧/上侧缩放时的 `x/y`）在 `resizeEnd` 事件统一回写 store——勿在 `resize` 事件里回写，会高频压入撤销栈并反复触发保存。
 - **缩放控制点显隐**：`NodeResizer` 的 `isVisible` 需包含「缩放中」状态（悬浮/选中/缩放中任一为真），否则拖出节点边界触发 mouseleave 卸载控制点会中断缩放。
 - **滚轮缩放豁免**：Vue Flow 按 `noWheelClassName`（默认 `nowheel`）判定是否拦截滚轮缩放；文本节点 textarea 必须带 `nowheel` 类才能在节点内滚动文本。同理节点拖拽豁免用 `nodrag`（textarea 上拖拽选择文本不移动节点）。
+- **剪贴板粘贴**：文件/文本粘贴统一在全局 `paste` 事件中处理（读 `clipboardData.items` 与 `text/plain`，优先级：文件 > 文本 > 画布内部复制的节点）；`Ctrl+V` 的 keydown 分支**不能 `preventDefault`**（会阻止浏览器派发 paste 事件），仅在剪贴板为空时用宏任务兜底粘贴内部复制的节点。焦点在 INPUT/TEXTAREA 内放行原生粘贴（粘贴进文本节点/编辑器输入框）。
 - **删除类操作**：必须走 `confirm` 工具弹窗确认（AGENTS.md 约束）。
 - **提交信息**：中文提交信息在 PowerShell 下用 `-m` 会乱码，用 UTF-8 临时文件 `--amend -F` 方式提交。
