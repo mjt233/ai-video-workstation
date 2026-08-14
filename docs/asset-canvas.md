@@ -59,7 +59,8 @@
 
 ## 3. 节点类型（`frontend/src/canvas/registry.ts`）
 
-节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / bodyComponent / editorComponent`。
+节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / bodyComponent / editorComponent`。
+其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有版本历史）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`video-frame-extract`/`video-concat` 仅 `canGenerate`（无历史）。
 
 | 原型 | 输入端口 | 输出端口 | 可缩放 | 卡片主体 | 配置组件（editorComponent） |
 |------|----------|----------|--------|----------|------------------------------|
@@ -119,11 +120,11 @@
 
 ---
 
-## 6. 配置面板（`AssetCanvas.vue` 内联实现）
+## 6. 配置面板（`CanvasEditorPanel.vue` 实现，由 AssetCanvas 编排）
 
-- 独立悬浮于节点下方的面板（不随节点尺寸撑大），渲染选中节点的 `editorComponent`。
-- **固定大小不随缩放**：宽度为固定屏幕像素（普通节点 400px、生成图片节点 500px，见常量 `EDITOR_PANEL_WIDTH[_GENERATE]`），间距 12px（`EDITOR_PANEL_GAP`）；仅**位置**随节点/视图联动（水平中心与节点中心对齐）。
-- **边界钳制**：优先放节点下方；放不下且上方有空间则翻转到节点上方；仍放不下则把面板底部钳到画布可视区内（必要时与节点重叠）。钳制用 `flowEl.clientHeight/Width`（ResizeObserver 监听 `flowEl` + `panelEl`）测量，勿用 Vue Flow `dimensions`（不可靠）。
+- 独立悬浮于节点下方的面板（不随节点尺寸撑大），渲染选中节点的 `editorComponent`；组件常驻挂载，显隐由 `visible` prop 驱动，`<Transition>` 与定位逻辑在组件内部。
+- **固定大小不随缩放**：宽度为固定屏幕像素（普通节点 400px、生成图片节点 500px、生成视频节点 640px，见组件内常量 `EDITOR_PANEL_WIDTH[_GENERATE/_VIDEO]`），间距 12px（`EDITOR_PANEL_GAP`）；仅**位置**随节点/视图联动（水平中心与节点中心对齐），视口与画布可视区尺寸由 AssetCanvas 以 props 传入（`viewport`/`flowWidth`/`flowHeight`）。
+- **边界钳制**：优先放节点下方；放不下且上方有空间则翻转到节点上方；仍放不下则把面板底部钳到画布可视区内（必要时与节点重叠）。钳制用 `flowEl.clientHeight/Width`（AssetCanvas 的 ResizeObserver 监听 `flowEl`）+ 面板自身高度（面板组件 ResizeObserver 监听 `panelEl`）测量，勿用 Vue Flow `dimensions`（不可靠）。
 - **淡入淡出**：`<Transition name="editor-panel">` + CSS（opacity 0.18s + `translateY(6px)`）；关闭淡出期间用 `lastPanelStyle` 缓存保持原位不跳位（缓存写在 `watch(editorPanelStyle)`，勿在 computed 内写副作用，会触发 eslint `vue/no-side-effects-in-computed-properties`）。
 - 拖拽节点时 `suppressEditor=true` 隐藏面板，仅点击节点才显示。
 - 程序化选中（粘贴自动聚焦等）置 `suppressPanelOnSelect=true` 抑制面板自动弹出；`onNodeClick`/`onPaneClick`/切换目标时复位。粘贴聚焦通过 `addSelectedNodes`（`useVueFlow`）写入 Vue Flow 内部选中态，需先 `await nextTick()` 等内部 nodeLookup 应用新节点。
@@ -133,10 +134,10 @@
 
 - props：`project`、`node`、`inputs`（`CanvasInputInfo[]`，仅生成节点用到）、`isRunning`；生成图片编辑器另有 `kind`（画布类型，`ImageGenerateEditor` 用它让「设为分镜场景图」按钮仅分镜画布显示）。
 - emits：
-  - `update:config(patch)` —— 合并写入节点 config（由 `AssetCanvas.onUpdateConfig` 处理）；
+  - `update:config(patch)` —— 合并写入节点 config（由 `useCanvasNodeOps.onUpdateConfig` 处理，AssetCanvas 接线）；
   - `generate(nodeId)` / `interrupt(nodeId)` / `open-history(nodeId)` / `set-as-scene(nodeId)`；
   - `open-picker(nodeId)` —— 打开资产选择器（加载图片编辑器使用）。
-- 新增编辑器时需在 `registry.ts` 为原型挂 `editorComponent`；若用到资产选择器，`AssetCanvas` 的编辑器插槽需给 `@open-picker="openAssetPicker"`。
+- 新增编辑器时需在 `registry.ts` 为原型挂 `editorComponent`；若用到资产选择器，`AssetCanvas` 的编辑器面板接线（`CanvasEditorPanel`）需给 `@open-picker="openAssetPicker"`。
 
 ---
 
@@ -151,7 +152,7 @@
 
 ## 8. 生成流程（`frontend/src/canvas/useCanvasGeneration.ts`）
 
-1. `generateNode(nodeId)`：收集输入图路径（`collectInputPaths`，含顺序）→ `gen.setInputPaths` → `gen.generate`。
+1. `generateNode(nodeId)`（`composables/useCanvasNodeOps.ts`，按原型分发）：收集输入图路径（`collectInputPaths`，含顺序）→ `gen.setInputPaths` → `gen.generate`。
 2. `generate`：
    - `image-edit`：`vars = { prompt, imagePaths: JSON.stringify(inputPaths), purpose: 'canvas-image' }`；
    - `text-to-image`：先把 prompt 写入节点目录的 `prompt.md`，`vars = { promptPath, purpose: 'canvas-image' }`。
@@ -175,7 +176,7 @@
 
 > **历史对话框**：生成节点「历史」打开的是独立组件 `CanvasAssertHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（缩略图、版本号、生成时间）；点「设为当前」把该版本激活为节点当前图片（仅改写 `config.current`，`history` 不变，原当前图自动成为历史版本），激活后对话框保持打开；点「删除」图标（当前版本禁用）→ `confirm` 弹窗确认 → `deleteFs` 删除图片文件 + `removeHistoryEntry` 从 `config.history` 移除该条目，对话框保持打开，若被删条目正处于预览选中态则回落到当前项。
 
-- 生成节点编辑器「设为分镜场景图」→ 弹出对话框（`AssetCanvas` 内联 `sceneDialog`）。
+- 生成节点编辑器「设为分镜场景图」→ 弹出对话框（独立组件 `SetAsSceneDialog.vue`，帧加载/新增/覆盖逻辑在组件内部；入口状态由 `useCanvasDialogs` 持有）。
 - 读取 `prompt/scene/{ep}/{shot}/stage.json` 列出**全部场景帧**（label = `基础场景` || prompt || `分镜场景图 N`，预览 `stage/{i}.jpg`，404 时 `@error` 置 `broken` 显示占位）。
 - 点击某帧只进入**选中状态**（高亮 + 右上角勾选图标，再点一次取消选中），底部「确认」按钮启用后点击才执行 `copyFs(current.path → assert/scene/{ep}/{shot}/stage/{i}.jpg)` 覆盖该帧。
 - 「新增场景图」→ `createSceneStageFrame`（`api/assets.ts`）追加帧并复制图片到新索引；新帧定义由 `deriveStageFrameBody` 从生成节点输入推导：
@@ -204,7 +205,7 @@
 frontend/src/
 ├── canvas/                       # 纯逻辑（可单元测试）
 │   ├── types.ts                  # 数据模型 + 版本迁移 + id/版本号工具
-│   ├── registry.ts               # 节点原型注册表
+│   ├── registry.ts               # 节点原型注册表（含 canGenerate/hasHistory 能力标志）
 │   ├── connection.ts             # 连接校验（类型/成环）
 │   ├── paths.ts                  # 定义文件与产物路径
 │   ├── preview.ts                # 预览 URL
@@ -212,14 +213,36 @@ frontend/src/
 │   ├── generate.ts               # 输入收集（collectInputs/collectInputPaths）、历史、资产读取
 │   ├── autobuild.ts              # 自动搭画布
 │   │   # 注：autobuild.ts 另含 resolveShotStageRef / resolveCharacterRef / deriveStageRefFromAssetPath / buildSubSceneAutoCanvas
+│   ├── clipboard.ts              # 剪贴板媒体识别（classifyPastedFile/collectPastedMedia/粘贴上传目标路径）
+│   ├── sceneFrame.ts             # 设为分镜场景图纯函数（buildSceneFrameOptions/deriveStageFrameBody）
 │   ├── useCanvasStore.ts         # 状态：加载/保存(防抖 800ms)/增删改查/撤销重做/剪贴板/switchTarget
 │   ├── useCanvasGeneration.ts    # 生成：跑工作流/轮询/中断/历史回写/switchTarget
-│   └── *.test.ts                 # 单元测试（共 70+ 用例）
+│   └── *.test.ts                 # 单元测试（210+ 用例）
 └── components/canvas/
-    ├── AssetCanvas.vue           # 主组件：VueFlow 画布 + 工具栏 + 配置面板 + 菜单 + 对话框
-    ├── nodes/                    # 节点卡片主体（ImageLoaderNode / ImageGenerateNode / TextNode）
-    └── editors/                  # 配置组件（ImageLoaderEditor / ImageGenerateEditor）
+    ├── AssetCanvas.vue           # 编排层：组装 store/gen/composables，渲染 VueFlow + 子组件
+    ├── CanvasToolbar.vue         # 工具栏（视图缩放/撤销重做/自动搭画布/添加节点/保存状态）
+    ├── CanvasNodeCard.vue        # 节点卡片（名称头/内联重命名/端口/主体组件/缩放控制点）
+    ├── CanvasEditorPanel.vue     # 配置悬浮面板（固定大小、位置联动、边界钳制、淡入淡出）
+    ├── CanvasContextMenu.vue     # 节点/连线右键菜单（纯展示）
+    ├── CanvasAddNodeMenu.vue     # 添加节点菜单（锚点 + VMenu 列表）
+    ├── SetAsSceneDialog.vue      # 设为分镜场景图对话框（帧加载/选中/覆盖/新增）
+    ├── CanvasAssertHistoryDialog.vue / SaveAssetDialog.vue  # 历史/保存资产对话框
+    ├── composables/              # 画布交互组合式（与组件同域，store/gen/VueFlow 工具以参数注入）
+    │   ├── types.ts              # 共享类型（CanvasStoreApi/CanvasGenerationApi/NodeMap 等）
+    │   ├── useCanvasFlow.ts      # Vue Flow 数据映射、拖拽/缩放回写、连线交互
+    │   ├── useCanvasSelection.ts # 选中状态/配置面板信息/删除
+    │   ├── useCanvasMenus.ts     # 右键菜单与添加节点菜单状态/动作
+    │   ├── useCanvasRename.ts    # 内联重命名状态
+    │   ├── useCanvasPaste.ts     # 剪贴板粘贴（文件/文本/画布内复制节点）+ Ctrl+V 兜底
+    │   ├── useCanvasKeyboard.ts  # 全局快捷键（撤销/重做/复制/粘贴/删除/Esc）
+    │   ├── useCanvasNodeOps.ts   # 生成调度（按原型分发）+ 输入收集查询
+    │   ├── useCanvasDialogs.ts   # 历史/保存资产/场景图/分镜视频/资产选择器状态
+    │   └── useCanvasAutobuild.ts # 自动搭画布（引用收集 + 幂等应用）
+    ├── nodes/                    # 节点卡片主体（ImageLoaderNode / ImageGenerateNode / TextNode 等）
+    └── editors/                  # 配置组件（ImageLoaderEditor / ImageGenerateEditor 等）
 ```
+
+> 组合式注入约定：只有 `AssetCanvas.vue` 调用 `useVueFlow()`（工具栏/面板/菜单是 VueFlow 的兄弟节点，不能依赖其 inject），`viewport`/`screenToFlowCoordinate`/`findNode`/`addSelectedNodes` 等工具以函数参数注入各组合式；`useVueFlow` 状态始终经 props 传给 `CanvasEditorPanel`。
 
 服务端画布专属路由（`server/src/routes/canvas.ts`，前缀 `/api/canvas`）：
 - `POST /canvas/extract-frame`——「获取视频帧」节点：body 可带 `frameIndex`（0=首帧、-1=尾帧…，解码序 select 选帧）或 `time`（秒，按呈现时间精确选帧 `-ss`，与预览画面一致）；

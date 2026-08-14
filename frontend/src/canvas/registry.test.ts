@@ -90,3 +90,28 @@ describe('getOutputAssetPath（各节点自实现输出资产解析）', () => {
     expect(p.getOutputAssetPath?.({})).toBeUndefined()
   })
 })
+
+describe('canGenerate / hasHistory 能力标志', () => {
+  it('生成类节点支持重新生成', () => {
+    const ids = ['image-generate', 'video-generate', 'tts-generate', 'video-frame-extract', 'video-concat']
+    for (const id of ids) {
+      expect(getPrototype(id)?.canGenerate, `${id} 应支持重新生成`).toBe(true)
+    }
+  })
+
+  it('加载类与文本节点不支持重新生成', () => {
+    const ids = ['image-loader', 'audio-loader', 'video-loader', 'text']
+    for (const id of ids) {
+      expect(getPrototype(id)?.canGenerate ?? false, `${id} 不应支持重新生成`).toBe(false)
+    }
+  })
+
+  it('有版本历史的节点：生成图片/视频/TTS；获取视频帧已移除历史', () => {
+    expect(getPrototype('image-generate')?.hasHistory).toBe(true)
+    expect(getPrototype('video-generate')?.hasHistory).toBe(true)
+    expect(getPrototype('tts-generate')?.hasHistory).toBe(true)
+    expect(getPrototype('video-frame-extract')?.hasHistory ?? false).toBe(false)
+    expect(getPrototype('video-concat')?.hasHistory ?? false).toBe(false)
+    expect(getPrototype('image-loader')?.hasHistory ?? false).toBe(false)
+  })
+})

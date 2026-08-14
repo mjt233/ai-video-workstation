@@ -32,6 +32,10 @@ export interface NodePrototype {
   outputPorts: Port[]
   /** 该类型节点是否允许用户自由缩放大小 */
   resizeable: boolean
+  /** 该类型节点是否有「重新生成」能力（驱动右键菜单「重新生成」入口显隐） */
+  canGenerate?: boolean
+  /** 该类型节点是否有版本历史（驱动右键菜单「历史」入口显隐） */
+  hasHistory?: boolean
   /** 渲染节点卡片主体的 Vue 组件（可拿到 node/project 等 props） */
   bodyComponent?: Component
   /** 节点被选中后渲染在节点下方的配置组件 */
@@ -99,6 +103,8 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     inputPorts: [{ id: 'in', type: 'image', label: '参考图' }],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: true,
+    canGenerate: true,
+    hasHistory: true,
     bodyComponent: ImageGenerateNode,
     editorComponent: ImageGenerateEditor,
     getOutputAssetPath: generateOutput,
@@ -120,6 +126,8 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     inputPorts: [{ id: 'in', type: 'media', label: '输入' }],
     outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
     resizeable: true,
+    canGenerate: true,
+    hasHistory: true,
     bodyComponent: VideoGenerateNode,
     editorComponent: VideoGenerateEditor,
     getOutputAssetPath: generateOutput,
@@ -141,6 +149,8 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     inputPorts: [{ id: 'in', type: 'audio', label: '参考音频' }],
     outputPorts: [{ id: 'out', type: 'audio', label: '音频' }],
     resizeable: true,
+    canGenerate: true,
+    hasHistory: true,
     bodyComponent: TtsGenerateNode,
     editorComponent: TtsGenerateEditor,
     getOutputAssetPath: generateOutput,
@@ -161,6 +171,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     inputPorts: [{ id: 'in', type: 'video', label: '视频' }],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: true,
+    canGenerate: true,
     bodyComponent: ExtractFrameNode,
     editorComponent: ExtractFrameEditor,
     getOutputAssetPath: generateOutput,
@@ -177,6 +188,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     inputPorts: [{ id: 'in', type: 'video', label: '视频' }],
     outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
     resizeable: true,
+    canGenerate: true,
     bodyComponent: ConcatVideoNode,
     editorComponent: ConcatVideoEditor,
     getOutputAssetPath: generateOutput,
