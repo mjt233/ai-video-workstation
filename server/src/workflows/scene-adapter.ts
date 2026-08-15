@@ -7,7 +7,7 @@
  * 组装成与画布节点一致的自包含数据；工作流实现内部不再读取任何分镜文件。
  */
 import { buildDirectorPayload, type DirectorInjectDeps } from './director-inject.js';
-import type { ProjectConfig, VideoCapabilities, VideoWorkflowSubmitData } from './types.js';
+import type { ProjectConfig, VideoCapabilities, VideoReference, VideoWorkflowSubmitData } from './types.js';
 
 /** 场景适配层依赖集合（由引擎注入，便于单测 mock） */
 export interface SceneAdapterDeps extends DirectorInjectDeps {
@@ -147,12 +147,31 @@ async function buildTtsAudio(deps: SceneAdapterDeps, episode: string, shot: stri
 }
 
 /**
+ * 解析分镜音频：优先用户编辑合并的 merged.flac，其次由 script.json 台词生成 TTS 配音。
+ * 两者均不存在时返回 undefined（不注入音频）。
+ *
+ * @param deps 场景适配层依赖
+ * @param episode 集数
+ * @param shot 分镜编号
+ * @returns 音频 File 或 undefined
+ */
+async function resolveSceneAudio(deps: SceneAdapterDeps, episode: string, shot: string): Promise<File | undefined> {
+  const mergedRel = `assert/scene/${episode}/${shot}/audio/merged.flac`;
+  if (await deps.fileExists(mergedRel)) {
+    return deps.readAssertFile(mergedRel);
+  }
+  return buildTtsAudio(deps, episode, shot);
+}
+
+/**
  * 组装场景自包含视频提交数据。
  *
  * 模式优先级：
  * 1. 实现声明支持 director 且分镜存在 director.json（含有效 imageClips）→ 导演台模式，
  *    复用 buildDirectorPayload（含用户滑块 cursor 与混音音频）；
- * 2. 否则 → 首尾帧模式：stage.json 启用帧 + cursor 均匀分布 + 音频
+ * 2. 实现声明支持 reference 但不支持 first-last-frame（如 MiniMax H3 R2VA）→ 参考模式：
+ *    stage.json 启用帧 → 参考图片，音频（merged.flac / TTS）→ 参考音频；
+ * 3. 否则 → 首尾帧模式：stage.json 启用帧 + cursor 均匀分布 + 音频
  *    （优先 merged.flac，其次 script.json TTS）。
  *
  * @param project 项目名
@@ -192,19 +211,34 @@ export async function buildSceneVideoSubmitData(
     }
   }
 
+  // ── 参考模式 ──（仅实现支持 reference 而不支持 first-last-frame，如 MiniMax H3 R2VA）
+  if (capabilities?.modes?.includes('reference') && !capabilities.modes.includes('first-last-frame')) {
+    const duration = await readSceneDuration(deps, episode, shot);
+    const stageImages = await collectStageImages(deps, episode, shot);
+    const files = await Promise.all(stageImages.map((p) => deps.readAssertFile(p)));
+    const references: VideoReference[] = files.map((file) => ({ type: 'image', file }));
+    const audio = await resolveSceneAudio(deps, episode, shot);
+    if (audio) {
+      references.push({ type: 'audio', file: audio });
+    }
+    return {
+      mode: 'reference',
+      resolution: { width: projectConfig.width, height: projectConfig.height },
+      fps: projectConfig.fps,
+      duration,
+      prompt,
+      references,
+      extraParams: {},
+    };
+  }
+
   // ── 首尾帧模式 ──
   const duration = await readSceneDuration(deps, episode, shot);
   const stageImages = await collectStageImages(deps, episode, shot);
   const files = await Promise.all(stageImages.map((p) => deps.readAssertFile(p)));
   const frames = files.map((file, i) => ({ file, cursor: stageCursor(i, files.length) }));
 
-  let audio: File | undefined;
-  const mergedRel = `assert/scene/${episode}/${shot}/audio/merged.flac`;
-  if (await deps.fileExists(mergedRel)) {
-    audio = await deps.readAssertFile(mergedRel);
-  } else {
-    audio = await buildTtsAudio(deps, episode, shot);
-  }
+  const audio = await resolveSceneAudio(deps, episode, shot);
 
   return {
     mode: 'first-last-frame',

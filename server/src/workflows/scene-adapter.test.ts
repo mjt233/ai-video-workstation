@@ -94,12 +94,36 @@ describe('buildSceneVideoSubmitData', () => {
     expect(data.director?.audio).toBeDefined();
   });
 
-  it('实现不支持导演台时即使有 director.json 也走首尾帧模式', async () => {
+  it('参考模式：实现仅支持 reference（不支持首尾帧）时，分镜场景帧组装为参考素材', async () => {
+    const genVoice = vi.fn(async () => new File(['a'], 'v.flac', { type: 'audio/flac' }));
     const deps = makeDeps({
       readFile: async (rel: string) => {
         if (rel.endsWith('director.json')) {
           return JSON.stringify({ version: 1, duration: 5, width: 720, height: 1280, fps: 30, imageClips: [], audioClips: [] });
         }
+        if (rel.endsWith('overview.json')) return JSON.stringify({ duration: 5 });
+        if (rel.endsWith('stage.json')) return JSON.stringify([{ 基础场景: 'a' }, { 基础场景: 'b' }]);
+        if (rel.endsWith('prompt.md')) return '提示词';
+        if (rel.endsWith('script.json')) return JSON.stringify([{ 角色名: '小明', 台词: '你好' }]);
+        if (rel.includes('character/小明/voice.md')) return '低沉男声';
+        throw new Error(`unexpected: ${rel}`);
+      },
+      generateVoice: genVoice,
+    });
+    const caps: VideoCapabilities = { modes: ['reference'] };
+    const data = await buildSceneVideoSubmitData('p', '1', '1', caps, PROJECT_CONFIG, deps);
+    expect(data.mode).toBe('reference');
+    expect(data.references).toHaveLength(3);
+    expect(data.references?.[0]).toEqual({ type: 'image', file: expect.any(File) });
+    expect(data.references?.[1]).toEqual({ type: 'image', file: expect.any(File) });
+    expect(data.references?.[2]).toEqual({ type: 'audio', file: expect.any(File) });
+    expect(data.director).toBeUndefined();
+    expect(genVoice).toHaveBeenCalledTimes(1);
+  });
+
+  it('参考模式：无台词且无 merged.flac 时不注入参考音频', async () => {
+    const deps = makeDeps({
+      readFile: async (rel: string) => {
         if (rel.endsWith('overview.json')) return JSON.stringify({ duration: 5 });
         if (rel.endsWith('stage.json')) return JSON.stringify([{ 基础场景: 'a' }]);
         if (rel.endsWith('prompt.md')) return '提示词';
@@ -108,6 +132,23 @@ describe('buildSceneVideoSubmitData', () => {
       },
     });
     const caps: VideoCapabilities = { modes: ['reference'] };
+    const data = await buildSceneVideoSubmitData('p', '1', '1', caps, PROJECT_CONFIG, deps);
+    expect(data.mode).toBe('reference');
+    expect(data.references).toHaveLength(1);
+    expect(data.references?.[0]).toEqual({ type: 'image', file: expect.any(File) });
+  });
+
+  it('实现同时支持 reference 与 first-last-frame 时仍走首尾帧模式（保持既有行为）', async () => {
+    const deps = makeDeps({
+      readFile: async (rel: string) => {
+        if (rel.endsWith('overview.json')) return JSON.stringify({ duration: 5 });
+        if (rel.endsWith('stage.json')) return JSON.stringify([{ 基础场景: 'a' }]);
+        if (rel.endsWith('prompt.md')) return '提示词';
+        if (rel.endsWith('script.json')) return JSON.stringify([]);
+        throw new Error(`unexpected: ${rel}`);
+      },
+    });
+    const caps: VideoCapabilities = { modes: ['reference', 'first-last-frame'] };
     const data = await buildSceneVideoSubmitData('p', '1', '1', caps, PROJECT_CONFIG, deps);
     expect(data.mode).toBe('first-last-frame');
     expect(data.director?.frames).toHaveLength(1);

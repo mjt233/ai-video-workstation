@@ -816,6 +816,11 @@ async function runTask(taskId: string): Promise<void> {
 
       if (result.done) {
         db.addLog(taskId, 'info', `Task completed with status: ${result.status}`);
+        // 远端任务失败：优先透出 provider 返回的错误详情（如 MiniMax 敏感内容/余额不足等），
+        // 避免落到统一兜底「No output files found from provider task」而丢失真实原因
+        if (result.status === 'failed') {
+          throw new Error(result.errorMessage ?? '远端任务失败（未知原因）');
+        }
         break;
       }
     }
