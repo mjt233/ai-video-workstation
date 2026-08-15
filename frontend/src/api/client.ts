@@ -21,6 +21,17 @@ export async function getProjects(): Promise<ProjectEntry[]> {
 }
 
 /**
+ * 手动创建空项目（首页「新建项目」使用）。
+ * 服务端会创建标准目录骨架（prompt/、assert/）、空的 overview.md 与默认尺寸的 project.json。
+ * @param name 项目名称（不允许包含 / 或 \，长度不超过 64 个字符）
+ * @returns 创建成功的项目名
+ */
+export async function createProject(name: string): Promise<{ name: string }> {
+  const { data } = await client.post<{ name: string }>('/projects', { name })
+  return data
+}
+
+/**
  * 从文件系统读取文件内容。注意：如果文件是.json，返回的数据直接就是已完成反序列化的对象或数组。
  */
 export async function readFs(project: string, path: string): Promise<DirResponse | string> {

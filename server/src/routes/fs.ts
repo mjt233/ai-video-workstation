@@ -53,6 +53,65 @@ fsRouter.get('/projects', async (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * 手动创建空项目（首页「新建项目」使用）：
+ * - 校验项目名：必填、不得包含 / 或 \、不得为 . 或 ..、长度不超过 64
+ * - 目标目录已存在时返回 409
+ * - 创建标准目录骨架 prompt/{character,scene,stage}、assert/{character,custom,stage}，
+ *   以及空的 overview.md 和含默认尺寸（1080x1920@24fps）的 project.json
+ * @param req.body.name 项目名称（创建成功后同时作为项目目录名）
+ */
+fsRouter.post('/projects', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body as { name?: string };
+    const projectName = (name ?? '').trim();
+    if (!projectName) {
+      res.status(400).json({ error: '项目名必填' });
+      return;
+    }
+    if (projectName === '.' || projectName === '..' || /[\\/]/.test(projectName) || projectName.length > 64) {
+      res.status(400).json({ error: '项目名不合法：不能包含 / 或 \\，长度不超过 64 个字符' });
+      return;
+    }
+    const projectDir = path.resolve(DESIGN_DIR, projectName);
+    const designRoot = path.resolve(DESIGN_DIR) + path.sep;
+    if (!projectDir.startsWith(designRoot)) {
+      res.status(403).json({ error: 'Path traversal denied' });
+      return;
+    }
+    try {
+      await fs.access(projectDir);
+      res.status(409).json({ error: `项目「${projectName}」已存在` });
+      return;
+    } catch {
+      // 目录不存在，继续创建
+    }
+    // 标准目录骨架：prompt/（character、scene、stage）、assert/（character、custom、stage）
+    await fs.mkdir(path.join(projectDir, 'prompt', 'character'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'prompt', 'scene'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'prompt', 'stage'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'assert', 'character'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'assert', 'custom'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'assert', 'stage'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'overview.md'), '', 'utf-8');
+    const projectConfig = {
+      projectName,
+      width: 1080,
+      height: 1920,
+      fps: 24,
+    };
+    await fs.writeFile(
+      path.join(projectDir, 'project.json'),
+      `${JSON.stringify(projectConfig, null, 2)}\n`,
+      'utf-8',
+    );
+    res.status(201).json({ name: projectName });
+  } catch (err) {
+    console.error('Failed to create project:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 fsRouter.get('/fs/:project/*', async (req: Request, res: Response) => {
   try {
     const project = req.params.project as string;
