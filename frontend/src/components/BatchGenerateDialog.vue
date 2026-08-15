@@ -75,7 +75,25 @@
                 variant="outlined"
                 hide-details
                 class="mt-1"
-              />
+              >
+                <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
+                <template #item="{ item, props: itemProps }">
+                  <v-list-item v-bind="itemProps">
+                    <template #append>
+                      <v-chip
+                        v-if="providerLabel(item)"
+                        size="x-small"
+                        label
+                        variant="tonal"
+                        color="secondary"
+                        class="ml-1"
+                      >
+                        {{ providerLabel(item) }}
+                      </v-chip>
+                    </template>
+                  </v-list-item>
+                </template>
+              </v-select>
               <!-- 所选工作流的用户参数输入表单（按实现切换自动重置） -->
               <WorkflowParamsForm
                 v-if="selectedTypes.includes(at.id)"
@@ -220,9 +238,11 @@ import {
   type BatchSummary,
   type TaskResponse,
   type WorkflowInfo,
+  type WorkflowImplementation,
   type WorkflowUserParamDeclaration,
   type WorkflowUserParamValue,
 } from '../api/workflow'
+import { useProviderNames } from '../composables/useProviderNames'
 import WorkflowParamsForm from './WorkflowParamsForm.vue'
 
 const props = defineProps<{
@@ -276,6 +296,24 @@ const configWarning = ref<string | null>(null)
 
 /** 已加载的工作流定义列表（含各类型可用实现） */
 const workflows = ref<WorkflowInfo[]>([])
+
+/** provider ID → 友好名称的共享映射（下拉选项提供商 chip 文案） */
+const providerNames = useProviderNames()
+
+/**
+ * 解析工作流实现条目的提供商显示名。
+ *
+ * 优先展示 provider 的友好名称（如「MiniMax H3」）；名称映射未加载成功
+ * 或 provider 未注册时回退显示原始 provider ID；未声明 provider 返回空串
+ * （下拉选项不渲染 chip）。
+ *
+ * @param raw 下拉原始条目（工作流实现，含可选 provider 字段）
+ * @returns 提供商显示名；未声明 provider 时为空串
+ */
+function providerLabel(raw: { provider?: string }): string {
+  const p = raw?.provider
+  return p ? (providerNames.value.get(p) ?? p) : ''
+}
 const workflowMap = computed(() => {
   const m: Record<string, WorkflowInfo> = {}
   for (const w of workflows.value) m[w.type] = w
@@ -321,7 +359,7 @@ function setUserParams(assetTypeId: string, v: Record<string, WorkflowUserParamV
  * @param assetTypeId 资产类型 ID
  * @returns 实现列表；工作流未加载或类型未知时返回空数组
  */
-function implOptionsFor(assetTypeId: string): { impl: string; name: string; description?: string }[] {
+function implOptionsFor(assetTypeId: string): WorkflowImplementation[] {
   const wid = ASSET_TYPE_WORKFLOW[assetTypeId]
   const wf = wid ? workflowMap.value[wid] : undefined
   return wf?.implementations ?? []

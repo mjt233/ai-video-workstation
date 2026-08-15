@@ -96,7 +96,25 @@
       hide-details
       class="mb-2"
       @update:model-value="onImplChange"
-    />
+    >
+      <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
+      <template #item="{ item, props: itemProps }">
+        <v-list-item v-bind="itemProps">
+          <template #append>
+            <v-chip
+              v-if="providerLabel(item)"
+              size="x-small"
+              label
+              variant="tonal"
+              color="secondary"
+              class="ml-1"
+            >
+              {{ providerLabel(item) }}
+            </v-chip>
+          </template>
+        </v-list-item>
+      </template>
+    </v-select>
 
     <WorkflowParamsForm
       v-model="workflowParams"
@@ -146,6 +164,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { getWorkflows, type WorkflowInfo } from '../../../api/workflow'
+import { useProviderNames } from '../../../composables/useProviderNames'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import { getHistory, type CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
@@ -274,10 +293,28 @@ const workflowTypeItems = computed(() =>
     .map((w) => ({ value: w.type, label: w.type === 'text-to-image' ? '文生图' : '图片编辑' })),
 )
 
-/** 当前类型下的所有实现（如 ComfyUI default / Seedream pro / Seedream lite） */
+/** 当前类型下的所有实现（如 ComfyUI default / Seedream pro / Seedream lite；provider 用于选项 chip） */
 const implItems = computed(() =>
-  (currentWorkflow.value?.implementations ?? []).map((i) => ({ value: i.impl, label: i.name })),
+  (currentWorkflow.value?.implementations ?? []).map((i) => ({ value: i.impl, label: i.name, provider: i.provider })),
 )
+
+/** provider ID → 友好名称的共享映射（下拉选项提供商 chip 文案） */
+const providerNames = useProviderNames()
+
+/**
+ * 解析工作流实现条目的提供商显示名。
+ *
+ * 优先展示 provider 的友好名称（如「火山方舟」）；名称映射未加载成功
+ * 或 provider 未注册时回退显示原始 provider ID；未声明 provider 返回空串
+ * （下拉选项不渲染 chip）。
+ *
+ * @param raw 下拉原始条目（含可选 provider 字段）
+ * @returns 提供商显示名；未声明 provider 时为空串
+ */
+function providerLabel(raw: { provider?: string }): string {
+  const p = raw?.provider
+  return p ? (providerNames.value.get(p) ?? p) : ''
+}
 
 /** 当前选择的工作流实现标识（config.workflowImpl；非法/未初始化时回退第一个实现） */
 const currentImplId = computed(() => {

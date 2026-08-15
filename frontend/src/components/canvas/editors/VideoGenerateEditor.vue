@@ -20,7 +20,25 @@
           hide-details
           class="flex-grow-1"
           @update:model-value="onWorkflowChange"
-        />
+        >
+          <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
+          <template #item="{ item, props: itemProps }">
+            <v-list-item v-bind="itemProps">
+              <template #append>
+                <v-chip
+                  v-if="providerLabel(item)"
+                  size="x-small"
+                  label
+                  variant="tonal"
+                  color="secondary"
+                  class="ml-1"
+                >
+                  {{ providerLabel(item) }}
+                </v-chip>
+              </template>
+            </v-list-item>
+          </template>
+        </v-select>
 
         <!-- 模式切换（所选实现声明多种模式时显示） -->
         <v-select
@@ -280,6 +298,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getWorkflows, type WorkflowInfo } from '../../../api/workflow'
+import { useProviderNames } from '../../../composables/useProviderNames'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
@@ -436,10 +455,28 @@ const flfMaxFrames = computed(() => currentImpl.value?.capabilities?.video?.firs
 /** 当前实现是否支持音频输入（video.audio；首尾帧模式据此显示音频输入分组） */
 const audioEnabled = computed(() => currentImpl.value?.capabilities?.video?.audio === true)
 
-/** 工作流下拉选项（图生视频类型下的所有实现，直接选择实现） */
+/** 工作流下拉选项（图生视频类型下的所有实现，直接选择实现；provider 用于选项 chip） */
 const workflowItems = computed(() =>
-  impls.value.map((i) => ({ value: i.impl, label: i.name })),
+  impls.value.map((i) => ({ value: i.impl, label: i.name, provider: i.provider })),
 )
+
+/** provider ID → 友好名称的共享映射（下拉选项提供商 chip 文案） */
+const providerNames = useProviderNames()
+
+/**
+ * 解析工作流实现条目的提供商显示名。
+ *
+ * 优先展示 provider 的友好名称（如「MiniMax H3」）；名称映射未加载成功
+ * 或 provider 未注册时回退显示原始 provider ID；未声明 provider 返回空串
+ * （下拉选项不渲染 chip）。
+ *
+ * @param raw 下拉原始条目（含可选 provider 字段）
+ * @returns 提供商显示名；未声明 provider 时为空串
+ */
+function providerLabel(raw: { provider?: string }): string {
+  const p = raw?.provider
+  return p ? (providerNames.value.get(p) ?? p) : ''
+}
 
 /** 自定义工作流参数（key → 值；与 config.workflowParams 双向同步） */
 const workflowParams = ref<Record<string, WorkflowUserParamValue>>({})
