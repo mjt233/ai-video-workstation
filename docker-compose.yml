@@ -16,7 +16,7 @@ services:
         APT_MIRROR: mirrors.tuna.tsinghua.edu.cn
     # 始终基于本地 Dockerfile 构建，避免启动时先尝试 pull 远程同名镜像
     pull_policy: build
-    image: ai-video-workstation:latest
+    image: xiaotao233/ai-video-workstation:latest
     container_name: ai-video-workstation
     ports:
       # 宿主机端口 : 容器内端口（服务端监听 PORT 环境变量）
