@@ -1,0 +1,25 @@
+# 版本控制与工作区
+.git
+.gitignore
+.worktrees
+
+# 依赖与构建产物（镜像内重新安装/构建）
+node_modules
+**/node_modules
+**/dist
+
+# 运行时数据（通过 docker-compose bind mount 挂载，不进入镜像）
+design
+data
+server/config
+
+# 文档与工具
+docs
+.agents
+skills-lock.json
+
+# 其它
+*.log
+.DS_Store
+__pycache__
+*.pyc
