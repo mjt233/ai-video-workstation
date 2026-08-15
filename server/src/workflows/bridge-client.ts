@@ -105,8 +105,12 @@ export interface ImageEditSizeParams {
 /**
  * 从工作流 vars 解析图片编辑尺寸参数。
  *
- * 仅当 vars.enable_specified_size === 'true' 时返回启用标记与宽高（数字，取整），
- * 否则返回空对象（对应「不指定」模式，不向 Bridge 传任何尺寸参数）。
+ * 仅当 vars.enable_specified_size === 'false'（前端「不指定」模式）或无有效宽高时
+ * 返回空对象；否则返回启用标记与有效宽高（数字，取整）。
+ *
+ * 门控说明：ComfyUI Bridge 工作流（ceb-*，动态注册）通常不声明 enable_specified_size
+ * 参数（该字段为 Seedream 等云工作流约定），若以其 === 'true' 作为唯一开关，
+ * 画布节点等提交的 width/height 会被静默忽略而始终使用项目全局尺寸。
  *
  * @param vars 工作流 vars（key → 字符串值）
  * @returns 可透传给 Bridge 的尺寸参数
@@ -114,12 +118,14 @@ export interface ImageEditSizeParams {
 export function resolveImageEditSizeParams(
   vars: Record<string, string | undefined>,
 ): ImageEditSizeParams {
-  if (vars.enable_specified_size !== 'true') return {};
-  const out: ImageEditSizeParams = { enable_specified_size: true };
+  if (vars.enable_specified_size === 'false') return {};
+  const out: ImageEditSizeParams = {};
   const width = vars.width ? Number(vars.width) : NaN;
   const height = vars.height ? Number(vars.height) : NaN;
   if (Number.isFinite(width)) out.width = Math.round(width);
   if (Number.isFinite(height)) out.height = Math.round(height);
+  if (out.width == null && out.height == null) return {};
+  out.enable_specified_size = true;
   return out;
 }
 

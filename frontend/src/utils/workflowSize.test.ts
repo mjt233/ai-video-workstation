@@ -63,6 +63,19 @@ describe('resolveSizeMode', () => {
     ).toBe('project')
   })
 
+  it('未声明 enable_specified_size 但宽高有效 → 视为已启用（Bridge 工作流回显）', () => {
+    expect(resolveSizeMode({ width: 1920, height: 1080 })).toBe('preset')
+    expect(resolveSizeMode({ width: 720, height: 1280 })).toBe('preset')
+    expect(resolveSizeMode({ width: 1234, height: 567 })).toBe('manual')
+    expect(resolveSizeMode({ width: 720, height: 1280, projectSize: { width: 720, height: 1280 } })).toBe('project')
+  })
+
+  it('未声明 enable_specified_size 且宽高缺失/无效 → none', () => {
+    expect(resolveSizeMode({ width: '', height: '' })).toBe('none')
+    expect(resolveSizeMode({ width: 720 })).toBe('none')
+    expect(resolveSizeMode({ width: 'abc', height: 'def' })).toBe('none')
+  })
+
   it('启用且宽高匹配某预设 → preset', () => {
     expect(resolveSizeMode({ enableSpecifiedSize: true, width: 1920, height: 1080 })).toBe('preset')
   })

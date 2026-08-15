@@ -40,19 +40,22 @@ export interface TextToImageVars extends WorkflowVarsBase {
   enhance_prompt?: string;
   /**
    * 可选：是否启用指定输出尺寸（"true"/"false"）。
-   * 由用户通过工作流参数声明传入；仅当为 "true" 时 width/height 生效，否则回退 projectConfig。
+   * 由用户通过工作流参数声明传入；显式为 "false"（前端「不指定」模式）时
+   * width/height 不生效，回退 projectConfig。
+   * 注：ComfyUI Bridge 工作流通常不声明该参数（其为 Seedream 等云工作流约定字段），
+   * 此时只要 width/height 为有效正数即生效（见 bridge-sync textToImageSubmit）。
    */
   enable_specified_size?: string;
   /**
    * 可选：覆盖默认宽度（像素，字符串形式）。
    * 角色外观通常固定 1280；场景图默认使用 projectConfig.width。
-   * 仅当 enable_specified_size 为 "true" 时生效。
+   * 显式 enable_specified_size 为 "false" 时不生效；未配置时回退 projectConfig。
    */
   width?: string;
   /**
    * 可选：覆盖默认高度（像素，字符串形式）。
    * 角色外观通常固定 720；场景图默认使用 projectConfig.height。
-   * 仅当 enable_specified_size 为 "true" 时生效。
+   * 显式 enable_specified_size 为 "false" 时不生效；未配置时回退 projectConfig。
    */
   height?: string;
   /**
@@ -115,17 +118,19 @@ export interface ImageEditVars extends WorkflowVarsBase {
   baseLabel?: string;
   /**
    * 可选：是否启用指定输出尺寸（"true"/"false"）。
-   * 由用户通过工作流参数声明传入；仅当为 "true" 时 width/height 生效。
+   * 由用户通过工作流参数声明传入；显式为 "false" 时不生效。
+   * 注：ComfyUI Bridge 工作流通常不声明该参数（其为 Seedream 等云工作流约定字段），
+   * 此时只要 width/height 为有效正数即生效（见 bridge-client resolveImageEditSizeParams）。
    */
   enable_specified_size?: string;
   /**
    * 可选：输出宽度（像素，字符串形式）。
-   * enable_specified_size 为 "true" 时提交给 Bridge。
+   * 显式 enable_specified_size 为 "false" 时不提交给 Bridge；未配置时由工作流/项目默认兜底。
    */
   width?: string;
   /**
    * 可选：输出高度（像素，字符串形式）。
-   * enable_specified_size 为 "true" 时提交给 Bridge。
+   * 显式 enable_specified_size 为 "false" 时不提交给 Bridge；未配置时由工作流/项目默认兜底。
    */
   height?: string;
 }

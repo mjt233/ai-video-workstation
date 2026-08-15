@@ -150,6 +150,38 @@ describe('buildSubmit（text-to-image）', () => {
       params: expect.objectContaining({ prompt: '一只猫', width: 1080, height: 1920 }),
     });
   });
+
+  it('无 enable_specified_size 声明时，vars.width/height 直接生效（不依赖门控）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't1' }));
+    const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
+    const ctx = {
+      vars: { promptPath: 'p.md', width: '720', height: '1280' },
+      projectConfig: { width: 1080, height: 1920 },
+      readFile: async () => '一只猫',
+      provider: { execute },
+    } as never;
+    await submit(ctx as never);
+    expect(execute).toHaveBeenCalledWith({
+      workflowId: 'text_to_image',
+      params: expect.objectContaining({ width: 720, height: 1280 }),
+    });
+  });
+
+  it('显式 enable_specified_size=false 时回退 projectConfig（忽略 vars.width/height）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't1' }));
+    const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
+    const ctx = {
+      vars: { promptPath: 'p.md', enable_specified_size: 'false', width: '720', height: '1280' },
+      projectConfig: { width: 1080, height: 1920 },
+      readFile: async () => '一只猫',
+      provider: { execute },
+    } as never;
+    await submit(ctx as never);
+    expect(execute).toHaveBeenCalledWith({
+      workflowId: 'text_to_image',
+      params: expect.objectContaining({ width: 1080, height: 1920 }),
+    });
+  });
 });
 
 describe('buildSubmit（image-edit）', () => {

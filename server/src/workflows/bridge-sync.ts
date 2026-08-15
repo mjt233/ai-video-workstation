@@ -135,9 +135,14 @@ function resolveOverrideSize(value: string | undefined, fallback: number): numbe
 /**
  * 文生图提交实现。
  *
- * 读取 vars.promptPath 对应的提示词文件内容作为 prompt；输出尺寸按
- * enable_specified_size 门控：为 "true" 且 width/height 非空时覆盖 projectConfig，
- * 否则回退 projectConfig（缺省 1080×1920）。
+ * 读取 vars.promptPath 对应的提示词文件内容作为 prompt；输出尺寸优先采用
+ * vars.width/height（有效正数），未配置时回退 projectConfig（缺省 1080×1920）。
+ *
+ * 尺寸门控说明：ComfyUI Bridge 工作流（ceb-*，动态注册）通常不声明
+ * enable_specified_size 参数（该字段为 Seedream 等云工作流约定），若以其 === 'true'
+ * 作为唯一开关，画布节点等提交的 width/height 会被静默忽略而始终使用项目全局尺寸。
+ * 因此仅当显式 enable_specified_size === 'false'（前端「不指定」模式，此时不携带
+ * width/height）时才回退 projectConfig，其余情况 width/height 有效即采用。
  *
  * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
  * @returns 动态工作流 submit 函数
@@ -147,7 +152,7 @@ function textToImageSubmit(workflowId: string): WorkflowDefinition['submit'] {
     const promptPath = ctx.vars.promptPath?.trim();
     if (!promptPath) throw new Error('text-to-image 需要 vars.promptPath');
     const prompt = await ctx.readFile(promptPath);
-    const specified = ctx.vars.enable_specified_size === 'true';
+    const specified = ctx.vars.enable_specified_size !== 'false';
     const width = specified
       ? resolveOverrideSize(ctx.vars.width, ctx.projectConfig.width || 1080)
       : (ctx.projectConfig.width || 1080);

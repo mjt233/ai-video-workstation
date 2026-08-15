@@ -107,22 +107,30 @@ export interface SizeEchoInput {
  * - 宽高能匹配某个比例+分辨率档 → 'preset'
  * - 其余 → 'manual'
  *
+ * 启用判定：enable_specified_size 为 truthy 即启用；该字段缺失（undefined，如
+ * ComfyUI Bridge 动态注册工作流未声明此参数）但宽高有效时同样视为启用——
+ * 否则已保存的宽高无法回显，会误判为「不指定」。
+ *
  * @param input 外部传入的值
  * @returns 推断出的模式
  */
 export function resolveSizeMode(input: SizeEchoInput): SizeMode {
+  const rawEnable = input.enableSpecifiedSize
   const enabled =
-    input.enableSpecifiedSize === true ||
-    input.enableSpecifiedSize === 'true' ||
-    input.enableSpecifiedSize === 1 ||
-    input.enableSpecifiedSize === '1'
+    rawEnable === true ||
+    rawEnable === 'true' ||
+    rawEnable === 1 ||
+    rawEnable === '1'
   const w = Number(input.width)
   const h = Number(input.height)
   const hasSize =
     input.width !== undefined && input.width !== '' &&
     input.height !== undefined && input.height !== '' &&
     Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
-  if (!enabled || !hasSize) return 'none'
+  // 工作流未声明 enable_specified_size（如 ComfyUI Bridge 动态注册工作流）时，
+  // 宽高存在即视为已启用，否则已保存的尺寸无法回显（会误判为「不指定」）。
+  const effectiveEnabled = enabled || (rawEnable === undefined && hasSize)
+  if (!effectiveEnabled || !hasSize) return 'none'
   if (input.projectSize && w === input.projectSize.width && h === input.projectSize.height) {
     return 'project'
   }
