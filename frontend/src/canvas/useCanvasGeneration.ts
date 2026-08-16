@@ -4,11 +4,10 @@ import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow, type WorkflowU
 import { extractVideoFrame, extractVideoFrameAtTime, concatVideo as requestConcatVideo, trimVideo as requestTrimVideo } from './api'
 import type { VideoSubmitParams } from './videoSubmit'
 import type { CanvasNodeData, CanvasKind } from './types'
-import { canvasNodeAssetPath, sceneCanvasRelPath } from './paths'
-import { getHistory, type HistoryEntry } from './generate'
-import { nextVersion } from './types'
+import { canvasNodeOutputPath, sceneCanvasRelPath, type CanvasScope } from './paths'
+import { getPrototype } from './registry'
 
-/** 生成状态（挂在生成节点上展示） */
+/** 生成状态（挂在生成节点上展示；仅页面会话内的展示态，不持久化） */
 export interface GenerateStatus {
   status: 'running' | 'success' | 'error'
   progress?: number
@@ -28,7 +27,11 @@ export interface GenTarget {
 }
 
 /**
- * 生成图片节点的资产生成组合式：跑工作流、轮询状态、更新节点历史。
+ * 生成节点资产生成组合式：跑工作流、轮询状态（纯体验层）、通知结果。
+ *
+ * 产物路径为固定文件名 output.{ext}（"当前结果"为文件系统事实）：本组合式只管提交与状态展示，
+ * **不再回写 config.current/history**（结果落盘由服务端引擎/路由完成，页面离开/关闭后结果依然存在，
+ * 重新进入画布时按固定路径直接可见；历史由服务端 history API 管理）。
  *
  * @param project 项目名
  * @param target 画布目标（决定产物目录与 prompt 文件位置）
@@ -36,7 +39,7 @@ export interface GenTarget {
 export function useCanvasGeneration(project: string, target: GenTarget) {
   /** 当前生成目标（切换分镜/场景时通过 switchTarget 更新） */
   const targetRef = ref<GenTarget>({ ...target })
-  /** nodeId → 生成状态 */
+  /** nodeId → 生成状态（仅页面展示） */
   const statusByNode = ref<Record<string, GenerateStatus>>({})
   /** nodeId → 轮询句柄 */
   const pollTimers: Record<string, ReturnType<typeof setInterval>> = {}
@@ -56,39 +59,23 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     inputPathsRef.value[nodeId] = paths
   }
 
-  /** 计算生成节点的产物路径（版本号 = 历史长度 + 1） */
+  /** 当前画布作用域（产物路径推导用） */
+  function getScope(): CanvasScope {
+    if (targetRef.value.kind === 'stage') {
+      return { kind: 'stage', primary: targetRef.value.stage ?? '', label: targetRef.value.label }
+    }
+    return { kind: 'scene', primary: targetRef.value.episode ?? '', secondary: targetRef.value.shot }
+  }
+
+  /**
+   * 计算生成节点的产物路径（固定文件名 output.{ext}，扩展名取原型声明）。
+   *
+   * @param node 生成节点数据
+   * @returns assert 相对路径
+   */
   function computeOutputPath(node: CanvasNodeData): string {
-    const version = nextVersion(getHistory(node.config))
-    const scope =
-      targetRef.value.kind === 'stage'
-        ? {
-            kind: 'stage' as const,
-            primary: targetRef.value.stage ?? '',
-            label: targetRef.value.label,
-          }
-        : { kind: 'scene' as const, primary: targetRef.value.episode ?? '', secondary: targetRef.value.shot }
-    const base = canvasNodeAssetPath(scope, node.id, version)
-    if (node.prototypeId === 'video-generate') {
-      // 视频产物扩展名替换为 .mp4（图片路径助手默认 .jpg）
-      return base.replace(/\.jpg$/, '.mp4')
-    }
-    if (node.prototypeId === 'video-frame-extract') {
-      // 帧提取产物为 .png（图片路径助手默认 .jpg）
-      return base.replace(/\.jpg$/, '.png')
-    }
-    if (node.prototypeId === 'video-concat') {
-      // 拼接视频产物扩展名替换为 .mp4（图片路径助手默认 .jpg）
-      return base.replace(/\.jpg$/, '.mp4')
-    }
-    if (node.prototypeId === 'video-trim') {
-      // 裁剪视频无历史版本：固定覆盖 output.mp4（不按 v{n} 递增）
-      return base.replace(/\/v\d+\.jpg$/, '/output.mp4')
-    }
-    if (node.prototypeId === 'tts-generate') {
-      // TTS 产物扩展名替换为 .flac（音频）
-      return base.replace(/\.jpg$/, '.flac')
-    }
-    return base
+    const ext = getPrototype(node.prototypeId)?.outputExt ?? 'jpg'
+    return canvasNodeOutputPath(getScope(), node.id, ext)
   }
 
   /** 计算生成节点 prompt 文件相对路径（文生图工作流需要） */
@@ -102,7 +89,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
   }
 
   /**
-   * 触发生成节点的资产生成。
+   * 触发生成节点的资产生成（异步任务：提交后由服务端队列执行，轮询仅展示状态）。
    *
    * - 图片节点：走既有 prompt/inputPaths 逻辑（text-to-image / image-edit）
    * - 视频节点（video-generate）：走自包含提交参数（videoParams，组装后传入）
@@ -110,13 +97,13 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
    *   克隆模式需先连接音频输入作为参考音色，产物为 .flac
    *
    * @param node 生成节点数据（图片、视频或 TTS）
-   * @param updateConfig 更新节点配置的回调（由调用方写入 current/history）
    * @param videoParams 视频生成节点的自包含提交参数（仅 video-generate 需要）
+   * @param onResult 任务完成（含失败）时的回调（nodeId, outputPath），供 UI 刷新产物展示；可省略
    */
   async function generate(
     node: CanvasNodeData,
-    updateConfig: (config: Record<string, unknown>) => void,
     videoParams?: VideoSubmitParams,
+    onResult?: (nodeId: string, outputPath: string) => void,
   ): Promise<void> {
     const nodeId = node.id
     if (statusByNode.value[nodeId]?.status === 'running') return
@@ -142,7 +129,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
           },
         })
         taskIdByNode.value[nodeId] = taskId
-        poll(taskId, node, outputPath, updateConfig)
+        poll(taskId, node, outputPath, onResult)
       } catch (e) {
         statusByNode.value[nodeId] = {
           status: 'error',
@@ -178,7 +165,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
           params: { vars, outputPath, userParams },
         })
         taskIdByNode.value[nodeId] = taskId
-        poll(taskId, node, outputPath, updateConfig)
+        poll(taskId, node, outputPath, onResult)
       } catch (e) {
         statusByNode.value[nodeId] = {
           status: 'error',
@@ -216,7 +203,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
         params: { vars, outputPath, userParams },
       })
       taskIdByNode.value[nodeId] = taskId
-      poll(taskId, node, outputPath, updateConfig)
+      poll(taskId, node, outputPath, onResult)
     } catch (e) {
       statusByNode.value[nodeId] = {
         status: 'error',
@@ -225,14 +212,25 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     }
   }
 
+  /**
+   * 轮询任务状态（纯体验层：只更新 statusByNode 展示，成功后通知结果）。
+   *
+   * 结果落盘不依赖本轮询（服务端独立完成）；即使轮询全部中断，重新进入画布时
+   * 产物按固定路径直接可见。首轮立即查询一次，避免结果已就绪时等待 2s。
+   *
+   * @param taskId 任务 id
+   * @param node 生成节点数据
+   * @param outputPath 产物相对路径（服务端实际写入路径）
+   * @param onResult 完成（含失败）回调（nodeId, outputPath），可省略
+   */
   function poll(
     taskId: string,
     node: CanvasNodeData,
     outputPath: string,
-    updateConfig: (config: Record<string, unknown>) => void,
+    onResult?: (nodeId: string, outputPath: string) => void,
   ): void {
     if (pollTimers[node.id]) clearInterval(pollTimers[node.id])
-    pollTimers[node.id] = setInterval(async () => {
+    const tick = async (): Promise<void> => {
       try {
         const task = await getTaskStatus(taskId)
         const logs = await getTaskLogs(taskId).catch(() => [])
@@ -247,24 +245,17 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
           errorMsg: task.errorMsg,
         }
 
-        if (done) {
+        if (done || isError) {
           clearInterval(pollTimers[node.id])
           delete pollTimers[node.id]
-          const history: HistoryEntry[] = [...getHistory(node.config), { version: nextVersion(getHistory(node.config)), path: outputPath, date: new Date().toISOString() }]
-          updateConfig({
-            ...node.config,
-            current: { version: nextVersion(getHistory(node.config)), path: outputPath, date: new Date().toISOString() },
-            history,
-          })
-        } else if (isError) {
-          clearInterval(pollTimers[node.id])
-          delete pollTimers[node.id]
-          statusByNode.value[node.id] = { status: 'error', errorMsg: task.errorMsg, taskId }
+          if (done) onResult?.(node.id, outputPath)
         }
       } catch {
         // 轮询失败忽略，下轮重试
       }
-    }, 2000)
+    }
+    void tick()
+    pollTimers[node.id] = setInterval(() => void tick(), 2000)
   }
 
   /**
@@ -293,19 +284,19 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
   }
 
   /**
-   * 获取视频帧节点的帧提取：调用服务端 ffmpeg 接口，成功后回写 current/history。
+   * 获取视频帧节点的帧提取：调用服务端 ffmpeg 接口，成功后通知结果（产物为固定 output.png）。
    *
    * 提取方式：优先按时间点（config.frameTime，「提取当前帧」写入，ffmpeg -ss 呈现序精确选帧）；
    * 无 frameTime 时按帧索引（config.frameIndex，0=首帧、1=第二帧、-1=尾帧、-2=倒数第二帧，解码序 select）。
    *
    * @param node 获取视频帧节点数据
    * @param videoPath 输入视频相对路径（来自连线输入）
-   * @param updateConfig 更新节点配置的回调（回写 current/history）
+   * @param onResult 完成（含失败）回调（nodeId, outputPath），可省略
    */
   async function extractFrame(
     node: CanvasNodeData,
     videoPath: string,
-    updateConfig: (config: Record<string, unknown>) => void,
+    onResult?: (nodeId: string, outputPath: string) => void,
   ): Promise<void> {
     const nodeId = node.id
     if (statusByNode.value[nodeId]?.status === 'running') return
@@ -319,21 +310,11 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
       const res = hasTime
         ? await extractVideoFrameAtTime(project, videoPath, time as number, outputPath)
         : await extractVideoFrame(project, videoPath, frameIndex, outputPath)
-      const version = nextVersion(getHistory(node.config))
-      const now = new Date().toISOString()
-      const history: HistoryEntry[] = [
-        ...getHistory(node.config),
-        { version, path: res.path, date: now },
-      ]
-      updateConfig({
-        ...node.config,
-        current: { version, path: res.path, date: now },
-        history,
-      })
       statusByNode.value[nodeId] = {
         status: 'success',
         lastLog: hasTime ? `已提取第 ${time} 秒处画面` : `已提取第 ${frameIndex} 帧`,
       }
+      onResult?.(nodeId, res.path)
     } catch (e) {
       statusByNode.value[nodeId] = {
         status: 'error',
@@ -342,20 +323,19 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     }
   }
 
-
   /**
-   * 拼接视频节点的视频拼接：调用服务端 ffmpeg 接口，成功后回写 current/history。
+   * 拼接视频节点的视频拼接：调用服务端 ffmpeg 接口，成功后通知结果（产物为固定 output.mp4）。
    *
    * 同步路由（ffmpeg 阻塞等待），无轮询；各段视频规格须一致（服务端校验，否则报错）。
    *
    * @param node 拼接视频节点数据
    * @param videoPaths 输入视频相对路径数组（assert/ 下，按拼接顺序）
-   * @param updateConfig 更新节点配置的回调（回写 current/history）
+   * @param onResult 完成（含失败）回调（nodeId, outputPath），可省略
    */
   async function concatVideo(
     node: CanvasNodeData,
     videoPaths: string[],
-    updateConfig: (config: Record<string, unknown>) => void,
+    onResult?: (nodeId: string, outputPath: string) => void,
   ): Promise<void> {
     const nodeId = node.id
     if (statusByNode.value[nodeId]?.status === 'running') return
@@ -363,21 +343,11 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     try {
       const outputPath = computeOutputPath(node)
       const res = await requestConcatVideo(project, videoPaths, outputPath)
-      const version = nextVersion(getHistory(node.config))
-      const now = new Date().toISOString()
-      const history: HistoryEntry[] = [
-        ...getHistory(node.config),
-        { version, path: res.path, date: now },
-      ]
-      updateConfig({
-        ...node.config,
-        current: { version, path: res.path, date: now },
-        history,
-      })
       statusByNode.value[nodeId] = {
         status: 'success',
         lastLog: `已拼接 ${videoPaths.length} 段视频`,
       }
+      onResult?.(nodeId, res.path)
     } catch (e) {
       statusByNode.value[nodeId] = {
         status: 'error',
@@ -387,19 +357,18 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
   }
 
   /**
-   * 裁剪视频节点：调用服务端 ffmpeg 接口，成功后只回写 current（无 history）。
+   * 裁剪视频节点：调用服务端 ffmpeg 接口，成功后通知结果（产物固定覆盖 output.mp4）。
    *
-   * 同步路由（ffmpeg 阻塞等待），无轮询；产物覆盖同一 output.mp4，
-   * current.version 自增仅用于预览防缓存。
+   * 同步路由（ffmpeg 阻塞等待），无轮询；重复裁剪时旧产物由服务端归档进历史目录。
    *
    * @param node 裁剪视频节点数据
    * @param videoPath 输入视频相对路径（来自连线输入）
-   * @param updateConfig 更新节点配置的回调（回写 current）
+   * @param onResult 完成（含失败）回调（nodeId, outputPath），可省略
    */
   async function trimVideo(
     node: CanvasNodeData,
     videoPath: string,
-    updateConfig: (config: Record<string, unknown>) => void,
+    onResult?: (nodeId: string, outputPath: string) => void,
   ): Promise<void> {
     const nodeId = node.id
     if (statusByNode.value[nodeId]?.status === 'running') return
@@ -416,19 +385,13 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
           ? { startFrame: Math.trunc(startValue), duration }
           : { startTime: startValue, duration }
       const res = await requestTrimVideo(project, videoPath, params, outputPath)
-      const prev = node.config.current as { version?: number } | undefined
-      const version = (typeof prev?.version === 'number' ? prev.version : 0) + 1
-      const now = new Date().toISOString()
-      updateConfig({
-        ...node.config,
-        current: { version, path: res.path, date: now },
-      })
       statusByNode.value[nodeId] = {
         status: 'success',
         lastLog: startMode === 'frame'
           ? `已从第 ${params.startFrame} 帧裁剪 ${duration}s`
           : `已从 ${startValue}s 处裁剪 ${duration}s`,
       }
+      onResult?.(nodeId, res.path)
     } catch (e) {
       statusByNode.value[nodeId] = {
         status: 'error',
@@ -437,7 +400,7 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     }
   }
 
-  /** 重置全部生成状态与轮询（切换画布目标时调用） */
+  /** 重置全部生成状态与轮询（切换画布目标时调用；结果已由服务端落盘，重置仅清展示态） */
   function reset(): void {
     for (const id of Object.keys(pollTimers)) {
       clearInterval(pollTimers[id])
@@ -458,5 +421,5 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     reset()
   }
 
-  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, trimVideo, interrupt, clearStatus, computeOutputPath, switchTarget }
+  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, trimVideo, interrupt, clearStatus, computeOutputPath, getScope, reset, switchTarget }
 }

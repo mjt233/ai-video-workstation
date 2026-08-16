@@ -122,7 +122,7 @@
         :disabled="!canGenerate"
         @click="emit('generate', node.id)"
       >
-        {{ node.config.current ? '重新生成' : '生成' }}
+        {{ hasOutput ? '重新生成' : '生成' }}
       </v-btn>
       <v-btn
         v-if="isRunning"
@@ -134,12 +134,12 @@
       </v-btn>
       <v-spacer />
       <v-btn
-        v-if="node.config.current"
+        v-if="hasOutput"
         size="small"
         variant="text"
         @click="emit('open-history', node.id)"
       >
-        历史 ({{ history.length }})
+        历史
       </v-btn>
     </div>
   </div>
@@ -150,7 +150,7 @@ import { computed, ref, watch } from 'vue'
 import { getWorkflows, type WorkflowInfo, type WorkflowUserParamValue } from '../../../api/workflow'
 import { useProviderNames } from '../../../composables/useProviderNames'
 import type { CanvasNodeData } from '../../../canvas/types'
-import { getHistory, type CanvasInputInfo } from '../../../canvas/generate'
+import type { CanvasInputInfo } from '../../../canvas/generate'
 import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
 
 const props = defineProps<{
@@ -158,6 +158,8 @@ const props = defineProps<{
   node: CanvasNodeData
   inputs: CanvasInputInfo[]
   isRunning: boolean
+  /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
 }>()
 
 const emit = defineEmits<{
@@ -169,11 +171,13 @@ const emit = defineEmits<{
 
 const workflows = ref<WorkflowInfo[]>([])
 
+/** 节点当前是否已有产物（生成按钮文案/历史入口用；产物为固定路径文件，由服务端落盘） */
+const hasOutput = computed(() => !!(props.output || props.node.config.current))
+
 const mode = computed(() => (props.node.config.mode === 'clone' ? 'clone' : 'design'))
 const text = computed(() => (typeof props.node.config.text === 'string' ? props.node.config.text : ''))
 const refText = computed(() => (typeof props.node.config.refText === 'string' ? props.node.config.refText : ''))
 const prompt = computed(() => (typeof props.node.config.prompt === 'string' ? props.node.config.prompt : ''))
-const history = computed(() => getHistory(props.node.config))
 const workflowParams = ref<Record<string, WorkflowUserParamValue>>({})
 
 const workflowId = computed(() => (mode.value === 'clone' ? 'tts-voice-clone' : 'tts-voice-design'))

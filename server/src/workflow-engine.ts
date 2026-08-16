@@ -16,7 +16,7 @@ import { getProviderConfig } from './providers/config-store.js';
 import { getProvider } from './providers/registry.js';
 import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
-import { archiveExistingAsset } from './assets/history.js';
+import { copyExistingAssetToHistory } from './assets/history.js';
 import { isCancelRequested } from './workflows/cancel.js';
 import { toNativeUserParams } from './workflows/user-params.js';
 
@@ -504,7 +504,8 @@ async function tryHandleSceneStageDirectReference(
     );
   }
 
-  const archived = await archiveExistingAsset(project, outputPath);
+  // 重复生成时，将已有资产归档到历史版本（copy：原文件保留到新产物覆盖前，运行期间旧图持续可见）
+  const archived = await copyExistingAssetToHistory(project, outputPath);
   if (archived) {
     db.addLog(taskId, 'info', `已有资产已归档为历史版本: ${archived}`);
   }
@@ -847,8 +848,8 @@ async function runTask(taskId: string): Promise<void> {
       throw new Error('用户中断');
     }
 
-    // 重复生成时，将已有资产归档到历史版本
-    const archived = await archiveExistingAsset(task.project, outputPath);
+    // 重复生成时，将已有资产归档到历史版本（copy：固定路径产物在生成期间不消失，预览不断链）
+    const archived = await copyExistingAssetToHistory(task.project, outputPath);
     if (archived) {
       db.addLog(taskId, 'info', `已有资产已归档为历史版本: ${archived}`);
     }

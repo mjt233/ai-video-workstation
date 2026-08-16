@@ -9,12 +9,31 @@ import {
 import { concatVideos, ConcatError } from '../assets/concat-video.js';
 import { trimVideo, TrimError } from '../assets/trim-video.js';
 import { isUnderAssert } from './fs-path.js';
+import { copyExistingAssetToHistory } from '../assets/history.js';
+import { readCanvasNodeInfo } from '../canvas/node-info.js';
 
 /**
  * 画布专属路由：本地媒体处理操作（不走工作流队列）。
  * 当前提供「获取视频帧」节点所需的 ffmpeg 帧提取接口。
  */
 export const canvasRouter = Router();
+
+/**
+ * 写固定路径产物前归档旧版本。
+ * 画布节点产物统一为固定路径 output.{ext}，重复生成时旧产物先复制归档到
+ * history/ 目录（copy 而非 rename：新文件覆盖前旧文件仍留在原位，预览不断链）。
+ * 归档失败不阻断本次写入（仅丢历史，不丢结果）。
+ *
+ * @param project 项目名
+ * @param outputPath 产物相对路径（assert/ 下，已规范化）
+ */
+async function archiveCanvasOutput(project: string, outputPath: string): Promise<void> {
+  try {
+    await copyExistingAssetToHistory(project, outputPath);
+  } catch (e) {
+    console.warn(`归档画布节点旧产物失败（不影响本次写入）: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
 
 /**
  * 提取视频帧：POST /api/canvas/extract-frame
@@ -47,6 +66,7 @@ canvasRouter.post('/canvas/extract-frame', async (req: Request, res: Response) =
         res.status(400).json({ error: 'time 必须是大于等于 0 的数字（秒）' });
         return;
       }
+      await archiveCanvasOutput(project, outputNorm);
       const result = await extractVideoFrameAtTime(project, videoNorm, time, outputNorm);
       res.json({ success: true, path: result });
       return;
@@ -56,6 +76,7 @@ canvasRouter.post('/canvas/extract-frame', async (req: Request, res: Response) =
       res.status(400).json({ error: 'frameIndex 必须是整数' });
       return;
     }
+    await archiveCanvasOutput(project, outputNorm);
     const result = await extractVideoFrame(project, videoNorm, frameIndex, outputNorm);
     res.json({ success: true, path: result });
   } catch (err) {
@@ -73,6 +94,36 @@ canvasRouter.post('/canvas/extract-frame', async (req: Request, res: Response) =
       return;
     }
     console.error('Failed to extract video frame:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * 获取节点产物信息：GET /api/canvas/node-info
+ *
+ * query: { project, path }
+ * 返回 { success, exists, mtime, size }（fs.stat）。
+ * 画布节点产物固定为 output.{ext}，"当前结果"即文件系统事实：
+ * 前端用它判断产物存在性（按钮文案）、mtime（预览防缓存/上游更新角标）。
+ * path 须位于 assert/ 前缀下；文件不存在时 exists=false（200，不报错）。
+ */
+canvasRouter.get('/canvas/node-info', async (req: Request, res: Response) => {
+  try {
+    const project = String(req.query.project ?? '');
+    const path = String(req.query.path ?? '');
+    if (!project || !path) {
+      res.status(400).json({ error: 'project / path 必填' });
+      return;
+    }
+    const norm = path.replace(/\\/g, '/');
+    if (!isUnderAssert(norm)) {
+      res.status(403).json({ error: '仅支持 assert/ 下的路径' });
+      return;
+    }
+    const info = await readCanvasNodeInfo(project, norm);
+    res.json({ success: true, ...info });
+  } catch (err) {
+    console.error('Failed to read node info:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -165,6 +216,7 @@ canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) =>
       res.status(403).json({ error: '仅支持 assert/ 下的视频路径' });
       return;
     }
+    await archiveCanvasOutput(project, outputNorm);
     const result = await concatVideos(project, videoPaths, outputNorm);
     res.json({ success: true, path: result });
   } catch (err) {
@@ -236,6 +288,7 @@ canvasRouter.post('/canvas/trim-video', async (req: Request, res: Response) => {
       }
       params.startFrame = startFrame;
     }
+    await archiveCanvasOutput(project, outputNorm);
     const result = await trimVideo(project, videoNorm, params, outputNorm);
     res.json({ success: true, path: result });
   } catch (err) {

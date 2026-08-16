@@ -173,7 +173,6 @@ export function useCanvasAutobuild(options: UseCanvasAutobuildOptions) {
       if (target.value.kind === 'stage') {
         const t = target.value
         const { baseAssetPath, variants } = await collectStageBuild()
-        const outputBase = `assert/stage/${t.stage ?? ''}/canvas/${t.label ?? ''}`
         const result = buildSubSceneAutoCanvas(
           store.data.value,
           t.label ?? '',
@@ -181,20 +180,18 @@ export function useCanvasAutobuild(options: UseCanvasAutobuildOptions) {
           variants,
           80,
           80,
-          outputBase,
         )
-        // 变体已有生成图：把既有图片复制到节点产物目录（复制失败不阻塞搭画布）
+        // 变体已有生成图：把既有图片复制到节点固定产物路径 output.jpg（复制失败不阻塞搭画布）
         for (const node of result.nodes) {
           if (node.prototypeId !== 'image-generate') continue
           const autoRef = typeof node.config.autoRef === 'string' ? node.config.autoRef : ''
           const vId = autoRef.slice(autoRef.lastIndexOf('@') + 1)
-          const cur = node.config.current as { path?: string } | undefined
-          if (!vId || !cur?.path) continue
+          if (!vId) continue
           try {
             await copyFs(
               project,
               `assert/stage/${t.stage ?? ''}/variants/${t.label ?? ''}/${vId}.jpg`,
-              cur.path,
+              `assert/stage/${t.stage ?? ''}/canvas/${t.label ?? ''}/${node.id}/output.jpg`,
             )
           } catch {
             // 复制失败忽略（节点仍保留，用户可自行重新生成）

@@ -239,9 +239,6 @@ export interface StageVariantRef {
  * @param variants 变体元数据列表
  * @param x 基础加载节点 x
  * @param y 基础加载节点 y
- * @param outputBase 可选。生成节点产物目录基路径（如 assert/stage/{stage}/canvas/{label}）。
- *   当某变体 hasImage 且传了 outputBase 时，预置该生成节点 config.current/history 指向
- *   {outputBase}/{nodeId}/v1.jpg（实际把既有变体图复制到该路径由调用方完成）。
  * @returns 应新增的节点与连线
  */
 export function buildSubSceneAutoCanvas(
@@ -251,7 +248,6 @@ export function buildSubSceneAutoCanvas(
   variants: StageVariantRef[],
   x = 80,
   y = 80,
-  outputBase?: string,
 ): AutoBuildResult {
   const nodes: CanvasNodeData[] = []
   const connections: CanvasConnection[] = []
@@ -333,14 +329,8 @@ export function buildSubSceneAutoCanvas(
     }
     const genId = newId()
     const level = depthByVariant.get(v.id) ?? 0
+    // 产物为固定 output.jpg（"当前结果"为文件系统事实）；变体已有生成图时由调用方把既有图片复制到该路径
     const config: Record<string, unknown> = { prompt: v.desc, autoRef }
-    // 变体已有生成图：预置 current/history 指向画布产物 v1（实际复制由调用方完成）
-    if (v.hasImage && outputBase) {
-      const outPath = `${outputBase}/${genId}/v1.jpg`
-      const now = new Date().toISOString()
-      config.current = { version: 1, path: outPath, date: now }
-      config.history = [{ version: 1, path: outPath, date: now }]
-    }
     nodes.push({
       id: genId,
       prototypeId: 'image-generate',

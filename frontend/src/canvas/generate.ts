@@ -1,17 +1,14 @@
 import type { CanvasConnection, CanvasNodeData, NodeConfig } from './types'
 import { getPrototype } from './registry'
+import { canvasNodeOutputPath, type CanvasScope } from './paths'
 
 /**
- * 资产生成辅助纯函数：输入路径收集、节点资产读取、版本号计算。
+ * 资产生成辅助纯函数：输入路径收集、节点资产读取。
  * 与 UI/网络解耦，便于单元测试。
+ *
+ * 注：历史版本（history/current 元数据）已退役——产物为固定 output.{ext} 文件，
+ * 版本管理由服务端 assets/history.ts（history/ 目录 + /api/assets/:project/history*）负责。
  */
-
-/** 生成图片节点的历史版本条目 */
-export interface HistoryEntry {
-  version: number
-  path: string
-  date: string
-}
 
 /** 生成图片节点的单个输入资产信息（含来源节点，用于预览与拖拽排序） */
 export interface CanvasInputInfo {
@@ -23,54 +20,33 @@ export interface CanvasInputInfo {
   label: string
 }
 
-/** 读取节点 config 中的历史版本列表（无则返回空数组） */
-export function getHistory(config: NodeConfig): HistoryEntry[] {
-  return Array.isArray(config.history) ? (config.history as HistoryEntry[]) : []
-}
-
-/**
- * 把某历史版本激活为节点当前图片（返回新 config）。
- * 仅改写 current 指针，history 列表不变——原当前图本就保留在历史中，
- * 因此激活后原图自然成为历史版本。
- *
- * @param config 节点原配置
- * @param entry 要激活的历史条目
- * @returns 新配置（current 指向该条目，history 引用不变）
- */
-export function activateHistory(config: NodeConfig, entry: HistoryEntry): NodeConfig {
-  return { ...config, current: { version: entry.version, path: entry.path, date: entry.date } }
-}
-
-/**
- * 从节点 config 的历史列表中移除指定版本条目（返回新 config）。
- * 仅改写 history，current 不变；当前版本不可删除（UI 层已禁用），
- * 若目标版本恰为当前版本或不存在则返回原配置。
- *
- * @param config 节点原配置
- * @param version 要删除的历史版本号
- * @returns 新配置（history 中已移除该版本条目）
- */
-export function removeHistoryEntry(config: NodeConfig, version: number): NodeConfig {
-  const cur = config.current as { version?: number } | undefined
-  if (cur && cur.version === version) return config
-  const history = getHistory(config).filter((h) => h.version !== version)
-  if (history.length === getHistory(config).length) return config
-  return { ...config, history }
-}
-
 /**
  * 获取节点当前的资产相对路径。
  *
- * 输出资产解析由各节点原型自实现（registry 的 getOutputAssetPath）：
- * 加载类读 config.assetPath，生成类读 config.current.path；
- * 未声明解析器的节点按画布约定默认读 config.current.path（无则 undefined）。
+ * 输出资产解析优先级：
+ * 1. 生成类节点（原型声明 outputExt）且已提供 scope → 固定产物路径
+ *    assert/{scope}/canvas/{nodeId}/output.{ext}（"当前结果"为文件系统事实，不依赖元数据）；
+ * 2. 原型声明的解析器（加载类读 config.assetPath）；
+ * 3. 未声明解析器的节点按画布约定默认读 config.current.path（旧数据兼容）。
  *
  * @param node 节点数据（可为 undefined）
+ * @param scope 画布作用域（生成类节点推导固定产物路径需要）
  * @returns 项目内相对路径或 undefined
  */
-export function getNodeCurrentAssetPath(node: CanvasNodeData | undefined): string | undefined {
+export function getNodeCurrentAssetPath(
+  node: CanvasNodeData | undefined,
+  scope?: CanvasScope,
+): string | undefined {
   if (!node) return undefined
-  const resolver = getPrototype(node.prototypeId)?.getOutputAssetPath
+  const proto = getPrototype(node.prototypeId)
+  // 生成类节点：产物为固定文件名，按 scope+nodeId+扩展名恒等推导
+  if (proto?.outputExt) {
+    if (scope) return canvasNodeOutputPath(scope, node.id, proto.outputExt)
+    // 无 scope（如旧调用点）时回落到 config.current 旧数据
+    const cur = node.config.current as { path?: string } | undefined
+    return cur?.path
+  }
+  const resolver = proto?.getOutputAssetPath
   if (resolver) return resolver(node.config)
   const cur = node.config.current as { path?: string } | undefined
   return cur?.path
@@ -85,6 +61,7 @@ export function getNodeCurrentAssetPath(node: CanvasNodeData | undefined): strin
  * @param nodes 全部节点
  * @param config 目标节点配置（可选，用于读取 inputOrder 排序）
  * @param portId 目标输入端口 id（可选，仅收集连到该端口的输入）
+ * @param scope 画布作用域（可选；生成类来源节点的当前产物按固定路径推导需要）
  * @returns 输入资产信息数组（仅包含有资产的输入节点）
  */
 export function collectInputs(
@@ -93,6 +70,7 @@ export function collectInputs(
   nodes: CanvasNodeData[],
   config?: NodeConfig,
   portId?: string,
+  scope?: CanvasScope,
 ): CanvasInputInfo[] {
   const order: string[] = Array.isArray(config?.inputOrder) ? (config.inputOrder as string[]) : []
   const list: CanvasInputInfo[] = []
@@ -100,7 +78,7 @@ export function collectInputs(
     if (c.toNodeId !== nodeId) continue
     if (portId && c.toPortId !== portId) continue
     const src = nodes.find((n) => n.id === c.fromNodeId)
-    const p = getNodeCurrentAssetPath(src)
+    const p = getNodeCurrentAssetPath(src, scope)
     if (!src || !p) continue
     list.push({ nodeId: src.id, path: p, label: p.split('/').pop() ?? p })
   }
@@ -120,6 +98,7 @@ export function collectInputs(
  * @param nodes 全部节点
  * @param config 目标节点配置（可选，用于读取 inputOrder 排序）
  * @param portId 目标输入端口 id（可选，仅收集连到该端口的输入）
+ * @param scope 画布作用域（可选；生成类来源节点的当前产物按固定路径推导需要）
  * @returns 输入资产相对路径数组
  */
 export function collectInputPaths(
@@ -128,8 +107,9 @@ export function collectInputPaths(
   nodes: CanvasNodeData[],
   config?: NodeConfig,
   portId?: string,
+  scope?: CanvasScope,
 ): string[] {
-  return collectInputs(nodeId, connections, nodes, config, portId).map((i) => i.path)
+  return collectInputs(nodeId, connections, nodes, config, portId, scope).map((i) => i.path)
 }
 
 /**

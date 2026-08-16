@@ -16,7 +16,7 @@
       </v-card-title>
       <v-card-text>
         <div
-          v-if="!props.node || entries.length === 0"
+          v-if="entries.length === 0 && !loading"
           class="text-grey text-body-medium"
         >
           暂无历史版本
@@ -61,28 +61,28 @@
               {{ selectedLabel }}
             </div>
           </div>
-          <!-- 右侧历史列表 -->
+          <!-- 右侧历史列表（首条为当前产物虚拟项，其余来自服务端历史目录） -->
           <v-list
             class="history-list"
             density="compact"
           >
             <v-list-item
-              v-for="h in entries"
-              :key="h.version"
-              :class="{ 'history-item--current': isCurrent(h) }"
+              v-for="(h, idx) in entries"
+              :key="h.path"
+              :class="{ 'history-item--current': h.isCurrent }"
               @click="selectEntry(h)"
             >
               <template #prepend>
                 <video
-                  v-if="thumbKind(h) === 'video' && !isBroken(h)"
+                  v-if="thumbKind(h) === 'video' && !isBroken(idx)"
                   :src="thumbUrl(h)"
                   muted
                   preload="metadata"
                   class="history-item__thumb"
-                  @error="markBroken(h)"
+                  @error="markBroken(idx)"
                 />
                 <div
-                  v-else-if="thumbKind(h) === 'audio' && !isBroken(h)"
+                  v-else-if="thumbKind(h) === 'audio' && !isBroken(idx)"
                   class="history-item__thumb history-item__thumb--audio"
                 >
                   <v-icon
@@ -91,10 +91,10 @@
                   />
                 </div>
                 <img
-                  v-else-if="!isBroken(h)"
+                  v-else-if="!isBroken(idx)"
                   :src="thumbUrl(h)"
                   class="history-item__thumb"
-                  @error="markBroken(h)"
+                  @error="markBroken(idx)"
                 >
                 <div
                   v-else
@@ -107,9 +107,9 @@
                 </div>
               </template>
               <v-list-item-title class="text-body-medium">
-                v{{ h.version }}
+                {{ h.isCurrent ? '当前版本' : h.name }}
                 <v-chip
-                  v-if="isCurrent(h)"
+                  v-if="h.isCurrent"
                   size="x-small"
                   color="primary"
                   class="ml-1"
@@ -127,15 +127,15 @@
                     variant="text"
                     color="error"
                     icon="mdi-delete-outline"
-                    :disabled="isCurrent(h)"
-                    :title="isCurrent(h) ? '当前版本不可删除' : '删除该版本'"
+                    :disabled="h.isCurrent || loading"
+                    :title="h.isCurrent ? '当前版本不可删除' : '删除该版本'"
                     @click.stop="deleteEntry(h)"
                   />
                   <v-btn
                     size="x-small"
                     variant="tonal"
                     color="primary"
-                    :disabled="isCurrent(h)"
+                    :disabled="h.isCurrent || loading"
                     @click.stop="activateEntry(h)"
                   >
                     设为当前
@@ -162,69 +162,111 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../canvas/types'
-import { getHistory, type HistoryEntry } from '../../canvas/generate'
 import { buildPreviewUrl } from '../../canvas/preview'
+import { activateAssetHistory, deleteAssetHistory, listAssetHistory } from '../../api/assets'
+import { confirm } from '../../utils/confirm'
 import { getPreviewKind, isAudioFile, isVideoFile, type PreviewKind } from '../../utils/customAssetFile'
 
-/** 组件 props：显隐、项目名、生成节点数据（null 时空态） */
+/** 历史条目（当前产物虚拟项 + 服务端历史目录条目） */
+interface DialogEntry {
+  /** 资产相对路径（当前项为固定产物路径；历史项为 history/ 下路径） */
+  path: string
+  /** 展示时间（ISO） */
+  date: string
+  /** 展示名（历史项为时间戳文件名） */
+  name: string
+  /** 是否为当前产物（虚拟项；不可激活/删除） */
+  isCurrent: boolean
+}
+
+/** 组件 props：显隐、项目名、生成节点数据（null 时空态）、当前产物（固定路径 + mtime） */
 const props = defineProps<{
   modelValue: boolean
   project: string
   node: CanvasNodeData | null
+  output?: { path: string; token?: number } | null
 }>()
 
-/** 组件 emits：显隐同步、请求激活某历史版本、请求删除某历史版本 */
+/** 组件 emits：显隐同步；激活/删除成功后通知父级刷新节点产物展示与操作反馈 */
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void
-  (e: 'activate', entry: HistoryEntry): void
-  (e: 'delete', entry: HistoryEntry): void
+  (e: 'refresh', nodeId: string): void
+  (e: 'notify', text: string, color: 'success' | 'error' | 'primary'): void
 }>()
 
-/** 历史条目列表（取节点 config.history） */
-const entries = computed<HistoryEntry[]>(() => (props.node ? getHistory(props.node.config) : []))
-
-/** 当前激活条目（config.current，用于标记与初始化选中） */
-const currentEntry = computed<HistoryEntry | null>(() => {
-  const cur = props.node?.config.current as { version?: number; path?: string; date?: string } | undefined
-  if (!cur?.path) return null
-  return { version: cur.version ?? 0, path: cur.path, date: cur.date ?? '' }
-})
+/** 历史条目列表（服务端历史 API；首条为当前产物虚拟项） */
+const entries = ref<DialogEntry[]>([])
+/** 正在加载/操作中标记（禁用按钮，防止重复提交） */
+const loading = ref(false)
 
 /** 当前选中的条目（驱动左侧大图预览；初始/激活后跟随当前项） */
-const selected = ref<HistoryEntry | null>(null)
+const selected = ref<DialogEntry | null>(null)
 
 /** 大图预览加载失败标记 */
 const previewBroken = ref(false)
 
-/** 缩略图加载失败的版本集合（按 version 记忆） */
-const brokenVersions = ref<Set<number>>(new Set())
+/** 缩略图加载失败的下标集合（按列表下标记忆） */
+const brokenIndexes = ref<Set<number>>(new Set())
 
-/** 某版本是否已标记加载失败 */
-function isBroken(h: HistoryEntry): boolean {
-  return brokenVersions.value.has(h.version)
+/** 当前产物路径（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
+function currentOutputPath(): string | null {
+  const out = props.output
+  if (out?.path) return out.path
+  const cur = props.node?.config.current as { path?: string } | undefined
+  return cur?.path ?? null
 }
 
-/** 标记某版本缩略图加载失败 */
-function markBroken(h: HistoryEntry) {
-  brokenVersions.value = new Set(brokenVersions.value).add(h.version)
+/** 某下标是否已标记缩略图加载失败 */
+function isBroken(idx: number): boolean {
+  return brokenIndexes.value.has(idx)
 }
 
-/** 是否某条目为当前项（版本号 + 路径都一致） */
-function isCurrent(h: HistoryEntry): boolean {
-  const cur = currentEntry.value
-  return cur !== null && cur.version === h.version && cur.path === h.path
+/** 标记某下标缩略图加载失败 */
+function markBroken(idx: number): void {
+  brokenIndexes.value = new Set(brokenIndexes.value).add(idx)
+}
+
+/** 从服务端加载历史列表（含当前产物虚拟首条） */
+async function loadHistory(): Promise<void> {
+  const node = props.node
+  if (!node || !props.modelValue) return
+  const path = currentOutputPath()
+  if (!path) {
+    entries.value = []
+    return
+  }
+  loading.value = true
+  try {
+    const { versions } = await listAssetHistory(props.project, path)
+    const list: DialogEntry[] = [
+      {
+        path,
+        date: props.output?.token ? new Date(props.output.token).toISOString() : '',
+        name: '当前产物',
+        isCurrent: true,
+      },
+    ]
+    for (const v of versions) {
+      list.push({ path: v.path, date: new Date(v.mtime).toISOString(), name: v.name, isCurrent: false })
+    }
+    entries.value = list
+    selected.value = list[0] ?? null
+    brokenIndexes.value = new Set()
+  } finally {
+    loading.value = false
+  }
 }
 
 /** 大图预览 URL（无选中或加载失败时为空） */
 const previewUrl = computed(() => {
   const s = selected.value
-  return s ? buildPreviewUrl(props.project, s.path, s.version) : ''
+  return s ? buildPreviewUrl(props.project, s.path) : ''
 })
 
-/** 大图预览标签（版本 + 生成时间） */
+/** 大图预览标签（展示名 + 时间） */
 const selectedLabel = computed(() => {
   const s = selected.value
-  return s ? `v${s.version} · ${formatDate(s.date)}` : ''
+  return s ? `${s.name} · ${formatDate(s.date)}` : ''
 })
 
 /** 大图预览媒体类型（按选中条目路径扩展名推断；无选中时为 none） */
@@ -246,45 +288,88 @@ const emptyIcon = computed(() => {
  * @param h 历史条目
  * @returns 媒体类型
  */
-function thumbKind(h: HistoryEntry): 'image' | 'video' | 'audio' {
+function thumbKind(h: DialogEntry): 'image' | 'video' | 'audio' {
   if (isVideoFile(h.path)) return 'video'
   if (isAudioFile(h.path)) return 'audio'
   return 'image'
 }
 
 /** 缩略图 URL */
-function thumbUrl(h: HistoryEntry): string {
-  return buildPreviewUrl(props.project, h.path, h.version)
+function thumbUrl(h: DialogEntry): string {
+  return buildPreviewUrl(props.project, h.path)
 }
 
 /** 点击列表行：仅更新大图预览（不激活） */
-function selectEntry(h: HistoryEntry) {
+function selectEntry(h: DialogEntry): void {
   selected.value = h
   previewBroken.value = false
 }
 
-/** 点击「设为当前」：请求父组件激活（父组件写回 current 后本组件随 node 更新） */
-function activateEntry(h: HistoryEntry) {
-  emit('activate', h)
+/**
+ * 「设为当前」：服务端激活历史版本（history 文件换回当前产物固定路径）。
+ * 成功后刷新列表与父级产物展示。
+ *
+ * @param h 历史条目
+ */
+async function activateEntry(h: DialogEntry): Promise<void> {
+  if (h.isCurrent || loading.value) return
+  const path = currentOutputPath()
+  if (!path) return
+  loading.value = true
+  try {
+    await activateAssetHistory(props.project, path, h.path)
+    emit('refresh', props.node?.id ?? '')
+    emit('notify', '已设为当前版本', 'success')
+    await loadHistory()
+  } catch (e) {
+    emit('notify', e instanceof Error ? e.message : '激活历史版本失败', 'error')
+  } finally {
+    loading.value = false
+  }
 }
 
-/** 点击「删除」：请求父组件删除该历史版本（父组件确认后删除文件并更新 history） */
-function deleteEntry(h: HistoryEntry) {
-  emit('delete', h)
+/**
+ * 「删除」：确认后调用服务端删除该历史版本文件；成功后刷新列表。
+ * 当前版本不可删除（列表已禁用）；删除后对话框保持打开。
+ *
+ * @param h 历史条目
+ */
+async function deleteEntry(h: DialogEntry): Promise<void> {
+  if (h.isCurrent || loading.value) return
+  const path = currentOutputPath()
+  if (!path) return
+  const ok = await confirm({
+    title: '删除历史版本',
+    content: `确定删除历史版本 ${h.name} 的文件吗？此操作不可撤销。`,
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
+  loading.value = true
+  try {
+    await deleteAssetHistory(props.project, path, h.path)
+    emit('notify', '已删除历史版本', 'success')
+    await loadHistory()
+  } catch (e) {
+    emit('notify', e instanceof Error ? e.message : '删除历史版本失败', 'error')
+  } finally {
+    loading.value = false
+  }
 }
 
 /** 内部 v-dialog 显隐变化 → 透传父组件 */
-function onDialogUpdate(v: unknown) {
+function onDialogUpdate(v: unknown): void {
   emit('update:modelValue', Boolean(v))
 }
 
 /** 关闭对话框 */
-function closeDialog() {
+function closeDialog(): void {
   emit('update:modelValue', false)
 }
 
 /** 格式化 ISO 时间为本地可读文本 */
 function formatDate(iso: string): string {
+  if (!iso) return ''
   try {
     return new Date(iso).toLocaleString('zh-CN')
   } catch {
@@ -292,34 +377,14 @@ function formatDate(iso: string): string {
   }
 }
 
-// 打开时（或节点变化）：重置选中为当前项，清空大图加载失败标记
+// 打开时加载历史（服务端）；关闭时清空
 watch(
-  [() => props.modelValue, () => props.node],
-  () => {
-    if (props.modelValue && props.node) {
-      selected.value = currentEntry.value
-      previewBroken.value = false
-    }
+  () => props.modelValue,
+  (open) => {
+    if (open) void loadHistory()
+    else entries.value = []
   },
-  { immediate: true },
 )
-
-// 激活后（node 变化导致 currentEntry 更新）：选中项跟随新的当前项，便于继续对比
-watch(currentEntry, (cur) => {
-  if (cur) {
-    selected.value = cur
-    previewBroken.value = false
-  }
-})
-
-// 删除后（entries 变化）：若选中的条目已被移除，则回落到当前项，避免预览指向已删除文件
-watch(entries, (list) => {
-  const sel = selected.value
-  if (sel && !list.some((h) => h.version === sel.version)) {
-    selected.value = currentEntry.value
-    previewBroken.value = false
-  }
-})
 </script>
 
 <style scoped>

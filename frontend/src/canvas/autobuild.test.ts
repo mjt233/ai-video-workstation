@@ -332,27 +332,14 @@ describe('buildSubSceneAutoCanvas', () => {
     expect(loader?.y).toBeGreaterThan(genA?.y ?? 0)
   })
 
-  it('变体已有生成图时预置 current/history（指向画布产物 v1）', () => {
+  it('变体已有生成图时不预置 current/history（产物为固定 output.jpg，文件系统即真值）', () => {
     const data = createCanvasData('stage')
     const variants: StageVariantRef[] = [
       { id: 'A', desc: 'A', refs: [], hasImage: true },
     ]
-    const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80, 'assert/stage/街角/canvas/白天')
-    const gen = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A')
-    expect(gen).toBeTruthy()
-    const cur = gen?.config.current as { version: number; path: string; date: string } | undefined
-    expect(cur?.version).toBe(1)
-    expect(cur?.path).toContain('assert/stage/街角/canvas/白天/')
-    expect(cur?.path.endsWith('/v1.jpg')).toBe(true)
-    expect(Array.isArray(gen?.config.history)).toBe(true)
-    expect((gen?.config.history as unknown[]).length).toBe(1)
-  })
-
-  it('未传 outputBase 时即使 hasImage 也不预置 current', () => {
-    const data = createCanvasData('stage')
-    const variants: StageVariantRef[] = [{ id: 'A', desc: 'A', refs: [], hasImage: true }]
     const r = buildSubSceneAutoCanvas(data, '白天', base, variants, 80, 80)
     const gen = r.nodes.find((n) => n.config.autoRef === 'stage:白天@A')
+    expect(gen).toBeTruthy()
     expect(gen?.config.current).toBeUndefined()
     expect(gen?.config.history).toBeUndefined()
   })

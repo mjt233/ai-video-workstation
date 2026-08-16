@@ -133,6 +133,8 @@ const props = defineProps<{
   project: string
   /** 生成节点（产物来源；为空时不执行） */
   node: CanvasNodeData | null
+  /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
   /** 生成节点输入资产（推导新帧定义） */
   inputs: CanvasInputInfo[]
   /** 分镜集数 */
@@ -224,7 +226,8 @@ function addNewFrame(): void {
  */
 async function applySetAsScene(frame: SceneFrameOption | null): Promise<void> {
   const node = props.node
-  const cur = node?.config.current as { path?: string } | undefined
+  // 当前产物优先取 AssetCanvas 下发的固定路径产物（"当前结果"为文件系统事实），回落到 config.current 旧数据
+  const cur = props.output ?? (node?.config.current as { path?: string } | undefined)
   if (!node || !cur?.path) {
     emit('update:modelValue', false)
     return

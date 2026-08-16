@@ -74,18 +74,19 @@ export async function saveUploadedAsset(
 }
 
 /**
- * 若当前资产已存在，则移入 history/{stem}/{timestamp}{ext}，再返回归档相对路径；
- * 不存在则返回 null。
+ * 计算历史归档目标路径：history/{stem}/{timestamp}{ext}，同秒冲突追加 -N。
+ *
+ * @param project 项目名
+ * @param rel 已规范化的 assert 相对路径
+ * @param date 归档时间戳
+ * @returns 目标相对路径与绝对路径
  */
-export async function archiveExistingAsset(
+async function historyDest(
   project: string,
-  assetRelPath: string,
-  date = new Date(),
-): Promise<string | null> {
-  const rel = assertIsAssertPath(assetRelPath);
+  rel: string,
+  date: Date,
+): Promise<{ destRel: string; destFull: string }> {
   const full = resolveProjectPath(project, rel);
-  if (!(await pathExists(full))) return null;
-
   const ext = path.extname(full);
   const histDirRel = historyDirForAsset(rel);
   const histDirFull = resolveProjectPath(project, histDirRel);
@@ -100,8 +101,46 @@ export async function archiveExistingAsset(
     destFull = resolveProjectPath(project, destRel);
     n += 1;
   }
+  return { destRel, destFull };
+}
 
+/**
+ * 若当前资产已存在，则移入 history/{stem}/{timestamp}{ext}，再返回归档相对路径；
+ * 不存在则返回 null。
+ */
+export async function archiveExistingAsset(
+  project: string,
+  assetRelPath: string,
+  date = new Date(),
+): Promise<string | null> {
+  const rel = assertIsAssertPath(assetRelPath);
+  const full = resolveProjectPath(project, rel);
+  if (!(await pathExists(full))) return null;
+
+  const { destRel, destFull } = await historyDest(project, rel, date);
   await fs.rename(full, destFull);
+  return destRel;
+}
+
+/**
+ * 若当前资产已存在，则复制到 history/{stem}/{timestamp}{ext}（原文件保留），再返回归档相对路径；
+ * 不存在则返回 null。
+ *
+ * 用于重复生成"固定路径产物"（如画布节点 output.{ext}）时的历史保留：
+ * 与 archiveExistingAsset（rename 移走）不同，copy 后原文件仍在原路径，
+ * 新的生成结果随后覆盖原路径——生成运行期间旧图持续可见（预览不 404），且历史条目完整。
+ */
+export async function copyExistingAssetToHistory(
+  project: string,
+  assetRelPath: string,
+  date = new Date(),
+): Promise<string | null> {
+  const rel = assertIsAssertPath(assetRelPath);
+  const full = resolveProjectPath(project, rel);
+  if (!(await pathExists(full))) return null;
+
+  const { destRel, destFull } = await historyDest(project, rel, date);
+  await fs.copyFile(full, destFull);
   return destRel;
 }
 

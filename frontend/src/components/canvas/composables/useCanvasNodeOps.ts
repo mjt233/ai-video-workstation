@@ -1,13 +1,15 @@
 /**
  * 生成节点调度组合式：按节点原型分发生成动作，并向编辑器/节点卡片提供输入收集等查询。
- * 与 useCanvasGeneration（工作流执行/轮询）配合：本组合式负责收集输入、组装提交参数并回调回写 config。
+ * 与 useCanvasGeneration（工作流执行/状态展示）配合：本组合式负责收集输入、组装提交参数，
+ * 生成结果由服务端落盘（固定产物路径），完成后通过 onNodeResult 通知 UI 刷新展示。
  */
 
 import { computed } from 'vue'
 import { buildVideoSubmitParams } from '../../../canvas/videoSubmit'
-import { collectInputPaths, collectInputs, getNodeCurrentAssetPath, type CanvasInputInfo } from '../../../canvas/generate'
+import { collectInputPaths, collectInputs, type CanvasInputInfo } from '../../../canvas/generate'
 import { getNodeOutputType } from '../../../canvas/connection'
 import type { CanvasNodeData } from '../../../canvas/types'
+import type { CanvasScope } from '../../../canvas/paths'
 import type { CanvasGenerationApi, CanvasStoreApi, NodeMap, ShowSnackbar } from './types'
 
 /** useCanvasNodeOps 参数 */
@@ -22,6 +24,12 @@ export interface UseCanvasNodeOpsOptions {
   showSnackbar: ShowSnackbar
   /** 当前选中节点（配置面板对应节点，供视频输入分组计算；运行期才求值，允许晚于本组合式创建） */
   getSelectedNode: () => CanvasNodeData | null
+  /** 画布作用域 getter（生成类节点产物固定路径推导/输入收集需要；随切换目标实时更新） */
+  getScope: () => CanvasScope
+  /** 生成完成回调（nodeId, outputPath）：由 AssetCanvas 刷新节点产物展示（固定路径+mtime） */
+  onNodeResult?: (nodeId: string, outputPath: string) => void
+  /** 查询节点产物 mtime（上游更新角标用：输入节点产物比本节点新 → 提示） */
+  getOutputMtime?: (nodeId: string) => number | null | undefined
 }
 
 /**
@@ -31,11 +39,15 @@ export interface UseCanvasNodeOpsOptions {
  * @returns 生成调度与输入查询 API
  */
 export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
-  const { store, gen, nodeMap, showSnackbar, getSelectedNode } = options
+  const { store, gen, nodeMap, showSnackbar, getSelectedNode, getScope, onNodeResult, getOutputMtime } = options
+
+  /** 生成完成/失败后通知 AssetCanvas 刷新节点产物展示 */
+  function applyResult(nodeId: string, outputPath: string): void {
+    onNodeResult?.(nodeId, outputPath)
+  }
 
   /**
-   * 触发生成节点：收集输入路径 → 注入 → 跑工作流，并把 current/history 回写节点配置。
-   * 视频节点（video-generate）额外组装自包含提交参数后传给 generate。
+   * 触发生成节点：收集输入路径 → 注入 → 跑工作流；结果由服务端写盘，完成后回调刷新展示。
    * 获取视频帧/拼接视频/裁剪视频节点走本地 ffmpeg 路由（不走工作流）。
    *
    * @param nodeId 生成节点 id
@@ -65,30 +77,20 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
         videos: videoInputsOf(nodeId, 'video'),
         audios: videoInputsOf(nodeId, 'audio'),
       })
-      await gen.generate(
-        node,
-        (config) => {
-          store.updateNode(nodeId, { config })
-        },
-        videoParams,
-      )
+      await gen.generate(node, videoParams, applyResult)
       return
     }
     if (node.prototypeId === 'tts-generate') {
       // TTS 声音生成：收集音频输入路径（克隆模式参考音色）后走通用生成流程
-      const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config)
+      const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config, undefined, getScope())
       gen.setInputPaths(nodeId, paths)
-      await gen.generate(node, (config) => {
-        store.updateNode(nodeId, { config })
-      })
+      await gen.generate(node, undefined, applyResult)
       return
     }
     if (node.prototypeId !== 'image-generate') return
-    const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config)
+    const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config, undefined, getScope())
     gen.setInputPaths(nodeId, paths)
-    await gen.generate(node, (config) => {
-      store.updateNode(nodeId, { config })
-    })
+    await gen.generate(node, undefined, applyResult)
   }
 
   /** 中断生成 */
@@ -111,9 +113,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       return
     }
     gen.clearStatus(nodeId)
-    await gen.extractFrame(node, videoPath, (config) => {
-      store.updateNode(nodeId, { config })
-    })
+    await gen.extractFrame(node, videoPath, applyResult)
   }
 
   /**
@@ -130,9 +130,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       return
     }
     gen.clearStatus(nodeId)
-    await gen.concatVideo(node, videos.map((v) => v.path), (config) => {
-      store.updateNode(nodeId, { config })
-    })
+    await gen.concatVideo(node, videos.map((v) => v.path), applyResult)
   }
 
   /**
@@ -156,9 +154,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       return
     }
     gen.clearStatus(nodeId)
-    await gen.trimVideo(node, videoPath, (config) => {
-      store.updateNode(nodeId, { config })
-    })
+    await gen.trimVideo(node, videoPath, applyResult)
   }
 
   /** 节点当前是否在生成中（供编辑器显示） */
@@ -166,10 +162,10 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     return gen.statusByNode.value[nodeId]?.status === 'running'
   }
 
-  /** 节点当前输入资产信息（含来源节点，供编辑器预览/拖拽排序） */
+  /** 节点当前输入资产信息（含来源节点，供编辑器预览/拖拽排序；生成类来源按固定产物路径推导） */
   function inputsOf(nodeId: string): CanvasInputInfo[] {
     const node = nodeMap.value[nodeId]
-    return collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config)
+    return collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope())
   }
 
   /**
@@ -184,7 +180,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
    */
   function videoInputsOf(nodeId: string, type: 'image' | 'video' | 'audio'): CanvasInputInfo[] {
     const node = nodeMap.value[nodeId]
-    const all = collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config)
+    const all = collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope())
     return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === type)
   }
 
@@ -203,24 +199,33 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     }
   })
 
-  /** 上游更新角标：生成节点任一输入节点资产比本节点新（current.date 更大）则显示 */
+  /**
+   * 上游更新角标：任一输入节点的产物 mtime 比本节点当前产物新 → 提示重新生成。
+   * （产物 mtime 由 AssetCanvas 经 getOutputMtime 提供；无 mtime 信息时返回 false）
+   *
+   * @param nodeId 生成节点 id
+   * @returns 是否有更上游的新产物
+   */
   function isUpstreamUpdated(nodeId: string): boolean {
     const node = nodeMap.value[nodeId]
     if (!node || node.prototypeId !== 'image-generate') return false
-    const cur = node.config.current as { date?: string } | undefined
-    if (!cur?.date) return false
+    const curMtime = getOutputMtime?.(nodeId)
+    if (curMtime == null) return false
     const incoming = store.connections.value.filter((c) => c.toNodeId === nodeId)
     for (const c of incoming) {
       const src = nodeMap.value[c.fromNodeId]
-      if (!getNodeCurrentAssetPath(src)) continue
-      const srcCur = src.config.current as { date?: string } | undefined
-      if (srcCur?.date && srcCur.date > cur.date) return true
+      if (!src) continue
+      const srcMtime = getOutputMtime?.(src.id)
+      if (srcMtime != null && srcMtime > curMtime) return true
     }
     return false
   }
 
   /**
    * 节点 body/editor 的 update:config → 合并写入节点 config。
+   *
+   * 注：生成结果（current/history）不再写入 config——产物为固定路径，由服务端落盘，
+   * 展示刷新走 onNodeResult/nodeOutputs。
    *
    * @param nodeId 节点 id
    * @param patch 配置补丁

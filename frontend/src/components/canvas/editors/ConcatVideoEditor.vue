@@ -38,7 +38,7 @@
         :disabled="videosInputs.length < 2"
         @click="emit('generate', node.id)"
       >
-        {{ node.config.current ? '重新拼接' : '拼接' }}
+        {{ hasOutput ? '重新拼接' : '拼接' }}
       </v-btn>
       <span class="text-body-small text-grey">
         至少连接 2 段视频；各段分辨率/帧率须一致
@@ -89,6 +89,8 @@ const props = defineProps<{
   videosInputs: CanvasInputInfo[]
   /** 节点是否正在拼接（显示加载态并禁用按钮） */
   isRunning: boolean
+  /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
 }>()
 
 /**
@@ -108,8 +110,13 @@ const previewUrls = computed<Record<string, string>>(() => {
   return m
 })
 
-/** 当前输出视频预览 URL（config.current.path，带版本号防缓存） */
+/** 节点当前是否已有拼接结果（按钮文案用；产物为固定路径文件，由服务端落盘） */
+const hasOutput = computed(() => !!(props.output || props.node.config.current))
+
+/** 当前输出视频预览 URL（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
 const currentVideo = computed(() => {
+  const out = props.output
+  if (out?.path) return buildPreviewUrl(props.project, out.path, out.token)
   const cur = props.node.config.current as { path?: string; version?: number } | undefined
   return cur?.path ? buildPreviewUrl(props.project, cur.path, cur.version) : ''
 })

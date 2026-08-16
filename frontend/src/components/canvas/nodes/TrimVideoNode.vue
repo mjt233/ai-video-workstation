@@ -73,6 +73,8 @@ const props = defineProps<{
   node: CanvasNodeData
   /** 裁剪运行状态（running / error 时显示遮罩） */
   status?: GenerateStatus | null
+  /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
 }>()
 
 defineEmits<{
@@ -83,22 +85,23 @@ defineEmits<{
 /** 当前输出视频预览 URL */
 const videoUrl = ref('')
 
-/** 当前产物相对路径（config.current.path） */
+/** 当前产物相对路径（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
 const currentPath = computed(() => {
+  const out = props.output
+  if (out?.path) return out.path
   const cur = props.node.config.current as { path?: string } | undefined
   return cur?.path ?? ''
 })
 
+/** 防缓存 token（产物 mtime；与 path 一起变化时需刷新预览，否则固定路径覆盖后浏览器命中旧缓存） */
+const currentToken = computed(
+  () => props.output?.token ?? (props.node.config.current as { version?: number } | undefined)?.version,
+)
+
 watch(
-  currentPath,
-  (p) => {
-    videoUrl.value = p
-      ? buildPreviewUrl(
-          props.project,
-          p,
-          (props.node.config.current as { version?: number } | undefined)?.version,
-        )
-      : ''
+  [currentPath, currentToken],
+  ([p, token]) => {
+    videoUrl.value = p ? buildPreviewUrl(props.project, p, token) : ''
   },
   { immediate: true },
 )

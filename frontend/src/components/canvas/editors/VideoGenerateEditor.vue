@@ -262,7 +262,7 @@
           :disabled="!canGenerate"
           @click="emit('generate', node.id)"
         >
-          {{ node.config.current ? '重新生成' : '生成' }}
+          {{ hasOutput ? '重新生成' : '生成' }}
         </v-btn>
         <v-btn
           v-if="isRunning"
@@ -274,7 +274,7 @@
         </v-btn>
         <v-spacer />
         <v-btn
-          v-if="node.config.current"
+          v-if="hasOutput"
           size="small"
           variant="text"
           @click="emit('open-history', node.id)"
@@ -282,7 +282,7 @@
           历史
         </v-btn>
         <v-btn
-          v-if="kind === 'scene' && node.config.current && !isRunning"
+          v-if="kind === 'scene' && hasOutput && !isRunning"
           size="small"
           variant="tonal"
           color="primary"
@@ -340,6 +340,8 @@ const props = defineProps<{
   isRunning: boolean
   /** 画布类型 */
   kind: CanvasKind
+  /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
 }>()
 
 /**
@@ -400,6 +402,9 @@ onBeforeUnmount(() => {
 
 /** 已加载的视频工作流列表（image-to-video 类） */
 const workflows = ref<WorkflowInfo[]>([])
+
+/** 节点当前是否已有产物（生成按钮文案/历史/设为分镜视频入口用；产物为固定路径文件，由服务端落盘） */
+const hasOutput = computed(() => !!(props.output || props.node.config.current))
 
 /** 图生视频工作流类型（配置面板固定使用 image-to-video 类型） */
 const imageToVideoType = computed(() => workflows.value.find((w) => w.type === 'image-to-video'))

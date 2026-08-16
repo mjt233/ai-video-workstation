@@ -48,6 +48,7 @@
         :project="project"
         :node="node"
         :status="status"
+        :output="output"
         :upstream-updated="upstreamUpdated"
         @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
         @open-picker="emit('open-picker', node.id)"
@@ -107,6 +108,8 @@ const props = defineProps<{
   selected: boolean
   /** 生成状态（透传给主体组件展示进度/错误遮罩） */
   status?: GenerateStatus
+  /** 节点当前产物（固定路径 + 防缓存 token；生成类节点由 AssetCanvas 按固定产物路径推导） */
+  output?: { path: string; token?: number } | null
   /** 上游已更新角标 */
   upstreamUpdated: boolean
   /** 是否处于名称内联编辑 */

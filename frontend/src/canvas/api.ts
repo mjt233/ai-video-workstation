@@ -121,6 +121,30 @@ export async function extractVideoFrameAtTime(
   return data
 }
 
+/** 画布节点产物信息（服务端 fs.stat；产物为固定 output.{ext}，"当前结果"即文件系统事实） */
+export interface CanvasNodeInfo {
+  /** 产物文件是否存在 */
+  exists: boolean
+  /** 文件 mtime（毫秒时间戳；预览防缓存/上游更新角标用）；不存在时为 null */
+  mtime: number | null
+  /** 文件大小（字节）；不存在时为 null */
+  size: number | null
+}
+
+/**
+ * 获取画布节点产物信息：存在性 / mtime / 大小。
+ *
+ * @param project 项目名
+ * @param relPath 产物相对路径（assert/ 下）
+ * @returns 产物信息（文件不存在时 exists=false，正常返回）
+ */
+export async function getCanvasNodeInfo(project: string, relPath: string): Promise<CanvasNodeInfo> {
+  const { data } = await client.get<{ success: boolean } & CanvasNodeInfo>('/canvas/node-info', {
+    params: { project, path: relPath },
+  })
+  return { exists: data.exists, mtime: data.mtime, size: data.size }
+}
+
 /** 视频基础信息（服务端 ffprobe，供「提取当前帧」把播放时间换算为帧索引） */
 export interface VideoInfo {
   /** 时长（秒） */

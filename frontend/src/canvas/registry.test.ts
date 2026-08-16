@@ -102,6 +102,21 @@ describe('getOutputAssetPath（各节点自实现输出资产解析）', () => {
   })
 })
 
+describe('outputExt（生成类节点产物扩展名）', () => {
+  it('生成类节点声明固定产物扩展名，加载/文本节点不声明', () => {
+    expect(getPrototype('image-generate')?.outputExt).toBe('jpg')
+    expect(getPrototype('video-generate')?.outputExt).toBe('mp4')
+    expect(getPrototype('tts-generate')?.outputExt).toBe('flac')
+    expect(getPrototype('video-frame-extract')?.outputExt).toBe('png')
+    expect(getPrototype('video-concat')?.outputExt).toBe('mp4')
+    expect(getPrototype('video-trim')?.outputExt).toBe('mp4')
+    expect(getPrototype('image-loader')?.outputExt).toBeUndefined()
+    expect(getPrototype('audio-loader')?.outputExt).toBeUndefined()
+    expect(getPrototype('video-loader')?.outputExt).toBeUndefined()
+    expect(getPrototype('text')?.outputExt).toBeUndefined()
+  })
+})
+
 describe('canGenerate / hasHistory 能力标志', () => {
   it('生成类节点支持重新生成', () => {
     const ids = ['image-generate', 'video-generate', 'tts-generate', 'video-frame-extract', 'video-concat', 'video-trim']

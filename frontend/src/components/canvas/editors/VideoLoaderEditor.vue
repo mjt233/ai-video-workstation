@@ -79,6 +79,8 @@ const props = defineProps<{
   node: CanvasNodeData
   /** 画布类型：仅分镜画布（scene）显示「设为分镜视频」 */
   kind: CanvasKind
+  /** 预留（加载类编辑器不使用；父级统一下发，避免非 prop 属性透传） */
+  output?: { path: string; token?: number } | null
 }>()
 
 const emit = defineEmits<{

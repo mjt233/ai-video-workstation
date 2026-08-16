@@ -24,7 +24,7 @@
         @zoom-out="zoomOut"
         @undo="undo"
         @redo="redo"
-        @auto-build="autoBuild"
+        @auto-build="onAutoBuild"
         @add="(e: MouseEvent) => openAddMenuAt(e, 80, 80)"
       />
 
@@ -59,6 +59,7 @@
               :project="props.project"
               :selected="selected"
               :status="statusByNode[id]"
+              :output="outputOf(nodeMap[id])"
               :upstream-updated="isUpstreamUpdated(id)"
               :renaming="renamingNodeId === id"
               :rename-value="renameInput"
@@ -82,6 +83,7 @@
           :node="editorPanel?.node ?? null"
           :editor-component="editorPanel?.editorComponent ?? null"
           :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
+          :output="editorPanel ? outputOf(editorPanel.node) : null"
           :video-input-groups="videoInputGroups"
           :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
           :kind="target.kind"
@@ -145,13 +147,14 @@
         </div>
       </div>
 
-      <!-- 版本历史对话框（大图预览 + 激活为当前） -->
+      <!-- 版本历史对话框（服务端历史 API：列表/激活/删除 + 当前产物预览） -->
       <CanvasAssertHistoryDialog
         v-model="historyDialog.show"
         :project="props.project"
         :node="historyNode"
-        @activate="onActivateHistory"
-        @delete="onDeleteHistory"
+        :output="historyNode ? outputOf(historyNode) : null"
+        @refresh="(nodeId: string) => void refreshNodeOutput(nodeId)"
+        @notify="(text: string, color: 'success' | 'error' | 'primary') => showSnackbar(text, color)"
       />
 
       <!-- 保存为自定义资产对话框（场景/分镜双根 + 新建目录） -->
@@ -173,6 +176,7 @@
         v-model="sceneDialog.show"
         :project="props.project"
         :node="sceneDialogNode ?? null"
+        :output="sceneDialogNode ? outputOf(sceneDialogNode) : null"
         :inputs="sceneDialogNode ? inputsOf(sceneDialogNode.id) : []"
         :episode="target.kind === 'scene' ? target.episode : undefined"
         :shot="target.kind === 'scene' ? target.shot : undefined"
@@ -214,6 +218,9 @@ import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
+import { getNodeCurrentAssetPath } from '../../canvas/generate'
+import { getCanvasNodeInfo } from '../../canvas/api'
+import type { CanvasScope } from '../../canvas/paths'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
 import SaveAssetDialog from './SaveAssetDialog.vue'
@@ -264,12 +271,80 @@ const target = computed(() => ({
 /** 场景画布未选择子场景时显示空状态 */
 const stageNoLabel = computed(() => props.kind === 'stage' && !props.label)
 
+/** 画布作用域（生成类节点产物固定路径推导/输入收集需要） */
+const scope = computed<CanvasScope>(() => {
+  if (props.kind === 'stage') {
+    return { kind: 'stage', primary: props.stage ?? '', label: props.label }
+  }
+  return { kind: 'scene', primary: props.episode ?? '', secondary: props.shot }
+})
+
 /** 画布数据 store：加载/保存/增删改查/撤销重做 */
 const store = useCanvasStore(props.project, target.value)
-/** 资产生成组合式：跑工作流 + 轮询 + 历史回写 */
+/** 资产生成组合式：跑工作流 + 轮询（纯体验层）+ 结果通知 */
 const gen = useCanvasGeneration(props.project, target.value)
 const { statusByNode } = gen
 const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo } = store
+
+// ── 节点产物展示状态（固定路径 + 服务端 mtime；"当前结果"为文件系统事实）────────
+
+/** nodeId → { 产物路径, mtime, exists }（画布加载与生成完成时从服务端 node-info 刷新） */
+const nodeOutputs = ref<Record<string, { path: string; mtime: number | null; exists: boolean }>>({})
+
+/** 刷新单个节点产物信息（存在性/mtime） */
+async function refreshNodeOutput(nodeId: string): Promise<void> {
+  const node = nodeMap.value[nodeId]
+  if (!node) return
+  const path = getNodeCurrentAssetPath(node, scope.value)
+  if (!path) return
+  const info = await getCanvasNodeInfo(props.project, path).catch(
+    () => ({ exists: false, mtime: null, size: null }) as { exists: boolean; mtime: number | null; size: number | null },
+  )
+  nodeOutputs.value = { ...nodeOutputs.value, [nodeId]: { path, mtime: info.mtime, exists: info.exists } }
+}
+
+/** 刷新整张画布全部节点的产物信息（加载/切换目标后调用） */
+async function refreshNodeOutputs(): Promise<void> {
+  const scopeVal = scope.value
+  const next: Record<string, { path: string; mtime: number | null; exists: boolean }> = {}
+  await Promise.all(
+    store.nodes.value.map(async (n) => {
+      const path = getNodeCurrentAssetPath(n, scopeVal)
+      if (!path) return
+      const info = await getCanvasNodeInfo(props.project, path).catch(
+        () => ({ exists: false, mtime: null, size: null }) as { exists: boolean; mtime: number | null; size: number | null },
+      )
+      next[n.id] = { path, mtime: info.mtime, exists: info.exists }
+    }),
+  )
+  nodeOutputs.value = next
+}
+
+/** 生成完成回调：产物已由服务端落盘，刷新该节点展示（先乐观更新，再取真实 mtime） */
+function handleNodeResult(nodeId: string, outputPath: string): void {
+  nodeOutputs.value = { ...nodeOutputs.value, [nodeId]: { path: outputPath, mtime: Date.now(), exists: true } }
+  void refreshNodeOutput(nodeId)
+}
+
+/**
+ * 节点当前产物（供节点卡片/编辑器/对话框展示预览）。
+ * 生成类节点按固定产物路径推导；加载类读 assetPath；均以服务端 mtime 作缓存键。
+ * 产物文件不存在（exists=false）时返回 null（调用方按 null 显示「生成」占位态）。
+ *
+ * @param node 节点数据
+ * @returns { path, token } 或 null（无产物）
+ */
+function outputOf(node: CanvasNodeData): { path: string; token?: number } | null {
+  const o = nodeOutputs.value[node.id]
+  if (o?.exists) return { path: o.path, token: o.mtime ?? undefined }
+  return null
+}
+
+/** 查询节点产物 mtime（上游更新角标用） */
+function getOutputMtime(nodeId: string): number | null | undefined {
+  const o = nodeOutputs.value[nodeId]
+  return o?.exists ? o.mtime : undefined
+}
 
 /** Vue Flow 视图控制：适应/缩放/屏幕坐标换算/程序化选中 */
 const { fitView, zoomIn, zoomOut, screenToFlowCoordinate, viewport, findNode, addSelectedNodes } = useVueFlow()
@@ -328,13 +403,16 @@ const nodeOps = useCanvasNodeOps({
   nodeMap,
   showSnackbar,
   getSelectedNode: () => selection.editorPanel.value?.node ?? null,
+  getScope: () => scope.value,
+  onNodeResult: handleNodeResult,
+  getOutputMtime,
 })
 
 /** Vue Flow 渲染映射与连线交互 */
 const flow = useCanvasFlow({ store, nodeMap, project: props.project, selectedEdgeId: selection.selectedEdgeId })
 
 /** 对话框与资产选择器 */
-const dialogs = useCanvasDialogs({ store, nodeMap, project: props.project, target, showSnackbar })
+const dialogs = useCanvasDialogs({ store, nodeMap, project: props.project, target, getScope: () => scope.value, showSnackbar })
 
 /** 右键菜单与添加节点菜单 */
 const menus = useCanvasMenus({
@@ -375,7 +453,7 @@ const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } =
 const { editorPanel, suppressEditor, suppressPanelOnSelect, onEdgeClick, onNodeDragStart } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig } = nodeOps
 const { flowNodes, flowEdges, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
-const { historyDialog, historyNode, onActivateHistory, onDeleteHistory, saveDialog, saveDialogNode, saveSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, openAssetPicker, onPickerConfirm, openHistory } = dialogs
+const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveAsAsset, contextGenerate, contextHistory, contextSaveAsset, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
 
@@ -423,6 +501,12 @@ function openAddMenuAt(event: MouseEvent, flowX: number, flowY: number): void {
   menus.openAddMenu(event, flowX, flowY, flowEl.value)
 }
 
+/** 自动搭画布：完成后刷新节点产物展示（复制既有图片到固定产物路径后立即可见） */
+async function onAutoBuild(): Promise<void> {
+  await autoBuild()
+  await refreshNodeOutputs()
+}
+
 // ── 生命周期 ────────────────────────────────────────────
 
 /** 切换分镜/场景时：重置各组合式状态，并让 store/生成组合式切换到新目标加载 */
@@ -435,13 +519,17 @@ watch(target, async (newTarget) => {
   dialogs.resetAll()
   gen.switchTarget(newTarget)
   await store.switchTarget(newTarget)
+  // 新画布加载后刷新全部节点产物信息（固定路径 + mtime；异步任务已由服务端落盘的结果直接可见）
+  await refreshNodeOutputs()
 })
 
 onMounted(() => {
   window.addEventListener('keydown', keyboard.onKeydown)
   window.addEventListener('paste', paste.onPaste)
   window.addEventListener('resize', updateHeight)
-  void store.load()
+  void store.load().then(() => {
+    void refreshNodeOutputs()
+  })
 })
 
 onUnmounted(() => {
@@ -450,6 +538,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateHeight)
   flowResizeObserver?.disconnect()
   flowResizeObserver = null
+  // 停止轮询/清理生成状态（结果已由服务端落盘，重新进入画布时按固定路径直接可见）
+  gen.reset()
 })
 
 // 画布容器尺寸变化 → 更新可视区尺寸（配置面板边界钳制用；面板自身高度由面板组件自测）

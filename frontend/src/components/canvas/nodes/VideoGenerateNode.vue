@@ -30,15 +30,21 @@ import { buildPreviewUrl } from '../../../canvas/preview'
 const props = defineProps<{
   project: string
   node: CanvasNodeData
+  /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
 }>()
 
 const videoUrl = ref('')
-const current = computed(() => props.node.config.current as { path?: string } | undefined)
+const current = computed(() => {
+  const out = props.output
+  if (out?.path) return { path: out.path, version: out.token }
+  return props.node.config.current as { path?: string; version?: number } | undefined
+})
 
 watch(
   current,
   (c) => {
-    videoUrl.value = c?.path ? buildPreviewUrl(props.project, c.path) : ''
+    videoUrl.value = c?.path ? buildPreviewUrl(props.project, c.path, c.version) : ''
   },
   { immediate: true },
 )

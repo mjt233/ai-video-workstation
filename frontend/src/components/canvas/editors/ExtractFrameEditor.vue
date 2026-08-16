@@ -69,7 +69,7 @@
           :disabled="!canExtract"
           @click="emit('extract', node.id)"
         >
-          {{ node.config.current ? '重新提取' : '提取' }}
+          {{ hasOutput ? '重新提取' : '提取' }}
         </v-btn>
       </template>
     </v-text-field>
@@ -123,6 +123,8 @@ const props = defineProps<{
   isRunning: boolean
   /** 画布类型（父级统一传入，本组件暂不使用） */
   kind: CanvasKind
+  /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
 }>()
 
 /**
@@ -218,8 +220,13 @@ const frameIndex = computed(() => {
   return typeof v === 'number' && Number.isInteger(v) ? v : 0
 })
 
-/** 当前提取结果图片 URL（config.current.path） */
+/** 节点当前是否已有提取结果（按钮文案用；产物为固定路径文件，由服务端落盘） */
+const hasOutput = computed(() => !!(props.output || props.node.config.current))
+
+/** 当前提取结果图片 URL（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
 const currentImage = computed(() => {
+  const out = props.output
+  if (out?.path) return buildPreviewUrl(props.project, out.path, out.token)
   const cur = props.node.config.current as { path?: string; version?: number } | undefined
   return cur?.path ? buildPreviewUrl(props.project, cur.path, cur.version) : ''
 })

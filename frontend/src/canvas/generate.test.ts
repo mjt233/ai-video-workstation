@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { activateHistory, collectInputs, collectInputPaths, getHistory, getNodeCurrentAssetPath, mergeInputOrder, removeHistoryEntry, type HistoryEntry } from './generate'
+import { collectInputs, collectInputPaths, getNodeCurrentAssetPath, mergeInputOrder } from './generate'
 
 const loader: CanvasNodeData = {
   id: 'l1', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,
@@ -26,17 +26,6 @@ const videoGen: CanvasNodeData = {
   },
 }
 
-describe('getHistory', () => {
-  it('无 history 返回空数组', () => {
-    expect(getHistory({})).toEqual([])
-  })
-
-  it('返回历史列表', () => {
-    const h = getHistory(gen.config)
-    expect(h).toHaveLength(2)
-  })
-})
-
 describe('getNodeCurrentAssetPath', () => {
   it('加载图片取 assetPath', () => {
     expect(getNodeCurrentAssetPath(loader)).toBe('assert/character/张三/appearance.jpg')
@@ -53,6 +42,22 @@ describe('getNodeCurrentAssetPath', () => {
   it('文本/无节点返回 undefined', () => {
     expect(getNodeCurrentAssetPath(text)).toBeUndefined()
     expect(getNodeCurrentAssetPath(undefined)).toBeUndefined()
+  })
+
+  it('提供 scope 时生成类节点按固定产物路径推导（忽略 config.current 旧数据）', () => {
+    const scope = { kind: 'scene' as const, primary: '1', secondary: '1' }
+    expect(getNodeCurrentAssetPath(gen, scope)).toBe('assert/scene/1/1/canvas/g1/output.jpg')
+    expect(getNodeCurrentAssetPath(videoGen, scope)).toBe('assert/scene/1/1/canvas/v1/output.mp4')
+  })
+
+  it('提供 scope 时加载节点仍读 assetPath（不受固定产物路径影响）', () => {
+    const scope = { kind: 'scene' as const, primary: '1', secondary: '1' }
+    expect(getNodeCurrentAssetPath(loader, scope)).toBe('assert/character/张三/appearance.jpg')
+  })
+
+  it('场景画布 scope：产物路径含子场景标签', () => {
+    const scope = { kind: 'stage' as const, primary: '街角', label: '白天' }
+    expect(getNodeCurrentAssetPath(gen, scope)).toBe('assert/stage/街角/canvas/白天/g1/output.jpg')
   })
 })
 
@@ -85,6 +90,24 @@ describe('collectInputPaths', () => {
 
   it('无入边返回空数组', () => {
     expect(collectInputPaths('t1', conns, [loader, gen, text])).toEqual([])
+  })
+
+  it('提供 scope 时生成类来源节点的产物按固定路径推导', () => {
+    const scope = { kind: 'scene' as const, primary: '1', secondary: '1' }
+    // g1 连接了加载节点（assetPath）与文本节点（无资产）→ 仍只有加载节点
+    const paths = collectInputPaths('g1', conns, [loader, gen, text], undefined, undefined, scope)
+    expect(paths).toEqual(['assert/character/张三/appearance.jpg'])
+    // 生成节点作为来源：产物为固定 output.{ext}
+    const genAsSource: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'gen-node', fromPortId: 'out', toNodeId: 'target', toPortId: 'in' },
+    ]
+    const genNode: CanvasNodeData = {
+      id: 'gen-node', prototypeId: 'image-generate', name: '生成', x: 0, y: 0, width: 10, height: 10,
+      config: { current: { version: 9, path: 'assert/scene/1/1/canvas/gen-node/v9.jpg', date: 'x' } },
+    }
+    expect(collectInputPaths('target', genAsSource, [genNode], undefined, undefined, scope)).toEqual([
+      'assert/scene/1/1/canvas/gen-node/output.jpg',
+    ])
   })
 })
 
@@ -133,67 +156,5 @@ describe('collectInputs / collectInputPaths：portId 过滤', () => {
   it('指定不存在的 portId 返回空数组', () => {
     expect(collectInputs('g1', conns, [loader, text], undefined, 'other')).toEqual([])
     expect(collectInputPaths('g1', conns, [loader, text], undefined, 'other')).toEqual([])
-  })
-})
-
-describe('activateHistory', () => {
-  it('把历史条目激活为 current，history 引用与内容不变，原 config 不被修改', () => {
-    const cfg = gen.config
-    const next = activateHistory(cfg, {
-      version: 1,
-      path: 'assert/scene/1/1/canvas/g1/v1.jpg',
-      date: '2026-01-01T00:00:00.000Z',
-    })
-    expect(next.current).toEqual({
-      version: 1,
-      path: 'assert/scene/1/1/canvas/g1/v1.jpg',
-      date: '2026-01-01T00:00:00.000Z',
-    })
-    // history 引用不变（原当前图保留在历史中）
-    expect(next.history).toBe(cfg.history)
-    // 原 config 不被修改
-    expect(cfg.current).toEqual({
-      version: 2,
-      path: 'assert/scene/1/1/canvas/g1/v2.jpg',
-      date: '2026-01-01T00:00:00.000Z',
-    })
-  })
-
-  it('激活后原当前图仍在历史中', () => {
-    const cfg = gen.config
-    const next = activateHistory(cfg, {
-      version: 1,
-      path: 'assert/scene/1/1/canvas/g1/v1.jpg',
-      date: '2026-01-01T00:00:00.000Z',
-    })
-    expect((next.history as HistoryEntry[]).map((h) => h.version)).toEqual([1, 2])
-  })
-})
-
-describe('removeHistoryEntry', () => {
-  it('移除指定版本，其余保留，current 不变', () => {
-    const cfg = gen.config
-    const next = removeHistoryEntry(cfg, 1)
-    expect(next.history).toEqual([
-      { version: 2, path: 'assert/scene/1/1/canvas/g1/v2.jpg', date: '2026-01-01T00:00:00.000Z' },
-    ])
-    expect(next.current).toEqual(cfg.current)
-    // 原 config 不被修改
-    expect((cfg.history as HistoryEntry[]).map((h) => h.version)).toEqual([1, 2])
-  })
-
-  it('版本不存在返回原配置（引用不变）', () => {
-    const cfg = gen.config
-    expect(removeHistoryEntry(cfg, 99)).toBe(cfg)
-  })
-
-  it('当前版本不可删除（返回原配置）', () => {
-    const cfg = gen.config
-    expect(removeHistoryEntry(cfg, 2)).toBe(cfg)
-  })
-
-  it('无历史时删除返回原配置', () => {
-    const cfg = { current: { version: 1, path: 'x/v1.jpg', date: '2026-01-01T00:00:00.000Z' } }
-    expect(removeHistoryEntry(cfg, 1)).toBe(cfg)
   })
 })

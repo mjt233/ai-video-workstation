@@ -49,6 +49,12 @@ export interface NodePrototype {
    * 未声明时 getNodeCurrentAssetPath 按画布约定默认读 config.current.path。
    */
   getOutputAssetPath?: (config: NodeConfig) => string | undefined
+  /**
+   * 生成类节点产物扩展名（无点号，如 jpg / mp4 / png / flac）。
+   * 声明后，产物路径按固定文件名推导：assert/{scope}/canvas/{nodeId}/output.{ext}
+   * （见 paths.ts canvasNodeOutputPath）——"当前结果"为文件系统事实，不再读写 config.current/history。
+   */
+  outputExt?: string
 }
 
 /** 加载类节点输出资产：config.assetPath（非空字符串） */
@@ -110,6 +116,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     bodyComponent: ImageGenerateNode,
     editorComponent: ImageGenerateEditor,
     getOutputAssetPath: generateOutput,
+    outputExt: 'jpg',
   },
   {
     id: 'text',
@@ -133,6 +140,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     bodyComponent: VideoGenerateNode,
     editorComponent: VideoGenerateEditor,
     getOutputAssetPath: generateOutput,
+    outputExt: 'mp4',
     defaultConfig: {
       workflowId: 'image-to-video',
       workflowImpl: undefined,
@@ -156,6 +164,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     bodyComponent: TtsGenerateNode,
     editorComponent: TtsGenerateEditor,
     getOutputAssetPath: generateOutput,
+    outputExt: 'flac',
     defaultConfig: {
       mode: 'design', // 'clone' | 'design'，编辑器切换
       workflowImpl: undefined,
@@ -177,6 +186,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     bodyComponent: ExtractFrameNode,
     editorComponent: ExtractFrameEditor,
     getOutputAssetPath: generateOutput,
+    outputExt: 'png',
     defaultConfig: {
       frameIndex: 0,
       history: [],
@@ -194,6 +204,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     bodyComponent: ConcatVideoNode,
     editorComponent: ConcatVideoEditor,
     getOutputAssetPath: generateOutput,
+    outputExt: 'mp4',
     defaultConfig: {
       inputOrder: [],
       history: [],
@@ -211,6 +222,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     bodyComponent: TrimVideoNode,
     editorComponent: TrimVideoEditor,
     getOutputAssetPath: generateOutput,
+    outputExt: 'mp4',
     defaultConfig: {
       startMode: 'time',
       startValue: 0,

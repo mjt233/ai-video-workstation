@@ -48,6 +48,8 @@ import { uploadFs } from '../../../api/client'
 const props = defineProps<{
   project: string
   node: CanvasNodeData
+  /** 预留（加载类节点不使用；父级统一下发，避免非 prop 属性透传） */
+  output?: { path: string; token?: number } | null
 }>()
 
 const emit = defineEmits<{

@@ -12,6 +12,7 @@
         :project="project"
         :node="node"
         :inputs="inputs"
+        :output="output"
         :images-inputs="videoInputGroups.images"
         :videos-inputs="videoInputGroups.videos"
         :audios-inputs="videoInputGroups.audios"
@@ -54,6 +55,8 @@ const props = defineProps<{
   editorComponent: Component | null
   /** 节点输入资产信息（编辑器预览/拖拽排序） */
   inputs: CanvasInputInfo[]
+  /** 节点当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
   /** 视频节点三组输入（非视频节点为空数组） */
   videoInputGroups: {
     images: CanvasInputInfo[]

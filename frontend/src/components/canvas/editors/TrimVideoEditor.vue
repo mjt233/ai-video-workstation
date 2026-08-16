@@ -104,7 +104,7 @@
         :disabled="!canTrim"
         @click="emit('generate', node.id)"
       >
-        {{ node.config.current ? '重新裁剪' : '裁剪' }}
+        {{ hasOutput ? '重新裁剪' : '裁剪' }}
       </v-btn>
       <span class="text-body-small text-grey">
         超出片尾时自动截到剩余时长
@@ -155,6 +155,8 @@ const props = defineProps<{
   isRunning: boolean
   /** 画布类型（父级统一传入，本组件暂不使用） */
   kind: CanvasKind
+  /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
+  output?: { path: string; token?: number } | null
 }>()
 
 /**
@@ -228,8 +230,13 @@ const duration = computed(() => {
 /** 持续时长输入框展示文本 */
 const durationText = computed(() => String(duration.value))
 
-/** 当前输出视频预览 URL（config.current.path，带版本号防缓存） */
+/** 节点当前是否已有裁剪结果（按钮文案用；产物为固定路径文件，由服务端落盘） */
+const hasOutput = computed(() => !!(props.output || props.node.config.current))
+
+/** 当前输出视频预览 URL（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
 const currentVideo = computed(() => {
+  const out = props.output
+  if (out?.path) return buildPreviewUrl(props.project, out.path, out.token)
   const cur = props.node.config.current as { path?: string; version?: number } | undefined
   return cur?.path ? buildPreviewUrl(props.project, cur.path, cur.version) : ''
 })
