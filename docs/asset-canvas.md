@@ -62,8 +62,8 @@
 
 ## 3. 节点类型（`frontend/src/canvas/registry.ts`）
 
-节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / bodyComponent / editorComponent`。
-其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有版本历史）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`video-frame-extract`/`video-concat`/`video-trim` 仅 `canGenerate`（无历史）。
+节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / outputExt / defaultConfig / bodyComponent / editorComponent / getOutputAssetPath`。
+其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有**历史对话框入口**）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`video-frame-extract`/`video-concat`/`video-trim` 仅 `canGenerate`（无历史对话框入口；但重复执行时旧产物仍会被服务端归档进 history 目录，只是没有 UI 入口查看）。`outputExt`（生成类节点产物扩展名，如 jpg/mp4/png/flac）决定固定产物文件名 `output.{ext}`。
 
 | 原型 | 输入端口 | 输出端口 | 可缩放 | 卡片主体 | 配置组件（editorComponent） |
 |------|----------|----------|--------|----------|------------------------------|
@@ -137,7 +137,7 @@
 
 ### 编辑器组件（editorComponent）约定
 
-- props：`project`、`node`、`inputs`（`CanvasInputInfo[]`，仅生成节点用到）、`isRunning`；生成图片编辑器另有 `kind`（画布类型，`ImageGenerateEditor` 用它让「设为分镜场景图」按钮仅分镜画布显示）。
+- props：`project`、`node`、`inputs`（`CanvasInputInfo[]`，仅生成节点用到）、`isRunning`、`output`（`{ path, token? } | null` —— 当前产物固定路径 + 防缓存 token（产物 mtime），由 AssetCanvas 按 node-info 推导下发，优先于 `config.current` 旧数据）；生成图片编辑器另有 `kind`（画布类型，`ImageGenerateEditor` 用它让「设为分镜场景图」按钮仅分镜画布显示）；视频生成/拼接编辑器另有 `imagesInputs` / `videosInputs` / `audiosInputs`（三组输入，按 `config.inputOrder` 排序，编辑器统一传入）。
 - emits：
   - `update:config(patch)` —— 合并写入节点 config（由 `useCanvasNodeOps.onUpdateConfig` 处理，AssetCanvas 接线）；
   - `generate(nodeId)` / `interrupt(nodeId)` / `open-history(nodeId)` / `set-as-scene(nodeId)`；
@@ -184,7 +184,7 @@
 
 - 生成节点编辑器「设为分镜场景图」→ 弹出对话框（独立组件 `SetAsSceneDialog.vue`，帧加载/新增/覆盖逻辑在组件内部；入口状态由 `useCanvasDialogs` 持有）。
 - 读取 `prompt/scene/{ep}/{shot}/stage.json` 列出**全部场景帧**（label = `基础场景` || prompt || `分镜场景图 N`，预览 `stage/{i}.jpg`，404 时 `@error` 置 `broken` 显示占位）。
-- 点击某帧只进入**选中状态**（高亮 + 右上角勾选图标，再点一次取消选中），底部「确认」按钮启用后点击才执行 `copyFs(current.path → assert/scene/{ep}/{shot}/stage/{i}.jpg)` 覆盖该帧。
+- 点击某帧只进入**选中状态**（高亮 + 右上角勾选图标，再点一次取消选中），底部「确认」按钮启用后点击才执行 `copyFs(当前产物路径 → assert/scene/{ep}/{shot}/stage/{i}.jpg)` 覆盖该帧（当前产物路径来自 AssetCanvas 下发的 `output` prop）。
 - 「新增场景图」→ `createSceneStageFrame`（`api/assets.ts`）追加帧并复制图片到新索引；新帧定义由 `deriveStageFrameBody` 从生成节点输入推导：
   - `assert/stage/{场景}/{标签}` 输入 → `基础场景 = 场景/标签`
   - `assert/stage/{场景}/variants/{标签}/{变体}.jpg` 输入 → `基础场景 = 场景/标签@变体`
@@ -210,7 +210,7 @@
 ```
 frontend/src/
 ├── canvas/                       # 纯逻辑（可单元测试）
-│   ├── types.ts                  # 数据模型 + 版本迁移 + id/版本号工具
+│   ├── types.ts                  # 数据模型 + 版本迁移 + id 工具
 │   ├── registry.ts               # 节点原型注册表（含 canGenerate/hasHistory 能力标志）
 │   ├── connection.ts             # 连接校验（类型/成环）
 │   ├── paths.ts                  # 定义文件与产物路径
@@ -223,8 +223,8 @@ frontend/src/
 │   ├── nodeClipboard.ts          # 节点复制标记（NODE_CLIPBOARD_PREFIX/serializeNodeClipboard/parseNodeClipboardText）
 │   ├── sceneFrame.ts             # 设为分镜场景图纯函数（buildSceneFrameOptions/deriveStageFrameBody）
 │   ├── useCanvasStore.ts         # 状态：加载/保存(防抖 800ms)/增删改查/撤销重做/剪贴板/switchTarget
-│   ├── useCanvasGeneration.ts    # 生成：跑工作流/轮询/中断/历史回写/switchTarget
-│   └── *.test.ts                 # 单元测试（210+ 用例）
+│   ├── useCanvasGeneration.ts    # 生成：跑工作流/轮询（纯体验层，不回写元数据）/中断/结果通知/switchTarget
+│   └── *.test.ts                 # 单元测试（220+ 用例）
 └── components/canvas/
     ├── AssetCanvas.vue           # 编排层：组装 store/gen/composables，渲染 VueFlow + 子组件
     ├── CanvasToolbar.vue         # 工具栏（视图缩放/撤销重做/自动搭画布/添加节点/保存状态）
@@ -267,7 +267,7 @@ frontend/src/
 「获取视频帧」编辑器（`editors/ExtractFrameEditor.vue`）：
 - 预览输入视频时提供「提取当前帧」按钮：把预览当前 `currentTime` 写入 `config.frameTime` 并立即提取（服务端 `-ss` 按呈现时间精确选帧，拖拽进度条后也与画面一致）；有帧率时同时回显近似 `frameIndex`；
 - 手动修改「帧索引」会清除 `frameTime`（改回按帧索引提取）；「提取/重新提取」按钮内置于帧索引输入框右侧；
-- 该节点**已移除「历史」功能**（编辑器无历史按钮、右键菜单不显示「历史」项）；config 仍会累积 history 字段但无 UI 展示；
+- 该节点**无历史对话框入口**（编辑器无历史按钮、右键菜单不显示「历史」项）；重复提取时旧产物由服务端自动归档进 `history/output/`（仅文件层面保留，无 UI 查看）；
 - 预览 URL 按输入路径缓存，修改帧索引等触发重渲染不会导致视频重载。
 
 ---
@@ -277,9 +277,10 @@ frontend/src/
 ### 13.1 新增一种节点类型
 
 1. 在 `registry.ts` 注册 `NodePrototype`（端口、resizeable、bodyComponent）。
-2. 新建 `components/canvas/nodes/{Xxx}Node.vue`（卡片主体）。
-3. （可选）新建 `components/canvas/editors/{Xxx}Editor.vue` 并挂 `editorComponent`；编辑器根元素不要自己定宽度（面板宽度由 AssetCanvas 统一控制）。
-4. `config` 字段与既有节点保持兼容（未知字段不影响读取）。
+2. **生成类节点**在原型上声明 `outputExt`（产物固定文件名扩展名，如 `jpg`/`mp4`/`png`/`flac`）——产物展示/按钮文案由 AssetCanvas 按固定路径 + node-info 推导后经 `output` prop 下发，组件内优先读 `props.output`、`config.current` 仅作旧数据回落；加载类节点（`config.assetPath`）无需声明。
+3. 新建 `components/canvas/nodes/{Xxx}Node.vue`（卡片主体）。
+4. （可选）新建 `components/canvas/editors/{Xxx}Editor.vue` 并挂 `editorComponent`；编辑器根元素不要自己定宽度（面板宽度由 AssetCanvas 统一控制）。
+5. `config` 字段与既有节点保持兼容（未知字段不影响读取）。
 
 ### 13.2 测试与验证
 
@@ -293,6 +294,7 @@ frontend/src/
 - **服务端任务终态**：`completed` / `failed`（无 success/error），轮询按 `completed` 判成功。
 - **产物固定文件名**：节点产物统一 `output.{ext}`（原型 `outputExt`），**勿再引入版本号文件名**；历史由服务端 history 目录管理，前端不要读写 `config.current`/`config.history`（旧字段仅兼容读取）。
 - **节点展示用 `output` prop**：AssetCanvas 按固定路径 + node-info mtime 推导并下发给节点主体/编辑器（`outputOf`）；组件内优先 `props.output`，`config.current` 仅作旧数据回落。
+- **预览 watch 需同时监听 path 与 token**：固定路径产物每次重新生成路径不变，预览 URL 只由 token（产物 mtime）区分；节点主体若只 `watch(currentPath)`，新产物覆盖后不会刷新 URL、浏览器命中旧缓存——必须 `watch([currentPath, currentToken])`（实测踩坑，4 个节点主体均已按此实现）。
 - **配置双向同步**：editor 内 `config.workflowParams ↔ 本地 ref` 双 watch 必须加 JSON 相等性守卫，否则无限循环。
 - **`readFs` 对 `.json` 返回反序列化对象**：加载 `canvas.json` 需同时兼容 string 与 object 两种形态。
 - **eslint computed 副作用**：`vue/no-side-effects-in-computed-properties` 禁止在 computed 内写缓存/状态，改用 `watch`。
