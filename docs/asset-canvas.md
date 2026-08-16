@@ -60,7 +60,7 @@
 ## 3. 节点类型（`frontend/src/canvas/registry.ts`）
 
 节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / bodyComponent / editorComponent`。
-其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有版本历史）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`video-frame-extract`/`video-concat` 仅 `canGenerate`（无历史）。
+其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有版本历史）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`video-frame-extract`/`video-concat`/`video-trim` 仅 `canGenerate`（无历史）。
 
 | 原型 | 输入端口 | 输出端口 | 可缩放 | 卡片主体 | 配置组件（editorComponent） |
 |------|----------|----------|--------|----------|------------------------------|
@@ -73,6 +73,7 @@
 | `tts-generate`（TTS声音生成） | `in: audio` | `out: audio` | 是 | `nodes/TtsGenerateNode.vue` | `editors/TtsGenerateEditor.vue` |
 | `video-frame-extract`（获取视频帧） | `in: video` | `out: image` | 是 | `nodes/ExtractFrameNode.vue` | `editors/ExtractFrameEditor.vue` |
 | `video-concat`（拼接视频） | `in: video` | `out: video` | 是 | `nodes/ConcatVideoNode.vue` | `editors/ConcatVideoEditor.vue` |
+| `video-trim`（裁剪视频） | `in: video` | `out: video` | 是 | `nodes/TrimVideoNode.vue` | `editors/TrimVideoEditor.vue` |
 
 - **加载图片**：`config.assetPath` 绑定一张既有资产（上传到 `assert/custom/canvas/` 或从资产选择器选择）；点击节点出现的配置组件可预览当前图并「上传图片 / 选择资产」。
 - **加载音频**：`config.assetPath` 绑定一段音频（上传到 `assert/custom/canvas/` 或从资产选择器选择）。该节点打开的资产选择器额外提供「音频」页签（台词音频/分镜自定义/全局自定义），且「角色」页签在选择角色后会展示**音色**分区（`assert/character/{角色}/voice.flac` 由 character-voice 任务生成；`assert/character/{角色}/voice-variants/{变体id}.flac` 为角色**声音变体**，见 `docs/asset-layout.md`，均已生成才列出），与外观图一起可选；图片类节点（image-loader）的选择器不显示音色与音频页签（`AssetCanvas.openAssetPicker` 按 `prototypeId === 'audio-loader'` 决定 `showVoice` 与页签列表）。
@@ -80,6 +81,7 @@
 - **生成图片**：`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（默认有输入图用 `image-edit`，否则 `text-to-image`）、`workflowParams`（用户参数）、`inputOrder`（输入图顺序，见 §7）、`current` / `history`。
 - **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`workflowParams`、`inputOrder`、`current` / `history`。单一 `media` 输入口，素材类型由来源节点自动归类；编辑器内嵌导演台（仅 director 模式）或参考素材分组；分镜画布下提供「设为分镜视频」（把 `config.current` 复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。
 - **拼接视频**：`config` 含 `inputOrder`（拼接顺序，编辑器内 `VideoRefInputGroup` 拖拽排序）、`current` / `history`。单一 `video` 输入口，同一端口可连多段视频（无输入上限校验）；编辑器「拼接」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/concat-video`（本地 ffmpeg，concat demuxer + `-c copy` 无损拼接，各段编码/分辨率/帧率/音轨结构须一致，不一致返回清晰中文错误）；产物为版本化 `assert/{scope}/canvas/{nodeId}/v{n}.mp4`，回写 `current` / `history`。
+- **裁剪视频**：`config` 含 `startMode`（`time` / `frame`）、`startValue`（秒可小数，或帧索引整数 ≥ 0）、`duration`（秒，> 0 可小数）、`current`。单一 `video` 输入口（多路只取第一路）；编辑器「裁剪」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/trim-video`（本地 ffmpeg **重编码**，不用 `-c copy`，保证帧索引 / 小数秒切口准确：`libx264 veryfast crf=18`，有音轨则 `aac`）。起点 + 时长超出片尾时截到剩余时长。产物固定覆盖 `assert/{scope}/canvas/{nodeId}/output.mp4`，只回写 `current`（`version` 自增仅防缓存），**无历史**。节点卡片与配置面板均可预览裁剪结果。
 - **文本**：`config.text`，可编辑纯文本；当前仅作为 text 类型数据流锚点。文本域带 Vue Flow 约定类 `nodrag` / `nowheel`：在文本域内拖拽是选择文本（不移动节点），滚轮滚动是滚动文本内容（不缩放画布）。
 
 ---
@@ -248,6 +250,8 @@ frontend/src/
 服务端画布专属路由（`server/src/routes/canvas.ts`，前缀 `/api/canvas`）：
 - `POST /canvas/extract-frame`——「获取视频帧」节点：body 可带 `frameIndex`（0=首帧、-1=尾帧…，解码序 select 选帧）或 `time`（秒，按呈现时间精确选帧 `-ss`，与预览画面一致）；
 - `GET /canvas/video-info`——返回视频时长/帧率/分辨率（ffprobe），供编辑器「提取当前帧」回显近似帧索引。
+- `POST /canvas/concat-video`——「拼接视频」节点：body `{ project, videoPaths, outputPath }`，concat demuxer + `-c copy`。
+- `POST /canvas/trim-video`——「裁剪视频」节点：body `{ project, videoPath, outputPath, duration, startTime? | startFrame? }`；重编码裁剪（不用 `-c copy`），产物覆盖 `output.mp4`。
 其余画布读写仍走既有 `GET/POST /api/fs/:project/*`（读写 `canvas.json`）与 `/assets/.../stage`（设为分镜场景图新增帧）。
 
 「获取视频帧」编辑器（`editors/ExtractFrameEditor.vue`）：

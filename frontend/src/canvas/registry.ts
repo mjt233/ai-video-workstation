@@ -8,6 +8,7 @@ import VideoLoaderNode from '../components/canvas/nodes/VideoLoaderNode.vue'
 import VideoGenerateNode from '../components/canvas/nodes/VideoGenerateNode.vue'
 import ExtractFrameNode from '../components/canvas/nodes/ExtractFrameNode.vue'
 import ConcatVideoNode from '../components/canvas/nodes/ConcatVideoNode.vue'
+import TrimVideoNode from '../components/canvas/nodes/TrimVideoNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
@@ -16,6 +17,7 @@ import VideoLoaderEditor from '../components/canvas/editors/VideoLoaderEditor.vu
 import VideoGenerateEditor from '../components/canvas/editors/VideoGenerateEditor.vue'
 import ExtractFrameEditor from '../components/canvas/editors/ExtractFrameEditor.vue'
 import ConcatVideoEditor from '../components/canvas/editors/ConcatVideoEditor.vue'
+import TrimVideoEditor from '../components/canvas/editors/TrimVideoEditor.vue'
 import TtsGenerateEditor from '../components/canvas/editors/TtsGenerateEditor.vue'
 
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
@@ -195,6 +197,24 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     defaultConfig: {
       inputOrder: [],
       history: [],
+    },
+  },
+  {
+    id: 'video-trim',
+    name: '裁剪视频',
+    icon: 'mdi-content-cut',
+    // 输入/输出均为 video；手动点击裁剪（服务端 ffmpeg 重编码，保证帧/小数秒精度）
+    inputPorts: [{ id: 'in', type: 'video', label: '视频' }],
+    outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
+    resizeable: true,
+    canGenerate: true,
+    bodyComponent: TrimVideoNode,
+    editorComponent: TrimVideoEditor,
+    getOutputAssetPath: generateOutput,
+    defaultConfig: {
+      startMode: 'time',
+      startValue: 0,
+      duration: 1,
     },
   },
 ]

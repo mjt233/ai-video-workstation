@@ -14,7 +14,7 @@ import type { CanvasGenerationApi, CanvasStoreApi, NodeMap, ShowSnackbar } from 
 export interface UseCanvasNodeOpsOptions {
   /** 画布数据 store（回写 config/连接查询） */
   store: CanvasStoreApi
-  /** 生成执行组合式（工作流/轮询/中断/帧提取/拼接） */
+  /** 生成执行组合式（工作流/轮询/中断/帧提取/拼接/裁剪） */
   gen: CanvasGenerationApi
   /** 节点 id → 节点数据索引 */
   nodeMap: NodeMap
@@ -36,7 +36,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   /**
    * 触发生成节点：收集输入路径 → 注入 → 跑工作流，并把 current/history 回写节点配置。
    * 视频节点（video-generate）额外组装自包含提交参数后传给 generate。
-   * 获取视频帧/拼接视频节点走本地 ffmpeg 路由（不走工作流）。
+   * 获取视频帧/拼接视频/裁剪视频节点走本地 ffmpeg 路由（不走工作流）。
    *
    * @param nodeId 生成节点 id
    */
@@ -52,6 +52,11 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     if (node.prototypeId === 'video-concat') {
       // 拼接视频：本地 ffmpeg 拼接（不走工作流）
       await concatNodeVideos(nodeId)
+      return
+    }
+    if (node.prototypeId === 'video-trim') {
+      // 裁剪视频：本地 ffmpeg 裁剪（不走工作流）
+      await trimNodeVideo(nodeId)
       return
     }
     if (node.prototypeId === 'video-generate') {
@@ -126,6 +131,32 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     }
     gen.clearStatus(nodeId)
     await gen.concatVideo(node, videos.map((v) => v.path), (config) => {
+      store.updateNode(nodeId, { config })
+    })
+  }
+
+  /**
+   * 裁剪视频节点：收集第一路视频输入并触发服务端 ffmpeg 裁剪。
+   *
+   * @param nodeId 节点 id
+   */
+  async function trimNodeVideo(nodeId: string): Promise<void> {
+    const node = nodeMap.value[nodeId]
+    if (!node) return
+    const videos = videoInputsOf(nodeId, 'video')
+    const videoPath = videos[0]?.path
+    if (!videoPath) {
+      showSnackbar('请先连接视频输入', 'primary')
+      return
+    }
+    const rawDuration = node.config.duration
+    const duration = typeof rawDuration === 'number' && Number.isFinite(rawDuration) ? rawDuration : 0
+    if (!(duration > 0)) {
+      showSnackbar('请填写有效的持续时长', 'primary')
+      return
+    }
+    gen.clearStatus(nodeId)
+    await gen.trimVideo(node, videoPath, (config) => {
       store.updateNode(nodeId, { config })
     })
   }
@@ -205,6 +236,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     onInterrupt,
     extractNodeFrame,
     concatNodeVideos,
+    trimNodeVideo,
     isNodeRunning,
     inputsOf,
     videoInputsOf,

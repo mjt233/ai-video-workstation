@@ -194,3 +194,41 @@ export async function concatVideo(
   })
   return data
 }
+
+/** 裁剪视频请求参数（起点二选一：startTime 或 startFrame） */
+export interface TrimVideoParams {
+  /** 起始时间（秒，可小数）；与 startFrame 互斥，优先本字段 */
+  startTime?: number
+  /** 起始帧索引（整数 ≥ 0）；无 startTime 时由服务端按 帧 / fps 换算 */
+  startFrame?: number
+  /** 持续时长（秒，> 0，可小数） */
+  duration: number
+}
+
+/**
+ * 裁剪视频：调用服务端 ffmpeg 接口，把输入视频按起点与持续时长剪切为单个视频。
+ *
+ * 服务端重编码输出（不用 -c copy），保证帧索引 / 小数秒切口准确。
+ *
+ * @param project 项目名
+ * @param videoPath 输入视频相对路径（assert/ 下）
+ * @param params 裁剪参数（startTime 或 startFrame + duration）
+ * @param outputPath 输出视频相对路径（assert/ 下，.mp4）
+ * @returns 服务端执行结果（含输出相对路径）
+ */
+export async function trimVideo(
+  project: string,
+  videoPath: string,
+  params: TrimVideoParams,
+  outputPath: string,
+): Promise<{ success: boolean; path: string }> {
+  const { data } = await client.post<{ success: boolean; path: string }>('/canvas/trim-video', {
+    project,
+    videoPath,
+    outputPath,
+    duration: params.duration,
+    startTime: params.startTime,
+    startFrame: params.startFrame,
+  })
+  return data
+}

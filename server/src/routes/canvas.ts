@@ -7,6 +7,7 @@ import {
   readVideoInfo,
 } from '../assets/extract-frame.js';
 import { concatVideos, ConcatError } from '../assets/concat-video.js';
+import { trimVideo, TrimError } from '../assets/trim-video.js';
 import { isUnderAssert } from './fs-path.js';
 
 /**
@@ -177,6 +178,77 @@ canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) =>
       return;
     }
     console.error('Failed to concat videos:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * 裁剪视频：POST /api/canvas/trim-video
+ *
+ * body: { project, videoPath, outputPath, duration, startTime? | startFrame? }
+ * - startTime：起始时间（秒，可小数），提供时按呈现时间裁剪；
+ * - startFrame：起始帧索引（整数 ≥ 0），无 startTime 时按 帧 / fps 换算为秒；
+ * - duration：持续时长（秒，> 0，可小数；超出片尾截到剩余时长）。
+ * 重编码输出（不用 -c copy），保证帧索引 / 小数秒切口准确。
+ * videoPath / outputPath 均须位于 assert/ 前缀下。
+ */
+canvasRouter.post('/canvas/trim-video', async (req: Request, res: Response) => {
+  try {
+    const project = String(req.body?.project ?? '');
+    const videoPath = String(req.body?.videoPath ?? '');
+    const outputPath = String(req.body?.outputPath ?? '');
+    const videoNorm = videoPath.replace(/\\/g, '/');
+    const outputNorm = outputPath.replace(/\\/g, '/');
+    if (!project || !videoPath || !outputPath) {
+      res.status(400).json({ error: 'project / videoPath / outputPath 必填' });
+      return;
+    }
+    if (!isUnderAssert(videoNorm) || !isUnderAssert(outputNorm)) {
+      res.status(403).json({ error: '仅支持 assert/ 下的视频与输出路径' });
+      return;
+    }
+    const duration = Number(req.body?.duration);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      res.status(400).json({ error: 'duration 必须是大于 0 的数字（秒）' });
+      return;
+    }
+    const startTimeRaw = req.body?.startTime;
+    const startFrameRaw = req.body?.startFrame;
+    const hasStartTime = startTimeRaw !== undefined && startTimeRaw !== null && startTimeRaw !== '';
+    const hasStartFrame = startFrameRaw !== undefined && startFrameRaw !== null && startFrameRaw !== '';
+    if (!hasStartTime && !hasStartFrame) {
+      res.status(400).json({ error: 'startTime 或 startFrame 必填其一' });
+      return;
+    }
+    const params: { duration: number; startTime?: number; startFrame?: number } = { duration };
+    if (hasStartTime) {
+      const startTime = Number(startTimeRaw);
+      if (!Number.isFinite(startTime) || startTime < 0) {
+        res.status(400).json({ error: 'startTime 必须是大于等于 0 的数字（秒）' });
+        return;
+      }
+      params.startTime = startTime;
+    } else {
+      const startFrame = Number(startFrameRaw);
+      if (!Number.isInteger(startFrame) || startFrame < 0) {
+        res.status(400).json({ error: 'startFrame 必须是大于等于 0 的整数' });
+        return;
+      }
+      params.startFrame = startFrame;
+    }
+    const result = await trimVideo(project, videoNorm, params, outputNorm);
+    res.json({ success: true, path: result });
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    if (e?.code === 'NOT_FOUND') {
+      res.status(404).json({ error: e.message, code: 'NOT_FOUND' });
+      return;
+    }
+    if (e instanceof TrimError || e?.code === 'INVALID') {
+      res.status(400).json({ error: e.message, code: e.code ?? 'INVALID' });
+      return;
+    }
+    console.error('Failed to trim video:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

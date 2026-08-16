@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow, type WorkflowUserParamValue } from '../api/workflow'
-import { extractVideoFrame, extractVideoFrameAtTime, concatVideo as requestConcatVideo } from './api'
+import { extractVideoFrame, extractVideoFrameAtTime, concatVideo as requestConcatVideo, trimVideo as requestTrimVideo } from './api'
 import type { VideoSubmitParams } from './videoSubmit'
 import type { CanvasNodeData, CanvasKind } from './types'
 import { canvasNodeAssetPath, sceneCanvasRelPath } from './paths'
@@ -79,6 +79,10 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     if (node.prototypeId === 'video-concat') {
       // 拼接视频产物扩展名替换为 .mp4（图片路径助手默认 .jpg）
       return base.replace(/\.jpg$/, '.mp4')
+    }
+    if (node.prototypeId === 'video-trim') {
+      // 裁剪视频无历史版本：固定覆盖 output.mp4（不按 v{n} 递增）
+      return base.replace(/\/v\d+\.jpg$/, '/output.mp4')
     }
     if (node.prototypeId === 'tts-generate') {
       // TTS 产物扩展名替换为 .flac（音频）
@@ -382,6 +386,57 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     }
   }
 
+  /**
+   * 裁剪视频节点：调用服务端 ffmpeg 接口，成功后只回写 current（无 history）。
+   *
+   * 同步路由（ffmpeg 阻塞等待），无轮询；产物覆盖同一 output.mp4，
+   * current.version 自增仅用于预览防缓存。
+   *
+   * @param node 裁剪视频节点数据
+   * @param videoPath 输入视频相对路径（来自连线输入）
+   * @param updateConfig 更新节点配置的回调（回写 current）
+   */
+  async function trimVideo(
+    node: CanvasNodeData,
+    videoPath: string,
+    updateConfig: (config: Record<string, unknown>) => void,
+  ): Promise<void> {
+    const nodeId = node.id
+    if (statusByNode.value[nodeId]?.status === 'running') return
+    statusByNode.value[nodeId] = { status: 'running' }
+    try {
+      const outputPath = computeOutputPath(node)
+      const startMode = node.config.startMode === 'frame' ? 'frame' : 'time'
+      const rawStart = node.config.startValue
+      const startValue = typeof rawStart === 'number' && Number.isFinite(rawStart) ? rawStart : 0
+      const rawDuration = node.config.duration
+      const duration = typeof rawDuration === 'number' && Number.isFinite(rawDuration) ? rawDuration : 0
+      const params =
+        startMode === 'frame'
+          ? { startFrame: Math.trunc(startValue), duration }
+          : { startTime: startValue, duration }
+      const res = await requestTrimVideo(project, videoPath, params, outputPath)
+      const prev = node.config.current as { version?: number } | undefined
+      const version = (typeof prev?.version === 'number' ? prev.version : 0) + 1
+      const now = new Date().toISOString()
+      updateConfig({
+        ...node.config,
+        current: { version, path: res.path, date: now },
+      })
+      statusByNode.value[nodeId] = {
+        status: 'success',
+        lastLog: startMode === 'frame'
+          ? `已从第 ${params.startFrame} 帧裁剪 ${duration}s`
+          : `已从 ${startValue}s 处裁剪 ${duration}s`,
+      }
+    } catch (e) {
+      statusByNode.value[nodeId] = {
+        status: 'error',
+        errorMsg: e instanceof Error ? e.message : String(e),
+      }
+    }
+  }
+
   /** 重置全部生成状态与轮询（切换画布目标时调用） */
   function reset(): void {
     for (const id of Object.keys(pollTimers)) {
@@ -403,5 +458,5 @@ export function useCanvasGeneration(project: string, target: GenTarget) {
     reset()
   }
 
-  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, interrupt, clearStatus, computeOutputPath, switchTarget }
+  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, trimVideo, interrupt, clearStatus, computeOutputPath, switchTarget }
 }

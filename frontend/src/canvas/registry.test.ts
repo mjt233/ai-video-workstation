@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含九个内置节点', () => {
+  it('包含十个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'image-generate',
@@ -13,6 +13,7 @@ describe('NODE_PROTOTYPES', () => {
       'video-frame-extract',
       'video-generate',
       'video-loader',
+      'video-trim',
     ])
   })
 
@@ -89,11 +90,21 @@ describe('getOutputAssetPath（各节点自实现输出资产解析）', () => {
     expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/vc/v1.mp4' } })).toBe('assert/scene/1/1/canvas/vc/v1.mp4')
     expect(p.getOutputAssetPath?.({})).toBeUndefined()
   })
+
+  it('裁剪视频节点：video 输入、video 输出、默认配置与 current.path 解析', () => {
+    const p = getPrototype('video-trim')!
+    expect(p.name).toBe('裁剪视频')
+    expect(p.inputPorts[0]?.type).toBe('video')
+    expect(p.outputPorts[0]?.type).toBe('video')
+    expect(p.defaultConfig).toMatchObject({ startMode: 'time', startValue: 0, duration: 1 })
+    expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/vt/output.mp4' } })).toBe('assert/scene/1/1/canvas/vt/output.mp4')
+    expect(p.getOutputAssetPath?.({})).toBeUndefined()
+  })
 })
 
 describe('canGenerate / hasHistory 能力标志', () => {
   it('生成类节点支持重新生成', () => {
-    const ids = ['image-generate', 'video-generate', 'tts-generate', 'video-frame-extract', 'video-concat']
+    const ids = ['image-generate', 'video-generate', 'tts-generate', 'video-frame-extract', 'video-concat', 'video-trim']
     for (const id of ids) {
       expect(getPrototype(id)?.canGenerate, `${id} 应支持重新生成`).toBe(true)
     }
@@ -112,6 +123,7 @@ describe('canGenerate / hasHistory 能力标志', () => {
     expect(getPrototype('tts-generate')?.hasHistory).toBe(true)
     expect(getPrototype('video-frame-extract')?.hasHistory ?? false).toBe(false)
     expect(getPrototype('video-concat')?.hasHistory ?? false).toBe(false)
+    expect(getPrototype('video-trim')?.hasHistory ?? false).toBe(false)
     expect(getPrototype('image-loader')?.hasHistory ?? false).toBe(false)
   })
 })

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
@@ -34,10 +35,20 @@ interface ErrorWithCode extends Error {
   code?: string;
 }
 
-/** 不限文件类型的 multer upload（用于自定义资产上传） */
+/**
+ * 不限文件类型的 multer upload（用于自定义资产上传）
+ * - 上限 8GB，支持大视频/音频素材
+ * - 使用 diskStorage 先落盘到系统临时目录，避免超大文件占用内存
+ *   （memoryStorage 需将整个文件装入内存 Buffer，8GB 无法满足）
+ */
 const customUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (_req, _file, cb) => {
+      cb(null, `dsh-upload-${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+    },
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 * 1024 }, // 8GB
 });
 
 fsRouter.get('/projects', async (_req: Request, res: Response) => {
@@ -229,7 +240,8 @@ fsRouter.post(
     customUpload.single('file')(req, res, (err: unknown) => {
       if (err) {
         const e = err as { message?: string; code?: string };
-        res.status(400).json({ error: e.message || '上传失败' });
+        const msg = e.code === 'LIMIT_FILE_SIZE' ? '文件大小超过 8GB 限制' : (e.message || '上传失败');
+        res.status(400).json({ error: msg });
         return;
       }
       next();
@@ -249,18 +261,29 @@ fsRouter.post(
         return;
       }
       const file = req.file;
-      if (!file?.buffer?.length) {
+      if (!file?.size) {
         res.status(400).json({ error: '请选择要上传的文件' });
         return;
       }
       const fullPath = path.resolve(DESIGN_DIR, project, normalized);
       const projectRoot = path.resolve(DESIGN_DIR, project) + path.sep;
       if (!fullPath.startsWith(projectRoot)) {
+        await fs.unlink(file.path).catch(() => {});
         res.status(403).json({ error: 'Path traversal denied' });
         return;
       }
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
-      await fs.writeFile(fullPath, file.buffer);
+      // 先删除已存在的目标（Windows 下 rename 不能覆盖已存在文件），再移动临时文件；
+      // 跨磁盘（EXDEV）时退化为复制后清理临时文件
+      await fs.unlink(fullPath).catch(() => {});
+      try {
+        await fs.rename(file.path, fullPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+        await fs.copyFile(file.path, fullPath);
+      } finally {
+        await fs.unlink(file.path).catch(() => {});
+      }
       res.json({ success: true, path: normalized });
     } catch (err) {
       console.error('Failed to upload:', err);

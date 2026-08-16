@@ -8,11 +8,11 @@ vi.mock('../api/workflow', () => ({
   getTaskLogs: vi.fn(),
   cancelWorkflow: vi.fn(),
 }))
-vi.mock('./api', () => ({ extractVideoFrame: vi.fn(), extractVideoFrameAtTime: vi.fn(), concatVideo: vi.fn() }))
+vi.mock('./api', () => ({ extractVideoFrame: vi.fn(), extractVideoFrameAtTime: vi.fn(), concatVideo: vi.fn(), trimVideo: vi.fn() }))
 
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow } from '../api/workflow'
-import { extractVideoFrame, extractVideoFrameAtTime, concatVideo } from './api'
+import { extractVideoFrame, extractVideoFrameAtTime, concatVideo, trimVideo } from './api'
 import type { CanvasNodeData } from './types'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
@@ -222,6 +222,61 @@ describe('useCanvasGeneration', () => {
     ;(cancelWorkflow as Mock).mockRejectedValueOnce(new Error('boom'))
     await expect(gen.interrupt('n1')).resolves.toBeUndefined()
     expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
+  })
+
+  it('裁剪视频节点：按时间调用 trim-video，回写 output.mp4 且不写 history', async () => {
+    ;(trimVideo as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/vt/output.mp4' })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vt', prototypeId: 'video-trim', name: '裁剪视频', x: 0, y: 0, width: 240, height: 160,
+      config: { startMode: 'time', startValue: 1.5, duration: 2 },
+    }
+    let savedConfig: Record<string, unknown> | null = null
+    await gen.trimVideo(node, 'assert/v.mp4', (c) => { savedConfig = c })
+    expect(trimVideo).toHaveBeenCalledWith(
+      'p',
+      'assert/v.mp4',
+      { startTime: 1.5, duration: 2 },
+      'assert/scene/1/1/canvas/vt/output.mp4',
+    )
+    expect(gen.statusByNode.value.vt?.status).toBe('success')
+    const cfg = savedConfig as unknown as { current: { path: string; version: number }; history?: unknown }
+    expect(cfg.current.path).toBe('assert/scene/1/1/canvas/vt/output.mp4')
+    expect(cfg.current.version).toBe(1)
+    expect(cfg.history).toBeUndefined()
+  })
+
+  it('裁剪视频节点：帧模式传 startFrame，重复裁剪 version 自增', async () => {
+    ;(trimVideo as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/vt/output.mp4' })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vt', prototypeId: 'video-trim', name: '裁剪视频', x: 0, y: 0, width: 240, height: 160,
+      config: { startMode: 'frame', startValue: 12, duration: 0.5, current: { version: 3, path: 'assert/scene/1/1/canvas/vt/output.mp4', date: 'x' } },
+    }
+    let savedConfig: Record<string, unknown> | null = null
+    await gen.trimVideo(node, 'assert/v.mp4', (c) => { savedConfig = c })
+    expect(trimVideo).toHaveBeenCalledWith(
+      'p',
+      'assert/v.mp4',
+      { startFrame: 12, duration: 0.5 },
+      'assert/scene/1/1/canvas/vt/output.mp4',
+    )
+    const cfg = savedConfig as unknown as { current: { version: number } }
+    expect(cfg.current.version).toBe(4)
+  })
+
+  it('裁剪视频节点：失败进入 error 状态且不回写配置', async () => {
+    ;(trimVideo as Mock).mockRejectedValueOnce(new Error('起始位置越界'))
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vt', prototypeId: 'video-trim', name: '裁剪视频', x: 0, y: 0, width: 240, height: 160,
+      config: { startMode: 'time', startValue: 99, duration: 1 },
+    }
+    let savedConfig: Record<string, unknown> | null = null
+    await gen.trimVideo(node, 'assert/v.mp4', (c) => { savedConfig = c })
+    expect(gen.statusByNode.value.vt?.status).toBe('error')
+    expect(gen.statusByNode.value.vt?.errorMsg).toBe('起始位置越界')
+    expect(savedConfig).toBeNull()
   })
 
   it('获取视频帧：调用 extractVideoFrame 并回写 current/history（.png 产物路径）', async () => {

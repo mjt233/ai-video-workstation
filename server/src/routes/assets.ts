@@ -63,7 +63,7 @@ const ALLOWED_IMAGE_MIME = new Set([
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_IMAGE_MIME.has(file.mimetype)) {
       cb(Object.assign(new Error('仅支持 JPG / PNG / WebP 图片'), { code: 'INVALID' }));
@@ -543,6 +543,11 @@ assetsRouter.post(
   (req: Request, res: Response, next) => {
     upload.single('file')(req, res, (err: unknown) => {
       if (err) {
+        const e = err as { code?: string };
+        if (e?.code === 'LIMIT_FILE_SIZE') {
+          res.status(400).json({ error: '图片大小超过 100MB 限制' });
+          return;
+        }
         httpError(res, err);
         return;
       }
