@@ -1,8 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderClient } from '../../providers/types.js';
-import { getImpl } from '../registry.js';
+import { getCandidatesByProvider, getImpl, registerOrReplace } from '../registry.js';
 import type { ImageEditVars, WorkflowRunContext } from '../types.js';
 import './seedream.js'; // 触发注册（模块顶层 register）
+
+/**
+ * 将 volcengine-ark 静态候选定义提升为可执行定义（补 providerInstanceId），
+ * 使 getImpl 能检索到（注册表语义：无实例 = 候选，不可执行）。
+ */
+function promoteStaticCandidates(): void {
+  for (const w of getCandidatesByProvider('volcengine-ark')) {
+    registerOrReplace({ ...w, providerInstanceId: 'test-inst', providerName: '测试实例' });
+  }
+}
+promoteStaticCandidates();
 
 const executeMock = vi.fn();
 const stubProvider = {

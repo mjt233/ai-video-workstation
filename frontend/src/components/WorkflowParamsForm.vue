@@ -100,8 +100,10 @@ const props = defineProps<{
   modelValue: Record<string, WorkflowUserParamValue>
   /** 项目名（用于尺寸组件「使用项目尺寸」读取 project.json） */
   project?: string
-  /** 工作流实现声明的 Provider 插件 ID（为 comfyui-bridge 时显示「ComfyUI 提供商」选择） */
+  /** 服务商实例 ID（为 comfyui-bridge 类型实例时显示「ComfyUI 提供商」选择，并按实例拉取 Bridge 侧提供商） */
   provider?: string
+  /** 服务商类型 ID（如 comfyui-bridge / volcengine-ark；决定是否显示「ComfyUI 提供商」选择） */
+  providerType?: string
 }>()
 
 const emit = defineEmits<{
@@ -111,10 +113,10 @@ const emit = defineEmits<{
 /** 表单内部值（key → 值） */
 const values = ref<Record<string, WorkflowUserParamValue>>({})
 
-// ── ComfyUI 提供商选择（provider=comfyui-bridge 时显示） ─────────────────
+// ── ComfyUI 提供商选择（providerType=comfyui-bridge 时显示） ─────────────────
 
 /** 是否为 ComfyUI Easy Bridge 工作流（决定是否显示提供商下拉） */
-const isBridgeProvider = computed(() => props.provider === 'comfyui-bridge')
+const isBridgeProvider = computed(() => props.providerType === 'comfyui-bridge')
 
 /** Easy Bridge 提供商实例列表（组件内本地状态，每次挂载实时拉取，不缓存） */
 const bridgeProviders = ref<ComfyuiBridgeProviderInfo[]>([])
@@ -126,13 +128,14 @@ const providersError = ref('')
 /**
  * 拉取 Easy Bridge 提供商实例列表。
  * 每次表单挂载（对话框/面板打开）实时请求，不做任何缓存，保证选项与 Bridge 侧一致；
+ * 按当前服务商实例（props.provider）拉取对应 Bridge 的提供商列表（多 Bridge 实例场景）；
  * 失败时仅记录错误（hint 展示），保留「默认」选项与已保存值回显，不阻断提交。
  */
 async function loadComfyuiProviders() {
   providersLoading.value = true
   providersError.value = ''
   try {
-    bridgeProviders.value = await getComfyuiBridgeProviders()
+    bridgeProviders.value = await getComfyuiBridgeProviders(props.provider)
   } catch (e) {
     providersError.value = e instanceof Error ? e.message : String(e)
   } finally {

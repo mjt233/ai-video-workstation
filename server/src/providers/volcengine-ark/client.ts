@@ -7,6 +7,12 @@ interface ArkImageData {
   b64_json?: string;
 }
 
+/** 火山方舟客户端：传输能力 + 连接测试 */
+export interface VolcengineArkClient extends ProviderClient {
+  /** 连接测试：验证地址可达（暂不校验密钥，后续优化） */
+  testConnection(): Promise<{ ok: boolean; message: string }>;
+}
+
 /**
  * 创建火山方舟传输客户端。
  *
@@ -19,7 +25,7 @@ interface ArkImageData {
  * @param config 已解析配置（apiKey / baseUrl / timeout）
  * @returns ProviderClient
  */
-export function createVolcengineArkClient(config: ResolvedProviderConfig): ProviderClient {
+export function createVolcengineArkClient(config: ResolvedProviderConfig): VolcengineArkClient {
   const apiKey = String(config.apiKey ?? '');
   const baseUrl = String(config.baseUrl ?? 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/+$/, '');
   // 超时下限钳制：非法/非正数回退默认 900s，防止 0/NaN 导致 setTimeout 立即触发
@@ -91,6 +97,20 @@ export function createVolcengineArkClient(config: ResolvedProviderConfig): Provi
 
     async cancel() {
       // 同步请求已在 execute 内完成，无法中止；幂等 no-op
+    },
+
+    async testConnection(): Promise<{ ok: boolean; message: string }> {
+      // 轻量 GET 基础地址验证可达；5 秒超时，任何异常（网络不可达/超时）均返回 ok:false
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      try {
+        const res = await fetch(baseUrl, { method: 'GET', signal: ctrl.signal });
+        return { ok: true, message: `地址可达（HTTP ${res.status}）` };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }

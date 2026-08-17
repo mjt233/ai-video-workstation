@@ -3,12 +3,22 @@ import { v4 as uuidv4 } from 'uuid';
 import * as db from '../db.js';
 import type { TaskRecord } from '../db.js';
 import { getAllWorkflows } from '../workflow-engine.js';
-import { getImpl, getImplementations } from '../workflows/registry.js';
+import { getImpl, getImplementations, unregisterByInstance } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
 import { markCancelRequested, stripCancelRequested } from '../workflows/cancel.js';
-import { getProviderConfig, getProviderConfigMasked, setProviderConfig } from '../providers/config-store.js';
+import {
+  createInstance,
+  deleteInstance,
+  getInstance,
+  getInstanceConfigMasked,
+  listInstances,
+  resolveInstanceConfig,
+  resolveProviderConfig,
+  updateInstance,
+} from '../providers/config-store.js';
 import { getAllProviders, getProvider } from '../providers/registry.js';
+import { syncInstance } from '../providers/instance-sync.js';
 import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
 
@@ -57,42 +67,76 @@ export function extractComfyuiProviderId(raw: Record<string, unknown> | undefine
   return trimmed !== '' ? trimmed : undefined;
 }
 
-// GET /api/providers — 列出所有 Provider 插件及其配置（secret 字段脱敏为 '__set__'）
+// GET /api/providers — 服务商类型列表 + 实例列表（config 脱敏）
 workflowRouter.get('/providers', async (_req: Request, res: Response) => {
   try {
-    const providers = await Promise.all(
-      getAllProviders().map(async (p) => ({
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        configSchema: p.configSchema,
-        config: await getProviderConfigMasked(p.id),
-      })),
-    );
-    res.json({ providers });
+    const types = getAllProviders().map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      configSchema: p.configSchema,
+    }));
+    const instances = await listInstances();
+    const instanceInfos = await Promise.all(instances.map(async (inst) => ({
+      id: inst.id,
+      type: inst.type,
+      name: inst.name,
+      config: getInstanceConfigMasked(inst),
+      enabledWorkflows: inst.enabledWorkflows,
+    })));
+    res.json({ types, instances: instanceInfos });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: `读取 Provider 配置失败: ${msg}` });
+    res.status(500).json({ error: `读取服务商配置失败: ${msg}` });
   }
 });
 
-// PUT /api/providers/:id — 保存 Provider 配置（按 schema 校验；secret 空串保留原值）
-workflowRouter.put('/providers/:id', async (req: Request, res: Response) => {
-  const id = req.params.id as string;
-  const { config } = req.body as { config?: Record<string, unknown> };
-  if (!config || typeof config !== 'object') {
-    res.status(400).json({ error: 'Missing body: config' });
+// POST /api/providers/instances — 新增服务商实例（创建后触发实例工作流同步）
+workflowRouter.post('/providers/instances', async (req: Request, res: Response) => {
+  const { type, name, config, enabledWorkflows } = req.body as {
+    type?: string;
+    name?: string;
+    config?: Record<string, unknown>;
+    enabledWorkflows?: string[];
+  };
+  if (!type || !name || !config || typeof config !== 'object') {
+    res.status(400).json({ error: 'Missing body: type/name/config' });
     return;
   }
   try {
-    await setProviderConfig(id, config);
-    // Bridge 工作流动态重同步（仅 comfyui-bridge 配置变化触发；失败不阻塞响应）
-    if (id === 'comfyui-bridge') {
-      const { syncBridgeWorkflows } = await import('../workflows/bridge-sync.js');
-      syncBridgeWorkflows().catch((e) => {
-        console.error(`[bridge-sync] 配置变更重同步失败: ${e instanceof Error ? e.message : String(e)}`);
-      });
-    }
+    const instance = await createInstance({ type, name, config, enabledWorkflows });
+    await syncInstance(instance);
+    res.json({ instance: { ...instance, config: getInstanceConfigMasked(instance) } });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
+  }
+});
+
+// PUT /api/providers/instances/:id — 更新服务商实例（secret 空串保留原值；更新后触发同步）
+workflowRouter.put('/providers/instances/:id', async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const { name, config, enabledWorkflows } = req.body as {
+    name?: string;
+    config?: Record<string, unknown>;
+    enabledWorkflows?: string[];
+  };
+  try {
+    const instance = await updateInstance(id, { name, config, enabledWorkflows });
+    await syncInstance(instance);
+    res.json({ instance: { ...instance, config: getInstanceConfigMasked(instance) } });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
+  }
+});
+
+// DELETE /api/providers/instances/:id — 删除服务商实例（注销其全部工作流）
+workflowRouter.delete('/providers/instances/:id', async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  try {
+    await deleteInstance(id);
+    unregisterByInstance(id, new Set());
     res.json({ success: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -100,13 +144,58 @@ workflowRouter.put('/providers/:id', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/providers/test — 连接测试（用当前表单参数，不落盘）
+workflowRouter.post('/providers/test', async (req: Request, res: Response) => {
+  const { type, config } = req.body as { type?: string; config?: Record<string, unknown> };
+  if (!type || !config || typeof config !== 'object') {
+    res.status(400).json({ error: 'Missing body: type/config' });
+    return;
+  }
+  try {
+    const providerDef = getProvider(type);
+    if (!providerDef) throw new Error(`服务商类型未注册: ${type}`);
+    const resolved = resolveProviderConfig(providerDef.configSchema, config as Record<string, string | number | boolean>);
+    const result = await providerDef.testConnection(resolved);
+    res.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
+  }
+});
+
+// GET /api/providers/instances/:id/workflows — 该实例当前工作流列表（Bridge 实时 / 静态返回）
+workflowRouter.get('/providers/instances/:id/workflows', async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  try {
+    const instance = await getInstance(id);
+    if (!instance) {
+      res.status(404).json({ error: `实例不存在: ${id}` });
+      return;
+    }
+    const providerDef = getProvider(instance.type);
+    if (!providerDef) throw new Error(`服务商类型未注册: ${instance.type}`);
+    const workflows = await providerDef.listWorkflows(resolveInstanceConfig(instance));
+    res.json({ workflows });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(502).json({ error: `获取工作流列表失败: ${msg}` });
+  }
+});
+
 // GET /api/comfyui-bridge/providers — 列出 ComfyUI Easy Bridge 的提供商实例（实时转发 Bridge 列表，不落盘）
 // 供前端「ComfyUI 提供商」下拉选项使用；返回脱敏后的最小摘要（仅 id/name/type/enabled）。
-workflowRouter.get('/comfyui-bridge/providers', async (_req: Request, res: Response) => {
+// 支持 ?instanceId= 指定 Bridge 实例；未指定时取第一个 comfyui-bridge 实例（兼容旧前端）。
+workflowRouter.get('/comfyui-bridge/providers', async (req: Request, res: Response) => {
   try {
     const providerDef = getProvider('comfyui-bridge');
     if (!providerDef) throw new Error('Provider 未注册: comfyui-bridge');
-    const client = providerDef.createClient(await getProviderConfig('comfyui-bridge')) as ComfyuiBridgeClient;
+    const instances = await listInstances();
+    const requestedId = typeof req.query.instanceId === 'string' ? req.query.instanceId : undefined;
+    const inst = requestedId
+      ? instances.find((i) => i.id === requestedId && i.type === 'comfyui-bridge')
+      : instances.find((i) => i.type === 'comfyui-bridge');
+    if (!inst) throw new Error('未配置 comfyui-bridge 实例');
+    const client = providerDef.createClient(resolveInstanceConfig(inst)) as ComfyuiBridgeClient;
     const list = await client.listProviders();
     res.json({
       providers: list.map((p) => ({ id: p.id, name: p.name, type: p.type, enabled: p.enabled })),
@@ -341,8 +430,11 @@ workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: 
       if (!providerDef) {
         throw new Error(`provider 未注册: ${providerId}`);
       }
+      const instances = await listInstances();
+      const inst = instances.find((i) => i.type === providerId);
+      if (!inst) throw new Error(`未配置 ${providerId} 实例`);
       await providerDef
-        .createClient(await getProviderConfig(providerId))
+        .createClient(resolveInstanceConfig(inst))
         .cancel(getRemoteTaskId(task)!);
     }
     db.updateTaskStatus(task.id, 'failed', { error_msg: '用户中断' });

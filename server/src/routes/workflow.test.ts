@@ -11,6 +11,8 @@ function registerFake(type: string, impl: string, provider?: string): void {
     name: type,
     impl,
     provider,
+    // 注册表语义：无实例 = 候选定义（getImplementations 不可见），补实例 ID 使其可执行
+    providerInstanceId: 'test-inst',
     submit: async () => ({ taskId: 't' }),
   } as WorkflowDefinition);
 }

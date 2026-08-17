@@ -92,7 +92,8 @@
       <WorkflowParamsForm
         v-model="workflowParams"
         :declarations="currentDeclarations"
-        :provider="currentImpl?.provider"
+        :provider="currentImpl?.providerInstanceId"
+        :provider-type="currentImpl?.provider"
         :project="props.project"
         class="mb-2"
       />
@@ -299,7 +300,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getWorkflows, type WorkflowInfo } from '../../../api/workflow'
-import { useProviderNames } from '../../../composables/useProviderNames'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
@@ -461,27 +461,22 @@ const flfMaxFrames = computed(() => currentImpl.value?.capabilities?.video?.firs
 /** 当前实现是否支持音频输入（video.audio；首尾帧模式据此显示音频输入分组） */
 const audioEnabled = computed(() => currentImpl.value?.capabilities?.video?.audio === true)
 
-/** 工作流下拉选项（图生视频类型下的所有实现，直接选择实现；provider 用于选项 chip） */
+/** 工作流下拉选项（图生视频类型下的所有实现，直接选择实现；providerName 用于选项 chip） */
 const workflowItems = computed(() =>
-  impls.value.map((i) => ({ value: i.impl, label: i.name, provider: i.provider })),
+  impls.value.map((i) => ({ value: i.impl, label: i.name, providerName: i.providerName, provider: i.provider })),
 )
 
-/** provider ID → 友好名称的共享映射（下拉选项提供商 chip 文案） */
-const providerNames = useProviderNames()
-
 /**
- * 解析工作流实现条目的提供商显示名。
+ * 解析工作流实现条目的服务商显示名。
  *
- * 优先展示 provider 的友好名称（如「MiniMax H3」）；名称映射未加载成功
- * 或 provider 未注册时回退显示原始 provider ID；未声明 provider 返回空串
- * （下拉选项不渲染 chip）。
+ * 优先展示服务商实例名（providerName，来自 /api/workflows）；未提供时回退显示
+ * provider 类型 ID；均缺失返回空串（下拉选项不渲染 chip）。
  *
- * @param raw 下拉原始条目（含可选 provider 字段）
- * @returns 提供商显示名；未声明 provider 时为空串
+ * @param raw 下拉原始条目（含可选 providerName / provider 字段）
+ * @returns 服务商显示名；未声明时为空串
  */
-function providerLabel(raw: { provider?: string }): string {
-  const p = raw?.provider
-  return p ? (providerNames.value.get(p) ?? p) : ''
+function providerLabel(raw: { providerName?: string; provider?: string }): string {
+  return raw?.providerName ?? raw?.provider ?? ''
 }
 
 /** 自定义工作流参数（key → 值；与 config.workflowParams 双向同步） */

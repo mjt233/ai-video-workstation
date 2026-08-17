@@ -1,12 +1,13 @@
-import { getProviderConfig } from '../providers/config-store.js';
+import { resolveInstanceConfig } from '../providers/config-store.js';
 import { getProvider } from '../providers/registry.js';
+import type { ProviderInstance } from '../providers/types.js';
 import type {
   BridgeTagGroup,
   BridgeWorkflowDetail,
   BridgeWorkflowSummary,
   ComfyuiBridgeClient,
 } from '../providers/comfyui-bridge/client.js';
-import { getAllWorkflows, register, unregister } from './registry.js';
+import { registerOrReplace, unregisterByInstance } from './registry.js';
 import { deriveCapabilities, deriveParams, deriveWorkflowType, type BridgeDerivedType } from './bridge-derive.js';
 import {
   buildDirectorPayload,
@@ -30,11 +31,8 @@ import type {
 /** ComfyUI Bridge Provider 插件 id */
 const PROVIDER_ID = 'comfyui-bridge';
 
-/** 动态注册实现标识前缀：impl = ceb-{bridge workflow id} */
+/** 动态注册实现标识前缀：impl = ceb-{instanceId}-{bridgeId}，workflowKey = ceb-{bridgeId} */
 const IMPL_PREFIX = 'ceb-';
-
-/** 并发同步串行化：重叠调用共享同一 promise（in-flight 完成后置空） */
-let inflight: Promise<void> | null = null;
 
 /** text-to-image 提交按结构字段处理的用户参数键（从透传排除） */
 const TEXT_TO_IMAGE_STRUCTURAL_KEYS = new Set(['seed', 'enhance_prompt', 'enable_specified_size', 'width', 'height']);
@@ -107,24 +105,6 @@ function exposeFieldOf(tags: BridgeTagGroup[], tagId: string): string | undefine
     }
   }
   return undefined;
-}
-
-/**
- * 以工作流 id 集合驱动陈旧清理：unregister 掉本次列表之外的所有 ceb-* 实现。
- *
- * 以 summaries 的 id 集合为准（而非注册键），详情拉取失败的工作流 id 仍在集合中，
- * 因此其旧注册会被保留；列表不再出现的工作流才被清理。
- *
- * @param summaryIds 本次列表中出现的工作流 id 集合
- */
-function cleanupStale(summaryIds: Set<string>): void {
-  for (const wf of getAllWorkflows()) {
-    for (const impl of wf.implementations) {
-      if (impl.provider !== PROVIDER_ID || !impl.impl.startsWith(IMPL_PREFIX)) continue;
-      const id = impl.impl.slice(IMPL_PREFIX.length);
-      if (!summaryIds.has(id)) unregister(wf.type, impl.impl);
-    }
-  }
 }
 
 /** TextToImageVars 形状（避免与业务 vars 强耦合，仅取本模块使用的字段） */
@@ -377,25 +357,38 @@ export function buildSubmit(
 }
 
 /**
- * 从详情构建并注册一个动态工作流定义（替换语义）。
+ * 从详情构建并注册一个动态工作流定义（替换语义，按实例）。
  *
- * 类型推导失败（未知类型）时告警并返回 null，由调用方跳过；对同 id 实现
- * 先注销旧定义再注册（unregister + register），保证重同步刷新
+ * 类型推导失败（未知类型）时告警并返回 null，由调用方跳过；对同 (type, impl)
+ * 先注销旧定义再注册（registerOrReplace），保证重同步刷新
  * name/params/capabilities 且不会重复注册。
+ *
+ * 系统注册键 impl = ceb-{instanceId}-{bridgeId}（ceb- 前缀防止与其它提供商工作流 id
+ * 冲突，实例 id 保证多实例下全局唯一）；workflowKey = ceb-{bridgeId} 为不含实例的
+ * 基键，供 enabledWorkflows 过滤与 unregisterByInstance 清理。
  *
  * @param detail Bridge 工作流详情（含解析后的 params/declaredParams 与 tags）
  * @param tagId 自动注册标签 id（expose_field 元数据来源；可为空串）
- * @returns 注册键（{type}:{impl}）；未知类型返回 null
+ * @param instance 服务商实例（决定 impl 前缀、providerInstanceId/providerName 与启用过滤）
+ * @returns 注册键（{type}:{impl}）；未知类型或未启用返回 null
  */
-function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string | null {
+function buildAndRegister(
+  detail: BridgeWorkflowDetail,
+  tagId: string,
+  instance: ProviderInstance,
+): string | null {
   const type = deriveWorkflowType(detail.tags);
   if (!type) {
     console.warn(`[bridge-sync] 跳过未知类型工作流: ${detail.id}（tags=${JSON.stringify(detail.tags)}）`);
     return null;
   }
-  // 系统注册键：impl = ceb-{bridgeId}（ceb- 前缀防止与其它提供商工作流 id 冲突）
   const bridgeId = detail.id;
-  const impl = `${IMPL_PREFIX}${bridgeId}`;
+  // 工作流基键（不含实例 id）：ceb-{bridgeId}，enabledWorkflows 与清理均以此为准
+  const workflowKey = `${IMPL_PREFIX}${bridgeId}`;
+  // 未启用的工作流不注册（enabledWorkflows 过滤；空集合 = 默认全选，允许全部）
+  if (instance.enabledWorkflows.length > 0 && !instance.enabledWorkflows.includes(workflowKey)) return null;
+  // 系统注册键：impl = ceb-{instanceId}-{bridgeId}（实例 id 保证多实例下全局唯一）
+  const impl = `${IMPL_PREFIX}${instance.id}-${bridgeId}`;
   const caps = deriveCapabilities(detail.tags, type);
   const expose = exposeFieldOf(detail.tags, tagId);
   // expose_field 字段信息：params 优先（工作流固定参数字段），declaredParams 兜底；
@@ -407,48 +400,40 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
     type, impl, name: detail.name || detail.id,
     description: detail.description || undefined,
     provider: PROVIDER_ID,
+    providerInstanceId: instance.id,
+    providerName: instance.name,
+    workflowKey,
     params,
     capabilities: caps,
     // 提交载荷使用 Bridge 原始工作流 id（不含 ceb- 前缀）；前缀仅存在于系统注册键 impl
     submit: buildSubmit(bridgeId, type, caps),
   };
   // 替换语义：先注销旧定义再注册，保证重同步刷新 name/params/capabilities 且不重复
-  unregister(type, impl);
-  register(def);
+  registerOrReplace(def);
   return `${type}:${impl}`;
 }
 
 /**
- * 从 Bridge 同步并注册工作流（核心集成入口，并发安全）。
+ * 按实例同步 Bridge 动态工作流（核心集成入口）。
  *
- * 并发调用串行化：重叠调用共享同一 in-flight promise，避免交错清理与重复注册。
- * 内部逻辑见 {@link doSync}。
+ * 由实例同步器（instance-sync）对 comfyui-bridge 类型实例分发调用；配置变更 /
+ * 启动时经 syncAllInstances 触发。流程：
+ * 1. 用 resolveInstanceConfig(instance) 解析实例配置，getProvider(instance.type) 创建 client；
+ * 2. 取 autoRegisterTag；非空按标签筛选列表，空则拉取全部；
+ * 3. 对每个工作流：按 enabledWorkflows 过滤（未启用跳过）→ 拉详情 →
+ *    buildAndRegister 注册（impl=ceb-{instanceId}-{bridgeId}，幂等）；
+ * 4. 以本次启用的 ceb- 键集合为 keepKeys 调用 unregisterByInstance 清理陈旧注册
+ *    （该实例下已禁用 / 列表消失的工作流被注销）；
+ * 5. 列表拉取失败（Bridge 不可达 / 鉴权失败）：记 error，保留既有注册不清空；
+ *    单个详情拉取失败：告警并跳过该工作流（键仍在 keepKeys 中 → 旧注册保留）。
  *
+ * @param instance 服务商实例（含 config 与 enabledWorkflows）
  * @returns 同步完成（无返回值；失败不抛出，仅记录日志）
  */
-export function syncBridgeWorkflows(): Promise<void> {
-  if (!inflight) {
-    inflight = doSync().finally(() => { inflight = null; });
-  }
-  return inflight;
-}
-
-/**
- * 同步主流程。
- *
- * 流程：
- * 1. 读 comfyui-bridge 配置取 autoRegisterTag；非空按标签筛选列表，空则拉取全部；
- * 2. 对每个工作流拉取详情 → 推导类型/能力/参数 → 注册（impl=ceb-{id}，幂等）；
- * 3. 以本次 summaries 的 id 集合驱动陈旧清理（cleanupStale）；
- * 4. 列表拉取失败（Bridge 不可达 / 鉴权失败）：记 error，保留既有注册不清空；
- *    单个详情拉取失败：告警并跳过该工作流（id 仍在 summaries 中 → 旧注册保留）。
- *
- * @returns 同步完成（无返回值；失败不抛出，仅记录日志）
- */
-async function doSync(): Promise<void> {
-  const config = await getProviderConfig(PROVIDER_ID);
-  const providerDef = getProvider(PROVIDER_ID);
-  if (!providerDef) throw new Error(`Provider 未注册: ${PROVIDER_ID}`);
+export async function syncBridgeInstance(instance: ProviderInstance): Promise<void> {
+  const config = resolveInstanceConfig(instance);
+  const providerDef = getProvider(instance.type);
+  if (!providerDef) throw new Error(`Provider 未注册: ${instance.type}`);
   const client = providerDef.createClient(config) as ComfyuiBridgeClient;
   const tagId = String(config.autoRegisterTag ?? '').trim();
 
@@ -456,20 +441,28 @@ async function doSync(): Promise<void> {
   try {
     summaries = tagId ? await client.listWorkflows(tagId) : await client.listWorkflows();
   } catch (e) {
-    console.error(`[bridge-sync] 拉取工作流列表失败，保留既有注册: ${e instanceof Error ? e.message : String(e)}`);
+    console.error(`[bridge-sync] 实例 ${instance.name} 拉取工作流列表失败，保留既有注册: ${e instanceof Error ? e.message : String(e)}`);
     return;
   }
 
-  // 先注册新列表（本次出现的实现，幂等）
+  // 本次启用的 ceb- 键集合（启用且出现在列表中）：既用于过滤注册，也作为 unregisterByInstance 的 keepKeys。
+  // 空启用集合 = 默认全选：Bridge 工作流列表随远程动态变化，空集合表示启用全部当前与后续新增的工作流。
+  const enabled = new Set(instance.enabledWorkflows);
+  const enableAll = enabled.size === 0;
+  const keepKeys = new Set<string>();
   for (const s of summaries) {
+    const workflowKey = `${IMPL_PREFIX}${s.id}`;
+    if (!enableAll && !enabled.has(workflowKey)) continue;
+    // 启用即加入 keepKeys（即使详情拉取失败也保留旧注册）
+    keepKeys.add(workflowKey);
     try {
       const detail = await client.getWorkflowDetail(s.id);
-      buildAndRegister(detail, tagId);
+      buildAndRegister(detail, tagId, instance);
     } catch (e) {
-      console.warn(`[bridge-sync] 工作流详情拉取失败，跳过: ${s.id}; ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(`[bridge-sync] 实例 ${instance.name} 工作流详情拉取失败，跳过: ${s.id}; ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  // 清理陈旧注册（本次 summaries 之外的历史 ceb-*）
-  cleanupStale(new Set(summaries.map((s) => s.id)));
+  // 清理陈旧注册：该实例下已禁用 / 列表消失的工作流被注销（keepKeys 之外）
+  unregisterByInstance(instance.id, keepKeys);
 }

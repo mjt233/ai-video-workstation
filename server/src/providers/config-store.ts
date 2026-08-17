@@ -1,8 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import { getProvider } from './registry.js';
-import type { ProviderConfigField, ResolvedProviderConfig } from './types.js';
+import type { ProviderConfigField, ProviderInstance, ResolvedProviderConfig } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,32 +13,44 @@ export const CONFIG_PATH = path.resolve(__dirname, '../../config/providers.json'
 /** 敏感字段占位符（GET 脱敏返回，前端显示「已设置」） */
 export const MASKED_SECRET = '__set__';
 
-/** providers.json 文件结构：provider id → 配置键值 */
+/** providers.json 文件结构：实例数组 */
 interface ProvidersFile {
-  [providerId: string]: Record<string, string | number | boolean>;
+  instances: ProviderInstance[];
 }
 
-/**
- * 读取配置文件。
- * - 文件不存在（ENOENT）：返回空对象（首次保存时正常创建）；
- * - 存在但解析失败：抛错（避免 setProviderConfig 以空对象为基础覆盖损坏文件、抹掉其它配置）。
- * @param configPath 配置文件路径（测试可注入临时路径）
- */
+/** 判断是否为旧格式（按 provider 类型一份配置） */
+function isLegacyFormat(parsed: unknown): parsed is Record<string, Record<string, string | number | boolean>> {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  return !('instances' in (parsed as object));
+}
+
 async function readConfigFile(configPath: string): Promise<ProvidersFile> {
   let raw: string;
   try {
     raw = await fs.readFile(configPath, 'utf-8');
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-      return {};
-    }
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { instances: [] };
     throw e;
   }
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== 'object') {
     throw new Error(`配置文件解析失败（应为 JSON 对象）: ${configPath}`);
   }
-  return parsed as ProvidersFile;
+  if (isLegacyFormat(parsed)) {
+    // 旧格式：先迁移再返回（幂等）
+    await migrateLegacyConfig(configPath);
+    return readConfigFile(configPath);
+  }
+  const file = parsed as ProvidersFile;
+  if (!Array.isArray(file.instances)) throw new Error(`配置文件缺少 instances 数组: ${configPath}`);
+  return file;
+}
+
+async function writeConfigFile(configPath: string, file: ProvidersFile): Promise<void> {
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  const tmp = `${configPath}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(file, null, 2), 'utf-8');
+  await fs.rename(tmp, configPath);
 }
 
 /** 取字段的环境变量兜底值 */
@@ -47,12 +60,7 @@ function envValue(field: ProviderConfigField): string | undefined {
   return v !== undefined ? v : undefined;
 }
 
-/**
- * 合并配置：文件值 > 环境变量 > 默认值。
- * @param schema provider 配置字段声明
- * @param fileValues 文件中的配置值（可为 undefined）
- * @returns 合并后的已解析配置
- */
+/** 合并配置：文件值 > 环境变量 > 默认值 */
 export function resolveProviderConfig(
   schema: ProviderConfigField[],
   fileValues: Record<string, string | number | boolean> | undefined,
@@ -68,101 +76,150 @@ export function resolveProviderConfig(
   return out;
 }
 
-/**
- * 读取 provider 的已解析配置（供引擎 createClient 使用）。
- * @param providerId provider id
- * @param configPath 配置文件路径（默认 CONFIG_PATH；测试可注入）
- */
-export async function getProviderConfig(
-  providerId: string,
-  configPath: string = CONFIG_PATH,
-): Promise<ResolvedProviderConfig> {
-  const provider = getProvider(providerId);
-  if (!provider) throw new Error(`Provider 未注册: ${providerId}`);
-  const file = await readConfigFile(configPath);
-  return resolveProviderConfig(provider.configSchema, file[providerId]);
+/** 解析实例配置（文件值 > 环境变量 > 默认值） */
+export function resolveInstanceConfig(instance: ProviderInstance): ResolvedProviderConfig {
+  const provider = getProvider(instance.type);
+  if (!provider) throw new Error(`Provider 未注册: ${instance.type}`);
+  return resolveProviderConfig(provider.configSchema, instance.config);
 }
 
-/**
- * 读取 provider 配置用于前端展示：secret 字段有值则脱敏为空串（不回显真实值、也不用占位符）；
- * 未在文件中配置的字段不返回（前端回退到 defaultValue 展示）。
- *
- * 空串语义：前端保存时 secret 字段为空串 = 不修改（服务端保留原值）。
- * @param providerId provider id
- * @param configPath 配置文件路径（默认 CONFIG_PATH；测试可注入）
- */
-export async function getProviderConfigMasked(
-  providerId: string,
-  configPath: string = CONFIG_PATH,
-): Promise<ResolvedProviderConfig> {
-  const provider = getProvider(providerId);
-  if (!provider) throw new Error(`Provider 未注册: ${providerId}`);
-  const file = await readConfigFile(configPath);
-  const fileValues = file[providerId] ?? {};
+/** 实例配置脱敏：secret 字段有值则置空串（不回显真实值） */
+export function getInstanceConfigMasked(instance: ProviderInstance): ResolvedProviderConfig {
+  const provider = getProvider(instance.type);
+  if (!provider) throw new Error(`Provider 未注册: ${instance.type}`);
   const out: ResolvedProviderConfig = {};
   for (const field of provider.configSchema) {
-    const val = fileValues[field.key];
+    const val = instance.config[field.key];
     if (val === undefined) continue;
     out[field.key] = field.secret ? '' : val;
   }
   return out;
 }
 
-/**
- * 校验并保存 provider 配置。
- * - 未知键忽略；类型强转（number/boolean）；
- * - secret 字段传空串 = 保留原值；非 secret 空串 = 删除该键；
- * - 必填字段在文件值 + 环境变量 + 默认值均缺失时报错；
- * - 原子写入（临时文件 + rename）。
- * @param providerId provider id
- * @param values 要保存的配置键值（只处理 configSchema 中声明的键）
- * @param configPath 配置文件路径（默认 CONFIG_PATH；测试可注入）
- */
-export async function setProviderConfig(
+/** 校验并规范化配置值（类型强转 + secret 空串保留原值 + 必填校验） */
+function normalizeConfig(
   providerId: string,
   values: Record<string, unknown>,
-  configPath: string = CONFIG_PATH,
-): Promise<void> {
+  current: Record<string, string | number | boolean>,
+): Record<string, string | number | boolean> {
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`Provider 未注册: ${providerId}`);
-
-  const file = await readConfigFile(configPath);
-  const current: Record<string, string | number | boolean> = { ...(file[providerId] ?? {}) };
-
+  const out: Record<string, string | number | boolean> = { ...current };
   for (const field of provider.configSchema) {
     const raw = values[field.key];
     if (raw === undefined) continue;
-    // secret 空串 / MASKED_SECRET 占位符 = 保留原值（防止前端把脱敏占位符回写覆盖真实密钥）
-    if (field.secret && (raw === '' || raw === MASKED_SECRET)) continue;
-    if (raw === '') {
-      delete current[field.key];
-      continue;
-    }
+    if (field.secret && (raw === '' || raw === MASKED_SECRET)) continue; // 保留原值
+    if (raw === '') { delete out[field.key]; continue; }
     let parsed: string | number | boolean = String(raw);
     if (field.type === 'number') {
       const n = Number(raw);
-      if (!Number.isFinite(n)) {
-        throw new Error(`字段 ${field.label} 需要数字，收到: ${String(raw)}`);
-      }
+      if (!Number.isFinite(n)) throw new Error(`字段 ${field.label} 需要数字，收到: ${String(raw)}`);
       parsed = n;
     } else if (field.type === 'boolean') {
       parsed = raw === true || raw === 'true';
     }
-    current[field.key] = parsed;
+    out[field.key] = parsed;
   }
-
-  // 必填校验
   for (const field of provider.configSchema) {
     if (!field.required) continue;
-    const has = current[field.key] !== undefined || envValue(field) !== undefined || field.defaultValue !== undefined;
-    if (!has) {
-      throw new Error(`字段 ${field.label} 为必填项`);
-    }
+    const has = out[field.key] !== undefined || envValue(field) !== undefined || field.defaultValue !== undefined;
+    if (!has) throw new Error(`字段 ${field.label} 为必填项`);
   }
+  return out;
+}
 
-  file[providerId] = current;
-  await fs.mkdir(path.dirname(configPath), { recursive: true });
-  const tmp = `${configPath}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(file, null, 2), 'utf-8');
-  await fs.rename(tmp, configPath);
+/** 列出全部实例 */
+export async function listInstances(configPath: string = CONFIG_PATH): Promise<ProviderInstance[]> {
+  const file = await readConfigFile(configPath);
+  return file.instances;
+}
+
+/** 按 id 获取实例 */
+export async function getInstance(id: string, configPath: string = CONFIG_PATH): Promise<ProviderInstance | undefined> {
+  const file = await readConfigFile(configPath);
+  return file.instances.find((i) => i.id === id);
+}
+
+/** 创建实例（生成 uuid；enabledWorkflows 缺省为空数组，由调用方按「默认全选」填充） */
+export async function createInstance(
+  input: { type: string; name: string; config: Record<string, unknown>; enabledWorkflows?: string[] },
+  configPath: string = CONFIG_PATH,
+): Promise<ProviderInstance> {
+  const provider = getProvider(input.type);
+  if (!provider) throw new Error(`Provider 未注册: ${input.type}`);
+  if (!input.name || !input.name.trim()) throw new Error('实例名称不能为空');
+  const file = await readConfigFile(configPath);
+  const instance: ProviderInstance = {
+    id: randomUUID(),
+    type: input.type,
+    name: input.name.trim(),
+    config: normalizeConfig(input.type, input.config, {}),
+    enabledWorkflows: input.enabledWorkflows ?? [],
+  };
+  file.instances.push(instance);
+  await writeConfigFile(configPath, file);
+  return instance;
+}
+
+/** 更新实例（secret 空串 = 保留原值；name/config/enabledWorkflows 均可部分更新） */
+export async function updateInstance(
+  id: string,
+  input: { name?: string; config?: Record<string, unknown>; enabledWorkflows?: string[] },
+  configPath: string = CONFIG_PATH,
+): Promise<ProviderInstance> {
+  const file = await readConfigFile(configPath);
+  const idx = file.instances.findIndex((i) => i.id === id);
+  if (idx < 0) throw new Error(`实例不存在: ${id}`);
+  const inst = file.instances[idx];
+  if (input.name !== undefined) {
+    if (!input.name.trim()) throw new Error('实例名称不能为空');
+    inst.name = input.name.trim();
+  }
+  if (input.config !== undefined) {
+    inst.config = normalizeConfig(inst.type, input.config, inst.config);
+  }
+  if (input.enabledWorkflows !== undefined) {
+    inst.enabledWorkflows = input.enabledWorkflows;
+  }
+  file.instances[idx] = inst;
+  await writeConfigFile(configPath, file);
+  return inst;
+}
+
+/** 删除实例 */
+export async function deleteInstance(id: string, configPath: string = CONFIG_PATH): Promise<void> {
+  const file = await readConfigFile(configPath);
+  const next = file.instances.filter((i) => i.id !== id);
+  if (next.length === file.instances.length) throw new Error(`实例不存在: ${id}`);
+  file.instances = next;
+  await writeConfigFile(configPath, file);
+}
+
+/** 迁移旧格式（按类型一份配置）为实例数组；已是新格式返回 false */
+export async function migrateLegacyConfig(configPath: string = CONFIG_PATH): Promise<boolean> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(configPath, 'utf-8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw e;
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  if ('instances' in (parsed as object)) return false; // 已是新格式
+  const legacy = parsed as Record<string, Record<string, string | number | boolean>>;
+  const instances: ProviderInstance[] = [];
+  for (const [type, config] of Object.entries(legacy)) {
+    const provider = getProvider(type);
+    if (!provider) continue; // 未知类型跳过
+    instances.push({
+      id: randomUUID(),
+      type,
+      name: `${provider.name}-默认`,
+      config,
+      enabledWorkflows: [], // 默认全选由同步器按当前列表填充
+    });
+  }
+  await writeConfigFile(configPath, { instances });
+  return true;
 }

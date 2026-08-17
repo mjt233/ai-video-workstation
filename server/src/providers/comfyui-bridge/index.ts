@@ -47,6 +47,19 @@ const definition: ProviderDefinition = {
     },
   ],
   createClient: (config) => createComfyuiBridgeClient(config),
+  listWorkflows: async (config) => {
+    const client = createComfyuiBridgeClient(config);
+    const summaries = await client.listWorkflows();
+    return summaries.map((s) => ({
+      key: `ceb-${s.id}`,
+      name: s.name || s.id,
+      description: s.description,
+    }));
+  },
+  testConnection: async (config) => {
+    const client = createComfyuiBridgeClient(config);
+    return client.testConnection();
+  },
 };
 
 registerProvider(definition);

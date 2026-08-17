@@ -144,8 +144,14 @@ export interface WorkflowBaseDefinition {
   name: string;
   /** 可选描述 */
   description?: string;
-  /** 该实现使用的 Provider 插件 ID（引擎据此解析配置并创建传输客户端；默认 comfyui-bridge） */
+  /** 该实现使用的 Provider 插件 ID（候选定义声明类型，供 listWorkflows 枚举；引擎按 providerInstanceId 解析实例后经实例.type 创建客户端） */
   provider?: string;
+  /** 服务商实例 ID（实例同步器注册可执行副本时填充；无此字段 = 候选定义，不可执行） */
+  providerInstanceId?: string;
+  /** 服务商实例显示名（实例同步器注册时填充，供前端下拉展示） */
+  providerName?: string;
+  /** 工作流键（实例同步器注册时写入，如 `text-to-image:seedream` 或 `ceb-{bridgeId}`；unregisterByInstance 据此清理） */
+  workflowKey?: string;
   /** 可由用户手动传入的参数声明（前端据此渲染输入表单，并写入 vars） */
   params?: WorkflowUserParamDeclaration[];
 }

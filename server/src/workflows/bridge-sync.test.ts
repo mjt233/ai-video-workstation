@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getImpl, getImplementations, unregister, register } from './registry.js';
-import { syncBridgeWorkflows, buildSubmit } from './bridge-sync.js';
-import type { BridgeWorkflowDetail } from '../providers/comfyui-bridge/client.js';
+import { getCandidatesByProvider, getImpl, getImplementations, unregister, register } from './registry.js';
+import { syncBridgeInstance, buildSubmit } from './bridge-sync.js';
+import type { BridgeWorkflowDetail, BridgeWorkflowSummary } from '../providers/comfyui-bridge/client.js';
+import type { ProviderInstance } from '../providers/types.js';
 import type { WorkflowCapabilities, WorkflowDefinition } from './types.js';
 
-// ── mock getProviderConfig / getProvider（避免真实配置与网络） ──
+// ── mock resolveInstanceConfig / getProvider（避免真实配置与网络） ──
 // 注意：vi.mock 工厂被 hoist 到顶部，mock 客户端与可变配置必须用 vi.hoisted 定义；
-// getProviderConfig 每次调用都读取 mockConfig 的当前值（测试可直接改 autoRegisterTag 等）
+// resolveInstanceConfig 每次调用都读取 mockConfig 的当前值（测试可直接改 autoRegisterTag 等）
 const { mockClient, mockConfig } = vi.hoisted(() => ({
   mockClient: {
     listWorkflows: vi.fn(),
@@ -16,7 +17,7 @@ const { mockClient, mockConfig } = vi.hoisted(() => ({
 }));
 
 vi.mock('../providers/config-store.js', () => ({
-  getProviderConfig: vi.fn(async () => ({ ...mockConfig })),
+  resolveInstanceConfig: vi.fn(() => ({ ...mockConfig })),
 }));
 vi.mock('../providers/registry.js', () => ({
   getProvider: vi.fn(() => ({ id: 'comfyui-bridge', createClient: () => mockClient })),
@@ -26,88 +27,149 @@ const detail = (over: Partial<BridgeWorkflowDetail> = {}): BridgeWorkflowDetail 
   id: 'text_to_image', name: '文生图', description: '', declaredParams: [], params: [], tags: [{ id: 'text-to-image', metadata: {}, tags: [] }], ...over,
 });
 
+/** 按 id/类型构造详情（多工作流场景用） */
+const detailFor = (id: string, type: string): BridgeWorkflowDetail => ({
+  id, name: id, description: '', declaredParams: [], params: [], tags: [{ id: type, metadata: {}, tags: [] }],
+});
+
+/** 构造列表摘要 */
+const summary = (id: string, type: string): BridgeWorkflowSummary => ({
+  id, name: id, declaredParams: '[]', tags: [{ id: type, metadata: {}, tags: [] }],
+});
+
+/** 构造 comfyui-bridge 测试实例 */
+const mkInstance = (over: Partial<ProviderInstance> = {}): ProviderInstance => ({
+  id: 'inst-1',
+  type: 'comfyui-bridge',
+  name: '本地Bridge',
+  config: { ...mockConfig },
+  enabledWorkflows: ['ceb-text_to_image'],
+  ...over,
+});
+
 beforeEach(() => {
   // vi.clearAllMocks 不清除 mockConfig 的字段变更，显式复位 autoRegisterTag
   mockConfig.autoRegisterTag = 'auto';
   vi.clearAllMocks();
-  // 清空动态注册（测试隔离）
+  // 清空动态注册（测试隔离）：可执行 + 候选
   for (const t of ['text-to-image', 'image-edit', 'tts-voice-design', 'image-to-video']) {
     for (const w of getImplementations(t)) unregister(t, w.impl);
   }
+  for (const w of getCandidatesByProvider('comfyui-bridge')) unregister(w.type, w.impl);
 });
 
-describe('syncBridgeWorkflows', () => {
-  it('带标签时拉取列表并逐个拉详情注册（impl=ceb-{id}）', async () => {
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] }]);
+describe('syncBridgeInstance', () => {
+  it('按实例注册 ceb-{instanceId}-{bridgeId}，providerInstanceId/providerName/workflowKey 正确填充', async () => {
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
-    await syncBridgeWorkflows();
+    await syncBridgeInstance(mkInstance());
     expect(mockClient.listWorkflows).toHaveBeenCalledWith('auto');
-    const w = getImpl('text-to-image', 'ceb-text_to_image');
+    const w = getImpl('text-to-image', 'ceb-inst-1-text_to_image');
     expect(w).toBeDefined();
     expect(w!.name).toBe('文生图');
     expect(w!.provider).toBe('comfyui-bridge');
+    expect(w!.providerInstanceId).toBe('inst-1');
+    expect(w!.providerName).toBe('本地Bridge');
+    expect(w!.workflowKey).toBe('ceb-text_to_image');
+  });
+
+  it('按 enabledWorkflows 过滤：未启用的 ceb- 工作流不注册', async () => {
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      summary('text_to_image', 'text-to-image'),
+      summary('qwen-edit', 'image-edit'),
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => detailFor(id, id === 'qwen-edit' ? 'image-edit' : 'text-to-image'));
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: ['ceb-text_to_image'] }));
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')).toBeDefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-qwen-edit')).toBeUndefined();
+  });
+
+  it('空启用集合 = 默认全选：注册列表全部工作流（含后续新增）', async () => {
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      summary('text_to_image', 'text-to-image'),
+      summary('qwen-edit', 'image-edit'),
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => detailFor(id, id === 'qwen-edit' ? 'image-edit' : 'text-to-image'));
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: [] }));
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')).toBeDefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-qwen-edit')).toBeDefined();
+    // 列表新增工作流：空集合 = 全选语义下自动注册
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      summary('text_to_image', 'text-to-image'),
+      summary('qwen-edit', 'image-edit'),
+      summary('tts_voice_design', 'tts-voice-design'),
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => detailFor(id, id === 'qwen-edit' ? 'image-edit' : id === 'tts_voice_design' ? 'tts-voice-design' : 'text-to-image'));
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: [] }));
+    expect(getImpl('tts-voice-design', 'ceb-inst-1-tts_voice_design')).toBeDefined();
+  });
+
+  it('清理陈旧：该实例下已禁用/消失的工作流被注销', async () => {
+    // 第一次：启用两个工作流并注册
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      summary('text_to_image', 'text-to-image'),
+      summary('qwen-edit', 'image-edit'),
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => detailFor(id, id === 'qwen-edit' ? 'image-edit' : 'text-to-image'));
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: ['ceb-text_to_image', 'ceb-qwen-edit'] }));
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')).toBeDefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-qwen-edit')).toBeDefined();
+    // 第二次：qwen-edit 被禁用 → 注销
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: ['ceb-text_to_image'] }));
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')).toBeDefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-qwen-edit')).toBeUndefined();
+    // 第三次：列表不再包含 qwen-edit（消失）→ 注销
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: ['ceb-text_to_image', 'ceb-qwen-edit'] }));
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')).toBeDefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-qwen-edit')).toBeUndefined();
+  });
+
+  it('列表拉取失败保留既有注册（容错）', async () => {
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('unreachable'));
+    register({ type: 'text-to-image', impl: 'ceb-inst-1-keep', name: 'keep', provider: 'comfyui-bridge', providerInstanceId: 'inst-1', providerName: '本地Bridge', workflowKey: 'ceb-keep', submit: async () => ({ taskId: 't' }) } as WorkflowDefinition);
+    await expect(syncBridgeInstance(mkInstance())).resolves.toBeUndefined();
+    expect(getImpl('text-to-image', 'ceb-inst-1-keep')).toBeDefined();
   });
 
   it('未知类型工作流跳过且不注册', async () => {
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'tv', name: '文生视频', declaredParams: '[]', tags: [{ id: 'text-to-video', metadata: {}, tags: [] }] }]);
-    await syncBridgeWorkflows();
-    expect(getImpl('text-to-video', 'ceb-tv')).toBeUndefined();
-  });
-
-  it('拉取失败时保留既有注册', async () => {
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('unreachable'));
-    register({ type: 'text-to-image', impl: 'ceb-keep', name: 'keep', provider: 'comfyui-bridge', submit: async () => ({ taskId: 't' }) } as WorkflowDefinition);
-    await expect(syncBridgeWorkflows()).resolves.toBeUndefined();
-    expect(getImpl('text-to-image', 'ceb-keep')).toBeDefined();
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('tv', 'text-to-video')]);
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: ['ceb-tv'] }));
+    expect(getImpl('text-to-video', 'ceb-inst-1-tv')).toBeUndefined();
   });
 
   it('重同步幂等：同一工作流不会重复注册', async () => {
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] }]);
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
-    await syncBridgeWorkflows();
-    await syncBridgeWorkflows();
-    expect(getImplementations('text-to-image').filter((w) => w.impl === 'ceb-text_to_image')).toHaveLength(1);
+    await syncBridgeInstance(mkInstance());
+    await syncBridgeInstance(mkInstance());
+    expect(getImplementations('text-to-image').filter((w) => w.impl === 'ceb-inst-1-text_to_image')).toHaveLength(1);
   });
 
   it('重同步刷新工作流元数据（name/params 更新）', async () => {
-    const list = [{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] }];
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue(list);
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
-    await syncBridgeWorkflows();
-    expect(getImpl('text-to-image', 'ceb-text_to_image')!.name).toBe('文生图');
+    await syncBridgeInstance(mkInstance());
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')!.name).toBe('文生图');
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail({ name: '文生图V2' }));
-    await syncBridgeWorkflows();
-    expect(getImpl('text-to-image', 'ceb-text_to_image')!.name).toBe('文生图V2');
-    expect(getImplementations('text-to-image').filter((w) => w.impl === 'ceb-text_to_image')).toHaveLength(1);
+    await syncBridgeInstance(mkInstance());
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')!.name).toBe('文生图V2');
+    expect(getImplementations('text-to-image').filter((w) => w.impl === 'ceb-inst-1-text_to_image')).toHaveLength(1);
   });
 
   it('单详情拉取失败：跳过该工作流且保留其旧注册', async () => {
-    const list = [{ id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] }];
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue(list);
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
-    await syncBridgeWorkflows(); // 第一次成功注册
+    await syncBridgeInstance(mkInstance()); // 第一次成功注册
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
-    await syncBridgeWorkflows(); // 第二次详情失败
-    expect(getImpl('text-to-image', 'ceb-text_to_image')).toBeDefined(); // 旧注册保留
-  });
-
-  it('陈旧清理：列表不再包含的工作流被 unregister', async () => {
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: [{ id: 'text-to-image', metadata: {}, tags: [] }] },
-    ]);
-    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail());
-    await syncBridgeWorkflows();
-    expect(getImpl('text-to-image', 'ceb-text_to_image')).toBeDefined();
-    // 第二次列表为空 → 该工作流被清理
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    await syncBridgeWorkflows();
-    expect(getImpl('text-to-image', 'ceb-text_to_image')).toBeUndefined();
+    await syncBridgeInstance(mkInstance()); // 第二次详情失败
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')).toBeDefined(); // 旧注册保留
   });
 
   it('autoRegisterTag 为空时拉取全部（listWorkflows 无参）', async () => {
     mockConfig.autoRegisterTag = '';
     (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    await syncBridgeWorkflows();
+    await syncBridgeInstance(mkInstance());
     expect(mockClient.listWorkflows).toHaveBeenCalledWith();
     mockConfig.autoRegisterTag = 'auto';
   });
@@ -123,12 +185,10 @@ describe('syncBridgeWorkflows', () => {
       ],
       tags: [{ id: 'auto', metadata: { expose_field: 'steps' }, tags: [] }, { id: 'text-to-image', metadata: {}, tags: [] }],
     });
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: d.tags },
-    ]);
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(d);
-    await syncBridgeWorkflows();
-    const w = getImpl('text-to-image', 'ceb-text_to_image');
+    await syncBridgeInstance(mkInstance());
+    const w = getImpl('text-to-image', 'ceb-inst-1-text_to_image');
     // 同一别名 steps 在 params（步数V2）与 declaredParams（步数）中都存在 → 以 params 为准
     expect(w!.params).toEqual([{ key: 'steps', name: '步数V2', type: 'integer', defaultValue: '' }]);
   });
@@ -144,12 +204,10 @@ describe('syncBridgeWorkflows', () => {
         { id: 'text-to-image', metadata: {}, tags: [] },
       ],
     });
-    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: d.tags },
-    ]);
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
     (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(d);
-    await syncBridgeWorkflows();
-    const w = getImpl('text-to-image', 'ceb-text_to_image');
+    await syncBridgeInstance(mkInstance());
+    const w = getImpl('text-to-image', 'ceb-inst-1-text_to_image');
     expect(w!.params).toEqual([{ key: 'steps', name: '步数', type: 'integer', defaultValue: '' }]);
   });
 });

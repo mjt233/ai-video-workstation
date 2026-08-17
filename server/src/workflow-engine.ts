@@ -12,7 +12,7 @@ import type {
   VideoWorkflowSubmitParams,
 } from './workflows/types.js';
 import { buildSceneVideoSubmitData, type SceneAdapterDeps } from './workflows/scene-adapter.js';
-import { getProviderConfig } from './providers/config-store.js';
+import { getInstance, resolveInstanceConfig } from './providers/config-store.js';
 import { getProvider } from './providers/registry.js';
 import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
@@ -527,9 +527,15 @@ async function tryHandleSceneStageDirectReference(
 }
 
 /**
- * Run a single workflow task
+ * 执行单个任务（引擎主流程）。
+ *
+ * 按任务记录解析工作流实现，按实现绑定的服务商实例（providerInstanceId）查实例、
+ * 解析实例配置创建 provider 客户端，随后提交/轮询/下载输出并写入 assert/。
+ * 任何失败都会把任务标记为 failed（不自动重试）。
+ *
+ * @param taskId 任务 ID（db.tasks 主键）
  */
-async function runTask(taskId: string): Promise<void> {
+export async function runTask(taskId: string): Promise<void> {
   const task = db.getTask(taskId);
   if (!task) {
     console.error(`Task ${taskId} not found`);
@@ -680,13 +686,20 @@ async function runTask(taskId: string): Promise<void> {
     db.addLog(taskId, 'info', `Starting workflow: ${wf.name} (impl: ${wf.impl})`);
     db.updateTaskStatus(taskId, 'running');
 
-    // ── Provider 解析：工作流声明 → 插件 → 配置 → client（按请求实时解析，配置热加载）──
-    const providerId = wf.provider ?? 'comfyui-bridge';
-    const providerDef = getProvider(providerId);
-    if (!providerDef) {
-      throw new Error(`工作流 ${task.workflow_id}/${task.impl} 声明的 provider 未注册: ${providerId}`);
+    // ── Provider 解析：工作流实例 → 实例配置 → client（按请求实时解析，配置热加载）──
+    const instanceId = wf.providerInstanceId;
+    if (!instanceId) {
+      throw new Error(`工作流 ${task.workflow_id}/${task.impl} 未绑定服务商实例`);
     }
-    const provider = providerDef.createClient(await getProviderConfig(providerId));
+    const instance = await getInstance(instanceId);
+    if (!instance) {
+      throw new Error(`工作流 ${task.workflow_id}/${task.impl} 绑定的服务商实例不存在: ${instanceId}`);
+    }
+    const providerDef = getProvider(instance.type);
+    if (!providerDef) {
+      throw new Error(`服务商类型未注册: ${instance.type}`);
+    }
+    const provider = providerDef.createClient(resolveInstanceConfig(instance));
 
     // ── 视频自包含提交数据 ──
     // 画布节点任务：params.video（wire 形态）→ 解析为 File 形态；
@@ -798,7 +811,7 @@ async function runTask(taskId: string): Promise<void> {
     };
 
     // Step 1: Submit
-    db.addLog(taskId, 'info', `Submitting task to AI API (provider: ${providerId})...`);
+    db.addLog(taskId, 'info', `Submitting task to AI API (provider: ${instance.type}, instance: ${instanceId})...`);
     const { taskId: remoteTaskId } = await wf.submit(runContext);
     // 持久化远端任务 ID，供中断端点（/workflow/tasks/:id/cancel）使用。
     // 基于最新 params 合并（勿用提交前快照）：同步 provider 执行期间取消请求可能已写入

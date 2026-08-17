@@ -8,6 +8,7 @@ describe('工作流能力声明透传', () => {
       type: 'test-video-cap',
       name: '测试视频',
       impl: 'default',
+      providerInstanceId: 'test-inst',
       capabilities: {
         video: {
           modes: ['director', 'reference'],

@@ -9,7 +9,8 @@ import { workflowRouter } from './routes/workflow.js';
 import { canvasRouter } from './routes/canvas.js';
 import { discoverProviders } from './providers/index.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
-import { syncBridgeWorkflows } from './workflows/bridge-sync.js';
+import { syncAllInstances } from './providers/instance-sync.js';
+import { migrateLegacyConfig } from './providers/config-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -67,14 +68,20 @@ function printAccessUrls(port: string | number): void {
 }
 
 discoverProviders().then(() =>
-  discoverWorkflows().then(() => {
+  discoverWorkflows().then(async () => {
     startEngine();
     app.listen(Number(PORT), HOST, () => {
       printAccessUrls(PORT);
     });
-    // Bridge 工作流动态注册（失败不阻塞服务启动）
-    syncBridgeWorkflows().catch((e) => {
-      console.error(`[bridge-sync] 启动同步失败: ${e instanceof Error ? e.message : String(e)}`);
+    // 旧格式配置自动迁移为实例数组（幂等；已是新格式则跳过）
+    try {
+      await migrateLegacyConfig();
+    } catch (e) {
+      console.error(`[config-store] 旧配置迁移失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    // 实例工作流动态注册（失败不阻塞服务启动）
+    syncAllInstances().catch((e) => {
+      console.error(`[instance-sync] 启动同步失败: ${e instanceof Error ? e.message : String(e)}`);
     });
   }),
 );
