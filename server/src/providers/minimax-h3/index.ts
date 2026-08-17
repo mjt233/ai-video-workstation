@@ -1,5 +1,6 @@
 import { registerProvider } from '../registry.js';
 import type { ProviderDefinition } from '../types.js';
+import { getCandidatesByProvider } from '../../workflows/registry.js';
 import { createMinimaxH3Client } from './client.js';
 
 /**
@@ -62,9 +63,20 @@ const definition: ProviderDefinition = {
     },
   ],
   createClient: (config) => createMinimaxH3Client(config),
-  // TODO(后续任务): 实现真实 listWorkflows（查静态注册表）与 testConnection（验证地址可达）
-  listWorkflows: async () => [],
-  testConnection: async () => ({ ok: true, message: '' }),
+  listWorkflows: async () => {
+    // 静态服务商：查工作流注册表，返回 provider === minimax-h3 的候选定义
+    const candidates = getCandidatesByProvider('minimax-h3');
+    return candidates.map((c) => ({
+      key: `${c.type}:${c.impl}`,
+      name: c.name,
+      type: c.type,
+      description: c.description,
+    }));
+  },
+  testConnection: async (config) => {
+    const client = createMinimaxH3Client(config);
+    return client.testConnection();
+  },
 };
 
 registerProvider(definition);

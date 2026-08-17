@@ -86,6 +86,12 @@ interface MinimaxUploadResponse {
   base_resp?: { status_code?: number; status_msg?: string };
 }
 
+/** MiniMax H3 客户端：传输能力 + 连接测试 */
+export interface MinimaxH3Client extends ProviderClient {
+  /** 连接测试：验证地址可达（暂不校验密钥，后续优化） */
+  testConnection(): Promise<{ ok: boolean; message: string }>;
+}
+
 /** 单类媒体的上传大小上限（字节），来自官方文档输入媒体限制 */
 const MEDIA_MAX_BYTES: Record<MinimaxMediaInput['type'], number> = {
   image_url: 30 * 1024 * 1024,
@@ -132,7 +138,7 @@ async function readErrorDetail(res: Response): Promise<string> {
  * @param config 已解析配置（apiKey / baseUrl / resolution / timeout）
  * @returns ProviderClient（异步任务式：execute 提交 → poll 轮询 → getOutput 取输出）
  */
-export function createMinimaxH3Client(config: ResolvedProviderConfig): ProviderClient {
+export function createMinimaxH3Client(config: ResolvedProviderConfig): MinimaxH3Client {
   const apiKey = String(config.apiKey ?? '');
   const baseUrl = String(config.baseUrl ?? 'https://api.minimaxi.com').replace(/\/+$/, '');
   const defaultResolution: MinimaxResolution = config.resolution === '768P' ? '768P' : '2K';
@@ -321,6 +327,20 @@ export function createMinimaxH3Client(config: ResolvedProviderConfig): ProviderC
       if (!res.ok) {
         // 仅排队中（queued）任务可取消；运行中任务远端返回错误，将错误上抛给调用方
         throw new Error(`MiniMax 取消任务错误 (${res.status}): ${await readErrorDetail(res)}`);
+      }
+    },
+
+    async testConnection(): Promise<{ ok: boolean; message: string }> {
+      // 轻量 GET 基础地址验证可达；5 秒超时，任何异常（网络不可达/超时）均返回 ok:false
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      try {
+        const res = await fetch(baseUrl, { method: 'GET', signal: ctrl.signal });
+        return { ok: true, message: `地址可达（HTTP ${res.status}）` };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      } finally {
+        clearTimeout(timer);
       }
     },
   };

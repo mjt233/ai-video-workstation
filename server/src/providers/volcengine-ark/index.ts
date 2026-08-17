@@ -1,5 +1,6 @@
 import { registerProvider } from '../registry.js';
 import type { ProviderDefinition } from '../types.js';
+import { getCandidatesByProvider } from '../../workflows/registry.js';
 import { createVolcengineArkClient } from './client.js';
 
 /**
@@ -45,9 +46,20 @@ const definition: ProviderDefinition = {
     },
   ],
   createClient: (config) => createVolcengineArkClient(config),
-  // TODO(后续任务): 实现真实 listWorkflows（查静态注册表）与 testConnection（验证地址可达）
-  listWorkflows: async () => [],
-  testConnection: async () => ({ ok: true, message: '' }),
+  listWorkflows: async () => {
+    // 静态服务商：查工作流注册表，返回 provider === volcengine-ark 的候选定义
+    const candidates = getCandidatesByProvider('volcengine-ark');
+    return candidates.map((c) => ({
+      key: `${c.type}:${c.impl}`,
+      name: c.name,
+      type: c.type,
+      description: c.description,
+    }));
+  },
+  testConnection: async (config) => {
+    const client = createVolcengineArkClient(config);
+    return client.testConnection();
+  },
 };
 
 registerProvider(definition);

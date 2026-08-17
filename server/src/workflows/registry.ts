@@ -27,6 +27,24 @@ export function getImplementations(type: string): WorkflowDefinition[] {
 }
 
 /**
+ * 获取某 provider 类型下的候选工作流定义（供 listWorkflows 枚举）。
+ *
+ * 当前阶段所有注册定义均为候选（尚未绑定服务商实例）；Task 5 将区分候选与可执行定义。
+ *
+ * @param providerType provider 插件 ID，如 volcengine-ark / minimax-h3
+ * @returns 该 provider 类型下已注册的工作流定义列表
+ */
+export function getCandidatesByProvider(providerType: string): WorkflowDefinition[] {
+  const out: WorkflowDefinition[] = [];
+  for (const list of registry.values()) {
+    for (const w of list) {
+      if (w.provider === providerType) out.push(w);
+    }
+  }
+  return out;
+}
+
+/**
  * 按类型 + 实现标识获取实现。
  *
  * @param type 工作流类型，如 image-to-video
