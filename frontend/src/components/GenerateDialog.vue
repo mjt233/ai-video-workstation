@@ -29,11 +29,12 @@
 
         <!-- User-settable workflow params -->
         <WorkflowParamsForm
-          v-if="selectedDeclarations.length || selectedProvider === 'comfyui-bridge'"
+          v-if="selectedDeclarations.length || selectedProviderType === 'comfyui-bridge'"
           ref="paramsFormRef"
           v-model="userValues"
           :declarations="selectedDeclarations"
-          :provider="selectedProvider"
+          :provider="selectedInstanceId"
+          :provider-type="selectedProviderType"
           :project="props.project"
           class="mb-3"
         />
@@ -198,8 +199,11 @@ const selectedDeclarations = computed<WorkflowUserParamDeclaration[]>(() => {
   return implDef?.params ?? []
 })
 
-/** 当前选中实现使用的 Provider 插件 ID（为 comfyui-bridge 时表单显示「ComfyUI 提供商」选择） */
-const selectedProvider = computed(() => selectedImplDef.value?.provider)
+/** 当前选中实现的服务商实例 ID（为 comfyui-bridge 类型实例时表单按实例拉取「ComfyUI 提供商」选择） */
+const selectedInstanceId = computed(() => selectedImplDef.value?.providerInstanceId)
+
+/** 当前选中实现的服务商类型 ID（为 comfyui-bridge 时表单显示「ComfyUI 提供商」选择） */
+const selectedProviderType = computed(() => selectedImplDef.value?.provider)
 
 // Load implementations when dialog opens
 watch(show, async (val) => {

@@ -99,7 +99,8 @@
                 v-if="selectedTypes.includes(at.id)"
                 :key="`params-${at.id}-${implSelections[at.id] ?? 'none'}`"
                 :declarations="paramsDeclarationsMap[at.id]"
-                :provider="implProviderMap[at.id]"
+                :provider="implInstanceIdMap[at.id]"
+                :provider-type="implProviderTypeMap[at.id]"
                 :model-value="userParamsByAssetType[at.id] ?? {}"
                 :project="props.project"
                 class="mt-1"
@@ -243,7 +244,6 @@ import {
   type WorkflowUserParamDeclaration,
   type WorkflowUserParamValue,
 } from '../api/workflow'
-import { useProviderNames } from '../composables/useProviderNames'
 import WorkflowParamsForm from './WorkflowParamsForm.vue'
 
 const props = defineProps<{
@@ -298,22 +298,17 @@ const configWarning = ref<string | null>(null)
 /** 已加载的工作流定义列表（含各类型可用实现） */
 const workflows = ref<WorkflowInfo[]>([])
 
-/** provider ID → 友好名称的共享映射（下拉选项提供商 chip 文案） */
-const providerNames = useProviderNames()
-
 /**
- * 解析工作流实现条目的提供商显示名。
+ * 解析工作流实现条目的服务商显示名。
  *
- * 优先展示 provider 的友好名称（如「MiniMax H3」）；名称映射未加载成功
- * 或 provider 未注册时回退显示原始 provider ID；未声明 provider 返回空串
- * （下拉选项不渲染 chip）。
+ * 优先展示服务商实例名（providerName，来自 /api/workflows，如「火山方舟-主账号」）；
+ * 未提供时回退显示 provider 类型 ID；均缺失返回空串（下拉选项不渲染 chip）。
  *
- * @param raw 下拉原始条目（工作流实现，含可选 provider 字段）
- * @returns 提供商显示名；未声明 provider 时为空串
+ * @param raw 下拉原始条目（工作流实现，含可选 providerName / provider 字段）
+ * @returns 服务商显示名；未声明时为空串
  */
-function providerLabel(raw: { provider?: string }): string {
-  const p = raw?.provider
-  return p ? (providerNames.value.get(p) ?? p) : ''
+function providerLabel(raw: { providerName?: string; provider?: string }): string {
+  return raw?.providerName ?? raw?.provider ?? ''
 }
 const workflowMap = computed(() => {
   const m: Record<string, WorkflowInfo> = {}
@@ -356,11 +351,27 @@ function setUserParams(assetTypeId: string, v: Record<string, WorkflowUserParamV
 }
 
 /**
- * 资产类型 → 所选工作流实现的 Provider 插件 ID。
- * 与 paramsDeclarationsMap 平行：为 comfyui-bridge 的资产类型在表单中显示
- * 「ComfyUI 提供商」选择。
+ * 资产类型 → 所选工作流实现的服务商实例 ID。
+ * 与 paramsDeclarationsMap 平行：为 comfyui-bridge 类型实例的资产类型在表单中
+ * 显示「ComfyUI 提供商」选择（按实例拉取 Bridge 侧提供商）。
  */
-const implProviderMap = computed<Record<string, string | undefined>>(() => {
+const implInstanceIdMap = computed<Record<string, string | undefined>>(() => {
+  const m: Record<string, string | undefined> = {}
+  for (const at of assetTypes) {
+    const wid = ASSET_TYPE_WORKFLOW[at.id]
+    const wf = wid ? workflowMap.value[wid] : undefined
+    const impl = implSelections.value[at.id]
+    const implDef = wf?.implementations.find((i) => i.impl === impl)
+    m[at.id] = implDef?.providerInstanceId
+  }
+  return m
+})
+
+/**
+ * 资产类型 → 所选工作流实现的服务商类型 ID。
+ * 与 implInstanceIdMap 平行：决定 WorkflowParamsForm 是否显示「ComfyUI 提供商」选择。
+ */
+const implProviderTypeMap = computed<Record<string, string | undefined>>(() => {
   const m: Record<string, string | undefined> = {}
   for (const at of assetTypes) {
     const wid = ASSET_TYPE_WORKFLOW[at.id]
