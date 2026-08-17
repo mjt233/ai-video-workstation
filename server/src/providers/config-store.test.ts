@@ -51,6 +51,12 @@ describe('config-store 实例 CRUD', () => {
     expect(resolved.key).toBe('secret'); // 解析时用原值
   });
 
+  it('secret 字段显式传空串 = 保留原值', async () => {
+    const inst = await createInstance({ type: 'test-store', name: 'A', config: { url: 'http://a', key: 'secret' } }, configPath);
+    const kept = await updateInstance(inst.id, { config: { key: '' } }, configPath);
+    expect(kept.config.key).toBe('secret'); // 显式空串 → 保留原值
+  });
+
   it('删除实例', async () => {
     const inst = await createInstance({ type: 'test-store', name: 'A', config: { url: 'http://a' } }, configPath);
     await deleteInstance(inst.id, configPath);
