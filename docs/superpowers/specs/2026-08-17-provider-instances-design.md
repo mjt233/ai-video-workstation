@@ -185,7 +185,8 @@ interface ProviderDefinition {
 
 **工作流下拉（执行时选择）：**
 
-- 现有各工作流下拉（`ImageGenerateEditor`、`VideoGenerateEditor`、`BatchGenerateDialog` 等）改为展示「工作流名 [服务商名]」，数据来自 `GET /api/workflows`（含 `providerName`）。
+- 现有各工作流下拉（`ImageGenerateEditor`、`VideoGenerateEditor`、`BatchGenerateDialog` 等）改为展示「工作流名 + 服务商名」，数据来自 `GET /api/workflows`（含 `providerName`）。
+- 服务商名沿用现有 `v-chip` 组件展示在下拉选项右侧（复用 `BatchGenerateDialog` / `ImageGenerateEditor` 已有的 `v-slot:item` + `v-chip` 模式，`v-bind="itemProps"` 保留 title 与选中态）。
 - 选中某条后，执行时携带该条对应的 `providerInstanceId`，引擎按实例解析。
 
 ### 4.6 迁移、错误处理与测试
@@ -205,7 +206,7 @@ interface ProviderDefinition {
 **测试：**
 
 - 后端单测：`config-store`（实例 CRUD + 迁移 + 脱敏）、`instance-sync`（注册/注销/交集逻辑）、`registry`（impl 唯一性）、`workflow` 路由（新端点）。
-- 前端单测：`api/providers` 新方法、卡片网格/对话框组件、工作流下拉渲染「工作流名 [服务商名]」。
+- 前端单测：`api/providers` 新方法、卡片网格/对话框组件、工作流下拉渲染「工作流名 + 服务商名 v-chip」。
 - 沿用现有 vitest 结构（`*.test.ts` 与被测文件同目录）。
 
 **验证：** 修改后执行 `npm run typecheck` 和 `npm run lint`（项目 AGENTS.md 约束）。
