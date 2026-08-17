@@ -31,6 +31,22 @@ export function normalizeRelPath(relPath: string): string {
 }
 
 /**
+ * 判断 zip 条目路径是否危险（zip-slip 防护）：
+ * 拒绝绝对路径（/ 开头或盘符开头）、以及含 . 或 .. 路径段的条目，
+ * 防止解压逃逸目标目录。
+ *
+ * @param entryName zip 内的条目路径
+ * @returns 危险返回 true，安全返回 false
+ */
+export function isUnsafeZipEntry(entryName: string): boolean {
+  const normalized = entryName.replace(/\\/g, '/');
+  if (normalized.startsWith('/')) return true;
+  if (/^[a-zA-Z]:/.test(normalized)) return true;
+  const segments = normalized.split('/');
+  return segments.some((seg) => seg === '..' || seg === '.');
+}
+
+/**
  * 判断相对路径是否位于 assert/ 前缀下。
  *
  * @param relPath 已规范化的相对路径

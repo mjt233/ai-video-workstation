@@ -3,11 +3,13 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import multer from 'multer';
-import extract from 'extract-zip';
 import { openPromise, type Entry } from 'yauzl';
 import { ZipArchive } from 'archiver';
 import { DESIGN_DIR } from './fs.js';
-import { FsRouteError } from './fs-path.js';
+import { FsRouteError, isUnsafeZipEntry } from './fs-path.js';
+import { extractZipTo } from './zip-extract.js';
+
+export { isUnsafeZipEntry };
 
 /** 导入上传的 multer 实例：diskStorage 落盘系统临时目录，上限 8GB（与自定义资产上传一致） */
 const importUpload = multer({
@@ -64,22 +66,6 @@ export function deriveProjectName(entries: ExtractedEntry[], originalFilename: s
   const baseName = path.basename(originalFilename.replace(/\\/g, '/')).replace(/\.zip$/i, '');
   validateImportName(baseName);
   return baseName;
-}
-
-/**
- * 判断 zip 条目路径是否危险（zip-slip 防护）：
- * 拒绝绝对路径（/ 开头或盘符开头）、以及含 . 或 .. 路径段的条目，
- * 防止解压逃逸目标目录。
- *
- * @param entryName zip 内的条目路径
- * @returns 危险返回 true，安全返回 false
- */
-export function isUnsafeZipEntry(entryName: string): boolean {
-  const normalized = entryName.replace(/\\/g, '/');
-  if (normalized.startsWith('/')) return true;
-  if (/^[a-zA-Z]:/.test(normalized)) return true;
-  const segments = normalized.split('/');
-  return segments.some((seg) => seg === '..' || seg === '.');
 }
 
 /**
@@ -250,11 +236,8 @@ projectPortRouter.post(
       // 先全量校验条目安全，再解压，避免任何写入发生在校验之前
       await validateZipEntries(file.path);
       await fs.mkdir(tmpDir, { recursive: true });
-      try {
-        await extract(file.path, { dir: tmpDir });
-      } catch (err) {
-        throw new FsRouteError(400, `压缩包解析失败：${err instanceof Error ? err.message : 'zip 已损坏'}`);
-      }
+      // 流式解压（自研 yauzl 实现）：extract-zip 在写流背压下会流死锁导致请求悬挂，故不再使用
+      await extractZipTo(file.path, tmpDir);
 
       // 解压后读取临时目录顶层条目（项目名识别与外壳目录判定共用）
       const entries = (await fs.readdir(tmpDir, { withFileTypes: true })).map((e) => ({
