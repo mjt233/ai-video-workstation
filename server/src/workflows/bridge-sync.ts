@@ -1,5 +1,6 @@
 import { listInstances, resolveInstanceConfig } from '../providers/config-store.js';
 import { getProvider } from '../providers/registry.js';
+import type { ProviderInstance } from '../providers/types.js';
 import type {
   BridgeTagGroup,
   BridgeWorkflowDetail,
@@ -475,4 +476,17 @@ async function doSync(): Promise<void> {
 
   // 清理陈旧注册（本次 summaries 之外的历史 ceb-*）
   cleanupStale(new Set(summaries.map((s) => s.id)));
+}
+
+/**
+ * 按实例同步 Bridge 动态工作流（占位实现，Task 7 实现）。
+ *
+ * 由实例同步器（instance-sync）对 comfyui-bridge 类型实例分发调用；
+ * 当前仅保证签名与导出存在，使 instance-sync 的动态 import 通过类型检查。
+ *
+ * @param _instance 服务商实例（Task 7 将按实例注册 ceb-{instanceId}-{bridgeId}）
+ * @returns 同步完成（无返回值）
+ */
+export async function syncBridgeInstance(_instance: ProviderInstance): Promise<void> {
+  // Task 7 实现
 }
