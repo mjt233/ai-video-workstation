@@ -1,6 +1,7 @@
 import { registerProvider } from '../registry.js';
 import type { ProviderDefinition } from '../types.js';
 import { createComfyuiBridgeClient } from './client.js';
+import { deriveWorkflowType } from '../../workflows/bridge-derive.js';
 
 /**
  * ComfyUI Easy Bridge Provider 插件。
@@ -50,11 +51,17 @@ const definition: ProviderDefinition = {
   listWorkflows: async (config) => {
     const client = createComfyuiBridgeClient(config);
     const summaries = await client.listWorkflows();
-    return summaries.map((s) => ({
-      key: `ceb-${s.id}`,
-      name: s.name || s.id,
-      description: s.description,
-    }));
+    return summaries.map((s) => {
+      // 从列表摘要的标签推导工作流类型（text-to-image / image-edit / tts-* / image-to-video），
+      // 供前端以类型 v-chip 标识；未知类型（推导失败）时不带 type 字段。
+      const type = deriveWorkflowType(s.tags);
+      return {
+        key: `ceb-${s.id}`,
+        name: s.name || s.id,
+        ...(type ? { type } : {}),
+        description: s.description,
+      };
+    });
   },
   testConnection: async (config) => {
     const client = createComfyuiBridgeClient(config);

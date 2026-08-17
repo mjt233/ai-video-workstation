@@ -32,7 +32,7 @@ describe('comfyui-bridge 插件定义', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ([
-          { id: 'text_to_image', name: '文生图', description: '文生图工作流', declaredParams: '[]', tags: [] },
+          { id: 'text_to_image', name: '文生图', description: '文生图工作流', declaredParams: '[]', tags: [{ id: 'text-to-image', tags: [] }] },
           { id: 'tts-1', name: '', description: undefined, declaredParams: '[]', tags: [] },
         ]),
       });
@@ -42,8 +42,9 @@ describe('comfyui-bridge 插件定义', () => {
     expect(def).toBeDefined();
     const entries = await def!.listWorkflows({ baseUrl: 'http://bridge', password: 'pwd' });
 
+    // 带 text-to-image 标签的工作流推导出类型（供前端类型 v-chip 使用），未知标签不带 type
     expect(entries).toEqual([
-      { key: 'ceb-text_to_image', name: '文生图', description: '文生图工作流' },
+      { key: 'ceb-text_to_image', name: '文生图', type: 'text-to-image', description: '文生图工作流' },
       { key: 'ceb-tts-1', name: 'tts-1', description: undefined },
     ]);
     vi.unstubAllGlobals();

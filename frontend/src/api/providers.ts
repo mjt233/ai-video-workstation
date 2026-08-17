@@ -105,25 +105,50 @@ export async function deleteProviderInstance(id: string): Promise<{ success: boo
 
 /**
  * POST /api/providers/test — 连接测试（用当前表单参数，不落盘）。
+ *
+ * 编辑模式传入 instanceId 后，服务端会把表单中空白的 secret 字段回填为该实例
+ * 已保存值（表单不回显 secret，未修改则沿用已保存值）。
+ *
  * @param type 服务商类型 id
  * @param config 当前表单配置参数
+ * @param instanceId 编辑模式下实例 id（可选）
  * @returns 测试结果（ok + 提示信息）
  */
 export async function testProviderConnection(
   type: string,
   config: Record<string, unknown>,
+  instanceId?: string,
 ): Promise<{ ok: boolean; message: string }> {
-  const { data } = await client.post<{ ok: boolean; message: string }>('/providers/test', { type, config })
+  const { data } = await client.post<{ ok: boolean; message: string }>('/providers/test', {
+    type,
+    config,
+    ...(instanceId ? { instanceId } : {}),
+  })
   return data
 }
 
 /**
- * GET /api/providers/instances/:id/workflows — 该实例当前工作流列表。
- * @param id 实例 ID
- * @returns 工作流条目列表（Bridge 实时拉取 / 静态返回）
+ * POST /api/providers/workflows/fetch — 使用当前表单配置获取工作流列表（不落盘）。
+ *
+ * 新增服务商时直接按表单参数解析；编辑模式传入 instanceId 后，服务端会把表单中
+ * 空白的 secret 字段回填为该实例已保存值（表单不回显 secret），保证改完配置后
+ * 也能以「手头配置 + 已保存密钥」重新拉取。
+ *
+ * @param type 服务商类型 id
+ * @param config 当前表单配置参数
+ * @param instanceId 编辑模式下实例 id（可选）
+ * @returns 工作流条目列表
  */
-export async function getInstanceWorkflows(id: string): Promise<ProviderWorkflowEntry[]> {
-  const { data } = await client.get<{ workflows: ProviderWorkflowEntry[] }>(`/providers/instances/${id}/workflows`)
+export async function fetchProviderWorkflows(
+  type: string,
+  config: Record<string, unknown>,
+  instanceId?: string,
+): Promise<ProviderWorkflowEntry[]> {
+  const { data } = await client.post<{ workflows: ProviderWorkflowEntry[] }>('/providers/workflows/fetch', {
+    type,
+    config,
+    ...(instanceId ? { instanceId } : {}),
+  })
   return data.workflows
 }
 

@@ -8,6 +8,7 @@ import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks } from '../workflows/discovery.js';
 import { markCancelRequested, stripCancelRequested } from '../workflows/cancel.js';
 import {
+  MASKED_SECRET,
   createInstance,
   deleteInstance,
   getInstance,
@@ -18,6 +19,7 @@ import {
   updateInstance,
 } from '../providers/config-store.js';
 import { getAllProviders, getProvider } from '../providers/registry.js';
+import type { ProviderDefinition } from '../providers/types.js';
 import { syncInstance } from '../providers/instance-sync.js';
 import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
@@ -144,9 +146,14 @@ workflowRouter.delete('/providers/instances/:id', async (req: Request, res: Resp
   }
 });
 
-// POST /api/providers/test — 连接测试（用当前表单参数，不落盘）
+// POST /api/providers/test — 连接测试（用当前表单参数，不落盘）。
+// 编辑模式携带 instanceId：未填写的 secret 字段回填已保存值（表单不回显 secret）。
 workflowRouter.post('/providers/test', async (req: Request, res: Response) => {
-  const { type, config } = req.body as { type?: string; config?: Record<string, unknown> };
+  const { type, config, instanceId } = req.body as {
+    type?: string;
+    config?: Record<string, unknown>;
+    instanceId?: string;
+  };
   if (!type || !config || typeof config !== 'object') {
     res.status(400).json({ error: 'Missing body: type/config' });
     return;
@@ -154,12 +161,72 @@ workflowRouter.post('/providers/test', async (req: Request, res: Response) => {
   try {
     const providerDef = getProvider(type);
     if (!providerDef) throw new Error(`服务商类型未注册: ${type}`);
-    const resolved = resolveProviderConfig(providerDef.configSchema, config as Record<string, string | number | boolean>);
+    const effective = await mergeSavedSecrets(providerDef, config, instanceId);
+    const resolved = resolveProviderConfig(providerDef.configSchema, effective);
     const result = await providerDef.testConnection(resolved);
     res.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(400).json({ error: msg });
+  }
+});
+
+/**
+ * 组装「当前表单配置 + 已保存值」的有效配置（连接测试 / 获取工作流列表共用）。
+ *
+ * 新增模式（无 instanceId）直接使用表单值；编辑模式下 secret 字段在表单中为空
+ * （含脱敏占位）时回填该实例已保存值——表单不回显 secret，未修改则沿用已保存值。
+ * 环境变量 / 默认值兜底由 resolveProviderConfig 统一处理。
+ *
+ * @param providerDef 服务商定义（configSchema 提供 secret 标记）
+ * @param config 当前表单配置参数
+ * @param instanceId 编辑模式下实例 id；缺省为新增模式直接使用表单值
+ * @returns 可传给 resolveProviderConfig 的有效配置
+ */
+async function mergeSavedSecrets(
+  providerDef: ProviderDefinition,
+  config: Record<string, unknown>,
+  instanceId?: string,
+): Promise<Record<string, string | number | boolean>> {
+  const base = config as Record<string, string | number | boolean>;
+  if (!instanceId) return base;
+  const inst = await getInstance(instanceId);
+  if (!inst) throw new Error(`实例不存在: ${instanceId}`);
+  const effective = { ...base };
+  for (const f of providerDef.configSchema) {
+    if (!f.secret) continue;
+    const v = effective[f.key];
+    if ((v === undefined || v === '' || v === MASKED_SECRET) && inst.config[f.key] !== undefined) {
+      effective[f.key] = inst.config[f.key];
+    }
+  }
+  return effective;
+}
+
+// POST /api/providers/workflows/fetch — 用当前表单配置获取工作流列表（不落盘）。
+// 与 /providers/test 同语义：新增模式直接按表单参数解析；编辑模式携带 instanceId，
+// 表单中空白的 secret 字段回填该实例已保存值，保证改完配置后
+// 也能用「手头配置 + 已保存密钥」重新拉取。
+workflowRouter.post('/providers/workflows/fetch', async (req: Request, res: Response) => {
+  const { type, config, instanceId } = req.body as {
+    type?: string;
+    config?: Record<string, unknown>;
+    instanceId?: string;
+  };
+  if (!type || !config || typeof config !== 'object') {
+    res.status(400).json({ error: 'Missing body: type/config' });
+    return;
+  }
+  try {
+    const providerDef = getProvider(type);
+    if (!providerDef) throw new Error(`服务商类型未注册: ${type}`);
+    const effective = await mergeSavedSecrets(providerDef, config, instanceId);
+    const resolved = resolveProviderConfig(providerDef.configSchema, effective);
+    const workflows = await providerDef.listWorkflows(resolved);
+    res.json({ workflows });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(502).json({ error: `获取工作流列表失败: ${msg}` });
   }
 });
 

@@ -120,14 +120,31 @@
           />
         </div>
 
-        <!-- 编辑时：工作流列表（默认全选） -->
-        <template v-if="isEdit">
+        <!-- 工作流列表：获取按钮 + 勾选列表（新增/编辑均可用） -->
+        <template v-if="form.type">
           <v-divider class="my-3" />
-          <div class="text-body-medium mb-2 font-weight-medium">
-            可用工作流
-            <span class="text-caption text-medium-emphasis ml-1">
-              （默认全选；Bridge 工作流随远程配置实时刷新）
-            </span>
+          <div class="d-flex align-center mb-2">
+            <div class="text-body-medium font-weight-medium">
+              可用工作流
+              <span class="text-caption text-medium-emphasis ml-1">
+                （默认全选；Bridge 工作流随远程配置实时刷新）
+              </span>
+            </div>
+            <v-spacer />
+            <v-btn
+              color="secondary"
+              variant="tonal"
+              size="small"
+              :loading="workflowsLoading"
+              @click="loadWorkflows"
+            >
+              <v-icon
+                icon="mdi-refresh"
+                size="small"
+                class="mr-1"
+              />
+              获取工作流列表
+            </v-btn>
           </div>
           <div
             v-if="workflowsLoading"
@@ -150,16 +167,29 @@
             :key="wf.key"
             v-model="form.enabledWorkflows"
             :value="wf.key"
-            :label="wf.name"
             :hint="wf.description"
+            :title="wf.description"
             density="compact"
             hide-details
-          />
+          >
+            <template #label>
+              <v-chip
+                v-if="wf.type"
+                :color="workflowTypeColor(wf.type)"
+                size="x-small"
+                variant="tonal"
+                class="mr-1"
+              >
+                {{ workflowTypeLabel(wf.type) }}
+              </v-chip>
+              <span>{{ wf.name }}</span>
+            </template>
+          </v-checkbox>
           <div
             v-if="!workflowsLoading && !workflowsError && workflowEntries.length === 0"
             class="text-body-2 text-medium-emphasis"
           >
-            该服务商暂无可用的工作流。
+            尚未获取工作流，点击「获取工作流列表」查看当前配置下的可用工作流。
           </div>
         </template>
       </v-card-text>
@@ -188,7 +218,7 @@
 import { computed, ref, watch } from 'vue'
 import {
   createProviderInstance,
-  getInstanceWorkflows,
+  fetchProviderWorkflows,
   testProviderConnection,
   updateProviderInstance,
   type ProviderConfigField,
@@ -238,7 +268,7 @@ const testing = ref(false)
 const testResult = ref<{ ok: boolean; message: string } | null>(null)
 const showSecret = ref<Record<string, boolean>>({})
 
-/** 工作流列表状态（编辑模式） */
+/** 工作流列表状态（获取按钮 / 编辑自动加载共用） */
 const workflowsLoading = ref(false)
 const workflowsError = ref('')
 const workflowEntries = ref<ProviderWorkflowEntry[]>([])
@@ -286,34 +316,68 @@ watch(
   },
 )
 
+/** 工作流类型 → 中文标签与类型 v-chip 颜色（text-to-image / image-edit / tts-* / image-to-video） */
+const WORKFLOW_TYPE_META: Record<string, { label: string; color: string }> = {
+  'text-to-image': { label: '文生图', color: 'primary' },
+  'image-edit': { label: '图片编辑', color: 'secondary' },
+  'image-to-video': { label: '图生视频', color: 'info' },
+  'tts-voice-design': { label: 'TTS音色设计', color: 'success' },
+  'tts-voice-clone': { label: 'TTS音色克隆', color: 'warning' },
+}
+
+/** 工作流类型 → 中文标签（未知类型回退为原始类型 id） */
+function workflowTypeLabel(type: string): string {
+  return WORKFLOW_TYPE_META[type]?.label ?? type
+}
+
+/** 工作流类型 → 类型 v-chip 颜色（未知类型用默认色） */
+function workflowTypeColor(type: string): string {
+  return WORKFLOW_TYPE_META[type]?.color ?? 'default'
+}
+
 /** 切换类型时重建配置表单（保留已填的非冲突字段） */
 function onTypeChange() {
   const prev = form.value.config
   form.value.config = buildForm(form.value.type, prev)
   testResult.value = null
+  // 类型切换后清空工作流列表与启用集合，避免残留上一类型的条目
+  workflowEntries.value = []
+  workflowsError.value = ''
+  form.value.enabledWorkflows = []
 }
 
-/** 拉取该实例当前工作流列表（Bridge 实时 / 静态返回） */
+/**
+ * 拉取工作流列表：使用当前表单配置调用后端（新增模式无实例；编辑模式携带
+ * instanceId，服务端对空白的 secret 字段回填已保存值）。返回后把列表合并进
+ * enabledWorkflows：仍存在的已启用项保留、列表新增项自动勾选、已消失项剔除。
+ */
 async function loadWorkflows() {
-  if (!props.instance) return
+  const type = form.value.type
+  if (!type) return
   workflowsLoading.value = true
   workflowsError.value = ''
   try {
-    const entries = await getInstanceWorkflows(props.instance.id)
+    const entries = await fetchProviderWorkflows(type, { ...form.value.config }, props.instance?.id)
     workflowEntries.value = entries
-    // 合并已保存的启用集合：
-    // - 保留仍存在且已启用的项（已禁用项不恢复）；
-    // - 列表新增项（未保存过）默认勾选（默认全选）；
-    // - 列表已消失的项自动从启用集合剔除。
-    const saved = new Set(form.value.enabledWorkflows)
-    const kept = entries.filter((e) => saved.has(e.key)).map((e) => e.key)
-    const newOnes = entries.filter((e) => !saved.has(e.key)).map((e) => e.key)
-    form.value.enabledWorkflows = [...kept, ...newOnes]
+    mergeEnabledWorkflows(entries)
   } catch (e) {
     workflowsError.value = e instanceof Error ? e.message : String(e)
   } finally {
     workflowsLoading.value = false
   }
+}
+
+/**
+ * 合并启用集合：保留仍存在且已启用的项（已禁用项不恢复）、列表新增项默认勾选、
+ * 列表已消失的项自动剔除。
+ *
+ * @param entries 拉取到的最新工作流条目
+ */
+function mergeEnabledWorkflows(entries: ProviderWorkflowEntry[]) {
+  const saved = new Set(form.value.enabledWorkflows)
+  const kept = entries.filter((e) => saved.has(e.key)).map((e) => e.key)
+  const newOnes = entries.filter((e) => !saved.has(e.key)).map((e) => e.key)
+  form.value.enabledWorkflows = [...kept, ...newOnes]
 }
 
 /** 连接测试：用当前表单参数调用后端（不落盘） */
@@ -323,7 +387,7 @@ async function onTest() {
   testResult.value = null
   error.value = ''
   try {
-    testResult.value = await testProviderConnection(form.value.type, { ...form.value.config })
+    testResult.value = await testProviderConnection(form.value.type, { ...form.value.config }, props.instance?.id)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
