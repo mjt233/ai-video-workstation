@@ -1,7 +1,6 @@
 import { registerProvider } from '../registry.js';
 import type { ProviderDefinition } from '../types.js';
 import { createComfyuiBridgeClient } from './client.js';
-import type { ComfyuiBridgeClient } from './client.js';
 
 /**
  * ComfyUI Easy Bridge Provider 插件。
@@ -49,7 +48,7 @@ const definition: ProviderDefinition = {
   ],
   createClient: (config) => createComfyuiBridgeClient(config),
   listWorkflows: async (config) => {
-    const client = createComfyuiBridgeClient(config) as ComfyuiBridgeClient;
+    const client = createComfyuiBridgeClient(config);
     const summaries = await client.listWorkflows();
     return summaries.map((s) => ({
       key: `ceb-${s.id}`,
@@ -58,7 +57,7 @@ const definition: ProviderDefinition = {
     }));
   },
   testConnection: async (config) => {
-    const client = createComfyuiBridgeClient(config) as ComfyuiBridgeClient;
+    const client = createComfyuiBridgeClient(config);
     return client.testConnection();
   },
 };
