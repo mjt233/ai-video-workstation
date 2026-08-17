@@ -8,7 +8,6 @@ vi.mock('./config-store.js', () => ({
     { id: 'inst-1', type: 'volcengine-ark', name: '方舟A', config: {}, enabledWorkflows: ['text-to-image:seedream'] },
     { id: 'inst-2', type: 'volcengine-ark', name: '方舟B', config: {}, enabledWorkflows: [] },
   ]),
-  resolveInstanceConfig: vi.fn(() => ({})),
 }));
 
 vi.mock('./registry.js', () => ({
