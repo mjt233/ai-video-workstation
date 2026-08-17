@@ -92,6 +92,7 @@
       <WorkflowParamsForm
         v-model="workflowParams"
         :declarations="currentDeclarations"
+        :provider="currentImpl?.provider"
         :project="props.project"
         class="mb-2"
       />

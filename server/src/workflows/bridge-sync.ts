@@ -17,6 +17,7 @@ import {
   buildTtsPayload,
   buildTtsClonePayload,
   resolveImageEditSizeParams,
+  type BridgeExecutePayload,
 } from './bridge-client.js';
 import type {
   VideoWorkflowSubmitData,
@@ -62,6 +63,27 @@ function passthroughParams(
     if (!exclude.has(k)) out[k] = v;
   }
   return out;
+}
+
+/**
+ * 以本次任务选择的 Easy Bridge 提供商实例（ctx.comfyuiProviderId）执行提交。
+ *
+ * providerId 是 Bridge 执行接口的保留键：非空时显式指定执行端实例，留空时
+ * 不携带（Bridge 按「工作流配置 → 全局默认」解析）；不进入 params 载荷，
+ * 由 provider 客户端在 JSON/multipart 两种模式下分别放到正确位置。
+ *
+ * @param ctx 工作流运行上下文
+ * @param payload Bridge 提交载荷（workflowId + params + files）
+ * @returns 远端任务 ID
+ */
+function executeWithProvider(
+  ctx: WorkflowRunContext<WorkflowVarsBase>,
+  payload: BridgeExecutePayload,
+): Promise<{ taskId: string }> {
+  return ctx.provider.execute({
+    ...payload,
+    ...(ctx.comfyuiProviderId ? { providerId: ctx.comfyuiProviderId } : {}),
+  });
 }
 
 /**
@@ -162,7 +184,7 @@ function textToImageSubmit(workflowId: string): WorkflowDefinition['submit'] {
     const seed = ctx.vars.seed ? Number(ctx.vars.seed) : undefined;
     const enhance = ctx.vars.enhance_prompt === 'true';
     const extraParams = passthroughParams(ctx, TEXT_TO_IMAGE_STRUCTURAL_KEYS);
-    return ctx.provider.execute(buildTextToImagePayload({ workflowId, prompt, width, height, seed, enhance_prompt: enhance, extraParams }));
+    return executeWithProvider(ctx, buildTextToImagePayload({ workflowId, prompt, width, height, seed, enhance_prompt: enhance, extraParams }));
   };
 }
 
@@ -182,7 +204,7 @@ function ttsSubmit(workflowId: string): WorkflowDefinition['submit'] {
     if (!prompt) throw new Error('tts-voice-design 需要 vars.prompt（声线描述）');
     if (!text) throw new Error('tts-voice-design 需要 vars.text（朗读文本）');
     const extraParams = passthroughParams(ctx, TTS_STRUCTURAL_KEYS);
-    return ctx.provider.execute(buildTtsPayload({ workflowId, prompt, text, seed: vars.seed, extraParams }));
+    return executeWithProvider(ctx, buildTtsPayload({ workflowId, prompt, text, seed: vars.seed, extraParams }));
   };
 }
 
@@ -214,7 +236,7 @@ function ttsCloneSubmit(workflowId: string): WorkflowDefinition['submit'] {
     if (paths.length !== 1) throw new Error('tts-voice-clone 需要恰好 1 个参考音频（vars.refAudioPath）');
     const refAudio = await ctx.readAssertFile(paths[0]);
     const extraParams = passthroughParams(ctx, TTS_STRUCTURAL_KEYS);
-    return ctx.provider.execute(buildTtsClonePayload({ workflowId, text, refText, refAudio, seed: vars.seed, extraParams }));
+    return executeWithProvider(ctx, buildTtsClonePayload({ workflowId, text, refText, refAudio, seed: vars.seed, extraParams }));
   };
 }
 
@@ -246,7 +268,7 @@ function imageEditSubmit(workflowId: string): WorkflowDefinition['submit'] {
     const size = resolveImageEditSizeParams(vars);
     // 动态用户参数（如 enable_multiple_angles_lora）经 ctx.userParams 透传，不在本层硬编码
     const extraParams = passthroughParams(ctx, IMAGE_EDIT_STRUCTURAL_KEYS);
-    return ctx.provider.execute(buildImageEditPayload({
+    return executeWithProvider(ctx, buildImageEditPayload({
       workflowId, prompt, imgs, seed: vars.seed, size, extraParams,
     }));
   };
@@ -276,7 +298,7 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
       if (frames.length < 1) throw new Error('导演台模式需要 director.frames');
       const defines = frames.map((f, i) => ({ frameSeq: i, cursor: f.cursor }));
       const files = frames.map((f) => f.file);
-      return ctx.provider.execute(buildDirectorPayload({
+      return executeWithProvider(ctx, buildDirectorPayload({
         workflowId, prompt: video.prompt, width: video.resolution.width, height: video.resolution.height,
         duration: video.duration, fps: video.fps ?? 24, seed, frameDefines: defines, frameFiles: files,
         extraParams: passthroughParams(ctx, VIDEO_STRUCTURAL_KEYS),
@@ -287,7 +309,7 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
       const frames = video.director?.frames ?? [];
       const maxFrames = caps.video?.firstLastFrame?.maxFrames ?? 3;
       if (frames.length < 1 || frames.length > maxFrames) throw new Error(`首尾帧模式需要 1~${maxFrames} 帧参考图`);
-      return ctx.provider.execute(buildFirstLastFramePayload({
+      return executeWithProvider(ctx, buildFirstLastFramePayload({
         workflowId, prompt: video.prompt, width: video.resolution.width, height: video.resolution.height,
         duration: video.duration, fps: video.fps ?? 24, seed,
         frames: frames.map((f) => f.file),
@@ -322,7 +344,7 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
       if (audioRefs.length > 0 && imageRefs.length === 0 && videoRefs.length === 0) {
         throw new Error('音频参考必须与图片或视频参考一同输入，不能作为唯一输入');
       }
-      return ctx.provider.execute(buildReferencePayload({
+      return executeWithProvider(ctx, buildReferencePayload({
         workflowId, prompt: video.prompt, width: video.resolution.width, height: video.resolution.height,
         duration: video.duration, seed, imageRefs, videoRefs, audioRefs,
         extraParams: passthroughParams(ctx, VIDEO_STRUCTURAL_KEYS),
@@ -376,8 +398,11 @@ function buildAndRegister(detail: BridgeWorkflowDetail, tagId: string): string |
   const impl = `${IMPL_PREFIX}${bridgeId}`;
   const caps = deriveCapabilities(detail.tags, type);
   const expose = exposeFieldOf(detail.tags, tagId);
-  // expose_field 字段信息：params 优先（工作流固定参数字段），declaredParams 兜底
-  const params = deriveParams(expose, detail.params, detail.declaredParams);
+  // expose_field 字段信息：params 优先（工作流固定参数字段），declaredParams 兜底；
+  // providerId 为 Bridge 执行接口保留键（本次执行提供商），不作为用户参数暴露，
+  // 防止 expose_field 声明同名字段时与系统「ComfyUI 提供商」选择语义冲突
+  const params = deriveParams(expose, detail.params, detail.declaredParams)
+    .filter((d) => d.key !== 'providerId');
   const def: WorkflowDefinition = {
     type, impl, name: detail.name || detail.id,
     description: detail.description || undefined,

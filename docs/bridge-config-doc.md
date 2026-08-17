@@ -164,3 +164,14 @@ Bridge 工作流 id：`tts_voice_design`
 
 自动注册标签的元数据 `expose_field`（逗号分隔的字段别名列表）用于声明哪些字段作为**前端用户可配置参数**暴露。结构字段（`prompt` / `width` / `height` / `duration` / `fps` / `seed` / 文件 key 等）由工作站固定组装，无需列出；如需开放额外的可调参数（如 `enable_multiple_angles_lora`），将其别名加入 `expose_field` 即可。
 
+## 附：ComfyUI 提供商选择
+
+Easy Bridge 支持多个「执行提供商」实例（ComfyUI 原生 / RunningHub），并允许每次执行通过保留键 `providerId` 显式指定实例（见 Easy Bridge 的 `docs/workflow-api.md` §1/§2）。
+
+工作站中**所有来自 ComfyUI Easy Bridge 的工作流**（`ceb-*`）在生成对话框 / 批量生成 / 画布节点编辑器的参数表单顶部都提供「ComfyUI 提供商」下拉：
+
+- 选项实时来自 Easy Bridge 的 `GET /api/providers`（仅列出启用实例，RunningHub 类型带标注），**每次打开表单实时拉取，不缓存**；
+- 选择实例 → 提交时以保留键 `providerId` 显式指定本次执行的实例（JSON 模式为请求体顶层字段，multipart 模式为独立表单字段，不进入 `params`）；
+- 留空（默认）→ 不携带 `providerId`，由 Easy Bridge 按「工作流配置的提供商 → 系统全局默认提供商」解析；
+- 所选实例被禁用或删除后，已保存的选择以禁用项回显，需重新选择；仍提交无效 ID 时 Easy Bridge 返回 `400 provider_not_configured`，任务失败并透出错误。
+

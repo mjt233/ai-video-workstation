@@ -93,6 +93,12 @@ export interface WorkflowRunContext<TVars extends WorkflowVarsBase = WorkflowVar
   userParams?: Record<string, boolean | number | string>;
   /** Provider 客户端（引擎按工作流声明的 provider 解析配置后注入；工作流用它提交任务） */
   provider: ProviderClient;
+  /**
+   * 本次执行的 ComfyUI Easy Bridge 提供商实例 ID（执行接口保留键 providerId）。
+   * 源自任务创建时的用户选择（仅 comfyui-bridge 工作流入库）；留空/缺失时表示
+   * 不显式指定，由 Bridge 按「工作流配置 → 全局默认」解析。
+   */
+  comfyuiProviderId?: string;
   /** 视频自包含提交数据：仅当工作流为视频类型且数据已组装时注入（画布节点透传 / 场景适配层生成） */
   video?: VideoWorkflowSubmitData;
   /** 读取项目内文本文件（UTF-8），路径相对 design/{project}/ */

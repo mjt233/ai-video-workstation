@@ -132,6 +132,26 @@ describe('syncBridgeWorkflows', () => {
     // 同一别名 steps 在 params（步数V2）与 declaredParams（步数）中都存在 → 以 params 为准
     expect(w!.params).toEqual([{ key: 'steps', name: '步数V2', type: 'integer', defaultValue: '' }]);
   });
+
+  it('expose_field 含 providerId 时被过滤（Bridge 执行保留键不作为用户参数）', async () => {
+    const d = detail({
+      params: [
+        { alias: 'providerId', label: '提供商', paramType: 'text' },
+        { alias: 'steps', label: '步数', paramType: 'number' },
+      ],
+      tags: [
+        { id: 'auto', metadata: { expose_field: 'providerId,steps' }, tags: [] },
+        { id: 'text-to-image', metadata: {}, tags: [] },
+      ],
+    });
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'text_to_image', name: '文生图', declaredParams: '[]', tags: d.tags },
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(d);
+    await syncBridgeWorkflows();
+    const w = getImpl('text-to-image', 'ceb-text_to_image');
+    expect(w!.params).toEqual([{ key: 'steps', name: '步数', type: 'integer', defaultValue: '' }]);
+  });
 });
 
 describe('buildSubmit（text-to-image）', () => {
@@ -181,6 +201,22 @@ describe('buildSubmit（text-to-image）', () => {
       workflowId: 'text_to_image',
       params: expect.objectContaining({ width: 1080, height: 1920 }),
     });
+  });
+
+  it('ctx.comfyuiProviderId 非空时透传 providerId，缺省时不携带', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't1' }));
+    const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
+    const base = {
+      vars: { promptPath: 'p.md' },
+      projectConfig: { width: 1080, height: 1920 },
+      readFile: async () => '一只猫',
+      provider: { execute },
+    };
+    await submit({ ...base, comfyuiProviderId: 'inst-7' } as never);
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ providerId: 'inst-7' }));
+    await submit(base as never);
+    const last = (execute as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as { providerId?: string };
+    expect('providerId' in last).toBe(false);
   });
 });
 

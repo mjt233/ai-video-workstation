@@ -173,4 +173,84 @@ describe('createComfyuiBridgeClient', () => {
       expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
     });
   });
+
+  describe('execute providerId 保留键', () => {
+    it('JSON 模式：providerId 作为请求体顶层字段', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ task_id: 't3', status: 'accepted', comfyui_response: {} }) } as unknown as Response);
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      await client.execute({ workflowId: 'text_to_image', params: { prompt: 'p' }, providerId: 'inst-1' });
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.prompt).toBe('p');
+      expect(body.providerId).toBe('inst-1');
+    });
+
+    it('JSON 模式：不带 providerId 时请求体不含该键', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ task_id: 't', status: 'accepted', comfyui_response: {} }) } as unknown as Response);
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      await client.execute({ workflowId: 'text_to_image', params: { prompt: 'p' } });
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect('providerId' in body).toBe(false);
+    });
+
+    it('multipart 模式：providerId 为独立表单字段（不进入 params JSON）', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ task_id: 't4', status: 'accepted', comfyui_response: {} }) } as unknown as Response);
+      const file = new File(['dummy'], 'a.png', { type: 'image/png' });
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      await client.execute({ workflowId: 'qwen-edit-2509', params: { desc: '编辑' }, files: { image_0: file }, providerId: 'inst-2' });
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      const form = init.body as FormData;
+      expect(JSON.parse(form.get('params') as string)).toEqual({ desc: '编辑' });
+      expect(form.get('providerId')).toBe('inst-2');
+    });
+
+    it('multipart 模式：不带 providerId 时表单无该字段', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ task_id: 't', status: 'accepted', comfyui_response: {} }) } as unknown as Response);
+      const file = new File(['dummy'], 'a.png', { type: 'image/png' });
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      await client.execute({ workflowId: 'qwen-edit-2509', params: {}, files: { image_0: file } });
+      const form = (fetchMock.mock.calls[0][1] as RequestInit).body as FormData;
+      expect(form.get('providerId')).toBeNull();
+    });
+
+    it('providerId 为空串时不携带', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ task_id: 't', status: 'accepted', comfyui_response: {} }) } as unknown as Response);
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      await client.execute({ workflowId: 'text_to_image', params: {}, providerId: '  ' });
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect('providerId' in body).toBe(false);
+    });
+  });
+
+  describe('listProviders', () => {
+    it('自动登录并 GET /api/providers 带 Bearer，返回实例数组', async () => {
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'tok' }) } as unknown as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ([
+            { id: 'p1', name: '本地 ComfyUI', type: 'comfyui', enabled: true },
+            { id: 'p2', name: 'RunningHub 24G', type: 'runninghub', enabled: false },
+          ]),
+        } as unknown as Response);
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      const list = await client.listProviders();
+      expect(list).toHaveLength(2);
+      expect(list[0].id).toBe('p1');
+      expect(list[1].type).toBe('runninghub');
+      expect(fetchMock.mock.calls[0][0]).toBe('http://b/api/auth/login');
+      expect(fetchMock.mock.calls[1][0]).toBe('http://b/api/providers');
+      expect((fetchMock.mock.calls[1][1] as RequestInit).headers).toEqual({ Authorization: 'Bearer tok' });
+    });
+
+    it('非 2xx 抛错', async () => {
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'tok' }) } as unknown as Response)
+        .mockResolvedValueOnce({ ok: false, status: 502, text: async () => 'upstream down' } as unknown as Response);
+      const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+      await expect(client.listProviders()).rejects.toThrow('Bridge list providers failed (502): upstream down');
+    });
+  });
 });

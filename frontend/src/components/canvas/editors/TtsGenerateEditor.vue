@@ -111,6 +111,7 @@
     <WorkflowParamsForm
       v-model="workflowParams"
       :declarations="currentDeclarations"
+      :provider="currentImpl?.provider"
       :project="props.project"
     />
 
@@ -215,10 +216,12 @@ const currentImplId = computed(() => {
 /** 克隆模式未连接音频输入时禁用生成 */
 const canGenerate = computed(() => !(mode.value === 'clone' && props.inputs.length < 1))
 
-const currentDeclarations = computed(() => {
-  const impl = (currentWorkflow.value?.implementations ?? []).find((i) => i.impl === currentImplId.value)
-  return impl?.params ?? []
-})
+/** 当前选择的工作流实现（找不到时为 undefined） */
+const currentImpl = computed(() =>
+  (currentWorkflow.value?.implementations ?? []).find((i) => i.impl === currentImplId.value),
+)
+
+const currentDeclarations = computed(() => currentImpl.value?.params ?? [])
 
 /**
  * 切换生成模式（音色克隆 / 音色设计）：重置工作流实现与参数。

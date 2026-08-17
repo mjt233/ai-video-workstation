@@ -99,6 +99,7 @@
                 v-if="selectedTypes.includes(at.id)"
                 :key="`params-${at.id}-${implSelections[at.id] ?? 'none'}`"
                 :declarations="paramsDeclarationsMap[at.id]"
+                :provider="implProviderMap[at.id]"
                 :model-value="userParamsByAssetType[at.id] ?? {}"
                 :project="props.project"
                 class="mt-1"
@@ -353,6 +354,23 @@ const paramsDeclarationsMap = computed<Record<string, WorkflowUserParamDeclarati
 function setUserParams(assetTypeId: string, v: Record<string, WorkflowUserParamValue>) {
   userParamsByAssetType.value = { ...userParamsByAssetType.value, [assetTypeId]: v }
 }
+
+/**
+ * 资产类型 → 所选工作流实现的 Provider 插件 ID。
+ * 与 paramsDeclarationsMap 平行：为 comfyui-bridge 的资产类型在表单中显示
+ * 「ComfyUI 提供商」选择。
+ */
+const implProviderMap = computed<Record<string, string | undefined>>(() => {
+  const m: Record<string, string | undefined> = {}
+  for (const at of assetTypes) {
+    const wid = ASSET_TYPE_WORKFLOW[at.id]
+    const wf = wid ? workflowMap.value[wid] : undefined
+    const impl = implSelections.value[at.id]
+    const implDef = wf?.implementations.find((i) => i.impl === impl)
+    m[at.id] = implDef?.provider
+  }
+  return m
+})
 
 /**
  * 获取指定资产类型可用的工作流实现列表。

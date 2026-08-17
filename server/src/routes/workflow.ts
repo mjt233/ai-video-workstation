@@ -9,6 +9,7 @@ import { discoverTasks } from '../workflows/discovery.js';
 import { markCancelRequested, stripCancelRequested } from '../workflows/cancel.js';
 import { getProviderConfig, getProviderConfigMasked, setProviderConfig } from '../providers/config-store.js';
 import { getAllProviders, getProvider } from '../providers/registry.js';
+import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
 
 export const workflowRouter = Router();
@@ -38,6 +39,22 @@ export function resolveImpl(workflowId: string, impl?: string): string {
   // 未显式指定时优先本地 Bridge 实现（provider=comfyui-bridge），避免批量默认切到付费云
   const bridgeImpl = impls.find((w) => w.provider === 'comfyui-bridge');
   return bridgeImpl?.impl ?? impls[0]?.impl ?? 'default';
+}
+
+/**
+ * 从用户提交的工作流参数中提取 ComfyUI Easy Bridge 执行提供商实例 ID。
+
+ * providerId 是 Bridge 执行接口的保留键（本次执行显式指定的实例），不属于工作流参数；
+ * 前端以 userParams.providerId 携带，本函数在入库前提取并独立存储（不混入 vars）。
+ *
+ * @param raw 用户提交的原始参数对象（可为空）
+ * @returns 非空字符串（trim 后）的提供商实例 ID；缺失/非字符串/空串返回 undefined
+ */
+export function extractComfyuiProviderId(raw: Record<string, unknown> | undefined): string | undefined {
+  const v = raw?.providerId;
+  if (typeof v !== 'string') return undefined;
+  const trimmed = v.trim();
+  return trimmed !== '' ? trimmed : undefined;
 }
 
 // GET /api/providers — 列出所有 Provider 插件及其配置（secret 字段脱敏为 '__set__'）
@@ -83,6 +100,23 @@ workflowRouter.put('/providers/:id', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/comfyui-bridge/providers — 列出 ComfyUI Easy Bridge 的提供商实例（实时转发 Bridge 列表，不落盘）
+// 供前端「ComfyUI 提供商」下拉选项使用；返回脱敏后的最小摘要（仅 id/name/type/enabled）。
+workflowRouter.get('/comfyui-bridge/providers', async (_req: Request, res: Response) => {
+  try {
+    const providerDef = getProvider('comfyui-bridge');
+    if (!providerDef) throw new Error('Provider 未注册: comfyui-bridge');
+    const client = providerDef.createClient(await getProviderConfig('comfyui-bridge')) as ComfyuiBridgeClient;
+    const list = await client.listProviders();
+    res.json({
+      providers: list.map((p) => ({ id: p.id, name: p.name, type: p.type, enabled: p.enabled })),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(502).json({ error: `获取 ComfyUI 提供商列表失败: ${msg}` });
+  }
+});
+
 // GET /api/workflows — list available workflow types and implementations
 workflowRouter.get('/workflows', (_req: Request, res: Response) => {
   res.json({ workflows: getAllWorkflows() });
@@ -115,6 +149,10 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
   const resolvedImpl = resolveImpl(workflowId, impl);
   const implDef = getImpl(workflowId, resolvedImpl);
   const userVars = normalizeUserParams(implDef?.params, params.userParams);
+  // ComfyUI 提供商选择（Bridge 执行保留键 providerId）：仅 comfyui-bridge 工作流生效，
+  // 独立存于任务 params，不混入 vars（providerId 不是工作流参数，避免注入 Bridge 请求参数）
+  const comfyuiProviderId =
+    implDef?.provider === 'comfyui-bridge' ? extractComfyuiProviderId(params.userParams) : undefined;
 
   const taskId = uuidv4();
   db.createTask({
@@ -127,6 +165,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
       promptPaths: params.promptPaths ?? [],
       outputPath: params.outputPath,
       ...(params.video ? { video: params.video } : {}),
+      ...(comfyuiProviderId ? { comfyuiProviderId } : {}),
     },
   });
 
@@ -141,6 +180,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
  * @param paramsJson - 任务 params 的 JSON 字符串
  * @returns 结构化 params：vars 业务变量、promptPaths 提示词路径、outputPath 输出路径；
  *          video 为视频自包含提交参数（wire 形态，可选）；
+ *          comfyuiProviderId 为本次执行的 Easy Bridge 提供商实例 ID（可选，仅 comfyui-bridge 工作流）；
  *          remoteTaskId 为提交成功后持久化的远端（Bridge）任务 ID（可选，供中断使用）
  */
 export function parseTaskParams(paramsJson: string): {
@@ -148,6 +188,8 @@ export function parseTaskParams(paramsJson: string): {
   promptPaths: string[]
   outputPath: string
   video?: VideoWorkflowSubmitParams
+  /** 本次执行的 Easy Bridge 提供商实例 ID（用户在工作流表单选择，可选） */
+  comfyuiProviderId?: string
   /** 提交成功后持久化的远端（Bridge）任务 ID，供中断使用 */
   remoteTaskId?: string
 } {
@@ -157,6 +199,7 @@ export function parseTaskParams(paramsJson: string): {
       promptPaths?: string[]
       outputPath?: string
       video?: VideoWorkflowSubmitParams
+      comfyuiProviderId?: string
       remoteTaskId?: string
     };
     return {
@@ -164,6 +207,7 @@ export function parseTaskParams(paramsJson: string): {
       promptPaths: parsed.promptPaths ?? [],
       outputPath: parsed.outputPath ?? '',
       video: parsed.video,
+      comfyuiProviderId: parsed.comfyuiProviderId,
       remoteTaskId: parsed.remoteTaskId,
     };
   } catch {
@@ -364,6 +408,11 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
         implDef?.params,
         task.assetType ? userParamsByAssetType?.[task.assetType] : undefined,
       );
+      // ComfyUI 提供商选择：按资产类型从用户参数提取，仅 comfyui-bridge 实现入库（与 /workflow/run 同语义）
+      const comfyuiProviderId =
+        implDef?.provider === 'comfyui-bridge'
+          ? extractComfyuiProviderId(task.assetType ? userParamsByAssetType?.[task.assetType] : undefined)
+          : undefined;
       db.createTask({
         id: uuidv4(),
         project,
@@ -373,6 +422,7 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
           vars: { ...task.vars, ...userVars },
           promptPaths: task.promptPaths,
           outputPath: task.outputPath,
+          ...(comfyuiProviderId ? { comfyuiProviderId } : {}),
         },
         batch_id: batchId,
         phase,

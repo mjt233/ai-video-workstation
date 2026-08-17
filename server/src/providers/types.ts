@@ -67,6 +67,11 @@ export interface ProviderClient {
     workflowId: string;
     params?: Record<string, unknown>;
     files?: Record<string, File>;
+    /**
+     * 本次执行显式指定的执行端实例 ID（如 ComfyUI Easy Bridge 执行接口的保留键
+     * providerId）。仅支持该语义的 provider 使用；其余 provider 忽略此字段。
+     */
+    providerId?: string;
   }): Promise<{ taskId: string }>;
 
   /**

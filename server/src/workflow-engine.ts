@@ -551,6 +551,8 @@ async function runTask(taskId: string): Promise<void> {
     promptPaths?: string[];
     outputPath?: string;
     video?: VideoWorkflowSubmitParams;
+    /** 本次执行的 Easy Bridge 提供商实例 ID（用户选择，仅 comfyui-bridge 工作流入库） */
+    comfyuiProviderId?: string;
   };
   const projectConfig = await loadProjectConfig(task.project);
 
@@ -732,6 +734,8 @@ async function runTask(taskId: string): Promise<void> {
               const ttsResult = await provider.execute({
                 workflowId: 'tts_voice_design',
                 params: { prompt: voiceDesc, text },
+                // 内联 TTS 同样沿用本次任务选择的 Bridge 提供商实例
+                ...(paramsObj.comfyuiProviderId ? { providerId: paramsObj.comfyuiProviderId } : {}),
               });
               let ttsOk = false;
               while (true) {
@@ -785,6 +789,8 @@ async function runTask(taskId: string): Promise<void> {
       projectConfig,
       vars,
       provider,
+      // 本次任务选择的 Easy Bridge 提供商实例（留空时由 Bridge 自行解析默认实例）
+      comfyuiProviderId: paramsObj.comfyuiProviderId || undefined,
       ...(video ? { video } : {}),
       userParams,
       readFile,

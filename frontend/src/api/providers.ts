@@ -55,3 +55,28 @@ export async function saveProviderConfig(
   const { data } = await client.put<{ success: boolean }>(`/providers/${id}`, { config })
   return data
 }
+
+/** ComfyUI Easy Bridge 的提供商实例摘要（工作流「ComfyUI 提供商」下拉选项） */
+export interface ComfyuiBridgeProviderInfo {
+  /** 实例 ID（作为执行接口保留键 providerId 的值） */
+  id: string
+  /** 实例显示名，如「本地 ComfyUI」 */
+  name: string
+  /** 实例类型：comfyui（ComfyUI 原生）或 runninghub（RunningHub 云端） */
+  type: string
+  /** 是否启用（禁用实例不能作为执行目标） */
+  enabled?: boolean
+}
+
+/**
+ * GET /api/comfyui-bridge/providers — 实时获取 Easy Bridge 的提供商实例列表。
+ *
+ * 服务端转发 Bridge 的 GET /api/providers（不落盘）；前端每次表单挂载时重新请求，
+ * 不做缓存，保证选项与 Bridge 侧实时一致。
+ *
+ * @returns 提供商实例摘要列表（Bridge 不可达时后端返回 502，调用方应捕获并提示）
+ */
+export async function getComfyuiBridgeProviders(): Promise<ComfyuiBridgeProviderInfo[]> {
+  const { data } = await client.get<{ providers: ComfyuiBridgeProviderInfo[] }>('/comfyui-bridge/providers')
+  return data.providers
+}

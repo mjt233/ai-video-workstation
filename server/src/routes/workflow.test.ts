@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTaskParams, canCancelTask, getRemoteTaskId, resolveImpl } from './workflow.js';
+import { parseTaskParams, canCancelTask, getRemoteTaskId, resolveImpl, extractComfyuiProviderId } from './workflow.js';
 import { register } from '../workflows/registry.js';
 import type { TaskRecord } from '../db.js';
 import type { WorkflowDefinition } from '../workflows/types.js';
@@ -97,9 +97,38 @@ describe('parseTaskParams', () => {
     expect(parsed.remoteTaskId).toBe('bridge-task-1');
   });
 
+  it('comfyuiProviderId 透传', () => {
+    const parsed = parseTaskParams(JSON.stringify({
+      vars: {},
+      outputPath: 'assert/x.mp4',
+      comfyuiProviderId: 'inst-9',
+    }));
+    expect(parsed.comfyuiProviderId).toBe('inst-9');
+  });
+
+  it('无 comfyuiProviderId 时返回 undefined', () => {
+    const parsed = parseTaskParams(JSON.stringify({ vars: {}, outputPath: 'assert/x.mp4' }));
+    expect(parsed.comfyuiProviderId).toBeUndefined();
+  });
+
   it('无 video 时返回 undefined', () => {
     const parsed = parseTaskParams(JSON.stringify({ vars: {}, outputPath: 'assert/x.mp4' }));
     expect(parsed.video).toBeUndefined();
+  });
+});
+
+describe('extractComfyuiProviderId', () => {
+  it('非空字符串 trim 后返回', () => {
+    expect(extractComfyuiProviderId({ providerId: '  inst-1  ' })).toBe('inst-1');
+  });
+
+  it('缺失 / 空串 / 非字符串返回 undefined', () => {
+    expect(extractComfyuiProviderId(undefined)).toBeUndefined();
+    expect(extractComfyuiProviderId({})).toBeUndefined();
+    expect(extractComfyuiProviderId({ providerId: '' })).toBeUndefined();
+    expect(extractComfyuiProviderId({ providerId: '   ' })).toBeUndefined();
+    expect(extractComfyuiProviderId({ providerId: 42 })).toBeUndefined();
+    expect(extractComfyuiProviderId({ providerId: true })).toBeUndefined();
   });
 });
 

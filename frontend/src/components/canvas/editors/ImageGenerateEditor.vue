@@ -119,6 +119,7 @@
     <WorkflowParamsForm
       v-model="workflowParams"
       :declarations="currentDeclarations"
+      :provider="currentImpl?.provider"
       :project="props.project"
     />
 
@@ -343,10 +344,12 @@ function onImplChange(v: string) {
   emit('update:config', { workflowImpl: v, workflowParams: {} })
 }
 
-const currentDeclarations = computed(() => {
-  const impl = (currentWorkflow.value?.implementations ?? []).find((i) => i.impl === currentImplId.value)
-  return impl?.params ?? []
-})
+/** 当前选择的工作流实现（找不到时为 undefined） */
+const currentImpl = computed(() =>
+  (currentWorkflow.value?.implementations ?? []).find((i) => i.impl === currentImplId.value),
+)
+
+const currentDeclarations = computed(() => currentImpl.value?.params ?? [])
 
 watch(
   () => props.node.config.workflowParams,

@@ -29,10 +29,11 @@
 
         <!-- User-settable workflow params -->
         <WorkflowParamsForm
-          v-if="selectedDeclarations.length"
+          v-if="selectedDeclarations.length || selectedProvider === 'comfyui-bridge'"
           ref="paramsFormRef"
           v-model="userValues"
           :declarations="selectedDeclarations"
+          :provider="selectedProvider"
           :project="props.project"
           class="mb-3"
         />
@@ -186,11 +187,19 @@ const userValues = ref<Record<string, WorkflowUserParamValue>>({})
 /** 参数输入表单引用（用于打开时重置为默认值） */
 const paramsFormRef = ref<InstanceType<typeof WorkflowParamsForm> | null>(null)
 
+/** 当前选中的工作流实现定义（未加载/未命中时为 undefined） */
+const selectedImplDef = computed(() =>
+  implementations.value.find((i) => i.impl === selectedImpl.value),
+)
+
 /** 当前选中实现声明的用户参数（供表单渲染；随实现切换自动重置） */
 const selectedDeclarations = computed<WorkflowUserParamDeclaration[]>(() => {
   const implDef = implementations.value.find((i) => i.impl === selectedImpl.value)
   return implDef?.params ?? []
 })
+
+/** 当前选中实现使用的 Provider 插件 ID（为 comfyui-bridge 时表单显示「ComfyUI 提供商」选择） */
+const selectedProvider = computed(() => selectedImplDef.value?.provider)
 
 // Load implementations when dialog opens
 watch(show, async (val) => {

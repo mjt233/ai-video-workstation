@@ -45,12 +45,24 @@ export interface BridgeTagGroup {
   tags?: BridgeTagGroup[];
 }
 
+/** Bridge 提供商实例列表接口返回的实例摘要（GET /api/providers，仅取所需字段） */
+export interface BridgeProviderSummary {
+  id: string;
+  name: string;
+  /** 实例类型：comfyui（ComfyUI 原生）或 runninghub（RunningHub 云端） */
+  type: string;
+  /** 是否启用（禁用的实例不能作为执行目标） */
+  enabled?: boolean;
+}
+
 /** ComfyUI Bridge 客户端：传输能力 + 工作流列表/详情查询（后者供 bridge-sync 使用） */
 export interface ComfyuiBridgeClient extends ProviderClient {
   /** 拉取工作流列表；tag 非空时按标签筛选（GET /api/workflows[?tags=]） */
   listWorkflows(tag?: string): Promise<BridgeWorkflowSummary[]>;
   /** 拉取单个工作流详情（GET /api/workflows/:id，declaredParams 为解析数组） */
   getWorkflowDetail(id: string): Promise<BridgeWorkflowDetail>;
+  /** 拉取 Bridge 的提供商实例列表（GET /api/providers，需认证） */
+  listProviders(): Promise<BridgeProviderSummary[]>;
 }
 
 /**
@@ -96,11 +108,15 @@ export function createComfyuiBridgeClient(config: ResolvedProviderConfig): Comfy
       const url = `${baseUrl}/api/workflows/${p.workflowId}/execute`;
       const fileEntries = Object.entries(p.files ?? {});
       const hasFiles = fileEntries.length > 0;
+      // 保留键 providerId：本次执行显式指定的执行端实例 ID（仅当非空时携带）；
+      // JSON 模式为请求体顶层字段，multipart 模式为独立表单字段（不进 params JSON）。
+      const providerId = typeof p.providerId === 'string' && p.providerId.trim() !== '' ? p.providerId.trim() : undefined;
 
       let res: Response;
       if (hasFiles) {
         const form = new FormData();
         form.append('params', JSON.stringify(p.params ?? {}));
+        if (providerId) form.append('providerId', providerId);
         for (const [alias, file] of fileEntries) {
           form.append(alias, file);
         }
@@ -110,7 +126,8 @@ export function createComfyuiBridgeClient(config: ResolvedProviderConfig): Comfy
         res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(p.params ?? {}),
+          // providerId 后置展开，保证保留键优先于同名工作流参数
+          body: JSON.stringify({ ...(p.params ?? {}), ...(providerId ? { providerId } : {}) }),
         });
       }
 
@@ -202,6 +219,18 @@ export function createComfyuiBridgeClient(config: ResolvedProviderConfig): Comfy
         throw new Error(`Bridge workflow detail failed (${res.status}): ${text}`);
       }
       return (await res.json()) as BridgeWorkflowDetail;
+    },
+
+    async listProviders() {
+      const token = await ensureToken();
+      const res = await fetch(`${baseUrl}/api/providers`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Bridge list providers failed (${res.status}): ${text}`);
+      }
+      return (await res.json()) as BridgeProviderSummary[];
     },
   };
 }
