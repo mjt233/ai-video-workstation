@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fsRouter } from './routes/fs.js';
+import { projectPortRouter } from './routes/project-port.js';
 import { assetsRouter } from './routes/assets.js';
 import { workflowRouter } from './routes/workflow.js';
 import { canvasRouter } from './routes/canvas.js';
@@ -20,6 +21,7 @@ const HOST = '0.0.0.0';
 app.use(express.json());
 
 app.use('/api', fsRouter);
+app.use('/api', projectPortRouter);
 app.use('/api', assetsRouter);
 app.use('/api', workflowRouter);
 app.use('/api', canvasRouter);

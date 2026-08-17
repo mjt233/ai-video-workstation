@@ -7,7 +7,8 @@ import { fileURLToPath } from 'url';
 import { FsRouteError, isUnderAssert, validateCopyRequest } from './fs-path.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DESIGN_DIR = path.resolve(__dirname, '../../../design');
+/** 项目资产根目录（所有项目位于 design/{project}/ 下），供项目导出/导入路由复用 */
+export const DESIGN_DIR = path.resolve(__dirname, '../../../design');
 const WRITABLE_PREFIXES = ['prompt', 'assert'];
 const WRITABLE_ROOT_FILES = ['overview.md', 'project.json'];
 
