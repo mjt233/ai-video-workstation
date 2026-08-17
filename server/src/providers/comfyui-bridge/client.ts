@@ -63,6 +63,8 @@ export interface ComfyuiBridgeClient extends ProviderClient {
   getWorkflowDetail(id: string): Promise<BridgeWorkflowDetail>;
   /** 拉取 Bridge 的提供商实例列表（GET /api/providers，需认证） */
   listProviders(): Promise<BridgeProviderSummary[]>;
+  /** 连接测试：验证连通性 + 鉴权（登录成功即通过） */
+  testConnection(): Promise<{ ok: boolean; message: string }>;
 }
 
 /**
@@ -231,6 +233,15 @@ export function createComfyuiBridgeClient(config: ResolvedProviderConfig): Comfy
         throw new Error(`Bridge list providers failed (${res.status}): ${text}`);
       }
       return (await res.json()) as BridgeProviderSummary[];
+    },
+
+    async testConnection(): Promise<{ ok: boolean; message: string }> {
+      try {
+        await ensureToken();
+        return { ok: true, message: '连接成功，鉴权通过' };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
     },
   };
 }
