@@ -133,6 +133,47 @@ describe('createVolcengineArkClient', () => {
     await expect(client.execute({ workflowId: 'm', params: {} })).rejects.toThrow('network down');
   });
 
+  it('testConnection 200 返回 ok:true 并携带任务总数（Bearer 鉴权 GET 任务列表）', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ total: 0, items: [] }),
+    } as unknown as Response);
+
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    const res = await client.testConnection();
+
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain('连接成功');
+    expect(res.message).toContain('0');
+    // 请求详情：GET + 任务列表路由 + Bearer 鉴权
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://ark/contents/generations/tasks?page_size=3&filter.status=succeeded');
+    expect(init.method).toBe('GET');
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json', 'Authorization': 'Bearer k' });
+  });
+
+  it('testConnection 非 200 返回 ok:false 并携带状态与错误信息（如密钥格式错误）', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => '{"error":{"code":"AuthenticationError","message":"The API key format is incorrect."}}',
+    } as unknown as Response);
+
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    const res = await client.testConnection();
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('401');
+    expect(res.message).toContain('AuthenticationError');
+  });
+
+  it('testConnection 网络异常返回 ok:false', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'));
+    const client = createVolcengineArkClient({ apiKey: 'k', baseUrl: 'http://ark', timeout: 900 });
+    const res = await client.testConnection();
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('network down');
+  });
+
   it('fileToDataUrl 生成 data URL', async () => {
     const file = new File(['hello'], 'a.png', { type: 'image/png' });
     expect(await fileToDataUrl(file)).toBe('data:image/png;base64,aGVsbG8=');

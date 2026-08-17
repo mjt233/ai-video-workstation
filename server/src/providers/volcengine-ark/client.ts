@@ -9,7 +9,7 @@ interface ArkImageData {
 
 /** 火山方舟客户端：传输能力 + 连接测试 */
 export interface VolcengineArkClient extends ProviderClient {
-  /** 连接测试：验证地址可达（暂不校验密钥，后续优化） */
+  /** 连接测试：GET 任务列表接口验证鉴权与连通性（Bearer apiKey；HTTP 200 即通过） */
   testConnection(): Promise<{ ok: boolean; message: string }>;
 }
 
@@ -20,7 +20,8 @@ export interface VolcengineArkClient extends ProviderClient {
  * - execute：POST {baseUrl}/images/generations，同步等待完成，把输出规格缓存到内存 Map；
  * - poll：直接返回 completed（execute 已同步完成）；
  * - getOutput：从缓存返回输出（download 或 body）；
- * - cancel：no-op（同步请求已结束，无法中止；中断走 deferredCancel 标记机制）。
+ * - cancel：no-op（同步请求已结束，无法中止；中断走 deferredCancel 标记机制）；
+ * - testConnection：GET {baseUrl}/contents/generations/tasks（Bearer 鉴权），200 即连接正常。
  *
  * @param config 已解析配置（apiKey / baseUrl / timeout）
  * @returns ProviderClient
@@ -100,13 +101,43 @@ export function createVolcengineArkClient(config: ResolvedProviderConfig): Volce
     },
 
     async testConnection(): Promise<{ ok: boolean; message: string }> {
-      // 轻量 GET 基础地址验证可达；5 秒超时，任何异常（网络不可达/超时）均返回 ok:false
+      // 调用推理 API 的「任务列表」接口验证连通性与鉴权：
+      //   GET {baseUrl}/contents/generations/tasks?page_size=3&filter.status=succeeded
+      //   Authorization: Bearer {apiKey}
+      // HTTP 200（如 {"total":0,"items":[]}）视为连接正常并附任务总数；
+      // 非 200（如 401 AuthenticationError「API key 格式不正确」）视为失败并回显服务端错误。
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const timer = setTimeout(() => ctrl.abort(), 10000);
       try {
-        const res = await fetch(baseUrl, { method: 'GET', signal: ctrl.signal });
-        return { ok: true, message: `地址可达（HTTP ${res.status}）` };
+        const url = new URL(`${baseUrl}/contents/generations/tasks`);
+        url.searchParams.set('page_size', '3');
+        url.searchParams.set('filter.status', 'succeeded');
+        const res = await fetch(url.toString(), {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          signal: ctrl.signal,
+        });
+        if (!res.ok) {
+          const text = (await res.text()).trim() || '(空响应体)';
+          return { ok: false, message: `连接失败（HTTP ${res.status}）: ${text}` };
+        }
+        let total: number | undefined;
+        try {
+          const data = (await res.json()) as { total?: number };
+          if (typeof data.total === 'number') total = data.total;
+        } catch {
+          // 非 JSON 响应不影响成功判定
+        }
+        return total !== undefined
+          ? { ok: true, message: `连接成功（HTTP 200，任务列表 ${total} 条）` }
+          : { ok: true, message: '连接成功（HTTP 200）' };
       } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') {
+          return { ok: false, message: '连接超时（10s）' };
+        }
         return { ok: false, message: e instanceof Error ? e.message : String(e) };
       } finally {
         clearTimeout(timer);
