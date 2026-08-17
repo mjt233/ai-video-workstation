@@ -365,12 +365,12 @@ export function buildSubmit(
  *
  * 系统注册键 impl = ceb-{instanceId}-{bridgeId}（ceb- 前缀防止与其它提供商工作流 id
  * 冲突，实例 id 保证多实例下全局唯一）；workflowKey = ceb-{bridgeId} 为不含实例的
- * 基键，供 enabledWorkflows 过滤与 unregisterByInstance 清理。
+ * 基键，供 unregisterByInstance 清理。
  *
  * @param detail Bridge 工作流详情（含解析后的 params/declaredParams 与 tags）
  * @param tagId 自动注册标签 id（expose_field 元数据来源；可为空串）
- * @param instance 服务商实例（决定 impl 前缀、providerInstanceId/providerName 与启用过滤）
- * @returns 注册键（{type}:{impl}）；未知类型或未启用返回 null
+ * @param instance 服务商实例（决定 impl 前缀与 providerInstanceId/providerName）
+ * @returns 注册键（{type}:{impl}）；未知类型返回 null
  */
 function buildAndRegister(
   detail: BridgeWorkflowDetail,
@@ -383,10 +383,8 @@ function buildAndRegister(
     return null;
   }
   const bridgeId = detail.id;
-  // 工作流基键（不含实例 id）：ceb-{bridgeId}，enabledWorkflows 与清理均以此为准
+  // 工作流基键（不含实例 id）：ceb-{bridgeId}，作为系统的 workflowKey 与清理依据
   const workflowKey = `${IMPL_PREFIX}${bridgeId}`;
-  // 未启用的工作流不注册（enabledWorkflows 过滤；空集合 = 默认全选，允许全部）
-  if (instance.enabledWorkflows.length > 0 && !instance.enabledWorkflows.includes(workflowKey)) return null;
   // 系统注册键：impl = ceb-{instanceId}-{bridgeId}（实例 id 保证多实例下全局唯一）
   const impl = `${IMPL_PREFIX}${instance.id}-${bridgeId}`;
   const caps = deriveCapabilities(detail.tags, type);
@@ -420,14 +418,14 @@ function buildAndRegister(
  * 启动时经 syncAllInstances 触发。流程：
  * 1. 用 resolveInstanceConfig(instance) 解析实例配置，getProvider(instance.type) 创建 client；
  * 2. 取 autoRegisterTag；非空按标签筛选列表，空则拉取全部；
- * 3. 对每个工作流：按 enabledWorkflows 过滤（未启用跳过）→ 拉详情 →
- *    buildAndRegister 注册（impl=ceb-{instanceId}-{bridgeId}，幂等）；
- * 4. 以本次启用的 ceb- 键集合为 keepKeys 调用 unregisterByInstance 清理陈旧注册
- *    （该实例下已禁用 / 列表消失的工作流被注销）；
+ * 3. 对列表内每个工作流：拉详情 → buildAndRegister 注册（impl=ceb-{instanceId}-{bridgeId}，
+ *    默认全量可用，不做启用过滤）；
+ * 4. 以本次列表的 ceb- 键集合为 keepKeys 调用 unregisterByInstance 清理陈旧注册
+ *    （该实例下远程列表已消失的工作流被注销）；
  * 5. 列表拉取失败（Bridge 不可达 / 鉴权失败）：记 error，保留既有注册不清空；
  *    单个详情拉取失败：告警并跳过该工作流（键仍在 keepKeys 中 → 旧注册保留）。
  *
- * @param instance 服务商实例（含 config 与 enabledWorkflows）
+ * @param instance 服务商实例（含 config）
  * @returns 同步完成（无返回值；失败不抛出，仅记录日志）
  */
 export async function syncBridgeInstance(instance: ProviderInstance): Promise<void> {
@@ -445,15 +443,11 @@ export async function syncBridgeInstance(instance: ProviderInstance): Promise<vo
     return;
   }
 
-  // 本次启用的 ceb- 键集合（启用且出现在列表中）：既用于过滤注册，也作为 unregisterByInstance 的 keepKeys。
-  // 空启用集合 = 默认全选：Bridge 工作流列表随远程动态变化，空集合表示启用全部当前与后续新增的工作流。
-  const enabled = new Set(instance.enabledWorkflows);
-  const enableAll = enabled.size === 0;
+  // 默认全量可用：Bridge 工作流列表随远程动态变化，本次列表中的全部工作流都注册，
+  // keepKeys 与列表一致，清理仅剔除远程已消失的工作流。
   const keepKeys = new Set<string>();
   for (const s of summaries) {
     const workflowKey = `${IMPL_PREFIX}${s.id}`;
-    if (!enableAll && !enabled.has(workflowKey)) continue;
-    // 启用即加入 keepKeys（即使详情拉取失败也保留旧注册）
     keepKeys.add(workflowKey);
     try {
       const detail = await client.getWorkflowDetail(s.id);
@@ -463,6 +457,6 @@ export async function syncBridgeInstance(instance: ProviderInstance): Promise<vo
     }
   }
 
-  // 清理陈旧注册：该实例下已禁用 / 列表消失的工作流被注销（keepKeys 之外）
+  // 清理陈旧注册：该实例下远程列表已消失的工作流被注销（keepKeys 之外）
   unregisterByInstance(instance.id, keepKeys);
 }

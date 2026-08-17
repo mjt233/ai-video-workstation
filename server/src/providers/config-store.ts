@@ -140,9 +140,9 @@ export async function getInstance(id: string, configPath: string = CONFIG_PATH):
   return file.instances.find((i) => i.id === id);
 }
 
-/** 创建实例（生成 uuid；enabledWorkflows 缺省为空数组，由调用方按「默认全选」填充） */
+/** 创建实例（生成 uuid；该类型下的全部工作流默认可用，由同步器注册） */
 export async function createInstance(
-  input: { type: string; name: string; config: Record<string, unknown>; enabledWorkflows?: string[] },
+  input: { type: string; name: string; config: Record<string, unknown> },
   configPath: string = CONFIG_PATH,
 ): Promise<ProviderInstance> {
   const provider = getProvider(input.type);
@@ -154,17 +154,16 @@ export async function createInstance(
     type: input.type,
     name: input.name.trim(),
     config: normalizeConfig(input.type, input.config, {}),
-    enabledWorkflows: input.enabledWorkflows ?? [],
   };
   file.instances.push(instance);
   await writeConfigFile(configPath, file);
   return instance;
 }
 
-/** 更新实例（secret 空串 = 保留原值；name/config/enabledWorkflows 均可部分更新） */
+/** 更新实例（secret 空串 = 保留原值；name/config 均可部分更新） */
 export async function updateInstance(
   id: string,
-  input: { name?: string; config?: Record<string, unknown>; enabledWorkflows?: string[] },
+  input: { name?: string; config?: Record<string, unknown> },
   configPath: string = CONFIG_PATH,
 ): Promise<ProviderInstance> {
   const file = await readConfigFile(configPath);
@@ -177,9 +176,6 @@ export async function updateInstance(
   }
   if (input.config !== undefined) {
     inst.config = normalizeConfig(inst.type, input.config, inst.config);
-  }
-  if (input.enabledWorkflows !== undefined) {
-    inst.enabledWorkflows = input.enabledWorkflows;
   }
   file.instances[idx] = inst;
   await writeConfigFile(configPath, file);
@@ -217,7 +213,6 @@ export async function migrateLegacyConfig(configPath: string = CONFIG_PATH): Pro
       type,
       name: `${provider.name}-默认`,
       config,
-      enabledWorkflows: [], // 默认全选由同步器按当前列表填充
     });
   }
   await writeConfigFile(configPath, { instances });

@@ -65,9 +65,6 @@
                   </v-chip>
                 </div>
                 <div class="text-medium-emphasis">
-                  <div>
-                    已启用工作流：{{ inst.enabledWorkflows.length }} 个
-                  </div>
                   <div :class="statusColor(inst.id)">
                     {{ statusLabel(inst.id) }}
                   </div>

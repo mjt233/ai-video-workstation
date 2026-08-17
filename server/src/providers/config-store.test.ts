@@ -35,7 +35,6 @@ describe('config-store 实例 CRUD', () => {
   it('创建实例并读取', async () => {
     const inst = await createInstance({ type: 'test-store', name: '实例A', config: { url: 'http://a', key: 'secret' } }, configPath);
     expect(inst.id).toBeTruthy();
-    expect(inst.enabledWorkflows).toEqual([]);
     const list = await listInstances(configPath);
     expect(list).toHaveLength(1);
     expect(list[0].name).toBe('实例A');

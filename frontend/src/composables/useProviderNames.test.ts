@@ -21,8 +21,8 @@ describe('useProviderNames', () => {
         { id: 'volcengine-ark', name: '火山方舟', configSchema: [] },
       ],
       instances: [
-        { id: 'inst-1', type: 'volcengine-ark', name: '火山方舟-主账号', config: {}, enabledWorkflows: [] },
-        { id: 'inst-2', type: 'minimax-h3', name: 'MiniMax-主账号', config: {}, enabledWorkflows: [] },
+        { id: 'inst-1', type: 'volcengine-ark', name: '火山方舟-主账号', config: {} },
+        { id: 'inst-2', type: 'minimax-h3', name: 'MiniMax-主账号', config: {} },
       ],
     })
     const { useProviderNames } = await import('./useProviderNames')

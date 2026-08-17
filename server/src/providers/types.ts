@@ -121,8 +121,6 @@ export interface ProviderInstance {
   name: string;
   /** 该实例的配置参数（secret 字段保存时脱敏处理） */
   config: Record<string, string | number | boolean>;
-  /** 启用的工作流键列表（默认全选）：静态为 `类型:实现`，Bridge 为 `ceb-{bridgeId}` */
-  enabledWorkflows: string[];
 }
 
 /** 服务商实例可提供的工作流条目（listWorkflows 返回） */

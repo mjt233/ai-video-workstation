@@ -51,7 +51,6 @@ export interface ProviderInstanceInfo {
   type: string
   name: string
   config: Record<string, string | number | boolean>
-  enabledWorkflows: string[]
 }
 
 /** 实例工作流条目（GET /api/providers/instances/:id/workflows 返回） */
@@ -70,14 +69,13 @@ export async function getProviders(): Promise<{ types: ProviderTypeInfo[]; insta
 
 /**
  * POST /api/providers/instances — 新增服务商实例。
- * @param input 实例输入（type/name/config/enabledWorkflows）
+ * @param input 实例输入（type/name/config）；创建后该类型全部工作流默认可用
  * @returns 创建的实例（config 脱敏）
  */
 export async function createProviderInstance(input: {
   type: string
   name: string
   config: Record<string, unknown>
-  enabledWorkflows?: string[]
 }): Promise<ProviderInstanceInfo> {
   const { data } = await client.post<{ instance: ProviderInstanceInfo }>('/providers/instances', input)
   return data.instance
@@ -86,12 +84,12 @@ export async function createProviderInstance(input: {
 /**
  * PUT /api/providers/instances/:id — 更新服务商实例。
  * @param id 实例 ID
- * @param input 可部分更新的字段（name/config/enabledWorkflows）；secret 字段传空串 = 服务端保留原值
+ * @param input 可部分更新的字段（name/config）；secret 字段传空串 = 服务端保留原值
  * @returns 更新后的实例（config 脱敏）
  */
 export async function updateProviderInstance(
   id: string,
-  input: { name?: string; config?: Record<string, unknown>; enabledWorkflows?: string[] },
+  input: { name?: string; config?: Record<string, unknown> },
 ): Promise<ProviderInstanceInfo> {
   const { data } = await client.put<{ instance: ProviderInstanceInfo }>(`/providers/instances/${id}`, input)
   return data.instance

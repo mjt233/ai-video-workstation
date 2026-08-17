@@ -99,7 +99,6 @@ const instance = (over: Partial<ProviderInstance> = {}): ProviderInstance => ({
   type: 'volcengine-ark',
   name: '火山方舟-主账号',
   config: { apiKey: 'key' },
-  enabledWorkflows: ['text-to-image:seedream'],
   ...over,
 });
 

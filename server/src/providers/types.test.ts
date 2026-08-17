@@ -15,13 +15,11 @@ describe('Provider 类型定义（多实例扩展）', () => {
       type: 'volcengine-ark',
       name: '火山方舟-主账号',
       config: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: 'secret' },
-      enabledWorkflows: ['text-to-image:seedream', 'image-edit:seedream'],
     };
     expect(instance.id).toBe('inst-abc123');
     expect(instance.type).toBe('volcengine-ark');
     expect(instance.name).toBe('火山方舟-主账号');
     expect(instance.config.baseUrl).toBe('https://ark.cn-beijing.volces.com/api/v3');
-    expect(instance.enabledWorkflows).toHaveLength(2);
   });
 
   it('ProviderWorkflowEntry 可被引用并符合结构', () => {

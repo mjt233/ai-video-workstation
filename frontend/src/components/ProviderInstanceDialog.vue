@@ -120,15 +120,12 @@
           />
         </div>
 
-        <!-- 工作流列表：获取按钮 + 勾选列表（新增/编辑均可用） -->
+        <!-- 工作流预览：获取按钮 + 类型标识（只读；该服务商全部工作流默认可用） -->
         <template v-if="form.type">
           <v-divider class="my-3" />
           <div class="d-flex align-center mb-2">
             <div class="text-body-medium font-weight-medium">
-              可用工作流
-              <span class="text-caption text-medium-emphasis ml-1">
-                （默认全选；Bridge 工作流随远程配置实时刷新）
-              </span>
+              工作流预览
             </div>
             <v-spacer />
             <v-btn
@@ -162,29 +159,22 @@
             :text="workflowsError"
             density="compact"
           />
-          <v-checkbox
+          <div
             v-for="wf in workflowEntries"
             :key="wf.key"
-            v-model="form.enabledWorkflows"
-            :value="wf.key"
-            :hint="wf.description"
-            :title="wf.description"
-            density="compact"
-            hide-details
+            class="d-flex align-center py-1"
           >
-            <template #label>
-              <v-chip
-                v-if="wf.type"
-                :color="workflowTypeColor(wf.type)"
-                size="x-small"
-                variant="tonal"
-                class="mr-1"
-              >
-                {{ workflowTypeLabel(wf.type) }}
-              </v-chip>
-              <span>{{ wf.name }}</span>
-            </template>
-          </v-checkbox>
+            <v-chip
+              v-if="wf.type"
+              :color="workflowTypeColor(wf.type)"
+              size="x-small"
+              variant="tonal"
+              class="mr-2"
+            >
+              {{ workflowTypeLabel(wf.type) }}
+            </v-chip>
+            <span class="text-body-2">{{ wf.name }}</span>
+          </div>
           <div
             v-if="!workflowsLoading && !workflowsError && workflowEntries.length === 0"
             class="text-body-2 text-medium-emphasis"
@@ -254,12 +244,10 @@ const form = ref<{
   type: string
   name: string
   config: Record<string, string | number | boolean>
-  enabledWorkflows: string[]
 }>({
   type: '',
   name: '',
   config: {},
-  enabledWorkflows: [],
 })
 
 const error = ref('')
@@ -304,12 +292,11 @@ watch(
         type: props.instance.type,
         name: props.instance.name,
         config: buildForm(props.instance.type, props.instance.config),
-        enabledWorkflows: [...props.instance.enabledWorkflows],
       }
       void loadWorkflows()
     } else {
       // 新增模式：重置
-      form.value = { type: '', name: '', config: {}, enabledWorkflows: [] }
+      form.value = { type: '', name: '', config: {} }
       workflowEntries.value = []
       workflowsError.value = ''
     }
@@ -340,16 +327,15 @@ function onTypeChange() {
   const prev = form.value.config
   form.value.config = buildForm(form.value.type, prev)
   testResult.value = null
-  // 类型切换后清空工作流列表与启用集合，避免残留上一类型的条目
+  // 类型切换后清空工作流预览，避免残留上一类型的条目
   workflowEntries.value = []
   workflowsError.value = ''
-  form.value.enabledWorkflows = []
 }
 
 /**
- * 拉取工作流列表：使用当前表单配置调用后端（新增模式无实例；编辑模式携带
- * instanceId，服务端对空白的 secret 字段回填已保存值）。返回后把列表合并进
- * enabledWorkflows：仍存在的已启用项保留、列表新增项自动勾选、已消失项剔除。
+ * 拉取工作流预览：使用当前表单配置调用后端（新增模式无实例；编辑模式携带
+ * instanceId，服务端对空白的 secret 字段回填已保存值）。结果仅作展示，
+ * 服务商全部工作流默认可用，与预览勾选无关。
  */
 async function loadWorkflows() {
   const type = form.value.type
@@ -357,27 +343,12 @@ async function loadWorkflows() {
   workflowsLoading.value = true
   workflowsError.value = ''
   try {
-    const entries = await fetchProviderWorkflows(type, { ...form.value.config }, props.instance?.id)
-    workflowEntries.value = entries
-    mergeEnabledWorkflows(entries)
+    workflowEntries.value = await fetchProviderWorkflows(type, { ...form.value.config }, props.instance?.id)
   } catch (e) {
     workflowsError.value = e instanceof Error ? e.message : String(e)
   } finally {
     workflowsLoading.value = false
   }
-}
-
-/**
- * 合并启用集合：保留仍存在且已启用的项（已禁用项不恢复）、列表新增项默认勾选、
- * 列表已消失的项自动剔除。
- *
- * @param entries 拉取到的最新工作流条目
- */
-function mergeEnabledWorkflows(entries: ProviderWorkflowEntry[]) {
-  const saved = new Set(form.value.enabledWorkflows)
-  const kept = entries.filter((e) => saved.has(e.key)).map((e) => e.key)
-  const newOnes = entries.filter((e) => !saved.has(e.key)).map((e) => e.key)
-  form.value.enabledWorkflows = [...kept, ...newOnes]
 }
 
 /** 连接测试：用当前表单参数调用后端（不落盘） */
@@ -404,14 +375,12 @@ async function onSave() {
       await updateProviderInstance(props.instance.id, {
         name: form.value.name,
         config: { ...form.value.config },
-        enabledWorkflows: form.value.enabledWorkflows,
       })
     } else {
       await createProviderInstance({
         type: form.value.type,
         name: form.value.name,
         config: { ...form.value.config },
-        enabledWorkflows: form.value.enabledWorkflows,
       })
     }
     emit('saved')

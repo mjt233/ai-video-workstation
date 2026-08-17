@@ -84,7 +84,6 @@ workflowRouter.get('/providers', async (_req: Request, res: Response) => {
       type: inst.type,
       name: inst.name,
       config: getInstanceConfigMasked(inst),
-      enabledWorkflows: inst.enabledWorkflows,
     })));
     res.json({ types, instances: instanceInfos });
   } catch (e) {
@@ -93,20 +92,19 @@ workflowRouter.get('/providers', async (_req: Request, res: Response) => {
   }
 });
 
-// POST /api/providers/instances — 新增服务商实例（创建后触发实例工作流同步）
+// POST /api/providers/instances — 新增服务商实例（创建后触发实例工作流同步，默认全量可用）
 workflowRouter.post('/providers/instances', async (req: Request, res: Response) => {
-  const { type, name, config, enabledWorkflows } = req.body as {
+  const { type, name, config } = req.body as {
     type?: string;
     name?: string;
     config?: Record<string, unknown>;
-    enabledWorkflows?: string[];
   };
   if (!type || !name || !config || typeof config !== 'object') {
     res.status(400).json({ error: 'Missing body: type/name/config' });
     return;
   }
   try {
-    const instance = await createInstance({ type, name, config, enabledWorkflows });
+    const instance = await createInstance({ type, name, config });
     await syncInstance(instance);
     res.json({ instance: { ...instance, config: getInstanceConfigMasked(instance) } });
   } catch (e) {
@@ -118,13 +116,12 @@ workflowRouter.post('/providers/instances', async (req: Request, res: Response) 
 // PUT /api/providers/instances/:id — 更新服务商实例（secret 空串保留原值；更新后触发同步）
 workflowRouter.put('/providers/instances/:id', async (req: Request, res: Response) => {
   const id = req.params.id as string;
-  const { name, config, enabledWorkflows } = req.body as {
+  const { name, config } = req.body as {
     name?: string;
     config?: Record<string, unknown>;
-    enabledWorkflows?: string[];
   };
   try {
-    const instance = await updateInstance(id, { name, config, enabledWorkflows });
+    const instance = await updateInstance(id, { name, config });
     await syncInstance(instance);
     res.json({ instance: { ...instance, config: getInstanceConfigMasked(instance) } });
   } catch (e) {
