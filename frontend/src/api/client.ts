@@ -33,6 +33,17 @@ export async function createProject(name: string): Promise<{ name: string }> {
 }
 
 /**
+ * 删除项目（首页项目列表「删除」使用）。
+ * 服务端递归删除 design/{name}/ 下的全部资产，操作不可恢复，调用方必须先经 confirm 弹窗确认。
+ * @param name 项目名称（不允许包含 / 或 \，长度不超过 64 个字符）
+ * @returns 删除成功标记
+ */
+export async function deleteProject(name: string): Promise<{ success: boolean }> {
+  const { data } = await client.delete<{ success: boolean }>(`/projects/${encodeURIComponent(name)}`)
+  return data
+}
+
+/**
  * 从文件系统读取文件内容。注意：如果文件是.json，返回的数据直接就是已完成反序列化的对象或数组。
  */
 export async function readFs(project: string, path: string): Promise<DirResponse | string> {

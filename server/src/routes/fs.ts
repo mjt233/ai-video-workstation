@@ -124,6 +124,40 @@ fsRouter.post('/projects', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * 删除项目（首页项目列表「删除」使用）：
+ * - 校验项目名：必填、不得包含 / 或 \、不得为 . 或 ..、长度不超过 64（与创建接口一致）
+ * - 目标目录不存在时返回 404
+ * - 递归删除 design/{name}/ 下的全部资产（prompt/、assert/、overview.md、project.json 等），不可恢复
+ * @param req.params.name 项目名称（作为项目目录名）
+ */
+fsRouter.delete('/projects/:name', async (req: Request, res: Response) => {
+  try {
+    const name = ((req.params.name as string) ?? '').trim();
+    if (!name || name === '.' || name === '..' || /[\\/]/.test(name) || name.length > 64) {
+      res.status(400).json({ error: '项目名不合法：不能包含 / 或 \\，长度不超过 64 个字符' });
+      return;
+    }
+    const projectDir = path.resolve(DESIGN_DIR, name);
+    const designRoot = path.resolve(DESIGN_DIR) + path.sep;
+    if (!projectDir.startsWith(designRoot)) {
+      res.status(403).json({ error: 'Path traversal denied' });
+      return;
+    }
+    try {
+      await fs.access(projectDir);
+    } catch {
+      res.status(404).json({ error: `项目「${name}」不存在` });
+      return;
+    }
+    await fs.rm(projectDir, { recursive: true, force: true });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to delete project:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 fsRouter.get('/fs/:project/*', async (req: Request, res: Response) => {
   try {
     const project = req.params.project as string;

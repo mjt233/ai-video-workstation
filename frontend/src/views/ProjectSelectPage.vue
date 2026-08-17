@@ -63,6 +63,25 @@
             <v-list-item-title class="font-weight-medium">
               {{ p.name }}
             </v-list-item-title>
+            <template #append>
+              <v-tooltip
+                text="删除项目"
+                location="left"
+              >
+                <template #activator="{ props }">
+                  <v-btn
+                    v-bind="props"
+                    icon="mdi-delete-outline"
+                    size="small"
+                    variant="text"
+                    color="error"
+                    :loading="deletingName === p.name"
+                    :disabled="deletingName !== null && deletingName !== p.name"
+                    @click.stop="handleDelete(p.name)"
+                  />
+                </template>
+              </v-tooltip>
+            </template>
           </v-list-item>
         </v-list>
         <v-empty-state
@@ -205,7 +224,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getProjects, createProject, importProject, ProjectImportError, type ProjectEntry } from '../api/client'
+import { getProjects, createProject, deleteProject, importProject, ProjectImportError, type ProjectEntry } from '../api/client'
 import { confirm } from '../utils/confirm'
 import { detectZipProjectName } from '../utils/detectZipName'
 
@@ -235,6 +254,8 @@ const importing = ref(false)
 const importProgress = ref(0)
 /** 导入接口返回的错误信息（如格式错误、重名） */
 const importError = ref('')
+/** 正在删除的项目名（null 表示无删除请求进行中；用于按钮 loading 与禁用互斥） */
+const deletingName = ref<string | null>(null)
 /** 文件名称探测序号：防止用户连续选择文件时旧探测结果覆盖新结果 */
 let detectSeq = 0
 
@@ -291,6 +312,31 @@ async function loadProjects() {
  */
 function openProject(name: string) {
   router.push('/project?project=' + encodeURIComponent(name))
+}
+
+/**
+ * 删除项目：先弹窗确认（删除类操作必须确认），确认后调用后端接口递归删除，
+ * 成功时刷新列表，失败时弹出提示。删除期间禁用其他删除按钮，避免并发操作。
+ * @param name 项目名
+ */
+async function handleDelete(name: string) {
+  const ok = await confirm({
+    title: '确认删除',
+    content: `确定删除项目「${name}」吗？项目下全部资产（prompt、assert、overview 等）将被永久删除，此操作不可撤销。`,
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
+  deletingName.value = name
+  try {
+    await deleteProject(name)
+    await loadProjects()
+  } catch (e) {
+    console.error('删除项目失败:', e)
+    alert('删除失败，请重试')
+  } finally {
+    deletingName.value = null
+  }
 }
 
 /** 打开新建项目对话框并清空上次输入与错误信息 */
