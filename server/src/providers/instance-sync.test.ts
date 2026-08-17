@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { syncAllInstances, syncInstance } from './instance-sync.js';
-import { getImplementations, getCandidatesByProvider, register, unregisterByInstance } from '../workflows/registry.js';
+import { syncAllInstances } from './instance-sync.js';
+import { getImplementations, register } from '../workflows/registry.js';
 import type { WorkflowDefinition } from '../workflows/types.js';
 
 vi.mock('./config-store.js', () => ({

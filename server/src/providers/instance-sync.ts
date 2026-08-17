@@ -1,4 +1,4 @@
-import { listInstances, resolveInstanceConfig } from './config-store.js';
+import { listInstances } from './config-store.js';
 import { getProvider } from './registry.js';
 import { getCandidatesByProvider, registerOrReplace, unregisterByInstance } from '../workflows/registry.js';
 import type { ProviderInstance } from './types.js';
