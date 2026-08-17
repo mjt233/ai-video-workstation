@@ -1,4 +1,4 @@
-import { getProviderConfig } from '../providers/config-store.js';
+import { listInstances, resolveInstanceConfig } from '../providers/config-store.js';
 import { getProvider } from '../providers/registry.js';
 import type {
   BridgeTagGroup,
@@ -446,7 +446,10 @@ export function syncBridgeWorkflows(): Promise<void> {
  * @returns 同步完成（无返回值；失败不抛出，仅记录日志）
  */
 async function doSync(): Promise<void> {
-  const config = await getProviderConfig(PROVIDER_ID);
+  const instances = await listInstances();
+  const instance = instances.find((i) => i.type === PROVIDER_ID);
+  if (!instance) throw new Error(`未配置 ${PROVIDER_ID} 实例`);
+  const config = resolveInstanceConfig(instance);
   const providerDef = getProvider(PROVIDER_ID);
   if (!providerDef) throw new Error(`Provider 未注册: ${PROVIDER_ID}`);
   const client = providerDef.createClient(config) as ComfyuiBridgeClient;

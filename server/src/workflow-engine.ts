@@ -12,7 +12,7 @@ import type {
   VideoWorkflowSubmitParams,
 } from './workflows/types.js';
 import { buildSceneVideoSubmitData, type SceneAdapterDeps } from './workflows/scene-adapter.js';
-import { getProviderConfig } from './providers/config-store.js';
+import { listInstances, resolveInstanceConfig } from './providers/config-store.js';
 import { getProvider } from './providers/registry.js';
 import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
@@ -686,7 +686,10 @@ async function runTask(taskId: string): Promise<void> {
     if (!providerDef) {
       throw new Error(`工作流 ${task.workflow_id}/${task.impl} 声明的 provider 未注册: ${providerId}`);
     }
-    const provider = providerDef.createClient(await getProviderConfig(providerId));
+    const instances = await listInstances();
+    const instance = instances.find((i) => i.type === providerId);
+    if (!instance) throw new Error(`Provider 未配置实例: ${providerId}`);
+    const provider = providerDef.createClient(resolveInstanceConfig(instance));
 
     // ── 视频自包含提交数据 ──
     // 画布节点任务：params.video（wire 形态）→ 解析为 File 形态；

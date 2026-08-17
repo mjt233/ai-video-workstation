@@ -4,9 +4,9 @@ import { syncBridgeWorkflows, buildSubmit } from './bridge-sync.js';
 import type { BridgeWorkflowDetail } from '../providers/comfyui-bridge/client.js';
 import type { WorkflowCapabilities, WorkflowDefinition } from './types.js';
 
-// ── mock getProviderConfig / getProvider（避免真实配置与网络） ──
+// ── mock listInstances / resolveInstanceConfig / getProvider（避免真实配置与网络） ──
 // 注意：vi.mock 工厂被 hoist 到顶部，mock 客户端与可变配置必须用 vi.hoisted 定义；
-// getProviderConfig 每次调用都读取 mockConfig 的当前值（测试可直接改 autoRegisterTag 等）
+// resolveInstanceConfig 每次调用都读取 mockConfig 的当前值（测试可直接改 autoRegisterTag 等）
 const { mockClient, mockConfig } = vi.hoisted(() => ({
   mockClient: {
     listWorkflows: vi.fn(),
@@ -16,7 +16,8 @@ const { mockClient, mockConfig } = vi.hoisted(() => ({
 }));
 
 vi.mock('../providers/config-store.js', () => ({
-  getProviderConfig: vi.fn(async () => ({ ...mockConfig })),
+  listInstances: vi.fn(async () => [{ id: 'inst-1', type: 'comfyui-bridge', name: '默认', config: { ...mockConfig }, enabledWorkflows: [] }]),
+  resolveInstanceConfig: vi.fn(() => ({ ...mockConfig })),
 }));
 vi.mock('../providers/registry.js', () => ({
   getProvider: vi.fn(() => ({ id: 'comfyui-bridge', createClient: () => mockClient })),
