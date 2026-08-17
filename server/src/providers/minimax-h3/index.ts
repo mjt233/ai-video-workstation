@@ -62,6 +62,9 @@ const definition: ProviderDefinition = {
     },
   ],
   createClient: (config) => createMinimaxH3Client(config),
+  // TODO(后续任务): 实现真实 listWorkflows（查静态注册表）与 testConnection（验证地址可达）
+  listWorkflows: async () => [],
+  testConnection: async () => ({ ok: true, message: '' }),
 };
 
 registerProvider(definition);

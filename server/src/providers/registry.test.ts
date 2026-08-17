@@ -10,6 +10,8 @@ const mkProvider = (id: string): ProviderDefinition => ({
   createClient: () => {
     throw new Error('not used in registry test');
   },
+  listWorkflows: async () => [],
+  testConnection: async () => ({ ok: true, message: 'ok' }),
 });
 
 describe('provider registry', () => {

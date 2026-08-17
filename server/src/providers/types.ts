@@ -50,6 +50,10 @@ export interface ProviderDefinition {
   configSchema: ProviderConfigField[];
   /** 按已解析配置创建传输客户端（每次调用返回独立实例，token 缓存等按实例持有） */
   createClient(config: ResolvedProviderConfig): ProviderClient;
+  /** 返回该实例可提供的工作流列表（Bridge 动态拉取 / 静态返回注册表候选） */
+  listWorkflows(config: ResolvedProviderConfig): Promise<ProviderWorkflowEntry[]>;
+  /** 连接测试：返回是否成功与提示信息（不抛 5xx，失败返回 ok:false） */
+  testConnection(config: ResolvedProviderConfig): Promise<{ ok: boolean; message: string }>;
 }
 
 /**
@@ -106,3 +110,29 @@ export type WorkflowOutput =
   | { type: 'download'; url: string; filename: string }
   | { type: 'fetch'; request: { url: string; method: string; headers?: Record<string, string> }; filename: string }
   | { type: 'body'; contentType: string; data: string; filename: string };
+
+/** 服务商实例（多实例模型的核心抽象） */
+export interface ProviderInstance {
+  /** 自动生成的唯一 ID（uuid），用户不可改 */
+  id: string;
+  /** 服务商类型 id，如 volcengine-ark / comfyui-bridge / minimax-h3 */
+  type: string;
+  /** 用户手填的显示名，如「火山方舟-主账号」 */
+  name: string;
+  /** 该实例的配置参数（secret 字段保存时脱敏处理） */
+  config: Record<string, string | number | boolean>;
+  /** 启用的工作流键列表（默认全选）：静态为 `类型:实现`，Bridge 为 `ceb-{bridgeId}` */
+  enabledWorkflows: string[];
+}
+
+/** 服务商实例可提供的工作流条目（listWorkflows 返回） */
+export interface ProviderWorkflowEntry {
+  /** 工作流键（不含实例 id）：静态为 `类型:实现`，Bridge 为 `ceb-{bridgeId}` */
+  key: string;
+  /** 显示名 */
+  name: string;
+  /** 工作流类型（text-to-image / image-edit / image-to-video / tts-*）；Bridge 可在同步时推导 */
+  type?: string;
+  /** 可选描述 */
+  description?: string;
+}

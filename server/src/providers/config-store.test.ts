@@ -27,6 +27,8 @@ const mkTestProvider = (id: string): ProviderDefinition => ({
   createClient: () => {
     throw new Error('not used in config-store test');
   },
+  listWorkflows: async () => [],
+  testConnection: async () => ({ ok: true, message: 'ok' }),
 });
 
 describe('config-store', () => {

@@ -47,6 +47,9 @@ const definition: ProviderDefinition = {
     },
   ],
   createClient: (config) => createComfyuiBridgeClient(config),
+  // TODO(后续任务): 实现真实 listWorkflows（从 Bridge 动态拉取）与 testConnection（连通性 + 鉴权）
+  listWorkflows: async () => [],
+  testConnection: async () => ({ ok: true, message: '' }),
 };
 
 registerProvider(definition);
