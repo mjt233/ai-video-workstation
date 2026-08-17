@@ -31,7 +31,7 @@ import type {
 /** ComfyUI Bridge Provider 插件 id */
 const PROVIDER_ID = 'comfyui-bridge';
 
-/** 动态注册实现标识前缀：impl = ceb-{bridge workflow id} */
+/** 动态注册实现标识前缀：impl = ceb-{instanceId}-{bridgeId}，workflowKey = ceb-{bridgeId} */
 const IMPL_PREFIX = 'ceb-';
 
 /** text-to-image 提交按结构字段处理的用户参数键（从透传排除） */
@@ -445,7 +445,7 @@ export async function syncBridgeInstance(instance: ProviderInstance): Promise<vo
     return;
   }
 
-  // 本次启用的 ceb- 键集合：既用于过滤注册，也作为 unregisterByInstance 的 keepKeys
+  // 本次启用的 ceb- 键集合（启用且出现在列表中）：既用于过滤注册，也作为 unregisterByInstance 的 keepKeys
   const enabled = new Set(instance.enabledWorkflows);
   const keepKeys = new Set<string>();
   for (const s of summaries) {
