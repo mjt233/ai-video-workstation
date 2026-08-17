@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getImpl } from '../registry.js';
+import { getCandidatesByProvider, getImpl, registerOrReplace } from '../registry.js';
 import type { ProviderClient } from '../../providers/types.js';
 import type { VideoWorkflowSubmitData, WorkflowRunContext, WorkflowVarsBase } from '../types.js';
 import {
@@ -7,6 +7,17 @@ import {
   resolveMinimaxRatio,
 } from './minimax-h3.js';
 import './minimax-h3.js';
+
+/**
+ * 将 minimax-h3 静态候选定义提升为可执行定义（补 providerInstanceId），
+ * 使 getImpl 能检索到（注册表语义：无实例 = 候选，不可执行）。
+ */
+function promoteStaticCandidates(): void {
+  for (const w of getCandidatesByProvider('minimax-h3')) {
+    registerOrReplace({ ...w, providerInstanceId: 'test-inst', providerName: '测试实例' });
+  }
+}
+promoteStaticCandidates();
 
 /** provider.execute 的函数类型（测试 mock 用） */
 type ExecuteFn = ProviderClient['execute'];
