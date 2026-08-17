@@ -4,7 +4,7 @@ import { getCandidatesByProvider } from '../../workflows/registry.js';
 import { createMinimaxH3Client } from './client.js';
 
 /**
- * MiniMax H3 Provider 插件。
+ * MiniMax Provider 插件。
  *
  * 对接 MiniMax 开放平台视频生成 V2 API（https://platform.minimaxi.com/docs/api-reference/video-generation-v2-create），
  * 为图生视频（i2va）与多模态参考生视频（r2va）工作流提供传输能力：
@@ -18,8 +18,8 @@ import { createMinimaxH3Client } from './client.js';
  */
 const definition: ProviderDefinition = {
   id: 'minimax-h3',
-  name: 'MiniMax H3',
-  description: 'MiniMax H3 视频生成 V2 API：图生视频（I2VA）与多模态参考生视频（R2VA），2K/768P 直出',
+  name: 'MiniMax',
+  description: 'MiniMax 视频生成 V2 API：图生视频（I2VA）与多模态参考生视频（R2VA），2K/768P 直出',
   configSchema: [
     {
       key: 'apiKey',

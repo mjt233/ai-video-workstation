@@ -18,7 +18,8 @@ import type { ProviderClient, ResolvedProviderConfig, WorkflowOutput } from '../
  * - poll：GET 查询任务，succeeded 时缓存输出 URL（getOutput 读取即删除）；failed/cancelled 返回
  *   对应错误信息；
  * - getOutput：从缓存返回 { type: 'download', url, filename }；
- * - cancel：DELETE 取消任务（仅排队中任务可取消，运行中远端会返回错误）。
+ * - cancel：DELETE 取消任务（仅排队中任务可取消，运行中远端会返回错误）；
+ * - testConnection：GET /v1/query/video_generation（Bearer 鉴权），200 + status_code 2013 即连接正常。
  */
 
 /** MiniMax H3 分辨率档位 */
@@ -88,7 +89,7 @@ interface MinimaxUploadResponse {
 
 /** MiniMax H3 客户端：传输能力 + 连接测试 */
 export interface MinimaxH3Client extends ProviderClient {
-  /** 连接测试：验证地址可达（暂不校验密钥，后续优化） */
+  /** 连接测试：GET /v1/query/video_generation 验证鉴权（HTTP 200 且 status_code 2013 即通过） */
   testConnection(): Promise<{ ok: boolean; message: string }>;
 }
 
@@ -210,7 +211,7 @@ export function createMinimaxH3Client(config: ResolvedProviderConfig): MinimaxH3
   return {
     async execute(p) {
       if (!apiKey) {
-        throw new Error('MiniMax API Key 未配置（请到「服务商配置」填写 MiniMax H3 的 API Key）');
+        throw new Error('MiniMax API Key 未配置（请到「服务商配置」填写 MiniMax 的 API Key）');
       }
       const params = (p.params ?? {}) as unknown as MinimaxVideoGenerationParams;
       const files = p.files ?? {};
@@ -331,13 +332,47 @@ export function createMinimaxH3Client(config: ResolvedProviderConfig): MinimaxH3
     },
 
     async testConnection(): Promise<{ ok: boolean; message: string }> {
-      // 轻量 GET 基础地址验证可达；5 秒超时，任何异常（网络不可达/超时）均返回 ok:false
+      // 调用「查询视频生成任务」接口验证连通性与鉴权：
+      //   GET {baseUrl}/v1/query/video_generation
+      //   Authorization: Bearer {apiKey}
+      // 判定：HTTP 200 且 base_resp.status_code === 2013（invalid params，缺查询参数）
+      // = 密钥有效、接口可达 → 连接正常；200 且 status_code === 1004（login fail）= 密钥无效；
+      // 其余情况按失败处理并回显服务端 status_msg / 原始响应体。
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const timer = setTimeout(() => ctrl.abort(), 10000);
       try {
-        const res = await fetch(baseUrl, { method: 'GET', signal: ctrl.signal });
-        return { ok: true, message: `地址可达（HTTP ${res.status}）` };
+        const res = await fetch(`${baseUrl}/v1/query/video_generation`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+          signal: ctrl.signal,
+        });
+        let rawBody = '';
+        try {
+          rawBody = await res.text();
+        } catch {
+          // 响应体读取失败时按空处理
+        }
+        let statusCode: number | undefined;
+        let statusMsg = '';
+        try {
+          const data = JSON.parse(rawBody) as { base_resp?: { status_code?: number; status_msg?: string } };
+          statusCode = data.base_resp?.status_code;
+          statusMsg = data.base_resp?.status_msg ?? '';
+        } catch {
+          // 非 JSON 响应体（如网关错误页），按文本处理
+        }
+        if (res.ok && statusCode === 2013) {
+          return { ok: true, message: '连接成功（鉴权通过，接口可达）' };
+        }
+        const detail = statusMsg || rawBody.trim() || '(空响应体)';
+        if (statusCode === 1004) {
+          return { ok: false, message: `连接失败：鉴权未通过（${detail}）` };
+        }
+        return { ok: false, message: `连接失败（HTTP ${res.status}，status_code=${statusCode ?? '?'}）: ${detail}` };
       } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') {
+          return { ok: false, message: '连接超时（10s）' };
+        }
         return { ok: false, message: e instanceof Error ? e.message : String(e) };
       } finally {
         clearTimeout(timer);

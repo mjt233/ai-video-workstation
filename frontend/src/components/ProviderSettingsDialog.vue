@@ -64,11 +64,6 @@
                     {{ typeName(inst.type) }}
                   </v-chip>
                 </div>
-                <div class="text-medium-emphasis">
-                  <div :class="statusColor(inst.id)">
-                    {{ statusLabel(inst.id) }}
-                  </div>
-                </div>
               </v-card-text>
               <v-card-actions>
                 <v-spacer />
@@ -190,19 +185,5 @@ async function onDelete(inst: ProviderInstanceInfo) {
 /** 类型 id → 类型显示名 */
 function typeName(typeId: string): string {
   return types.value.find((t) => t.id === typeId)?.name ?? typeId
-}
-
-/** 连接状态标签（未测试过显示「未测试」） */
-function statusLabel(instanceId: string): string {
-  const s = testStatus.value[instanceId]
-  if (!s) return '未测试'
-  return s.ok ? '连接正常' : '连接失败'
-}
-
-/** 连接状态颜色（成功绿色 / 失败红色 / 未测试默认） */
-function statusColor(instanceId: string): string {
-  const s = testStatus.value[instanceId]
-  if (!s) return ''
-  return s.ok ? 'text-success' : 'text-error'
 }
 </script>

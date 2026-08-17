@@ -287,4 +287,59 @@ describe('createMinimaxH3Client', () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect(body.resolution).toBe('768P');
   });
+
+  it('testConnection 200 + status_code 2013 判定连接成功（Bearer 鉴权 GET 查询接口）', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ base_resp: { status_code: 2013, status_msg: 'invalid params' } }),
+    } as unknown as Response);
+
+    const client = createMinimaxH3Client(config);
+    const res = await client.testConnection();
+
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain('连接成功');
+    // 请求详情：GET + /v1/query/video_generation + Bearer 鉴权
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://mm/v1/query/video_generation');
+    expect(init.method).toBe('GET');
+    expect(init.headers).toMatchObject({ 'Authorization': 'Bearer k' });
+  });
+
+  it('testConnection 200 + status_code 1004 判定鉴权失败（login fail）', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        base_resp: { status_code: 1004, status_msg: 'login fail: Please carry the API secret key in the Authorization field' },
+      }),
+    } as unknown as Response);
+
+    const client = createMinimaxH3Client(config);
+    const res = await client.testConnection();
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('鉴权未通过');
+    expect(res.message).toContain('login fail');
+  });
+
+  it('testConnection 非 200 判定失败并回显状态码与响应体', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { message: 'bad key' } }),
+      text: async () => '{"error":{"message":"bad key"}}',
+    } as unknown as Response);
+
+    const client = createMinimaxH3Client(config);
+    const res = await client.testConnection();
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('401');
+  });
+
+  it('testConnection 网络异常判定失败', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'));
+    const client = createMinimaxH3Client(config);
+    const res = await client.testConnection();
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('network down');
+  });
 });

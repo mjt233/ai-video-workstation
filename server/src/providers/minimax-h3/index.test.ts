@@ -12,12 +12,31 @@ vi.mock('../../workflows/registry.js', () => ({
 }));
 
 describe('minimax-h3 连接测试', () => {
-  it('地址可达返回 ok:true', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+  it('200 + status_code 2013（invalid params）判定连接成功', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ base_resp: { status_code: 2013, status_msg: 'invalid params' } }),
+    } as unknown as Response);
     vi.stubGlobal('fetch', fetchMock);
     const client = createMinimaxH3Client({ baseUrl: 'http://minimax' });
     const res = await client.testConnection();
     expect(res.ok).toBe(true);
+    expect(res.message).toContain('连接成功');
+    vi.unstubAllGlobals();
+  });
+
+  it('200 + status_code 1004（login fail）判定鉴权失败', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ base_resp: { status_code: 1004, status_msg: 'login fail' } }),
+    } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createMinimaxH3Client({ baseUrl: 'http://minimax' });
+    const res = await client.testConnection();
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('鉴权未通过');
     vi.unstubAllGlobals();
   });
 
@@ -54,12 +73,16 @@ describe('minimax-h3 插件定义', () => {
   });
 
   it('testConnection 委托给客户端并返回结果', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ base_resp: { status_code: 2013, status_msg: 'invalid params' } }),
+    } as unknown as Response);
     vi.stubGlobal('fetch', fetchMock);
     const def = getProvider('minimax-h3');
     const res = await def!.testConnection({ baseUrl: 'http://minimax' });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain('地址可达');
+    expect(res.message).toContain('连接成功');
     vi.unstubAllGlobals();
   });
 });

@@ -17,7 +17,7 @@ describe('useProviderNames', () => {
   it('加载成功：构建实例 ID → 友好名称映射，且整个会话只请求一次', async () => {
     mockedGetProviders.mockResolvedValue({
       types: [
-        { id: 'minimax-h3', name: 'MiniMax H3', configSchema: [] },
+        { id: 'minimax-h3', name: 'MiniMax', configSchema: [] },
         { id: 'volcengine-ark', name: '火山方舟', configSchema: [] },
       ],
       instances: [
