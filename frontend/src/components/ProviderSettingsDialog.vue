@@ -43,60 +43,56 @@
           <v-progress-circular indeterminate />
         </div>
         <template v-else>
-          <v-row>
-            <v-col
+          <div class="d-flex flex-wrap">
+            <v-card
               v-for="inst in instances"
               :key="inst.id"
-              cols="12"
-              sm="6"
-              md="4"
+              class="d-inline-block ma-1"
+              style="max-width: 260px;min-width: 260px;"
+              @click="openEdit(inst)"
             >
-              <v-card
-                variant="outlined"
-                class="h-100"
-                @click="openEdit(inst)"
-              >
-                <v-card-title class="text-subtitle-1 font-weight-bold d-flex align-center">
-                  {{ inst.name }}
+              <v-card-text class="text-caption">
+                <div class="d-flex justify-space-between mb-1">
+                  <span>{{ inst.name }}</span>
                   <v-chip
                     size="x-small"
                     variant="tonal"
                     color="secondary"
-                    class="ml-1"
+                    class="mr-1"
                   >
                     {{ typeName(inst.type) }}
                   </v-chip>
-                </v-card-title>
-                <v-card-text class="text-caption text-medium-emphasis">
+                </div>
+                <div class="text-medium-emphasis">
                   <div>
                     已启用工作流：{{ inst.enabledWorkflows.length }} 个
                   </div>
                   <div :class="statusColor(inst.id)">
                     {{ statusLabel(inst.id) }}
                   </div>
-                </v-card-text>
-                <v-card-actions>
-                  <v-spacer />
-                  <v-btn
-                    icon="mdi-delete"
-                    size="small"
-                    variant="text"
-                    color="error"
-                    :title="`删除服务商「${inst.name}」`"
-                    @click.stop="onDelete(inst)"
-                  />
-                </v-card-actions>
-              </v-card>
-            </v-col>
-            <v-col
-              v-if="instances.length === 0"
-              cols="12"
-            >
-              <div class="text-body-2 text-medium-emphasis text-center pa-6">
-                尚未添加服务商，点击左上角「新增服务商」开始配置。
-              </div>
-            </v-col>
-          </v-row>
+                </div>
+              </v-card-text>
+              <v-card-actions>
+                <v-spacer />
+                <v-btn
+                  icon="mdi-delete"
+                  size="small"
+                  variant="text"
+                  color="error"
+                  :title="`删除服务商「${inst.name}」`"
+                  @click.stop="onDelete(inst)"
+                />
+              </v-card-actions>
+            </v-card>
+          </div>
+          <v-col
+            v-if="instances.length === 0"
+            cols="12"
+          >
+            <div class="text-body-2 text-medium-emphasis text-center pa-6">
+              尚未添加服务商，点击左上角「新增服务商」开始配置。
+            </div>
+          </v-col>
         </template>
       </v-card-text>
     </v-card>
