@@ -49,6 +49,7 @@
               :key="inst.id"
               class="d-inline-block ma-1"
               style="max-width: 260px;min-width: 260px;"
+              variant="outlined"
               @click="openEdit(inst)"
             >
               <v-card-text class="text-caption">
