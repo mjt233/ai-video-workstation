@@ -37,23 +37,94 @@ export interface ProviderInfo {
   config: Record<string, string | number | boolean>
 }
 
-/** GET /api/providers — 列出所有 provider 及其配置（secret 脱敏） */
-export async function getProviders(): Promise<ProviderInfo[]> {
-  const { data } = await client.get<{ providers: ProviderInfo[] }>('/providers')
-  return data.providers
+/** 服务商类型信息（GET /api/providers 返回的 types 元素） */
+export interface ProviderTypeInfo {
+  id: string
+  name: string
+  description?: string
+  configSchema: ProviderConfigField[]
+}
+
+/** 服务商实例信息（GET /api/providers 返回的 instances 元素；config 已脱敏） */
+export interface ProviderInstanceInfo {
+  id: string
+  type: string
+  name: string
+  config: Record<string, string | number | boolean>
+  enabledWorkflows: string[]
+}
+
+/** 实例工作流条目（GET /api/providers/instances/:id/workflows 返回） */
+export interface ProviderWorkflowEntry {
+  key: string
+  name: string
+  type?: string
+  description?: string
+}
+
+/** GET /api/providers — 服务商类型列表 + 实例列表（config 脱敏） */
+export async function getProviders(): Promise<{ types: ProviderTypeInfo[]; instances: ProviderInstanceInfo[] }> {
+  const { data } = await client.get<{ types: ProviderTypeInfo[]; instances: ProviderInstanceInfo[] }>('/providers')
+  return data
 }
 
 /**
- * PUT /api/providers/:id — 保存 provider 配置。
- * @param id provider id
- * @param config 配置键值；secret 字段传空串或不传 = 服务端保留原值
+ * POST /api/providers/instances — 新增服务商实例。
+ * @param input 实例输入（type/name/config/enabledWorkflows）
+ * @returns 创建的实例（config 脱敏）
  */
-export async function saveProviderConfig(
+export async function createProviderInstance(input: {
+  type: string
+  name: string
+  config: Record<string, unknown>
+  enabledWorkflows?: string[]
+}): Promise<ProviderInstanceInfo> {
+  const { data } = await client.post<{ instance: ProviderInstanceInfo }>('/providers/instances', input)
+  return data.instance
+}
+
+/**
+ * PUT /api/providers/instances/:id — 更新服务商实例。
+ * @param id 实例 ID
+ * @param input 可部分更新的字段（name/config/enabledWorkflows）；secret 字段传空串 = 服务端保留原值
+ * @returns 更新后的实例（config 脱敏）
+ */
+export async function updateProviderInstance(
   id: string,
-  config: Record<string, unknown>,
-): Promise<{ success: boolean }> {
-  const { data } = await client.put<{ success: boolean }>(`/providers/${id}`, { config })
+  input: { name?: string; config?: Record<string, unknown>; enabledWorkflows?: string[] },
+): Promise<ProviderInstanceInfo> {
+  const { data } = await client.put<{ instance: ProviderInstanceInfo }>(`/providers/instances/${id}`, input)
+  return data.instance
+}
+
+/** DELETE /api/providers/instances/:id — 删除服务商实例（注销其全部工作流） */
+export async function deleteProviderInstance(id: string): Promise<{ success: boolean }> {
+  const { data } = await client.delete<{ success: boolean }>(`/providers/instances/${id}`)
   return data
+}
+
+/**
+ * POST /api/providers/test — 连接测试（用当前表单参数，不落盘）。
+ * @param type 服务商类型 id
+ * @param config 当前表单配置参数
+ * @returns 测试结果（ok + 提示信息）
+ */
+export async function testProviderConnection(
+  type: string,
+  config: Record<string, unknown>,
+): Promise<{ ok: boolean; message: string }> {
+  const { data } = await client.post<{ ok: boolean; message: string }>('/providers/test', { type, config })
+  return data
+}
+
+/**
+ * GET /api/providers/instances/:id/workflows — 该实例当前工作流列表。
+ * @param id 实例 ID
+ * @returns 工作流条目列表（Bridge 实时拉取 / 静态返回）
+ */
+export async function getInstanceWorkflows(id: string): Promise<ProviderWorkflowEntry[]> {
+  const { data } = await client.get<{ workflows: ProviderWorkflowEntry[] }>(`/providers/instances/${id}/workflows`)
+  return data.workflows
 }
 
 /** ComfyUI Easy Bridge 的提供商实例摘要（工作流「ComfyUI 提供商」下拉选项） */
@@ -74,9 +145,12 @@ export interface ComfyuiBridgeProviderInfo {
  * 服务端转发 Bridge 的 GET /api/providers（不落盘）；前端每次表单挂载时重新请求，
  * 不做缓存，保证选项与 Bridge 侧实时一致。
  *
+ * @param instanceId 可选：指定 Bridge 服务商实例 ID（多 Bridge 实例场景）；缺省取第一个
  * @returns 提供商实例摘要列表（Bridge 不可达时后端返回 502，调用方应捕获并提示）
  */
-export async function getComfyuiBridgeProviders(): Promise<ComfyuiBridgeProviderInfo[]> {
-  const { data } = await client.get<{ providers: ComfyuiBridgeProviderInfo[] }>('/comfyui-bridge/providers')
+export async function getComfyuiBridgeProviders(instanceId?: string): Promise<ComfyuiBridgeProviderInfo[]> {
+  const { data } = await client.get<{ providers: ComfyuiBridgeProviderInfo[] }>('/comfyui-bridge/providers', {
+    params: instanceId ? { instanceId } : undefined,
+  })
   return data.providers
 }

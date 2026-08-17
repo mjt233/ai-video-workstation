@@ -14,26 +14,32 @@ describe('useProviderNames', () => {
     mockedGetProviders.mockReset()
   })
 
-  it('加载成功：构建 provider ID → 友好名称映射，且整个会话只请求一次', async () => {
-    mockedGetProviders.mockResolvedValue([
-      { id: 'minimax-h3', name: 'MiniMax H3', configSchema: [], config: {} },
-      { id: 'volcengine-ark', name: '火山方舟', configSchema: [], config: {} },
-    ])
+  it('加载成功：构建实例 ID → 友好名称映射，且整个会话只请求一次', async () => {
+    mockedGetProviders.mockResolvedValue({
+      types: [
+        { id: 'minimax-h3', name: 'MiniMax H3', configSchema: [] },
+        { id: 'volcengine-ark', name: '火山方舟', configSchema: [] },
+      ],
+      instances: [
+        { id: 'inst-1', type: 'volcengine-ark', name: '火山方舟-主账号', config: {}, enabledWorkflows: [] },
+        { id: 'inst-2', type: 'minimax-h3', name: 'MiniMax-主账号', config: {}, enabledWorkflows: [] },
+      ],
+    })
     const { useProviderNames } = await import('./useProviderNames')
 
     const map = useProviderNames()
     // 异步加载完成前映射为空
     expect(map.value.size).toBe(0)
     await vi.waitFor(() => expect(map.value.size).toBe(2))
-    expect(map.value.get('minimax-h3')).toBe('MiniMax H3')
-    expect(map.value.get('volcengine-ark')).toBe('火山方舟')
+    expect(map.value.get('inst-1')).toBe('火山方舟-主账号')
+    expect(map.value.get('inst-2')).toBe('MiniMax-主账号')
 
     // 再次调用（其他组件复用）不应重复请求
     useProviderNames()
     expect(mockedGetProviders).toHaveBeenCalledTimes(1)
   })
 
-  it('加载失败：映射保持为空，调用方回退显示原始 provider ID', async () => {
+  it('加载失败：映射保持为空，调用方回退显示原始实例 ID', async () => {
     mockedGetProviders.mockRejectedValue(new Error('network error'))
     const { useProviderNames } = await import('./useProviderNames')
 
@@ -43,7 +49,7 @@ describe('useProviderNames', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(map.value.size).toBe(0)
-    // 调用方约定：取不到名称时回退原始 ID
-    expect(map.value.get('minimax-h3') ?? 'minimax-h3').toBe('minimax-h3')
+    // 调用方约定：取不到名称时回退原始实例 ID
+    expect(map.value.get('inst-1') ?? 'inst-1').toBe('inst-1')
   })
 })
