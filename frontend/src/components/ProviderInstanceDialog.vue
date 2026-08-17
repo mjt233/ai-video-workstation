@@ -301,12 +301,14 @@ async function loadWorkflows() {
   try {
     const entries = await getInstanceWorkflows(props.instance.id)
     workflowEntries.value = entries
-    // 合并已保存的启用集合：新增项默认勾选（默认全选），消失项从启用集合清理
+    // 合并已保存的启用集合：
+    // - 保留仍存在且已启用的项（已禁用项不恢复）；
+    // - 列表新增项（未保存过）默认勾选（默认全选）；
+    // - 列表已消失的项自动从启用集合剔除。
     const saved = new Set(form.value.enabledWorkflows)
-    const current = new Set(entries.map((e) => e.key))
-    const merged = entries.filter((e) => saved.has(e.key) || true).map((e) => e.key)
-    // 保留仍存在的已启用项 + 新增项（默认全选）；消失项自动剔除
-    form.value.enabledWorkflows = merged.filter((k) => current.has(k))
+    const kept = entries.filter((e) => saved.has(e.key)).map((e) => e.key)
+    const newOnes = entries.filter((e) => !saved.has(e.key)).map((e) => e.key)
+    form.value.enabledWorkflows = [...kept, ...newOnes]
   } catch (e) {
     workflowsError.value = e instanceof Error ? e.message : String(e)
   } finally {

@@ -84,6 +84,26 @@ describe('syncBridgeInstance', () => {
     expect(getImpl('image-edit', 'ceb-inst-1-qwen-edit')).toBeUndefined();
   });
 
+  it('空启用集合 = 默认全选：注册列表全部工作流（含后续新增）', async () => {
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      summary('text_to_image', 'text-to-image'),
+      summary('qwen-edit', 'image-edit'),
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => detailFor(id, id === 'qwen-edit' ? 'image-edit' : 'text-to-image'));
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: [] }));
+    expect(getImpl('text-to-image', 'ceb-inst-1-text_to_image')).toBeDefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-qwen-edit')).toBeDefined();
+    // 列表新增工作流：空集合 = 全选语义下自动注册
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      summary('text_to_image', 'text-to-image'),
+      summary('qwen-edit', 'image-edit'),
+      summary('tts_voice_design', 'tts-voice-design'),
+    ]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => detailFor(id, id === 'qwen-edit' ? 'image-edit' : id === 'tts_voice_design' ? 'tts-voice-design' : 'text-to-image'));
+    await syncBridgeInstance(mkInstance({ enabledWorkflows: [] }));
+    expect(getImpl('tts-voice-design', 'ceb-inst-1-tts_voice_design')).toBeDefined();
+  });
+
   it('清理陈旧：该实例下已禁用/消失的工作流被注销', async () => {
     // 第一次：启用两个工作流并注册
     (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([

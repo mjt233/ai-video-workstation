@@ -1,4 +1,4 @@
-import { listInstances } from './config-store.js';
+import { listInstances, updateInstance } from './config-store.js';
 import { getProvider } from './registry.js';
 import { getCandidatesByProvider, registerOrReplace, unregisterByInstance } from '../workflows/registry.js';
 import type { ProviderInstance } from './types.js';
@@ -13,6 +13,9 @@ let inflight: Promise<void> | null = null;
  * （impl = {候选impl}-{实例id}，填充 providerInstanceId/providerName/workflowKey），
  * 再以 keepKeys 清理该实例下已禁用/消失的工作流注册。
  *
+ * 空启用集合 = 默认全选：迁移/新建未显式指定时启用该类型全部候选工作流，
+ * 并把展开后的列表持久化回实例（enabledWorkflows 变为显式，后续编辑可精确禁用）。
+ *
  * @param instance 服务商实例
  */
 export async function syncStaticInstance(instance: ProviderInstance): Promise<void> {
@@ -20,6 +23,11 @@ export async function syncStaticInstance(instance: ProviderInstance): Promise<vo
   if (!providerDef) return;
   const candidates = getCandidatesByProvider(instance.type);
   const enabled = new Set(instance.enabledWorkflows);
+  // 空启用集合 = 默认全选：先展开为全部候选键并持久化，避免每次同步都视为「全选」
+  if (enabled.size === 0 && candidates.length > 0) {
+    for (const cand of candidates) enabled.add(`${cand.type}:${cand.impl}`);
+    await updateInstance(instance.id, { enabledWorkflows: [...enabled] });
+  }
   const keepKeys = new Set<string>();
   for (const cand of candidates) {
     const key = `${cand.type}:${cand.impl}`;

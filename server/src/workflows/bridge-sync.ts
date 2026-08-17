@@ -385,8 +385,8 @@ function buildAndRegister(
   const bridgeId = detail.id;
   // 工作流基键（不含实例 id）：ceb-{bridgeId}，enabledWorkflows 与清理均以此为准
   const workflowKey = `${IMPL_PREFIX}${bridgeId}`;
-  // 未启用的工作流不注册（enabledWorkflows 过滤）
-  if (!instance.enabledWorkflows.includes(workflowKey)) return null;
+  // 未启用的工作流不注册（enabledWorkflows 过滤；空集合 = 默认全选，允许全部）
+  if (instance.enabledWorkflows.length > 0 && !instance.enabledWorkflows.includes(workflowKey)) return null;
   // 系统注册键：impl = ceb-{instanceId}-{bridgeId}（实例 id 保证多实例下全局唯一）
   const impl = `${IMPL_PREFIX}${instance.id}-${bridgeId}`;
   const caps = deriveCapabilities(detail.tags, type);
@@ -445,12 +445,14 @@ export async function syncBridgeInstance(instance: ProviderInstance): Promise<vo
     return;
   }
 
-  // 本次启用的 ceb- 键集合（启用且出现在列表中）：既用于过滤注册，也作为 unregisterByInstance 的 keepKeys
+  // 本次启用的 ceb- 键集合（启用且出现在列表中）：既用于过滤注册，也作为 unregisterByInstance 的 keepKeys。
+  // 空启用集合 = 默认全选：Bridge 工作流列表随远程动态变化，空集合表示启用全部当前与后续新增的工作流。
   const enabled = new Set(instance.enabledWorkflows);
+  const enableAll = enabled.size === 0;
   const keepKeys = new Set<string>();
   for (const s of summaries) {
     const workflowKey = `${IMPL_PREFIX}${s.id}`;
-    if (!enabled.has(workflowKey)) continue;
+    if (!enableAll && !enabled.has(workflowKey)) continue;
     // 启用即加入 keepKeys（即使详情拉取失败也保留旧注册）
     keepKeys.add(workflowKey);
     try {
