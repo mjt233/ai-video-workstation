@@ -102,11 +102,11 @@ workflowRouter.put('/providers/:id', async (req: Request, res: Response) => {
       const providerDef = getProvider(id);
       await createInstance({ type: id, name: `${providerDef?.name ?? id}-默认`, config });
     }
-    // Bridge 工作流动态重同步（仅 comfyui-bridge 配置变化触发；失败不阻塞响应）
+    // 实例工作流动态重同步（仅 comfyui-bridge 配置变化触发；失败不阻塞响应）
     if (id === 'comfyui-bridge') {
-      const { syncBridgeWorkflows } = await import('../workflows/bridge-sync.js');
-      syncBridgeWorkflows().catch((e) => {
-        console.error(`[bridge-sync] 配置变更重同步失败: ${e instanceof Error ? e.message : String(e)}`);
+      const { syncAllInstances } = await import('../providers/instance-sync.js');
+      syncAllInstances().catch((e) => {
+        console.error(`[instance-sync] 配置变更重同步失败: ${e instanceof Error ? e.message : String(e)}`);
       });
     }
     res.json({ success: true });
