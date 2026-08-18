@@ -8,14 +8,33 @@ vi.mock('../api/workflow', () => ({
   getTaskLogs: vi.fn(),
   cancelWorkflow: vi.fn(),
 }))
-vi.mock('./api', () => ({ extractVideoFrame: vi.fn(), extractVideoFrameAtTime: vi.fn(), concatVideo: vi.fn(), trimVideo: vi.fn() }))
+vi.mock('./api', () => ({
+  extractVideoFrame: vi.fn(),
+  extractVideoFrameAtTime: vi.fn(),
+  concatVideo: vi.fn(),
+  trimVideo: vi.fn(),
+  getCanvasNodeInfo: vi.fn(),
+}))
 
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow } from '../api/workflow'
-import { extractVideoFrame, extractVideoFrameAtTime, concatVideo, trimVideo } from './api'
+import { extractVideoFrame, extractVideoFrameAtTime, concatVideo, trimVideo, getCanvasNodeInfo } from './api'
 import type { CanvasNodeData } from './types'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
+/** 画布 1/1 的任务持久化键（localStorage） */
+const TASK_KEY = 'dsh.asset-canvas.tasks.p:prompt/scene/1/1/canvas.json'
+
+/** 完成态任务响应（getTaskStatus mock 常用） */
+const COMPLETED_TASK = {
+  taskId: 'task-1', status: 'completed', result: { path: 'x' }, errorMsg: undefined,
+  workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '',
+}
+/** 运行态任务响应 */
+const RUNNING_TASK = {
+  taskId: 'task-1', status: 'running', result: null, errorMsg: undefined,
+  workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '',
+}
 
 function makeNode(prompt: string, workflowId?: string): CanvasNodeData {
   return {
@@ -28,13 +47,16 @@ describe('useCanvasGeneration', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    localStorage.clear()
     ;(runWorkflow as Mock).mockResolvedValue({ taskId: 'task-1', status: 'running' })
-    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'completed', result: { path: 'x' }, errorMsg: undefined, workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '' })
+    ;(getTaskStatus as Mock).mockResolvedValue(COMPLETED_TASK)
     ;(getTaskLogs as Mock).mockResolvedValue([])
+    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: false, mtime: null, size: null })
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    localStorage.clear()
   })
 
   it('文生图：写入 prompt 文件、提交固定产物路径，完成后通知结果且不回写 config', async () => {
@@ -53,6 +75,8 @@ describe('useCanvasGeneration', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(gen.statusByNode.value.n1?.status).toBe('success')
     expect(onResult).toHaveBeenCalledWith('n1', 'assert/scene/1/1/canvas/n1/output.jpg')
+    // 任务到达终态：持久化记录已清除
+    expect(localStorage.getItem(TASK_KEY)).toBeNull()
   })
 
   it('图生图：使用 image-edit 并传入 imagePaths', async () => {
@@ -207,22 +231,24 @@ describe('useCanvasGeneration', () => {
     expect(onResult).not.toHaveBeenCalled()
   })
 
-  it('中断：停止轮询并调用 cancelWorkflow', async () => {
+  it('中断：停止轮询并调用 cancelWorkflow，同时清除持久化记录', async () => {
     // 任务保持 running（避免首轮立即查询进入完成态与中断断言竞态）
-    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'running', result: null, errorMsg: undefined, workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '' })
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
     const gen = useCanvasGeneration('p', TARGET)
     const node = makeNode('一只猫')
     gen.setInputPaths('n1', ['assert/a.jpg'])
     await gen.generate(node)
     await vi.advanceTimersByTimeAsync(1) // 让首轮立即查询先落定（任务保持 running）
+    expect(localStorage.getItem(TASK_KEY)).toContain('n1')
     await gen.interrupt('n1')
     expect(cancelWorkflow).toHaveBeenCalledWith('task-1')
     expect(gen.statusByNode.value.n1?.status).toBe('error')
     expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
+    expect(localStorage.getItem(TASK_KEY)).toBeNull()
   })
 
   it('cancelWorkflow 失败不阻断状态展示', async () => {
-    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'running', result: null, errorMsg: undefined, workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '' })
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
     const gen = useCanvasGeneration('p', TARGET)
     const node = makeNode('一只猫')
     gen.setInputPaths('n1', ['assert/a.jpg'])
@@ -328,8 +354,128 @@ describe('useCanvasGeneration', () => {
     const node = makeNode('x')
     await gen.generate(node)
     expect(gen.statusByNode.value.n1?.status).toBeTruthy()
-    gen.switchTarget({ kind: 'scene', episode: '2', shot: '3' })
+    await gen.switchTarget({ kind: 'scene', episode: '2', shot: '3' })
     expect(gen.statusByNode.value).toEqual({})
     expect(gen.computeOutputPath(node)).toBe('assert/scene/2/3/canvas/n1/output.jpg')
+  })
+
+  // ── 运行中任务持久化与恢复（离开画布 / 刷新页面后继续显示 loading）────────
+
+  it('任务运行中持久化到 localStorage，模拟刷新后恢复 loading 并继续轮询到完成', async () => {
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
+    const gen = useCanvasGeneration('p', TARGET)
+    const node = makeNode('x', 'image-edit')
+    gen.setInputPaths('n1', ['assert/a.jpg'])
+    await gen.generate(node)
+    await vi.advanceTimersByTimeAsync(1) // 首轮查询落定（running）
+    // 运行中记录已持久化
+    expect(localStorage.getItem(TASK_KEY)).toContain('n1')
+    expect(gen.statusByNode.value.n1?.status).toBe('running')
+
+    // 模拟离开画布/刷新：新建组合式实例（旧实例内存态被丢弃），恢复后继续显示 loading
+    const onResult = vi.fn()
+    const gen2 = useCanvasGeneration('p', TARGET, { onResult })
+    await gen2.restore()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(gen2.statusByNode.value.n1?.status).toBe('running')
+
+    // 服务端任务随后完成：恢复实例的轮询收敛为 success、通知结果并清除记录
+    ;(getTaskStatus as Mock).mockResolvedValue(COMPLETED_TASK)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(gen2.statusByNode.value.n1.status).toBe('success')
+    expect(onResult).toHaveBeenCalledWith('n1', 'assert/scene/1/1/canvas/n1/output.jpg')
+    expect(localStorage.getItem(TASK_KEY)).toBeNull()
+  })
+
+  it('恢复时任务已完成：直接收敛为 success 并通知结果、清除记录', async () => {
+    localStorage.setItem(
+      TASK_KEY,
+      JSON.stringify({ n1: { kind: 'workflow', taskId: 'task-1', outputPath: 'assert/scene/1/1/canvas/n1/output.jpg', startedAt: Date.now() } }),
+    )
+    const onResult = vi.fn()
+    const gen = useCanvasGeneration('p', TARGET, { onResult })
+    await gen.restore()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(gen.statusByNode.value.n1?.status).toBe('success')
+    expect(onResult).toHaveBeenCalledWith('n1', 'assert/scene/1/1/canvas/n1/output.jpg')
+    expect(localStorage.getItem(TASK_KEY)).toBeNull()
+  })
+
+  it('恢复时任务已失败：收敛为 error 并清除记录', async () => {
+    ;(getTaskStatus as Mock).mockResolvedValue({ ...RUNNING_TASK, status: 'failed', errorMsg: '生成失败' })
+    localStorage.setItem(
+      TASK_KEY,
+      JSON.stringify({ n1: { kind: 'workflow', taskId: 'task-1', outputPath: 'assert/scene/1/1/canvas/n1/output.jpg', startedAt: Date.now() } }),
+    )
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.restore()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(gen.statusByNode.value.n1?.status).toBe('error')
+    expect(gen.statusByNode.value.n1?.errorMsg).toBe('生成失败')
+    expect(localStorage.getItem(TASK_KEY)).toBeNull()
+  })
+
+  it('切换画布后内存状态清空但持久化记录保留，切回时恢复 loading', async () => {
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
+    const gen = useCanvasGeneration('p', TARGET)
+    const node = makeNode('x', 'image-edit')
+    gen.setInputPaths('n1', ['assert/a.jpg'])
+    await gen.generate(node)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(localStorage.getItem(TASK_KEY)).toContain('n1')
+
+    // 切到另一张画布：内存清空，本画布记录保留（任务仍在服务端执行）
+    await gen.switchTarget({ kind: 'scene', episode: '2', shot: '3' })
+    expect(gen.statusByNode.value).toEqual({})
+    expect(localStorage.getItem(TASK_KEY)).toContain('n1')
+
+    // 切回本画布：恢复 loading 展示并继续轮询
+    await gen.switchTarget(TARGET)
+    expect(gen.statusByNode.value.n1?.status).toBe('running')
+  })
+
+  it('ffmpeg 任务运行中持久化（含产物基线），刷新后按产物 mtime 变化恢复为 success', async () => {
+    // 请求永不返回：模拟页面在服务端处理期间离开/刷新
+    ;(extractVideoFrame as Mock).mockImplementation(() => new Promise(() => {}))
+    // 提交前基线：产物已存在，mtime=100
+    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: true, mtime: 100, size: 1 })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
+      config: { frameIndex: 0 },
+    }
+    void gen.extractFrame(node, 'assert/v.mp4')
+    await vi.advanceTimersByTimeAsync(1) // 基线查询完成 → running 记录持久化
+    expect(gen.statusByNode.value.ef?.status).toBe('running')
+    expect(localStorage.getItem(TASK_KEY)).toContain('ef')
+
+    // 模拟刷新：新实例恢复 → 产物 mtime 已更新为 200（服务端写盘完成）→ 收敛 success
+    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: true, mtime: 200, size: 2 })
+    const onResult = vi.fn()
+    const gen2 = useCanvasGeneration('p', TARGET, { onResult })
+    await gen2.restore()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(gen2.statusByNode.value.ef?.status).toBe('success')
+    expect(onResult).toHaveBeenCalledWith('ef', 'assert/scene/1/1/canvas/ef/output.png')
+    expect(localStorage.getItem(TASK_KEY)).toBeNull()
+  })
+
+  it('ffmpeg 任务：中断后清除持久化记录并保持已中断错误态', async () => {
+    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: false, mtime: null, size: null })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
+      config: { frameIndex: 0 },
+    }
+    // 请求挂起不返回（模拟服务端仍在处理）
+    ;(extractVideoFrame as Mock).mockImplementation(() => new Promise(() => {}))
+    const p = gen.extractFrame(node, 'assert/v.mp4')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(localStorage.getItem(TASK_KEY)).toContain('ef')
+    await gen.interrupt('ef')
+    expect(gen.statusByNode.value.ef?.status).toBe('error')
+    expect(gen.statusByNode.value.ef?.errorMsg).toBe('已中断')
+    expect(localStorage.getItem(TASK_KEY)).toBeNull()
+    p.catch(() => {}) // 挂起请求防未处理拒绝
   })
 })

@@ -25,39 +25,6 @@
         </div>
       </div>
     </template>
-
-    <!-- 提取中遮罩 -->
-    <div
-      v-if="status?.status === 'running'"
-      class="extract-frame-node__mask"
-    >
-      <v-progress-circular
-        indeterminate
-        size="28"
-        color="primary"
-      />
-    </div>
-    <div
-      v-else-if="status?.status === 'error'"
-      class="extract-frame-node__mask extract-frame-node__mask--error"
-    >
-      <v-icon
-        icon="mdi-alert-circle-outline"
-        color="error"
-        size="28"
-      />
-      <div class="text-body-small error-text">
-        {{ status.errorMsg || '提取失败' }}
-      </div>
-      <v-btn
-        size="x-small"
-        variant="tonal"
-        color="error"
-        @click.stop="$emit('retry', node.id)"
-      >
-        重试
-      </v-btn>
-    </div>
   </div>
 </template>
 
@@ -65,20 +32,14 @@
 import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../../canvas/types'
 import { buildPreviewUrl } from '../../../canvas/preview'
-import type { GenerateStatus } from '../../../canvas/useCanvasGeneration'
 import ImageNodeActions from './ImageNodeActions.vue'
 
-/** 获取视频帧节点 body：当前提取帧图片预览 + 未提取占位（状态遮罩由 AssetCanvas 统一渲染） */
+/** 获取视频帧节点 body：当前提取帧图片预览 + 未提取占位（loading/错误遮罩由 CanvasNodeCard 统一渲染） */
 const props = defineProps<{
   project: string
   node: CanvasNodeData
-  status?: GenerateStatus | null
   /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
   output?: { path: string; token?: number } | null
-}>()
-
-defineEmits<{
-  (e: 'retry', nodeId: string): void
 }>()
 
 const imageUrl = ref('')
@@ -127,25 +88,4 @@ watch(
   pointer-events: auto;
 }
 
-.extract-frame-node__mask {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.85);
-  z-index: 2;
-}
-
-.extract-frame-node__mask--error {
-  background: rgba(255, 255, 255, 0.92);
-}
-
-.error-text {
-  max-width: 90%;
-  text-align: center;
-  word-break: break-all;
-}
 </style>

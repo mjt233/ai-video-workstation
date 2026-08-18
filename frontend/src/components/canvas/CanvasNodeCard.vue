@@ -47,13 +47,57 @@
         :is="proto?.bodyComponent"
         :project="project"
         :node="node"
-        :status="status"
         :output="output"
         :upstream-updated="upstreamUpdated"
         @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
         @open-picker="emit('open-picker', node.id)"
-        @retry="(nid: string) => emit('retry', nid)"
       />
+      <!-- 节点状态遮罩（通用能力）：running 显示加载动画 + 统一中断入口；error 显示错误与重试 -->
+      <div
+        v-if="status?.status === 'running'"
+        class="canvas-node__status canvas-node__status--running"
+      >
+        <v-progress-circular
+          indeterminate
+          size="28"
+          color="primary"
+        />
+        <div
+          v-if="status.lastLog"
+          class="text-body-small canvas-node__status-log"
+        >
+          {{ status.lastLog }}
+        </div>
+        <v-btn
+          size="x-small"
+          variant="tonal"
+          color="primary"
+          @click.stop="emit('interrupt', node.id)"
+        >
+          中断
+        </v-btn>
+      </div>
+      <div
+        v-else-if="status?.status === 'error'"
+        class="canvas-node__status canvas-node__status--error"
+      >
+        <v-icon
+          icon="mdi-alert-circle-outline"
+          color="error"
+          size="28"
+        />
+        <div class="text-body-small canvas-node__status-log">
+          {{ status.errorMsg || '任务失败' }}
+        </div>
+        <v-btn
+          size="x-small"
+          variant="tonal"
+          color="error"
+          @click.stop="emit('retry', node.id)"
+        >
+          重试
+        </v-btn>
+      </div>
     </div>
     <template
       v-for="(port, idx) in proto?.outputPorts ?? []"
@@ -106,7 +150,7 @@ const props = defineProps<{
   project: string
   /** Vue Flow 选中态（选中边框 + 缩放控制点） */
   selected: boolean
-  /** 生成状态（透传给主体组件展示进度/错误遮罩） */
+  /** 生成状态（由本卡片渲染通用 loading/错误遮罩） */
   status?: GenerateStatus
   /** 节点当前产物（固定路径 + 防缓存 token；生成类节点由 AssetCanvas 按固定产物路径推导） */
   output?: { path: string; token?: number } | null
@@ -123,8 +167,10 @@ const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
   /** 主体组件打开资产选择器 */
   (e: 'open-picker', nodeId: string): void
-  /** 主体组件重试生成 */
+  /** 状态遮罩「重试」按钮（失败后重新生成） */
   (e: 'retry', nodeId: string): void
+  /** 状态遮罩「中断」按钮（统一中断入口，参数为节点 id） */
+  (e: 'interrupt', nodeId: string): void
   /** 双击名称进入内联编辑 */
   (e: 'start-rename', nodeId: string): void
   /** 内联编辑输入值变化 */
@@ -244,6 +290,33 @@ function handleStyle(count: number, index: number): Record<string, string> {
   flex: 1;
   min-height: 0;
   position: relative;
+}
+
+/* 节点状态遮罩（通用能力）：覆盖在节点内容上。
+   running：半透明白色 + 加载动画 + 「中断」按钮；
+   error：浅红底 + 错误信息 + 「重试」按钮。 */
+.canvas-node__status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.85);
+  z-index: 3;
+  padding: 6px;
+}
+
+.canvas-node__status--error {
+  background: rgba(255, 235, 238, 0.92);
+}
+
+.canvas-node__status-log {
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 连接点：默认小尺寸；鼠标在附近悬浮时放大（带过渡动画），便于抓取拖拽连接。

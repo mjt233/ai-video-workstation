@@ -66,6 +66,7 @@
               @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
               @open-picker="openAssetPicker"
               @retry="generateNode"
+              @interrupt="onInterrupt"
               @start-rename="startRename"
               @update:rename-value="onRenameInput"
               @commit-rename="commitRename"
@@ -281,8 +282,11 @@ const scope = computed<CanvasScope>(() => {
 
 /** 画布数据 store：加载/保存/增删改查/撤销重做 */
 const store = useCanvasStore(props.project, target.value)
-/** 资产生成组合式：跑工作流 + 轮询（纯体验层）+ 结果通知 */
-const gen = useCanvasGeneration(props.project, target.value)
+/**
+ * 资产生成组合式：跑工作流 + 轮询（纯体验层）+ 结果通知 + 运行中任务持久化恢复。
+ * onResult 为恢复任务完成后的默认结果回调（正常生成路径仍按调用传入的回调优先）。
+ */
+const gen = useCanvasGeneration(props.project, target.value, { onResult: handleNodeResult })
 const { statusByNode } = gen
 const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo } = store
 
@@ -517,11 +521,14 @@ watch(target, async (newTarget) => {
   flow.closeEdgeMenu()
   paste.reset()
   dialogs.resetAll()
-  gen.switchTarget(newTarget)
+  await gen.switchTarget(newTarget)
   await store.switchTarget(newTarget)
   // 新画布加载后刷新全部节点产物信息（固定路径 + mtime；异步任务已由服务端落盘的结果直接可见）
   await refreshNodeOutputs()
 })
+
+/** 组件是否已卸载（异步 load 完成后不再恢复任务，避免卸载后残留轮询定时器） */
+let disposed = false
 
 onMounted(() => {
   window.addEventListener('keydown', keyboard.onKeydown)
@@ -529,16 +536,19 @@ onMounted(() => {
   window.addEventListener('resize', updateHeight)
   void store.load().then(() => {
     void refreshNodeOutputs()
+    // 恢复持久化的运行中任务：离开画布/刷新前未完成的任务继续显示 loading 并跟踪到终态
+    if (!disposed) void gen.restore()
   })
 })
 
 onUnmounted(() => {
+  disposed = true
   window.removeEventListener('keydown', keyboard.onKeydown)
   window.removeEventListener('paste', paste.onPaste)
   window.removeEventListener('resize', updateHeight)
   flowResizeObserver?.disconnect()
   flowResizeObserver = null
-  // 停止轮询/清理生成状态（结果已由服务端落盘，重新进入画布时按固定路径直接可见）
+  // 停止轮询/清理生成状态（localStorage 记录保留：重新进入画布时由 restore 恢复）
   gen.reset()
 })
 

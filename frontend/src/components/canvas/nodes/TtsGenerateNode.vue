@@ -18,45 +18,6 @@
         </div>
       </div>
     </template>
-
-    <!-- 生成中遮罩 -->
-    <div
-      v-if="status?.status === 'running'"
-      class="tts-generate-node__mask"
-    >
-      <v-progress-circular
-        indeterminate
-        size="28"
-        color="primary"
-      />
-      <div
-        v-if="status.lastLog"
-        class="text-body-small log-text"
-      >
-        {{ status.lastLog }}
-      </div>
-    </div>
-    <div
-      v-else-if="status?.status === 'error'"
-      class="tts-generate-node__mask tts-generate-node__mask--error"
-    >
-      <v-icon
-        icon="mdi-alert-circle-outline"
-        color="error"
-        size="28"
-      />
-      <div class="text-body-small error-text">
-        {{ status.errorMsg || '生成失败' }}
-      </div>
-      <v-btn
-        size="x-small"
-        variant="tonal"
-        color="error"
-        @click.stop="$emit('retry', node.id)"
-      >
-        重试
-      </v-btn>
-    </div>
   </div>
 </template>
 
@@ -64,19 +25,13 @@
 import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../../canvas/types'
 import { buildPreviewUrl } from '../../../canvas/preview'
-import type { GenerateStatus } from '../../../canvas/useCanvasGeneration'
 
-/** TTS 声音生成节点 body：音频预览 + 未生成占位 + 运行/错误遮罩 */
+/** TTS 声音生成节点 body：音频预览 + 未生成占位（loading/错误遮罩由 CanvasNodeCard 统一渲染） */
 const props = defineProps<{
   project: string
   node: CanvasNodeData
-  status?: GenerateStatus | null
   /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
   output?: { path: string; token?: number } | null
-}>()
-
-defineEmits<{
-  (e: 'retry', nodeId: string): void
 }>()
 
 const audioUrl = ref('')
@@ -120,26 +75,4 @@ watch(
   padding: 12px;
 }
 
-.tts-generate-node__mask {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: rgba(255, 255, 255, 0.85);
-  z-index: 1;
-  border-radius: 4px;
-}
-
-.tts-generate-node__mask--error {
-  background: rgba(255, 235, 238, 0.92);
-}
-
-.log-text,
-.error-text {
-  max-width: 90%;
-  text-align: center;
-}
 </style>
