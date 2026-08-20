@@ -66,6 +66,18 @@ export function collectPastedMedia(data: DataTransfer | null): { media: PastedMe
 }
 
 /**
+ * 计算加载节点上传的目标路径（自定义资产目录 assert/custom/canvas/）。
+ * 时间戳 + 原文件名（与粘贴命名规则一致，仅不带批次序号）。
+ *
+ * @param file 上传文件
+ * @param now 当前时间戳（可注入，测试用；默认 Date.now()）
+ * @returns 项目内相对路径
+ */
+export function buildLoaderUploadDest(file: File, now: number = Date.now()): string {
+  return `assert/custom/canvas/${now}-${file.name}`
+}
+
+/**
  * 计算粘贴上传的目标路径（自定义资产目录 assert/custom/canvas/）。
  * 时间戳 + 序号 + 原文件名保证并发粘贴多个文件不冲突。
  *

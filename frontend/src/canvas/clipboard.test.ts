@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildClipboardAssetDest, classifyPastedFile, collectPastedMedia } from './clipboard'
+import { buildClipboardAssetDest, buildLoaderUploadDest, classifyPastedFile, collectPastedMedia } from './clipboard'
 
 /** 构造带指定 MIME 与文件名的 File 对象 */
 function makeFile(name: string, type = ''): File {
@@ -64,5 +64,12 @@ describe('buildClipboardAssetDest', () => {
   it('生成自定义资产目录路径（时间戳 + 序号 + 原文件名）', () => {
     const file = makeFile('a.png', 'image/png')
     expect(buildClipboardAssetDest(file, 2, 12345)).toBe('assert/custom/canvas/12345-2-a.png')
+  })
+})
+
+describe('buildLoaderUploadDest', () => {
+  it('生成加载节点上传目标路径（时间戳 + 原文件名）', () => {
+    const file = makeFile('a.png', 'image/png')
+    expect(buildLoaderUploadDest(file, 12345)).toBe('assert/custom/canvas/12345-a.png')
   })
 })

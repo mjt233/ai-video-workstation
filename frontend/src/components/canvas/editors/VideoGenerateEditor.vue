@@ -312,6 +312,7 @@ import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
 import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
 import VideoDirector from '../../video-director/VideoDirector.vue'
 import VideoRefInputGroup from './VideoRefInputGroup.vue'
+import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 
 /**
  * 视频生成节点配置组件。
@@ -351,9 +352,11 @@ const props = defineProps<{
  * - generate：触发生成（参数为节点 id）
  * - interrupt：中断生成（参数为节点 id）
  * - open-history：打开历史对话框（参数为节点 id）
- * - set-as-scene / open-picker：父级（AssetCanvas）对所有编辑器统一传入的监听，
- *   本组件暂不使用，但需显式声明（Teleport 根节点无法自动继承外部监听，避免
- *   「Extraneous non-emits event listeners」警告）
+ * - upload-file：视频生成节点无上传入口，仅随父级统一下发的监听显式声明，
+ *   避免 Teleport 根节点无法自动继承外部监听产生警告（本组件不使用）
+ * - set-as-scene / open-picker / extract / set-as-video：父级（AssetCanvas）对所有
+ *   编辑器统一传入的监听，本组件暂不使用，但需显式声明（Teleport 根节点无法自动
+ *   继承外部监听，避免「Extraneous non-emits event listeners」警告）
  */
 const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
@@ -364,6 +367,7 @@ const emit = defineEmits<{
   (e: 'open-picker', nodeId: string): void
   (e: 'extract', nodeId: string): void
   (e: 'set-as-video', nodeId: string): void
+  (e: 'upload-file', payload: CanvasUploadFilePayload): void
 }>()
 
 // ── 全屏显示 ─────────────────────────────────────────────

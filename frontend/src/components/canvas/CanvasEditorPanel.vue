@@ -26,6 +26,7 @@
         @open-picker="(nodeId: string) => emit('open-picker', nodeId)"
         @extract="(nodeId: string) => emit('extract', nodeId)"
         @set-as-video="(nodeId: string) => emit('set-as-video', nodeId)"
+        @upload-file="(payload: CanvasUploadFilePayload) => emit('upload-file', payload)"
       />
     </div>
   </Transition>
@@ -36,6 +37,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import type { CanvasKind, CanvasNodeData } from '../../canvas/types'
 import type { CanvasInputInfo } from '../../canvas/generate'
+import type { CanvasUploadFilePayload } from './composables/useCanvasUpload'
 
 /**
  * 节点配置悬浮面板：独立于节点渲染在其下方（空间不足时翻转/钳制），
@@ -92,6 +94,8 @@ const emit = defineEmits<{
   (e: 'extract', nodeId: string): void
   /** 设为分镜视频 */
   (e: 'set-as-video', nodeId: string): void
+  /** 加载节点上传文件（进度显示在节点卡片遮罩上） */
+  (e: 'upload-file', payload: CanvasUploadFilePayload): void
 }>()
 
 /** 配置面板固定宽度（像素，屏幕坐标，不随缩放变化） */

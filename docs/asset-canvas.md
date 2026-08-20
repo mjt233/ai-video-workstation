@@ -123,6 +123,7 @@
 | `Delete` / `Backspace` | 删除选中节点（确认）或选中连线 |
 | `Esc` | 关闭右键菜单 / 取消内联重命名 |
 | 节点处于 loading（`status = running`） | **通用能力**：`CanvasNodeCard` 在节点内容上叠加半透明遮罩 + 加载动画 + 最近日志 + 「中断」按钮（统一中断入口）；error 时叠加错误遮罩 + 「重试」。loading 任务持久化于 localStorage，离开画布/刷新后未完成任务继续显示 loading（见 §2.3 / §8） |
+| 加载节点上传文件（「上传图片/音频/视频」按钮或粘贴媒体） | **节点内上传进度条（通用能力，`useCanvasUpload` 状态驱动）**：上传中节点卡片叠加进度遮罩（文件名 + `v-progress-linear` + 百分比/已传大小，总大小未知时显示不确定进度条）；失败时叠加错误遮罩（错误文案 + 「重试」按钮，沿用原文件与目标路径重传）+ snackbar 提示，遮罩 8s 后自动消失；成功遮罩消失、节点立即展示新资产。粘贴媒体先创建空加载节点再逐个上传（进度显示在各节点上，全部完成后 snackbar 汇总），上传失败保留空节点可直接重试/选资产 |
 
 > Vue Flow 绑定注意：勿用 `v-model:nodes/edges` 绑 computed（会报 readonly 写入错误），用单向 `:nodes/:edges` + `@node-drag-stop` 回写 + `@edges-change`(remove) 同步删除。
 
@@ -144,7 +145,8 @@
 - emits：
   - `update:config(patch)` —— 合并写入节点 config（由 `useCanvasNodeOps.onUpdateConfig` 处理，AssetCanvas 接线）；
   - `generate(nodeId)` / `interrupt(nodeId)` / `open-history(nodeId)` / `set-as-scene(nodeId)`；
-  - `open-picker(nodeId)` —— 打开资产选择器（加载图片编辑器使用）。
+  - `open-picker(nodeId)` —— 打开资产选择器（加载图片编辑器使用）；
+  - `upload-file(nodeId, file, dest)` —— 加载节点上传文件（加载图片/音频/视频编辑器与节点 body 使用）：上传进度由 `useCanvasUpload` 管理并渲染在**节点卡片遮罩**上，成功回调 `onUpdateConfig(nodeId, { assetPath })` 写回（编辑器不自行显示进度）。
 - 新增编辑器时需在 `registry.ts` 为原型挂 `editorComponent`；若用到资产选择器，`AssetCanvas` 的编辑器面板接线（`CanvasEditorPanel`）需给 `@open-picker="openAssetPicker"`。
 
 ---
@@ -248,6 +250,7 @@ frontend/src/
     │   ├── useCanvasPaste.ts     # 剪贴板粘贴（文件/文本/画布内复制节点）+ Ctrl+V 兜底
     │   ├── useCanvasKeyboard.ts  # 全局快捷键（撤销/重做/复制/粘贴/删除/Esc）
     │   ├── useCanvasNodeOps.ts   # 生成调度（按原型分发）+ 输入收集查询
+    │   ├── useCanvasUpload.ts    # 加载节点上传：节点级进度状态（上传中/失败遮罩数据源）+ 上传/重试/中止（reset）
     │   ├── useCanvasDialogs.ts   # 历史/保存资产/场景图/分镜视频/资产选择器状态
     │   └── useCanvasAutobuild.ts # 自动搭画布（引用收集 + 幂等应用）
     ├── nodes/                    # 节点卡片主体（ImageLoaderNode / ImageGenerateNode / TextNode 等）
@@ -311,5 +314,8 @@ frontend/src/
 - **缩放控制点显隐**：`NodeResizer` 的 `isVisible` 需包含「缩放中」状态（悬浮/选中/缩放中任一为真），否则拖出节点边界触发 mouseleave 卸载控制点会中断缩放。
 - **滚轮缩放豁免**：Vue Flow 按 `noWheelClassName`（默认 `nowheel`）判定是否拦截滚轮缩放；文本节点 textarea 必须带 `nowheel` 类才能在节点内滚动文本。同理节点拖拽豁免用 `nodrag`（textarea 上拖拽选择文本不移动节点）。
 - **剪贴板粘贴**：文件/文本粘贴统一在全局 `paste` 事件中处理（读 `clipboardData.items` 与 `text/plain`，优先级：**节点复制标记 > 文件 > 文本 > 画布内部复制的节点**）。复制节点（`copyNode`）会把「标记 + 节点 JSON」写入系统剪贴板（覆盖旧内容），因此粘贴节点不会被剪贴板中残留的旧文本/文件抢占；标记在 `onPaste` 中**最先**识别（在输入框焦点判断之前，防止标记 JSON 被原生粘贴插入输入框，输入框内粘贴标记仅吞掉不粘贴节点）。`Ctrl+V` 的 keydown 分支**不能 `preventDefault`**（会阻止浏览器派发 paste 事件），仅在剪贴板为空时用宏任务兜底粘贴内部复制的节点。焦点在 INPUT/TEXTAREA 内放行原生粘贴（粘贴进文本节点/编辑器输入框）。
+- **加载节点上传**：统一走 `useCanvasUpload`（节点 body/编辑器 `upload-file` 事件与粘贴均经它）。进度来自 `client.uploadFs` 的 `onUploadProgress`（浏览器 XHR upload 事件，纯前端能力，服务端无需改动）；粘贴媒体会**先创建空加载节点再上传**（进度显示在节点上），因此粘贴上传完成的撤销是两步（①撤 assetPath ②撤节点）。本地回环上传很快，小文件进度条可能一闪而过属正常现象。
+- **上传进度实时性**：进度经 Vue `reactive` 代理写回（`states[nodeId]` 返回代理），**勿直接修改捕获的原始 state 对象**（不触发响应式更新，进度条不刷新）。
+- **上传并发与日志**：同一节点上传进行中再次点「上传」会被忽略（**不中止进行中的请求**）——大文件请求中途被 abort 后，keep-alive 连接复用时残留字节可能污染下一个请求的 multipart 流，服务端解析出畸形字段（如 `Unexpected field`）；该场景服务端会打印 `[fs-upload] 上传失败` 日志并返回友好文案。接口异常统一打日志：前端 axios 响应拦截器（非 2xx 打印 `[api]` 日志，HEAD 404 存在性探测除外）+ 上传组合式 `console.error`；服务端 multer 错误分支 `console.error`。
 - **删除类操作**：必须走 `confirm` 工具弹窗确认（AGENTS.md 约束）。
 - **提交信息**：中文提交信息在 PowerShell 下用 `-m` 会乱码，用 UTF-8 临时文件 `--amend -F` 方式提交。

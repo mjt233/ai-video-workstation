@@ -60,11 +60,14 @@
               :selected="selected"
               :status="statusByNode[id]"
               :output="outputOf(nodeMap[id])"
+              :upload="upload.stateOf(id)"
               :upstream-updated="isUpstreamUpdated(id)"
               :renaming="renamingNodeId === id"
               :rename-value="renameInput"
               @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
               @open-picker="openAssetPicker"
+              @upload-file="onUploadFile"
+              @retry-upload="(nodeId: string) => void upload.retry(nodeId)"
               @retry="generateNode"
               @interrupt="onInterrupt"
               @start-rename="startRename"
@@ -99,6 +102,7 @@
           @open-picker="openAssetPicker"
           @extract="extractNodeFrame"
           @set-as-video="openSetAsShotVideo"
+          @upload-file="onUploadFile"
         />
 
         <!-- 右键菜单（节点 + 连线） -->
@@ -240,6 +244,7 @@ import { useCanvasKeyboard } from './composables/useCanvasKeyboard'
 import { useCanvasNodeOps } from './composables/useCanvasNodeOps'
 import { useCanvasDialogs } from './composables/useCanvasDialogs'
 import { useCanvasAutobuild } from './composables/useCanvasAutobuild'
+import { useCanvasUpload, type CanvasUploadFilePayload } from './composables/useCanvasUpload'
 
 /**
  * 资产画布主组件（编排层）：
@@ -412,6 +417,18 @@ const nodeOps = useCanvasNodeOps({
   getOutputMtime,
 })
 
+/** 加载节点上传组合式：节点级上传进度状态（上传进度/失败遮罩由节点卡片渲染） */
+const upload = useCanvasUpload({
+  project: props.project,
+  onSuccess: (nodeId, path) => onUpdateConfig(nodeId, { assetPath: path }),
+  showSnackbar,
+})
+
+/** 加载节点上传入口（节点卡片/编辑器 upload-file 事件 → 组合式上传，成功后写回 assetPath） */
+function onUploadFile(payload: CanvasUploadFilePayload): void {
+  void upload.uploadForNode(payload.nodeId, payload.file, payload.dest)
+}
+
 /** Vue Flow 渲染映射与连线交互 */
 const flow = useCanvasFlow({ store, nodeMap, project: props.project, selectedEdgeId: selection.selectedEdgeId })
 
@@ -431,12 +448,12 @@ const menus = useCanvasMenus({
 /** 剪贴板粘贴（文件/文本/画布内复制节点） */
 const paste = useCanvasPaste({
   store,
-  project: props.project,
   flowEl,
   screenToFlowCoordinate,
   findNode,
   addSelectedNodes,
   selection: { setSelectedNode: selection.setSelectedNode, setSuppressPanelOnSelect: selection.setSuppressPanelOnSelect },
+  upload,
   showSnackbar,
 })
 
@@ -521,6 +538,7 @@ watch(target, async (newTarget) => {
   flow.closeEdgeMenu()
   paste.reset()
   dialogs.resetAll()
+  upload.reset()
   await gen.switchTarget(newTarget)
   await store.switchTarget(newTarget)
   // 新画布加载后刷新全部节点产物信息（固定路径 + mtime；异步任务已由服务端落盘的结果直接可见）
@@ -548,6 +566,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateHeight)
   flowResizeObserver?.disconnect()
   flowResizeObserver = null
+  // 中止进行中的加载节点上传并清除进度状态
+  upload.reset()
   // 停止轮询/清理生成状态（localStorage 记录保留：重新进入画布时由 restore 恢复）
   gen.reset()
 })

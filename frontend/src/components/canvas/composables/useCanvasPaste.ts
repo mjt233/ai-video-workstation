@@ -1,7 +1,7 @@
 /**
  * 剪贴板粘贴组合式：全局 paste 事件处理与 Ctrl+V 兜底。
  * 剪贴板内容分派：画布内复制的节点标记 → 粘贴节点（最高优先级，复制节点已覆盖系统剪贴板）；
- * 文件（图片/视频/音频）→ 上传为自定义资产并创建加载节点；
+ * 文件（图片/视频/音频）→ 先创建加载节点再上传为自定义资产（上传进度显示在节点遮罩上）；
  * 文本 → 创建文本节点；无内容时兜底粘贴画布内复制的节点。
  * 文件识别纯函数在 canvas/clipboard.ts，节点复制标记解析在 canvas/nodeClipboard.ts。
  */
@@ -10,16 +10,14 @@ import { nextTick } from 'vue'
 import type { Ref } from 'vue'
 import { collectPastedMedia, buildClipboardAssetDest, type PastedMedia } from '../../../canvas/clipboard'
 import { parseNodeClipboardText } from '../../../canvas/nodeClipboard'
-import { uploadFs } from '../../../api/client'
 import type { CanvasNodeData } from '../../../canvas/types'
 import type { CanvasStoreApi, ScreenToFlow, FindNode, AddSelectedNodes, ShowSnackbar } from './types'
+import type { CanvasUploadApi } from './useCanvasUpload'
 
 /** useCanvasPaste 参数 */
 export interface UseCanvasPasteOptions {
   /** 画布数据 store（添加节点/粘贴节点） */
   store: CanvasStoreApi
-  /** 项目名（上传目标） */
-  project: string
   /** 画布容器 DOM（可视区中心计算） */
   flowEl: Ref<HTMLDivElement | null>
   /** Vue Flow 屏幕坐标 → 流坐标换算 */
@@ -28,6 +26,8 @@ export interface UseCanvasPasteOptions {
   findNode: FindNode
   /** Vue Flow 程序化写入选中态 */
   addSelectedNodes: AddSelectedNodes
+  /** 加载节点上传组合式（先建节点 → 逐个上传，进度显示在节点遮罩上） */
+  upload: CanvasUploadApi
   /** 选中控制（粘贴聚焦写入应用级选中并抑制面板弹出） */
   selection: {
     setSelectedNode: (nodeId: string) => void
@@ -44,7 +44,7 @@ export interface UseCanvasPasteOptions {
  * @returns 粘贴事件处理器与 Ctrl+V 兜底句柄
  */
 export function useCanvasPaste(options: UseCanvasPasteOptions) {
-  const { store, project, flowEl, screenToFlowCoordinate, findNode, addSelectedNodes, selection, showSnackbar } = options
+  const { store, flowEl, screenToFlowCoordinate, findNode, addSelectedNodes, selection, upload, showSnackbar } = options
 
   /** 粘贴兜底标记：剪贴板为空时浏览器不派发 paste 事件，由 keydown 置位、宏任务兜底粘贴内部复制的节点 */
   let nodePasteFallbackArmed = false
@@ -84,41 +84,35 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
   }
 
   /**
-   * 粘贴媒体文件：逐个上传到自定义资产目录（assert/custom/canvas/），
-   * 成功后创建对应加载节点（加载图片/视频/音频），多个节点依次错位摆放，
-   * 新节点全部自动聚焦（选中显示边框，不自动打开配置面板）。
+   * 粘贴媒体文件：先创建空加载节点（上传进度显示在节点卡片遮罩上），
+   * 再逐个上传到自定义资产目录（assert/custom/canvas/）并写回 assetPath，
+   * 多个节点依次错位摆放，新节点全部自动聚焦（选中显示边框，不自动打开配置面板）。
+   * 上传失败保留空加载节点（可直接在节点上重试/选择资产），snackbar 汇总结果。
    *
    * @param items 剪贴板媒体文件列表
    * @param unsupportedNames 不支持的文件名列表（仅用于反馈提示）
    */
   async function pasteClipboardAssets(items: PastedMedia[], unsupportedNames: string[]): Promise<void> {
     const base = viewportCenterNodePosition()
-    const results = await Promise.all(
-      items.map(async (m, index) => {
-        const dest = buildClipboardAssetDest(m.file, index)
-        try {
-          const res = await uploadFs(project, dest, m.file)
-          if (res.success && res.path) return { ok: true as const, path: res.path, prototypeId: m.prototypeId }
-          return { ok: false as const, name: m.file.name }
-        } catch {
-          return { ok: false as const, name: m.file.name }
-        }
-      }),
-    )
-    const ok = results.filter((r): r is Extract<(typeof results)[number], { ok: true }> => r.ok)
-    const failed = results.filter((r): r is Extract<(typeof results)[number], { ok: false }> => !r.ok)
-    const createdIds: string[] = []
-    ok.forEach((r, i) => {
-      const node = store.addNode(r.prototypeId, base.x + i * 28, base.y + i * 28, { assetPath: r.path })
-      createdIds.push(node.id)
+    // 1. 先创建空加载节点：上传期间节点即存在，进度条显示在各节点遮罩上
+    const tasks = items.map((m, index) => {
+      const node = store.addNode(m.prototypeId, base.x + index * 28, base.y + index * 28)
+      return { nodeId: node.id, file: m.file, dest: buildClipboardAssetDest(m.file, index) }
     })
-    if (createdIds.length > 0) await focusPastedNodes(createdIds)
+    // 2. 立即聚焦新节点（无需等上传完成）
+    await focusPastedNodes(tasks.map((t) => t.nodeId))
+    // 3. 并行上传（silent：失败提示由本函数汇总，避免与 upload 组合式重复弹 snackbar）
+    const results = await upload.uploadMany(tasks, { silent: true })
+    const okCount = results.filter((r) => r.ok).length
+    const failed = results
+      .map((r, i) => ({ r, item: items[i] }))
+      .filter((x): x is { r: { ok: false; error: string }; item: PastedMedia } => !x.r.ok)
     const parts: string[] = []
-    if (ok.length > 0) parts.push(`已创建 ${ok.length} 个资产节点`)
-    if (failed.length > 0) parts.push(`${failed.map((f) => f.name).join('、')} 上传失败`)
+    if (okCount > 0) parts.push(`已创建 ${okCount} 个资产节点`)
+    if (failed.length > 0) parts.push(`${failed.map((f) => f.item.file.name).join('、')} 上传失败`)
     if (unsupportedNames.length > 0) parts.push(`不支持的文件：${unsupportedNames.join('、')}`)
     if (parts.length > 0) {
-      showSnackbar(parts.join('；'), ok.length > 0 && failed.length === 0 && unsupportedNames.length === 0 ? 'success' : 'error')
+      showSnackbar(parts.join('；'), okCount > 0 && failed.length === 0 && unsupportedNames.length === 0 ? 'success' : 'error')
     }
   }
 
@@ -165,7 +159,7 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
    * 1. 画布内复制的节点标记 → 粘贴节点（最高优先级；复制节点已把「标记 + JSON」写入系统剪贴板，
    *    因此不会被剪贴板中残留的旧文本/文件抢占；输入框内也拦截，防止标记 JSON 被原生插入）；
    * 2. 焦点在输入框/文本域内 → 放行原生粘贴（如粘贴进文本节点/编辑器输入框）；
-   * 3. 含图片/视频/音频文件 → 上传为自定义资产并创建对应加载节点；
+   * 3. 含图片/视频/音频文件 → 先创建对应加载节点再上传（上传进度显示在节点遮罩上）；
    * 4. 含非空文本 → 创建文本节点并写入文本；
    * 5. 无可用内容但有画布内复制的节点 → 粘贴该节点。
    *

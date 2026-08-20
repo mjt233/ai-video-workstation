@@ -49,7 +49,8 @@
 import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../../canvas/types'
 import { buildPreviewUrl } from '../../../canvas/preview'
-import { uploadFs } from '../../../api/client'
+import { buildLoaderUploadDest } from '../../../canvas/clipboard'
+import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 import ImageNodeActions from './ImageNodeActions.vue'
 
 /** 节点 body 组件统一 props：节点数据 + 项目名 */
@@ -63,6 +64,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
   (e: 'open-picker', nodeId: string): void
+  (e: 'upload-file', payload: CanvasUploadFilePayload): void
 }>()
 
 const imageUrl = ref('')
@@ -78,19 +80,15 @@ watch(
   { immediate: true },
 )
 
-/** 打开系统文件选择并上传到自定义资产，然后写入 assetPath */
+/** 打开系统文件选择并交给父级上传（上传进度显示在节点卡片遮罩上），成功后写入 assetPath */
 function openUpload() {
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = 'image/*'
-  input.onchange = async () => {
+  input.onchange = () => {
     const file = input.files?.[0]
     if (!file) return
-    const dest = `assert/custom/canvas/${Date.now()}-${file.name}`
-    const res = await uploadFs(props.project, dest, file)
-    if (res.success) {
-      emit('update:config', { assetPath: res.path })
-    }
+    emit('upload-file', { nodeId: props.node.id, file, dest: buildLoaderUploadDest(file) })
   }
   input.click()
 }

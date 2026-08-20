@@ -51,6 +51,7 @@
         :upstream-updated="upstreamUpdated"
         @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
         @open-picker="emit('open-picker', node.id)"
+        @upload-file="(payload: CanvasUploadFilePayload) => emit('upload-file', { ...payload, nodeId: node.id })"
       />
       <!-- 节点状态遮罩（通用能力）：running 显示加载动画 + 统一中断入口；error 显示错误与重试 -->
       <div
@@ -98,6 +99,54 @@
           重试
         </v-btn>
       </div>
+      <!-- 加载节点上传遮罩（通用能力）：上传中显示文件名 + 进度条；失败显示错误与重试 -->
+      <div
+        v-else-if="upload"
+        class="canvas-node__status"
+        :class="{ 'canvas-node__status--error': upload.status === 'error' }"
+      >
+        <template v-if="upload.status === 'uploading'">
+          <div
+            class="text-body-small canvas-node__status-log"
+            :title="upload.fileName"
+          >
+            {{ upload.fileName }}
+          </div>
+          <v-progress-linear
+            :model-value="upload.percent ?? 0"
+            :indeterminate="upload.percent === null"
+            color="primary"
+            height="6"
+            rounded
+            class="canvas-node__upload-bar"
+          />
+          <div class="text-body-small text-medium-emphasis">
+            {{
+              upload.percent !== null
+                ? `${upload.percent}% · ${formatBytes(upload.loadedBytes)} / ${formatBytes(upload.totalBytes ?? 0)}`
+                : '上传中…'
+            }}
+          </div>
+        </template>
+        <template v-else>
+          <v-icon
+            icon="mdi-alert-circle-outline"
+            color="error"
+            size="28"
+          />
+          <div class="text-body-small canvas-node__status-log">
+            {{ upload.errorMsg || '上传失败' }}
+          </div>
+          <v-btn
+            size="x-small"
+            variant="tonal"
+            color="error"
+            @click.stop="emit('retry-upload', node.id)"
+          >
+            重试
+          </v-btn>
+        </template>
+      </div>
     </div>
     <template
       v-for="(port, idx) in proto?.outputPorts ?? []"
@@ -134,6 +183,7 @@ import '@vue-flow/node-resizer/dist/style.css'
 import { getPrototype } from '../../canvas/registry'
 import type { CanvasNodeData } from '../../canvas/types'
 import type { GenerateStatus } from '../../canvas/useCanvasGeneration'
+import { formatBytes, type CanvasUploadFilePayload, type CanvasUploadState } from './composables/useCanvasUpload'
 
 /**
  * 资产画布节点卡片：渲染单个节点的头部（名称/内联重命名）、输入/输出端口、
@@ -154,6 +204,8 @@ const props = defineProps<{
   status?: GenerateStatus
   /** 节点当前产物（固定路径 + 防缓存 token；生成类节点由 AssetCanvas 按固定产物路径推导） */
   output?: { path: string; token?: number } | null
+  /** 加载节点上传状态（由本卡片渲染上传进度/失败遮罩；undefined = 无上传） */
+  upload?: CanvasUploadState | null
   /** 上游已更新角标 */
   upstreamUpdated: boolean
   /** 是否处于名称内联编辑 */
@@ -167,6 +219,10 @@ const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
   /** 主体组件打开资产选择器 */
   (e: 'open-picker', nodeId: string): void
+  /** 主体组件上传文件（加载节点：进度显示在本卡片遮罩上） */
+  (e: 'upload-file', payload: CanvasUploadFilePayload): void
+  /** 上传失败「重试」按钮（父级按状态中保存的文件与路径重传） */
+  (e: 'retry-upload', nodeId: string): void
   /** 状态遮罩「重试」按钮（失败后重新生成） */
   (e: 'retry', nodeId: string): void
   /** 状态遮罩「中断」按钮（统一中断入口，参数为节点 id） */
@@ -317,6 +373,11 @@ function handleStyle(count: number, index: number): Record<string, string> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 上传进度条（加载节点遮罩内）：限制宽度防止撑满节点 */
+.canvas-node__upload-bar {
+  width: 85%;
 }
 
 /* 连接点：默认小尺寸；鼠标在附近悬浮时放大（带过渡动画），便于抓取拖拽连接。

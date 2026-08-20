@@ -3,6 +3,25 @@ import type { AxiosError } from 'axios'
 
 const client = axios.create({ baseURL: '/api' })
 
+/**
+ * 全局响应错误日志：任何非 2xx 响应都在浏览器控制台打印（方法 + URL + 状态码 + 服务端错误文案），
+ * 便于排查接口异常（如上传字段不匹配、服务端 5xx 等）。
+ * HEAD 404 是 existsFs 的存在性探测（读取前先确认文件是否存在），属正常流程，跳过不打日志。
+ */
+client.interceptors.response.use(
+  (res) => res,
+  (error: AxiosError<{ error?: string }>) => {
+    const status = error.response?.status
+    const method = (error.config?.method ?? 'GET').toUpperCase()
+    const url = `${error.config?.baseURL ?? ''}${error.config?.url ?? ''}`
+    if (method === 'HEAD' && status === 404) return Promise.reject(error)
+    console.error(
+      `[api] ${method} ${url} → ${status ?? '请求失败'}: ${error.response?.data?.error ?? error.message}`,
+    )
+    return Promise.reject(error)
+  },
+)
+
 export interface ProjectEntry {
   name: string
 }
@@ -89,12 +108,48 @@ export async function deleteFs(project: string, relPath: string): Promise<{ succ
   return data
 }
 
-/** 上传任意文件到自定义资产目录 */
-export async function uploadFs(project: string, destPath: string, file: File): Promise<{ success: boolean; path: string }> {
+/** uploadFs 可选参数：上传进度回调 + 中止信号 */
+export interface UploadFsOptions {
+  /**
+   * 上传进度回调（浏览器 XHR upload 事件）。
+   * @param progress.percent 0-100 整数百分比；总大小未知（无 Content-Length）时为 null
+   * @param progress.loaded 已上传字节数
+   * @param progress.total 总字节数（未知为 null）
+   */
+  onProgress?: (progress: { percent: number | null; loaded: number; total: number | null }) => void
+  /** 中止信号（切换画布/卸载时中止进行中的上传） */
+  signal?: AbortSignal
+}
+
+/**
+ * 上传任意文件到自定义资产目录。
+ * 可通过 opts.onProgress 获取上传进度（加载节点进度条使用）。
+ *
+ * @param project 项目名
+ * @param destPath 目标相对路径（须在 assert/ 下）
+ * @param file 上传文件
+ * @param opts 可选参数（进度回调/中止信号）
+ * @returns 服务端响应
+ */
+export async function uploadFs(
+  project: string,
+  destPath: string,
+  file: File,
+  opts: UploadFsOptions = {},
+): Promise<{ success: boolean; path: string }> {
   const form = new FormData()
   form.append('path', destPath)
   form.append('file', file)
-  const { data } = await client.post<{ success: boolean; path: string }>(`/fs/${project}/upload`, form)
+  const { data } = await client.post<{ success: boolean; path: string }>(`/fs/${project}/upload`, form, {
+    onUploadProgress: (e) => {
+      opts.onProgress?.({
+        percent: e.total ? Math.round((e.loaded / e.total) * 100) : null,
+        loaded: e.loaded,
+        total: e.total ?? null,
+      })
+    },
+    signal: opts.signal,
+  })
   return data
 }
 

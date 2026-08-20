@@ -548,6 +548,13 @@ assetsRouter.post(
           res.status(400).json({ error: '图片大小超过 100MB 限制' });
           return;
         }
+        if (e?.code === 'Unexpected field') {
+          // 打日志便于排查上传异常（multipart 流错位/字段不匹配）
+          console.error('[assets-upload] 上传失败:', err);
+          res.status(400).json({ error: '上传请求格式错误（multipart 字段不匹配），请重试' });
+          return;
+        }
+        // 未知错误：httpError 内部会打印日志并返回 500
         httpError(res, err);
         return;
       }

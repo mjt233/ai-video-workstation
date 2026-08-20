@@ -275,7 +275,12 @@ fsRouter.post(
     customUpload.single('file')(req, res, (err: unknown) => {
       if (err) {
         const e = err as { message?: string; code?: string };
-        const msg = e.code === 'LIMIT_FILE_SIZE' ? '文件大小超过 8GB 限制' : (e.message || '上传失败');
+        let msg: string;
+        if (e.code === 'LIMIT_FILE_SIZE') msg = '文件大小超过 8GB 限制';
+        else if (e.code === 'Unexpected field') msg = '上传请求格式错误（multipart 字段不匹配），请重试';
+        else msg = e.message || '上传失败';
+        // 打日志便于排查上传异常（如大文件经代理后 multipart 流错位导致的 Unexpected field）
+        console.error('[fs-upload] 上传失败:', err);
         res.status(400).json({ error: msg });
         return;
       }
