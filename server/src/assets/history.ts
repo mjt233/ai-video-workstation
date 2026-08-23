@@ -38,7 +38,12 @@ export function assertIsAssertPath(relPath: string): string {
 /** 允许用户上传覆盖的图片资产路径（与生成产物路径一致） */
 const UPLOADABLE_IMAGE_PATHS = [
   /^assert\/character\/[^/]+\/appearance\.jpg$/u,
+  // 角色外观衍生变体 ID 由用户命名，不限于数字（例如「原图」）。
+  // 使用非捕获分组校验扩展名，避免将 `[jpg|png]` 误当作字符集合。
+  /^assert\/character\/[^/]+\/variants\/[^/]+\.(?:jpg|jpeg|png|webp)$/iu,
   /^assert\/stage\/[^/]+\/[^/]+\.jpg$/u,
+  // 场景衍生变体位于 variants/{基础场景标签}/{变体 ID}/，两个名称均允许自定义。
+  /^assert\/stage\/[^/]+\/variants\/[^/]+\/[^/]+\.(?:jpg|jpeg|png|webp)$/iu,
   /^assert\/scene\/[1-9]\d*\/[1-9]\d*\/stage\/\d+\.jpg$/u,
 ];
 

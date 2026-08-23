@@ -24,11 +24,35 @@ vi.mock('./paths.js', () => ({
     `C:\\design\\${project}\\${relPath.replace(/\//g, '\\')}`,
 }));
 
-import { archiveExistingAsset, copyExistingAssetToHistory, formatHistoryStamp } from './history.js';
+import {
+  archiveExistingAsset,
+  assertUploadableImagePath,
+  copyExistingAssetToHistory,
+  formatHistoryStamp,
+} from './history.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockMkdir.mockResolvedValue(undefined);
+});
+
+describe('assertUploadableImagePath', () => {
+  it('允许上传角色外观衍生变体的自定义图像', () => {
+    expect(assertUploadableImagePath('assert/character/威廉伯爵/variants/原图.jpg'))
+      .toBe('assert/character/威廉伯爵/variants/原图.jpg');
+  });
+
+  it('允许常见图片扩展名且拒绝不支持的扩展名', () => {
+    expect(assertUploadableImagePath('assert/character/威廉伯爵/variants/v1.png'))
+      .toBe('assert/character/威廉伯爵/variants/v1.png');
+    expect(() => assertUploadableImagePath('assert/character/威廉伯爵/variants/v1.gif'))
+      .toThrow('仅支持上传角色外观、场景设定图或分镜场景图');
+  });
+
+  it('允许上传场景衍生变体的自定义图像', () => {
+    const imagePath = 'assert/stage/现代商场/variants/白天-入口/门已打开.webp';
+    expect(assertUploadableImagePath(imagePath)).toBe(imagePath);
+  });
 });
 
 describe('copyExistingAssetToHistory', () => {
