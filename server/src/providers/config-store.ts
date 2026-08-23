@@ -25,15 +25,21 @@ function isLegacyFormat(parsed: unknown): parsed is Record<string, Record<string
 }
 
 /**
- * 把 component 字段值规范为可 JSON 序列化的对象或数组。
+ * 把 component 字段值规范为可 JSON 序列化的值（对象/数组，或字符串等标量）。
+ *
+ * 标量（string/number/boolean）原样返回（如自定义服务商的 commonCode/testCode 代码文本）；
+ * 对象/数组深拷贝为纯 JSON 值，避免多个实例共享同一引用。
  *
  * @param label 字段中文标签（用于报错）
  * @param raw 前端提交的原始值
- * @returns 深拷贝后的纯 JSON 对象/数组
+ * @returns 规范化后的值（标量或纯 JSON 对象/数组）
  */
-export function normalizeComponentValue(label: string, raw: unknown): object {
+export function normalizeComponentValue(label: string, raw: unknown): ProviderConfigValue {
+  if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
+    return raw;
+  }
   if (raw === null || typeof raw !== 'object') {
-    throw new Error(`字段 ${label} 需要对象或数组`);
+    throw new Error(`字段 ${label} 需要对象、数组或标量值`);
   }
   let cloned: unknown;
   try {

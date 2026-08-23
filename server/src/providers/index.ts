@@ -19,6 +19,7 @@ export async function discoverProviders(): Promise<void> {
     try {
       await fs.access(indexPath);
     } catch {
+      // 子目录没有 index.ts（如测试/占位目录）时跳过该目录
       continue;
     }
     await import(pathToFileURL(indexPath).href);

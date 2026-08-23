@@ -44,6 +44,7 @@ async function fileExists(filePath: string): Promise<boolean> {
     await fs.access(filePath);
     return true;
   } catch {
+    // 文件不存在即视为不存在（探测语义）
     return false;
   }
 }
@@ -70,6 +71,7 @@ export async function discoverTasks(
   try {
     await fs.access(projectDir);
   } catch {
+    // 项目目录不存在时返回空任务列表
     return tasks;
   }
 
@@ -127,6 +129,7 @@ export async function discoverTasks(
             try {
               voiceDesc = (await fs.readFile(path.join(projectDir, voicePath), 'utf-8')).trim();
             } catch {
+              // voice.md 缺失时跳过该角色（无声线描述无法生成语音）
               continue;
             }
             if (!voiceDesc) continue;
@@ -198,6 +201,7 @@ export async function discoverTasks(
             try {
               variantFiles = (await fs.readdir(variantsDir)).filter((f) => f.endsWith('.json'));
             } catch {
+              // 变体目录不存在时跳过该角色
               continue;
             }
             for (const vf of variantFiles) {
@@ -209,6 +213,7 @@ export async function discoverTasks(
                   baseImage?: string;
                 };
               } catch {
+                // 变体元数据损坏时跳过该变体
                 continue;
               }
               const desc = (meta.desc ?? '').trim();
@@ -249,6 +254,7 @@ export async function discoverTasks(
                 .filter((e) => e.isDirectory())
                 .map((e) => e.name);
             } catch {
+              // 场景变体根目录不存在时跳过该场景
               continue;
             }
             for (const baseLabel of baseLabels) {
@@ -257,6 +263,7 @@ export async function discoverTasks(
               try {
                 variantFiles = (await fs.readdir(vDir)).filter((f) => f.endsWith('.json'));
               } catch {
+                // 基础标签变体目录不存在时跳过
                 continue;
               }
               for (const vf of variantFiles) {
@@ -268,6 +275,7 @@ export async function discoverTasks(
                     baseImage?: string;
                   };
                 } catch {
+                  // 变体元数据损坏时跳过该变体
                   continue;
                 }
                 const desc = (meta.desc ?? '').trim();

@@ -36,7 +36,7 @@ export async function syncStaticInstance(instance: ProviderInstance): Promise<vo
 }
 
 /**
- * 同步单个实例（按类型分发：Bridge / OpenAI 兼容走动态同步，其余走静态同步）。
+ * 同步单个实例（按类型分发：Bridge / OpenAI 兼容 / 自定义走动态同步，其余走静态同步）。
  *
  * @param instance 服务商实例
  */
@@ -47,6 +47,9 @@ export async function syncInstance(instance: ProviderInstance): Promise<void> {
   } else if (instance.type === 'openai-compatible') {
     const { syncOpenAICompatibleInstance } = await import('../workflows/openai-compatible-sync.js');
     await syncOpenAICompatibleInstance(instance);
+  } else if (instance.type === 'custom') {
+    const { syncCustomInstance } = await import('./custom/sync.js');
+    await syncCustomInstance(instance);
   } else {
     await syncStaticInstance(instance);
   }

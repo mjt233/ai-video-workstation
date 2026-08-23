@@ -154,6 +154,7 @@ export async function mixAudioTracks(
       try {
         duration = await getAudioDuration(t.filePath);
       } catch {
+        // 单条音轨时长读取失败（文件缺失/解析异常）时保留原 duration，继续处理其余音轨
         continue;
       }
     }

@@ -80,10 +80,21 @@ describe('config-store 实例 CRUD', () => {
     expect(resolved.models).toEqual(models);
   });
 
-  it('component 字段非法值报错', async () => {
+  it('component 字段支持标量（如自定义服务商代码文本）', async () => {
+    const inst = await createInstance(
+      { type: 'test-store', name: 'A', config: { url: 'http://a', models: 'export default async function() {}' } },
+      configPath,
+    );
+    expect(inst.config.models).toBe('export default async function() {}');
+  });
+
+  it('component 字段不可序列化值（函数）报错', async () => {
     await expect(
-      createInstance({ type: 'test-store', name: 'A', config: { url: 'http://a', models: 'oops' } }, configPath),
-    ).rejects.toThrow('对象或数组');
+      createInstance(
+        { type: 'test-store', name: 'A', config: { url: 'http://a', models: () => 1 } },
+        configPath,
+      ),
+    ).rejects.toThrow();
   });
 
   it('更新未提交 component 字段时保留原值', async () => {

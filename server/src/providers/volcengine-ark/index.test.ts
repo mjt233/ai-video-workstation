@@ -49,7 +49,7 @@ describe('volcengine-ark 插件定义', () => {
     const def = getProvider('volcengine-ark');
     const res = await def!.testConnection({ baseUrl: 'http://ark' });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain('地址可达');
+    expect(res.message).toContain('连接成功');
     vi.unstubAllGlobals();
   });
 });

@@ -106,7 +106,59 @@
             :label="f.label"
             :description="f.description"
             :name="f.component || ''"
+            v-bind="componentExtraProps(f)"
             @update:model-value="form.config[f.key] = $event"
+          />
+        </template>
+
+        <!-- 自定义服务商：配置导入 / 导出（导出包含 API Key，注意保管） -->
+        <template v-if="form.type === CUSTOM_PROVIDER_TYPE_ID">
+          <v-divider class="my-3" />
+          <div class="d-flex align-center">
+            <div class="text-body-medium font-weight-medium">
+              配置导入 / 导出
+            </div>
+            <v-spacer />
+            <v-btn
+              color="secondary"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-export"
+              title="导出为 JSON 配置文件（包含 API Key）"
+              @click="exportConfig"
+            >
+              导出配置
+            </v-btn>
+            <v-btn
+              color="secondary"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-import"
+              class="ml-2"
+              title="从 JSON 配置文件导入"
+              @click="importInput?.click()"
+            >
+              导入配置
+            </v-btn>
+            <input
+              ref="importInput"
+              type="file"
+              accept="application/json,.json"
+              class="d-none"
+              @change="onImportFile"
+            >
+          </div>
+          <div class="text-caption text-medium-emphasis mt-1">
+            导出文件包含 API Key 等全部配置，请妥善保管。
+          </div>
+          <v-alert
+            v-if="importNotice"
+            type="success"
+            class="mt-2 mb-0"
+            :text="importNotice"
+            density="compact"
+            closable
+            @click:close="importNotice = ''"
           />
         </template>
 
@@ -228,6 +280,7 @@ import {
   type ProviderWorkflowEntry,
 } from '../api/providers'
 import { resolveProviderFieldComponent } from './provider-fields'
+import { workflowTypeColor, workflowTypeLabel } from '../utils/workflow-types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -273,6 +326,13 @@ const workflowsLoading = ref(false)
 const workflowsError = ref('')
 const workflowEntries = ref<ProviderWorkflowEntry[]>([])
 
+/** 自定义服务商类型 id（命中时显示配置导入/导出） */
+const CUSTOM_PROVIDER_TYPE_ID = 'custom'
+/** 配置导入文件选择器 */
+const importInput = ref<HTMLInputElement | null>(null)
+/** 导入成功提示 */
+const importNotice = ref('')
+
 /**
  * 深拷贝 component 字段默认值 / 已保存值，避免多个实例共享同一引用。
  * @param value 原始值
@@ -287,6 +347,22 @@ function cloneConfigValue(value: ProviderConfigValue): ProviderConfigValue {
     }
   }
   return value
+}
+
+/**
+ * 计算 component 字段的额外 props：
+ * 一律传入 schema 字段本身（供代码编辑器按字段 key 选模板）；
+ * 工作流配置组件额外注入通用代码文本（供 Monaco 生成通用代码导出提示）。
+ *
+ * @param f schema 字段
+ * @returns 附加 props
+ */
+function componentExtraProps(f: ProviderConfigField): Record<string, unknown> {
+  const out: Record<string, unknown> = { field: f }
+  if (f.component === 'CustomWorkflowsEditorField') {
+    out.commonCode = form.value.config.commonCode
+  }
+  return out
 }
 
 /** 构建表单初始值：secret 字段恒为空；其余用已保存值或 defaultValue */
@@ -332,25 +408,6 @@ watch(
     }
   },
 )
-
-/** 工作流类型 → 中文标签与类型 v-chip 颜色（text-to-image / image-edit / tts-* / image-to-video） */
-const WORKFLOW_TYPE_META: Record<string, { label: string; color: string }> = {
-  'text-to-image': { label: '文生图', color: 'primary' },
-  'image-edit': { label: '图片编辑', color: 'secondary' },
-  'image-to-video': { label: '图生视频', color: 'info' },
-  'tts-voice-design': { label: 'TTS音色设计', color: 'success' },
-  'tts-voice-clone': { label: 'TTS音色克隆', color: 'warning' },
-}
-
-/** 工作流类型 → 中文标签（未知类型回退为原始类型 id） */
-function workflowTypeLabel(type: string): string {
-  return WORKFLOW_TYPE_META[type]?.label ?? type
-}
-
-/** 工作流类型 → 类型 v-chip 颜色（未知类型用默认色） */
-function workflowTypeColor(type: string): string {
-  return WORKFLOW_TYPE_META[type]?.color ?? 'default'
-}
 
 /** 切换类型时重建配置表单（保留已填的非冲突字段） */
 function onTypeChange() {
@@ -441,4 +498,67 @@ const textFields = computed(() =>
 )
 /** type=component 的自定义字段（按映射表渲染） */
 const componentFields = computed(() => schemaFields.value.filter((f) => f.type === 'component'))
+
+/**
+ * 导出配置：把当前表单（type/name/config，含 API Key）序列化为 JSON 文件下载。
+ */
+function exportConfig() {
+  const payload = {
+    type: form.value.type,
+    name: form.value.name,
+    config: { ...form.value.config },
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'custom-provider-' + (form.value.name.trim() || 'config') + '.json'
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * 导入配置：读取 JSON 文件并回填表单（name + config；API Key 直接恢复）。
+ *
+ * 校验 type 必须为 custom；config 中已存在的 schema 键回填，其余键并入。
+ *
+ * @param event 文件输入 change 事件
+ */
+function onImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result)) as {
+        type?: unknown
+        name?: unknown
+        config?: unknown
+      }
+      if (parsed.type !== CUSTOM_PROVIDER_TYPE_ID) {
+        error.value = '导入失败：文件不是自定义服务商配置（type 必须为 custom）'
+        importNotice.value = ''
+        return
+      }
+      if (typeof parsed.name === 'string' && parsed.name.trim()) {
+        form.value.name = parsed.name.trim()
+      }
+      if (parsed.config && typeof parsed.config === 'object' && !Array.isArray(parsed.config)) {
+        const rec = parsed.config as Record<string, unknown>
+        for (const [key, value] of Object.entries(rec)) {
+          form.value.config[key] = value as ProviderConfigValue
+        }
+      }
+      error.value = ''
+      testResult.value = null
+      importNotice.value = '已导入配置：' + file.name
+    } catch {
+      error.value = '导入失败：文件不是合法的 JSON'
+      importNotice.value = ''
+    }
+  }
+  reader.readAsText(file)
+}
 </script>

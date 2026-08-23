@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as db from '../db.js';
 import type { TaskRecord } from '../db.js';
 import { getAllWorkflows } from '../workflow-engine.js';
-import { getImpl, unregisterByInstance } from '../workflows/registry.js';
+import { getAllWorkflowTypes, getImpl, unregisterByInstance } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks, type DiscoveredTask } from '../workflows/discovery.js';
 import { markCancelRequested, stripCancelRequested } from '../workflows/cancel.js';
@@ -21,6 +21,7 @@ import {
 import { getAllProviders, getProvider } from '../providers/registry.js';
 import type { ProviderConfigValue, ProviderDefinition } from '../providers/types.js';
 import { syncInstance } from '../providers/instance-sync.js';
+import { CUSTOM_PROVIDER_ID, validateCustomProviderConfig } from '../providers/custom/index.js';
 import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities, WorkflowDefinition } from '../workflows/types.js';
 
@@ -140,6 +141,14 @@ workflowRouter.post('/providers/instances', async (req: Request, res: Response) 
     res.status(400).json({ error: 'Missing body: type/name/config' });
     return;
   }
+  // 自定义服务商：保存前校验工作流配置结构与代码可编译（避免保存后同步静默失败）
+  if (type === CUSTOM_PROVIDER_ID) {
+    const errors = validateCustomProviderConfig(config);
+    if (errors.length > 0) {
+      res.status(400).json({ error: '自定义服务商配置校验失败：\n' + errors.join('\n') });
+      return;
+    }
+  }
   try {
     const instance = await createInstance({ type, name, config });
     await syncInstance(instance);
@@ -157,6 +166,17 @@ workflowRouter.put('/providers/instances/:id', async (req: Request, res: Respons
     name?: string;
     config?: Record<string, unknown>;
   };
+  // 自定义服务商：保存前校验工作流配置结构与代码可编译
+  if (config && typeof config === 'object') {
+    const existing = await getInstance(id);
+    if (existing && existing.type === CUSTOM_PROVIDER_ID) {
+      const errors = validateCustomProviderConfig(config);
+      if (errors.length > 0) {
+        res.status(400).json({ error: '自定义服务商配置校验失败：\n' + errors.join('\n') });
+        return;
+      }
+    }
+  }
   try {
     const instance = await updateInstance(id, { name, config });
     await syncInstance(instance);
@@ -312,6 +332,13 @@ workflowRouter.get('/workflows', (_req: Request, res: Response) => {
   res.json({ workflows: getAllWorkflows() });
 });
 
+// GET /api/workflow-types — 系统支持的工作流类型列表（注册表真实键集合）。
+// 供自定义服务商工作流表单的「工作流类型」下拉选项使用；类型键以注册表为准，
+// 未来后端新增类型自动出现在列表中。
+workflowRouter.get('/workflow-types', (_req: Request, res: Response) => {
+  res.json({ types: getAllWorkflowTypes() });
+});
+
 // POST /api/workflow/run — submit a generation task
 workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
   const { project, workflowId, impl, params } = req.body as {
@@ -405,6 +432,7 @@ export function parseTaskParams(paramsJson: string): {
       remoteTaskId: parsed.remoteTaskId,
     };
   } catch {
+    // 任务 params 非法 JSON 时回退空结构（任务详情展示容错，不阻断接口）
     return { vars: {}, promptPaths: [], outputPath: '' };
   }
 }
@@ -546,7 +574,11 @@ workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: 
         throw new Error(`provider 未注册: ${providerId}`);
       }
       const instances = await listInstances();
-      const inst = instances.find((i) => i.type === providerId);
+      // 优先按工作流绑定的服务商实例 ID 定位（多实例时避免把取消请求发错实例）；
+      // 兼容旧数据：未绑定实例 ID 时回退取该类型第一个实例
+      const inst = wf?.providerInstanceId
+        ? instances.find((i) => i.id === wf.providerInstanceId && i.type === providerId)
+        : instances.find((i) => i.type === providerId);
       if (!inst) throw new Error(`未配置 ${providerId} 实例`);
       await providerDef
         .createClient(resolveInstanceConfig(inst))

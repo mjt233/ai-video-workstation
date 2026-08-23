@@ -724,6 +724,7 @@ export async function runTask(taskId: string): Promise<void> {
               await fs.access(full);
               return true;
             } catch {
+              // 探测语义：文件不存在/不可读即视为不存在
               return false;
             }
           },
@@ -770,6 +771,7 @@ export async function runTask(taskId: string): Promise<void> {
               }
               return null;
             } catch {
+              // 兜底降级：配音生成失败时返回 null（不注入音频，不阻断视频生成）
               return null;
             }
           },
@@ -901,7 +903,10 @@ export async function runTask(taskId: string): Promise<void> {
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? (err.stack ?? '') : '';
     db.addLog(taskId, 'error', `Task failed: ${msg}`);
+    // 控制台输出完整失败信息（含堆栈），便于排查脚本/请求类错误
+    console.error(`[engine] Task ${taskId} failed: ${msg}`, stack);
 
     // 失败直接标记 failed，不做自动重试/重新提交：避免长时间任务因轮询超时被重复提交远端生成
     // （旧任务被遗弃仍消耗算力/费用）。需要重试时由用户通过节点「重试」/ POST /workflow/retry/:taskId 手动触发。

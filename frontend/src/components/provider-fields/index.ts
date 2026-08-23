@@ -1,5 +1,7 @@
 import type { Component } from 'vue'
 import OpenAICompatibleModelsEditor from './OpenAICompatibleModelsEditor.vue'
+import CustomCodeEditorField from './CustomCodeEditorField.vue'
+import CustomWorkflowsEditorField from './CustomWorkflowsEditorField.vue'
 import UnknownProviderField from './UnknownProviderField.vue'
 
 /**
@@ -9,6 +11,8 @@ import UnknownProviderField from './UnknownProviderField.vue'
  */
 export const PROVIDER_FIELD_COMPONENTS: Record<string, Component> = {
   OpenAICompatibleModelsEditor,
+  CustomCodeEditorField,
+  CustomWorkflowsEditorField,
 }
 
 /**

@@ -28,6 +28,7 @@ async function walkShots(project: string): Promise<Array<{ episode: string; shot
       .filter(e => e.isDirectory())
       .map(e => e.name);
   } catch {
+    // 场景目录缺失时返回空结果（无场景即无引用）
     return result;
   }
   for (const episode of episodes) {
@@ -38,6 +39,7 @@ async function walkShots(project: string): Promise<Array<{ episode: string; shot
         .filter(e => e.isDirectory())
         .map(e => e.name);
     } catch {
+      // 单集目录缺失/不可读时跳过该集
       continue;
     }
     for (const shot of shots) {
@@ -53,6 +55,7 @@ async function readJsonArray<T>(filePath: string): Promise<T[] | null> {
     const data = JSON.parse(raw) as unknown;
     return Array.isArray(data) ? (data as T[]) : null;
   } catch {
+    // 文件缺失或 JSON 非法时视为无数组数据
     return null;
   }
 }

@@ -93,6 +93,7 @@ async function readMeta(project: string, metaRel: string): Promise<VariantMeta |
       updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
     };
   } catch {
+    // 变体元数据缺失/损坏时视为不存在
     return null;
   }
 }
@@ -115,6 +116,7 @@ async function checkCircularParent(
       const data = JSON.parse(raw) as Partial<VariantMeta>;
       current = data.parentId ? String(data.parentId) : '';
     } catch {
+      // 元数据缺失/损坏时终止向上追溯
       break;
     }
   }
@@ -133,6 +135,7 @@ async function collectChildIds(
   try {
     files = (await fs.readdir(dir)).filter(f => f.endsWith('.json'));
   } catch {
+    // 变体目录缺失时返回空列表
     return result;
   }
   for (const f of files) {
@@ -146,6 +149,7 @@ async function collectChildIds(
         result.push(...childIds);
       }
     } catch {
+      // 单个变体文件损坏时跳过，继续收集其余子变体
       continue;
     }
   }
@@ -166,6 +170,7 @@ export async function listCharacterVariants(project: string, name: string): Prom
   try {
     files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json'));
   } catch {
+    // 角色变体目录不存在时返回空数组
     return [];
   }
   const result: VariantInfo[] = [];
@@ -203,6 +208,7 @@ export async function listStageVariants(
   try {
     files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json'));
   } catch {
+    // 场景变体目录不存在时返回空数组
     return [];
   }
   const result: VariantInfo[] = [];
@@ -644,7 +650,10 @@ async function replaceParentRef(
   let files: string[] = [];
   try {
     files = (await fs.readdir(dirFull)).filter(f => f.endsWith('.json'));
-  } catch { return; }
+  } catch {
+    // 变体目录不存在时无需重命名，直接返回
+    return;
+  }
   for (const f of files) {
     const filePath = path.join(dirFull, f);
     try {
@@ -656,7 +665,10 @@ async function replaceParentRef(
         await fs.writeFile(filePath, `${JSON.stringify(data, null, 2)}
 `, 'utf-8');
       }
-    } catch { continue; }
+    } catch {
+      // 单个变体文件读取失败时跳过，其余文件继续重命名
+      continue;
+    }
   }
 }
 

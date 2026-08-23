@@ -47,6 +47,7 @@ export async function pathExists(fullPath: string): Promise<boolean> {
     await fs.access(fullPath);
     return true;
   } catch {
+    // 文件不存在或不可读即视为不存在（探测语义）
     return false;
   }
 }
@@ -63,6 +64,7 @@ export async function listNumericDirNames(dir: string): Promise<string[]> {
       .map(e => e.name)
       .sort((a, b) => Number(a) - Number(b));
   } catch {
+    // 目录不存在/无权限时返回空列表
     return [];
   }
 }

@@ -23,7 +23,8 @@ export interface ProviderConfigField {
   label: string;
   /**
    * 字段类型（决定前端表单控件与后端类型强转）。
-   * `component`：前端按 `component` 名渲染自定义组件，值通过 v-model 绑定结构化对象/数组。
+   * `component`：前端按 `component` 名渲染自定义组件，值通过 v-model 绑定
+   * 结构化对象/数组，也允许标量（如自定义服务商的代码文本）。
    */
   type: 'string' | 'password' | 'number' | 'boolean' | 'select' | 'component';
   /** 是否必填（文件值 / 环境变量 / 默认值均缺失时报错） */

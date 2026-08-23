@@ -188,3 +188,16 @@ export async function getComfyuiBridgeProviders(instanceId?: string): Promise<Co
   })
   return data.providers
 }
+
+/**
+ * GET /api/workflow-types — 系统支持的工作流类型列表（服务端注册表键集合）。
+ *
+ * 供自定义服务商工作流表单的「工作流类型」下拉选项使用；
+ * 调用失败时调用方可回退到内置类型常量。
+ *
+ * @returns 工作流类型 id 数组，如 ['text-to-image', 'image-edit', ...]
+ */
+export async function getWorkflowTypes(): Promise<string[]> {
+  const { data } = await client.get<{ types: string[] }>('/workflow-types')
+  return data.types
+}

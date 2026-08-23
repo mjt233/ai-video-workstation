@@ -82,6 +82,7 @@ async function readMeta(project: string, metaRel: string): Promise<VoiceVariantM
       updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
     };
   } catch {
+    // 声线变体元数据缺失/损坏时视为不存在
     return null;
   }
 }
@@ -115,6 +116,7 @@ export async function listCharacterVoiceVariants(
   try {
     files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json'));
   } catch {
+    // 声线变体目录不存在时返回空数组
     return [];
   }
   const result: VoiceVariantInfo[] = [];
