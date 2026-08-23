@@ -100,6 +100,67 @@ describe('CustomProviderClient 同步工作流', () => {
     const client = createCustomProviderClient(makeConfig() as never);
     await expect(client.execute({ workflowId: 'no-such', params: {} })).rejects.toThrow(/未配置或已删除/);
   });
+
+  it('execute 透传 userConfig 与 readFileToBase64 到 ctx（调用发起代码可读取）', async () => {
+    // 调用发起代码把 ctx.userConfig 与 ctx.readFileToBase64 的结果放进请求体，
+    // 通过 fetch mock 断言用户配置字段确实注入 ctx
+    const callCode = [
+      'export default async function(ctx: any) {',
+      '  const b64 = await ctx.readFileToBase64("assert/a.png")',
+      '  const b64Data = await ctx.readFileToBase64("assert/a.png", true)',
+      '  return {',
+      '    url: "https://example.com/run",',
+      '    data: {',
+      '      model: ctx.userConfig.model,',
+      '      steps: ctx.userConfig.steps,',
+      '      enhance: ctx.userConfig.enhance,',
+      '      missing: ctx.userConfig.missing,',
+      '      workflowType: ctx.workflowType,',
+      '      b64,',
+      '      b64Data',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const config = makeConfig({
+      workflows: [
+        {
+          name: 'wf-cfg',
+          types: ['text-to-image'],
+          async: false,
+          cancelable: false,
+          callCode,
+          extractCode: 'export default async function(ctx: any, r: any) { return { isFinish: true, outputs: [r.data.url] } }',
+          cancelCode: '',
+        },
+      ],
+    });
+    let requestBody: unknown;
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      'https://example.com/run': (init?: RequestInit) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ url: 'https://cdn.example.com/a.png' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    }));
+    const client = createCustomProviderClient(config as never);
+    await client.execute({
+      workflowId: 'wf-cfg',
+      params: {},
+      workflowType: 'text-to-image',
+      userConfig: { model: 'gpt-image-2', steps: 20, enhance: true },
+      readFileToBase64: async (p: string, withDataPrefix?: boolean) =>
+        (withDataPrefix ? 'data:image/png;base64,' : '') + 'b64:' + p,
+    });
+    expect(requestBody).toEqual({
+      model: 'gpt-image-2',
+      steps: 20,
+      enhance: true,
+      missing: undefined,
+      workflowType: 'text-to-image',
+      b64: 'b64:assert/a.png',
+      b64Data: 'data:image/png;base64,b64:assert/a.png',
+    });
+  });
 });
 
 describe('CustomProviderClient 异步工作流', () => {

@@ -33,6 +33,35 @@ export { getAllWorkflows };
  */
 const DEFAULT_PROJECT_FPS = 24;
 
+/**
+ * 按文件扩展名推断 MIME 类型（未知扩展名默认 image/jpeg）。
+ *
+ * @param filename 文件名（用于取扩展名）
+ * @returns MIME 类型字符串
+ */
+export function mimeTypeForFile(filename: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  return ext === '.png' ? 'image/png'
+    : ext === '.webp' ? 'image/webp'
+      : ext === '.flac' ? 'audio/flac'
+        : ext === '.mp4' ? 'video/mp4'
+          : 'image/jpeg';
+}
+
+/**
+ * 拼接 Base64 输出：withDataPrefix 为 true 时返回 data:<mime>;base64,<base64>
+ * data URL（MIME 按扩展名推断），否则原样返回 base64。
+ *
+ * @param base64 Base64 内容
+ * @param filename 文件名（推断 MIME 用）
+ * @param withDataPrefix 是否添加 data: 前缀
+ * @returns Base64 字符串或 data URL
+ */
+export function toBase64Output(base64: string, filename: string, withDataPrefix: boolean): string {
+  if (!withDataPrefix) return base64;
+  return 'data:' + mimeTypeForFile(filename) + ';base64,' + base64;
+}
+
 async function loadProjectConfig(project: string): Promise<ProjectConfig> {
   const configPath = path.resolve(DESIGN_DIR, project, 'project.json');
   try {
@@ -669,17 +698,29 @@ export async function runTask(taskId: string): Promise<void> {
     try {
       const buf = await fs.readFile(full);
       const filename = path.basename(full);
-      const ext = path.extname(filename).toLowerCase();
-      const type =
-        ext === '.png' ? 'image/png'
-          : ext === '.webp' ? 'image/webp'
-            : ext === '.flac' ? 'audio/flac'
-              : ext === '.mp4' ? 'video/mp4'
-                : 'image/jpeg';
-      return new File([buf], filename, { type });
+      return new File([buf], filename, { type: mimeTypeForFile(filename) });
     } catch {
       throw new Error(`assert 文件不存在: ${relPath}`);
     }
+  };
+
+  /**
+   * 读取项目内任意文件并转为 Base64 字符串。
+   *
+   * withDataPrefix 为 true 时自动添加 data:<mime>;base64, 前缀（MIME 按扩展名推断），
+   * 缺省/为 false 时返回纯 Base64。路径相对 design/{project}/；越界（路径穿越）时抛错。
+   *
+   * @param relPath 项目内相对路径
+   * @param withDataPrefix 是否自动添加 data: 前缀（默认 false）
+   * @returns Base64 字符串或 data URL
+   */
+  const readFileToBase64 = async (relPath: string, withDataPrefix = false): Promise<string> => {
+    const full = path.resolve(DESIGN_DIR, task.project, relPath);
+    if (!full.startsWith(projectRoot)) {
+      throw new Error(`Path traversal denied: ${relPath}`);
+    }
+    const buf = await fs.readFile(full);
+    return toBase64Output(buf.toString('base64'), path.basename(full), withDataPrefix === true);
   };
 
   try {
@@ -810,6 +851,7 @@ export async function runTask(taskId: string): Promise<void> {
       userParams,
       readFile,
       readAssertFile,
+      readFileToBase64,
     };
 
     // Step 1: Submit

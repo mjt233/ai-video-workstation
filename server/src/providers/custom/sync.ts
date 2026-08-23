@@ -15,7 +15,9 @@ import type {
   WorkflowVarsBase,
 } from '../../workflows/types.js';
 import type { CustomProviderClient } from './client.js';
-import { parseCustomWorkflows, sanitizeWorkflowName, type CustomWorkflowEntry } from './types.js';
+import { parseCustomWorkflows, sanitizeWorkflowName, type CustomUserConfigFieldType, type CustomWorkflowEntry, type CustomWorkflowType } from './types.js';
+import { toNativeUserParams } from '../../workflows/user-params.js';
+import type { WorkflowUserParamDeclaration } from '../../workflows/types.js';
 
 /** 自定义服务商 Provider 插件 id */
 const PROVIDER_ID = 'custom';
@@ -132,13 +134,75 @@ async function buildCustomParams(
 }
 
 /**
+ * 把条目的用户配置字段声明转为工作流用户参数声明（前端运行表单据此渲染）。
+ *
+ * @param entry 工作流条目
+ * @returns 用户参数声明列表
+ */
+function toUserParamDeclarations(entry: CustomWorkflowEntry): WorkflowUserParamDeclaration[] {
+  return entry.userConfigFields.map((f) => ({
+    name: f.name,
+    key: f.key,
+    type: f.type,
+    // 默认值按声明类型转为原生值（boolean 开关 / number 输入框需要，避免字符串默认值导致 UI 异常）
+    defaultValue: coerceDefaultValue(f.type, f.defaultValue),
+    ...(f.description !== undefined ? { description: f.description } : {}),
+  }));
+}
+
+/**
+ * 把用户配置字段的字符串默认值按类型转换为原生值。
+ *
+ * @param type 字段类型
+ * @param raw 字符串默认值（可能为空串 = 无默认值）
+ * @returns 原生默认值（无法转换时原样返回字符串）
+ */
+function coerceDefaultValue(
+  type: CustomUserConfigFieldType,
+  raw: string,
+): boolean | number | string {
+  if (type === 'boolean') {
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return raw;
+  }
+  if (type === 'integer' || type === 'float') {
+    const n = Number(raw);
+    if (raw !== '' && Number.isFinite(n)) return type === 'integer' ? Math.round(n) : n;
+  }
+  return raw;
+}
+
+/**
+ * 组装 ctx.userConfig：按声明类型从 vars 提取并转换为原生值，
+ * 用户未填写（vars 缺失/空）时回退声明默认值，保证每个声明字段都存在。
+ *
+ * @param entry 工作流条目
+ * @param ctx 引擎运行上下文
+ * @returns 用户配置字段值（key → boolean / number / string）
+ */
+function buildUserConfig(
+  entry: CustomWorkflowEntry,
+  ctx: WorkflowRunContext<WorkflowVarsBase>,
+): Record<string, boolean | number | string> {
+  const decls = toUserParamDeclarations(entry);
+  const vars = ctx.vars as Record<string, string | undefined>;
+  const raw: Record<string, string> = {};
+  for (const f of entry.userConfigFields) {
+    const v = vars[f.key];
+    raw[f.key] = v !== undefined && v !== '' ? v : f.defaultValue;
+  }
+  return toNativeUserParams(decls, raw);
+}
+
+/**
  * 构建条目在某工作流类型下的 submit 实现。
  *
  * @param entry 工作流条目
  * @param type 工作流类型（决定 ctx.params 组装方式）
  * @returns submit 函数
  */
-function buildSubmit(entry: CustomWorkflowEntry, type: string): WorkflowDefinition['submit'] {
+function buildSubmit(entry: CustomWorkflowEntry, type: CustomWorkflowType): WorkflowDefinition['submit'] {
   return async (ctx: WorkflowRunContext<WorkflowVarsBase>) => {
     const params = await buildCustomParams(type, ctx);
     const provider = ctx.provider as CustomProviderClient;
@@ -148,6 +212,9 @@ function buildSubmit(entry: CustomWorkflowEntry, type: string): WorkflowDefiniti
       projectConfig: ctx.projectConfig,
       readFile: ctx.readFile,
       readAssertFile: ctx.readAssertFile,
+      readFileToBase64: ctx.readFileToBase64,
+      workflowType: type,
+      userConfig: buildUserConfig(entry, ctx),
     });
   };
 }
@@ -179,6 +246,8 @@ export async function syncCustomInstance(instance: ProviderInstance): Promise<vo
         providerName: instance.name,
         workflowKey: key,
         capabilities: { cancelable: entry.cancelable },
+        // 用户配置字段声明 → 前端运行表单（WorkflowParamsForm）据此渲染输入
+        params: toUserParamDeclarations(entry),
         submit: buildSubmit(entry, type),
       });
       keepKeys.add(key);

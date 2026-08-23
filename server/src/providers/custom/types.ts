@@ -18,6 +18,37 @@ export const CUSTOM_WORKFLOW_TYPES = [
 /** 系统支持的工作流类型标识 */
 export type CustomWorkflowType = (typeof CUSTOM_WORKFLOW_TYPES)[number];
 
+/** 用户配置字段支持的类型（与 workflows/types.ts 的 WorkflowUserParamType 一致，便于复用运行表单） */
+export const CUSTOM_USER_CONFIG_FIELD_TYPES = [
+  'boolean',
+  'integer',
+  'float',
+  'string',
+] as const;
+
+/** 用户配置字段类型标识 */
+export type CustomUserConfigFieldType = (typeof CUSTOM_USER_CONFIG_FIELD_TYPES)[number];
+
+/**
+ * 用户配置字段声明。
+ *
+ * 运行工作流时，前端按声明渲染输入表单（默认值回填），用户填写后经 vars
+ * 进入自定义工作流 ctx.userConfig（按类型转换为原生值）。编辑器据此生成
+ * ctx.userConfig 的类型提示。
+ */
+export interface CustomUserConfigField {
+  /** 字段 key（在工作流条目内唯一；运行时 ctx.userConfig 的键名） */
+  key: string;
+  /** 显示名（表单标签） */
+  name: string;
+  /** 字段类型（决定表单控件与 ctx.userConfig 的原生值类型） */
+  type: CustomUserConfigFieldType;
+  /** 默认值（字符串形式；用户未填写时使用） */
+  defaultValue: string;
+  /** 可选说明文案（表单 hint） */
+  description?: string;
+}
+
 /**
  * 自定义工作流条目（工作流配置组件的一行）。
  *
@@ -39,6 +70,8 @@ export interface CustomWorkflowEntry {
   extractCode: string;
   /** 【取消调用】TypeScript 代码：export default async function(ctx, callResult) 调用远端取消接口 */
   cancelCode: string;
+  /** 用户配置字段声明（运行工作流时由用户填写，经 ctx.userConfig 读取） */
+  userConfigFields: CustomUserConfigField[];
 }
 
 /** 判断值是否为系统支持的工作流类型 */
@@ -94,7 +127,73 @@ export function parseCustomWorkflowEntry(raw: unknown, index: number): CustomWor
   if (cancelable && !cancelCode.trim()) {
     throw new Error(where + '（' + name + '）勾选了「支持取消」，必须编写「取消调用」代码');
   }
-  return { name, types, async: isAsync, cancelable, callCode, extractCode, cancelCode };
+  const userConfigFields = parseUserConfigFields(rec.userConfigFields, where + '（' + name + '）');
+  return {
+    name,
+    types,
+    async: isAsync,
+    cancelable,
+    callCode,
+    extractCode,
+    cancelCode,
+    userConfigFields,
+  };
+}
+
+/**
+ * 解析用户配置字段声明（原始 JSON 值）。
+ *
+ * 缺失 / null / 空串视为未配置，返回空数组；每项必须是对象，
+ * key 非空且不重复，type 非法时回退为 'string'。
+ *
+ * @param raw 原始值（条目 userConfigFields 字段）
+ * @param where 错误提示前缀（条目位置 + 名称）
+ * @returns 用户配置字段声明数组（可为空）
+ */
+export function parseUserConfigFields(
+  raw: unknown,
+  where: string,
+): CustomUserConfigField[] {
+  if (raw === undefined || raw === null || raw === '') return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(where + '的用户配置字段需要是数组');
+  }
+  const out: CustomUserConfigField[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(where + '用户配置字段第 ' + (i + 1) + ' 项需要是对象');
+    }
+    const rec = item as Record<string, unknown>;
+    const key = typeof rec.key === 'string' ? rec.key.trim() : '';
+    if (!key) {
+      throw new Error(where + '用户配置字段第 ' + (i + 1) + ' 项缺少 key');
+    }
+    if (seen.has(key)) {
+      throw new Error(where + '用户配置字段 key 重复: ' + key);
+    }
+    seen.add(key);
+    const type = typeof rec.type === 'string'
+      && (CUSTOM_USER_CONFIG_FIELD_TYPES as readonly string[]).includes(rec.type)
+      ? rec.type as CustomUserConfigFieldType
+      : 'string';
+    const name = typeof rec.name === 'string' && rec.name.trim() !== ''
+      ? rec.name.trim()
+      : key;
+    const defaultValue = typeof rec.defaultValue === 'string' ? rec.defaultValue : '';
+    const description = typeof rec.description === 'string' && rec.description.trim() !== ''
+      ? rec.description.trim()
+      : undefined;
+    out.push({
+      key,
+      name,
+      type,
+      defaultValue,
+      ...(description !== undefined ? { description } : {}),
+    });
+  }
+  return out;
 }
 
 /**

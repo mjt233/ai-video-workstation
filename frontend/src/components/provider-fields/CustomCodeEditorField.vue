@@ -59,6 +59,7 @@
           <MonacoEditor
             v-model="buffer"
             :extra-libs="libs"
+            :refresh-key="dialogOpen ? 1 : 0"
             :height="480"
           />
         </v-card-text>
@@ -96,6 +97,7 @@
 import { computed, ref } from 'vue'
 import MonacoEditor from '../monaco/MonacoEditor.vue'
 import {
+  buildCommonGlobalsLib,
   buildContextLib,
   COMMON_CODE_TEMPLATE,
   insertCodeTemplate,
@@ -113,6 +115,8 @@ const props = defineProps<{
   description?: string
   /** schema 字段（用于按字段 key 选择默认模板） */
   field?: ProviderConfigField
+  /** 通用代码块文本（测试代码等场景注入通用代码导出提示；通用代码块自身不传） */
+  commonCode?: unknown
 }>()
 
 const emit = defineEmits<{
@@ -138,13 +142,22 @@ function templateOf(fieldKey: string | undefined): string {
   return ''
 }
 
-/** 编辑器类型库：全量 params 接口 + 上下文声明（通用/测试代码里可用所有类型字段） */
-const libs = computed(() => [
-  {
-    content: buildContextLib(FALLBACK_WORKFLOW_TYPES),
-    filePath: 'custom-context.d.ts',
-  },
-])
+/** 编辑器类型库：全量 params 接口 + 上下文声明 + （可选）通用代码导出全局声明 */
+const libs = computed(() => {
+  const out: Array<{ content: string; filePath: string }> = [
+    {
+      content: buildContextLib(FALLBACK_WORKFLOW_TYPES),
+      filePath: 'custom-context.d.ts',
+    },
+  ]
+  // 测试代码等场景需要提示通用代码导出的函数；通用代码块自身不需要（不传该 prop）
+  const common = typeof props.commonCode === 'string' ? props.commonCode : ''
+  const globals = buildCommonGlobalsLib(common)
+  if (globals.trim()) {
+    out.push({ content: globals, filePath: 'custom-common-globals.d.ts' })
+  }
+  return out
+})
 
 /** 打开对话框：编辑当前内容（不默认注入模板，由用户点击「插入模板」） */
 function openDialog() {

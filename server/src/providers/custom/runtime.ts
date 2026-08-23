@@ -14,6 +14,7 @@
  */
 import vm from 'node:vm';
 import ts from 'typescript';
+import type { WorkflowTypeId } from '../../workflows/types.js';
 
 /**
  * http 请求配置（【调用发起】代码的返回值，也用于 ctx.request）。
@@ -78,6 +79,12 @@ export interface WorkflowCallContext {
   readFile?(relPath: string): Promise<string>;
   /** 读取项目 assert/ 下二进制文件为 File 对象；未注入时为 undefined */
   readAssertFile?(relPath: string): Promise<File>;
+  /** 读取项目内任意文件并转为 Base64 字符串；withDataPrefix 为 true 时自动添加 data:<mime>;base64, 前缀（MIME 按扩展名推断）；未注入时为 undefined */
+  readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>;
+  /** 本次调用的工作流类型（系统支持的类型之一）；测试连接等非工作流场景不存在 */
+  workflowType?: WorkflowTypeId;
+  /** 用户配置字段值（按声明类型转换为原生值；未填写时用声明默认值） */
+  userConfig: Record<string, boolean | number | string>;
 }
 
 /**
@@ -361,6 +368,12 @@ export interface WorkflowCallContextDeps {
   readFile?: (relPath: string) => Promise<string>;
   /** 读取 assert/ 文件（可选，注入 ctx.readAssertFile） */
   readAssertFile?: (relPath: string) => Promise<File>;
+  /** 读取项目内文件为 Base64（可选，注入 ctx.readFileToBase64） */
+  readFileToBase64?: (relPath: string, withDataPrefix?: boolean) => Promise<string>;
+  /** 本次调用的工作流类型（可选，注入 ctx.workflowType） */
+  workflowType?: WorkflowTypeId;
+  /** 用户配置字段值（可选，注入 ctx.userConfig；缺省空对象） */
+  userConfig?: Record<string, boolean | number | string>;
   /** 请求默认超时（毫秒，可选） */
   requestTimeoutMs?: number;
 }
@@ -383,6 +396,9 @@ export function buildWorkflowCallContext(deps: WorkflowCallContextDeps): Workflo
     projectConfig: deps.projectConfig,
     readFile: deps.readFile,
     readAssertFile: deps.readAssertFile,
+    readFileToBase64: deps.readFileToBase64,
+    workflowType: deps.workflowType,
+    userConfig: deps.userConfig ?? {},
     request: (conf: WorkflowCallRequestConfig) => performCustomRequest(conf, requestTimeoutMs),
   };
   return ctx;

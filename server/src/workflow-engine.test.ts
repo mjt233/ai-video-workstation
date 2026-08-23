@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { runTask } from './workflow-engine.js';
+import { mimeTypeForFile, runTask, toBase64Output } from './workflow-engine.js';
 import type { TaskRecord } from './db.js';
 import type { WorkflowDefinition } from './workflows/types.js';
 import type { ProviderInstance } from './providers/types.js';
@@ -161,5 +161,22 @@ describe('runTask provider 解析（按实例）', () => {
     expect(mockDb.updateTaskStatus).toHaveBeenCalledWith('task-1', 'failed', {
       error_msg: '工作流 text-to-image/seedream-inst-1 未绑定服务商实例',
     });
+  });
+});
+
+describe('mimeTypeForFile / toBase64Output', () => {
+  it('按扩展名推断 MIME 类型，未知扩展名默认 image/jpeg', () => {
+    expect(mimeTypeForFile('a.png')).toBe('image/png');
+    expect(mimeTypeForFile('a.webp')).toBe('image/webp');
+    expect(mimeTypeForFile('a.flac')).toBe('audio/flac');
+    expect(mimeTypeForFile('a.mp4')).toBe('video/mp4');
+    expect(mimeTypeForFile('a.bin')).toBe('image/jpeg');
+    expect(mimeTypeForFile('a.PNG')).toBe('image/png');
+  });
+
+  it('withDataPrefix=false（默认）只返回 base64，true 时添加 data: 前缀', () => {
+    expect(toBase64Output('QUJD', 'a.png', false)).toBe('QUJD');
+    expect(toBase64Output('QUJD', 'a.png', true)).toBe('data:image/png;base64,QUJD');
+    expect(toBase64Output('QUJD', 'a.mp4', true)).toBe('data:video/mp4;base64,QUJD');
   });
 });

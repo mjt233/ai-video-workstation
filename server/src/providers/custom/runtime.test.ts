@@ -94,19 +94,37 @@ describe('performCustomRequest', () => {
 describe('buildWorkflowCallContext', () => {
   it('ctx 字段齐全且 session 可跨调用共享', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: 1 }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    const readFileToBase64 = async (p: string, withDataPrefix?: boolean) =>
+      (withDataPrefix ? 'data:image/png;base64,' : '') + 'base64:' + p;
     const ctx = buildWorkflowCallContext({
       providerConfig: { baseUrl: 'https://example.com', apiKey: 'sk-x' },
       params: { prompt: 'hello' },
       projectConfig: { width: 1080, height: 1920, fps: 24 },
       readFile: async (p) => 'content:' + p,
       readAssertFile: async (p) => new File([new Uint8Array([1])], p),
+      readFileToBase64,
+      workflowType: 'text-to-image',
+      userConfig: { model: 'gpt-image-2', steps: 20, enhance: true },
     });
     expect(ctx.providerConfig.baseUrl).toBe('https://example.com');
     expect(ctx.session).toEqual({});
     ctx.session.count = 1;
     expect(ctx.session.count).toBe(1);
+    expect(ctx.readFileToBase64).toBe(readFileToBase64);
+    expect(await ctx.readFileToBase64?.('assert/a.png')).toBe('base64:assert/a.png');
+    expect(await ctx.readFileToBase64?.('assert/a.png', true)).toBe('data:image/png;base64,base64:assert/a.png');
+    expect(ctx.workflowType).toBe('text-to-image');
+    expect(ctx.userConfig).toEqual({ model: 'gpt-image-2', steps: 20, enhance: true });
     const res = await ctx.request({ url: 'https://example.com/t' });
     expect(res.data).toEqual({ ok: 1 });
+  });
+});
+
+describe('buildWorkflowCallContext 缺省值', () => {
+  it('未传 userConfig / readFileToBase64 时分别回退空对象与 undefined', () => {
+    const ctx = buildWorkflowCallContext({ providerConfig: {}, params: {} });
+    expect(ctx.userConfig).toEqual({});
+    expect(ctx.readFileToBase64).toBeUndefined();
   });
 });
 

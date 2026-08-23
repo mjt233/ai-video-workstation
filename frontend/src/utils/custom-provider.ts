@@ -5,7 +5,7 @@
  * WorkflowCallContext / WorkflowCallRequestConfig / WorkflowCallResult / WorkflowResult，
  * 以及按工作流类型组合的 ctx.params 类型提示。
  */
-import { normalizeWorkflowType } from './workflow-types'
+import { FALLBACK_WORKFLOW_TYPES, normalizeWorkflowType } from './workflow-types'
 
 /** 通用代码块默认模板（新增自定义服务商时的起始代码） */
 export const COMMON_CODE_TEMPLATE = [
@@ -101,6 +101,31 @@ export const TEST_CODE_TEMPLATE = [
   '  return res.status === 200',
   '}',
 ].join('\n')
+
+/** 用户配置字段支持的类型（与服务端 CUSTOM_USER_CONFIG_FIELD_TYPES 一致） */
+export const USER_CONFIG_FIELD_TYPES = ['boolean', 'integer', 'float', 'string'] as const
+
+/** 用户配置字段类型标识 */
+export type UserConfigFieldType = (typeof USER_CONFIG_FIELD_TYPES)[number]
+
+/**
+ * 用户配置字段声明（工作流条目内配置）。
+ *
+ * 运行工作流时前端按声明渲染输入表单；代码编辑器中按声明生成
+ * ctx.userConfig 的类型提示（boolean → boolean，integer/float → number，string → string）。
+ */
+export interface UserConfigFieldDef {
+  /** 字段 key（条目内唯一；ctx.userConfig 的键名） */
+  key: string
+  /** 显示名（表单标签） */
+  name: string
+  /** 字段类型 */
+  type: UserConfigFieldType
+  /** 默认值（字符串形式） */
+  defaultValue: string
+  /** 可选说明文案（表单 hint） */
+  description?: string
+}
 
 /** 各工作流类型 params 接口（按需包含进上下文库） */
 const PARAM_INTERFACES: Record<string, string> = {
@@ -215,16 +240,49 @@ const CORE_LIB = [
 ].join('\n')
 
 /**
+ * 生成 ctx.userConfig 的类型声明库。
+ *
+ * 有字段时生成带可选键的 interface（按字段类型映射：boolean → boolean，
+ * integer/float → number，string → string）；无字段时回退宽松索引签名。
+ *
+ * @param fields 用户配置字段声明
+ * @returns d.ts 片段（CustomUserConfig 类型）
+ */
+export function buildUserConfigLib(fields: UserConfigFieldDef[] | undefined): string {
+  const list = Array.isArray(fields) ? fields : []
+  if (list.length === 0) {
+    return 'type CustomUserConfig = Record<string, boolean | number | string>'
+  }
+  const lines: string[] = []
+  for (const field of list) {
+    if (!field.key?.trim()) continue
+    // 单引号包裹 key（转义其中的单引号与反斜杠），保证非法标识符也能作属性名
+    const key = "'" + field.key.trim().replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"
+    const jsType = field.type === 'boolean'
+      ? 'boolean'
+      : field.type === 'integer' || field.type === 'float'
+        ? 'number'
+        : 'string'
+    const doc = [field.name, field.description].filter(Boolean).join('：').replace(/\*\//g, '＊/').replace(/\n/g, ' ')
+    if (doc) lines.push('  /** ' + doc + ' */')
+    lines.push('  ' + key + '?: ' + jsType)
+  }
+  return 'declare interface CustomUserConfig {\n' + lines.join('\n') + '\n}'
+}
+
+/**
  * 构建 WorkflowCallContext 类型库。
  *
  * 按所选工作流类型动态组合 ctx.params 类型：
  * type CustomParams = TextToImageParams & ImageEditParams & ...
- * 未选类型时回退 Record<string, any>。
+ * 未选类型时回退 Record<string, any>；
+ * ctx.userConfig 按用户配置字段声明生成类型提示。
  *
  * @param types 该工作流支持的系统工作流类型
+ * @param userConfigFields 用户配置字段声明（可选）
  * @returns d.ts 库文本
  */
-export function buildContextLib(types: string[]): string {
+export function buildContextLib(types: string[], userConfigFields?: UserConfigFieldDef[]): string {
   const picked = (types ?? []).filter((t) => PARAM_INTERFACES[t])
   const paramLibs = picked.map((t) => PARAM_INTERFACES[t]).join('\n\n')
   const paramsType = picked.length > 0
@@ -233,6 +291,9 @@ export function buildContextLib(types: string[]): string {
   return [
     CORE_LIB,
     paramLibs,
+    buildUserConfigLib(userConfigFields),
+    // 系统支持的工作流类型联合（与 WORKFLOW_TYPE_META / FALLBACK_WORKFLOW_TYPES 保持一致）
+    'type CustomWorkflowTypeId = ' + FALLBACK_WORKFLOW_TYPES.map((t) => "'" + t + "'").join(' | '),
     'type CustomParams = ' + paramsType,
     'declare interface WorkflowCallContext {',
     '  /** 服务商已解析配置（含 baseUrl / apiKey / timeout 及其他字段） */',
@@ -249,6 +310,12 @@ export function buildContextLib(types: string[]): string {
     '  readFile?(relPath: string): Promise<string>',
     '  /** 读取项目 assert/ 下二进制文件为 File 对象 */',
     '  readAssertFile?(relPath: string): Promise<File>',
+    '  /** 读取项目内任意文件并转为 Base64；withDataPrefix 为 true 时自动添加 data:<mime>;base64, 前缀（MIME 按扩展名推断） */',
+    '  readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>',
+    '  /** 本次调用的工作流类型（系统支持的类型之一） */',
+    '  workflowType?: CustomWorkflowTypeId',
+    '  /** 用户配置字段值（按声明类型自动提示；未填写时用声明默认值） */',
+    '  userConfig: CustomUserConfig',
     '}',
   ].join('\n')
 }
@@ -351,6 +418,8 @@ export interface CustomWorkflowFormEntry {
   extractCode: string
   /** 【取消调用】代码 */
   cancelCode: string
+  /** 用户配置字段声明（运行工作流时由用户填写，经 ctx.userConfig 读取） */
+  userConfigFields?: UserConfigFieldDef[]
 }
 
 /**
@@ -379,6 +448,37 @@ export function normalizeWorkflowEntries(value: unknown): CustomWorkflowFormEntr
       callCode: typeof rec.callCode === 'string' ? rec.callCode : '',
       extractCode: typeof rec.extractCode === 'string' ? rec.extractCode : '',
       cancelCode: typeof rec.cancelCode === 'string' ? rec.cancelCode : '',
+      userConfigFields: normalizeUserConfigFields(rec.userConfigFields),
+    })
+  }
+  return out
+}
+
+/**
+ * 把外部值规范为用户配置字段声明数组（非法项丢弃，type 非法回退 'string'）。
+ *
+ * @param value 原始值（条目 userConfigFields 字段）
+ * @returns 用户配置字段声明数组（可为空）
+ */
+export function normalizeUserConfigFields(value: unknown): UserConfigFieldDef[] {
+  if (!Array.isArray(value)) return []
+  const out: UserConfigFieldDef[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const rec = item as Record<string, unknown>
+    const key = typeof rec.key === 'string' ? rec.key.trim() : ''
+    if (!key) continue
+    const type = USER_CONFIG_FIELD_TYPES.includes(rec.type as UserConfigFieldType)
+      ? (rec.type as UserConfigFieldType)
+      : 'string'
+    out.push({
+      key,
+      name: typeof rec.name === 'string' && rec.name.trim() ? rec.name.trim() : key,
+      type,
+      defaultValue: typeof rec.defaultValue === 'string' ? rec.defaultValue : '',
+      ...(typeof rec.description === 'string' && rec.description.trim()
+        ? { description: rec.description.trim() }
+        : {}),
     })
   }
   return out
@@ -409,5 +509,12 @@ export function validateWorkflowEntry(entry: CustomWorkflowFormEntry): string[] 
   if (!entry.callCode.trim()) errors.push('请编写「调用发起」代码')
   if (!entry.extractCode.trim()) errors.push('请编写「结果提取」代码')
   if (entry.cancelable && !entry.cancelCode.trim()) errors.push('勾选「支持取消」后必须编写「取消调用」代码')
+  const fields = entry.userConfigFields ?? []
+  for (const field of fields) {
+    if (!field.key.trim()) errors.push('用户配置字段存在空的 key')
+    if (!USER_CONFIG_FIELD_TYPES.includes(field.type)) errors.push('用户配置字段「' + (field.key || '未命名') + '」类型非法')
+  }
+  const keys = fields.map((field) => field.key.trim()).filter(Boolean)
+  if (new Set(keys).size !== keys.length) errors.push('用户配置字段 key 不能重复')
   return errors
 }

@@ -186,6 +186,123 @@
             />
           </div>
 
+          <!-- 用户配置字段：运行工作流时用户填写的自定义字段 -->
+          <v-divider class="mb-2" />
+          <div class="d-flex align-center mb-1">
+            <div class="text-body-medium font-weight-medium">
+              用户配置字段
+            </div>
+            <v-spacer />
+            <v-btn
+              color="secondary"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-plus"
+              @click="addUserConfigField"
+            >
+              新增字段
+            </v-btn>
+          </div>
+          <div class="text-caption text-medium-emphasis mb-2">
+            运行工作流时表单按声明渲染，用户填写后可在代码中通过
+            <code>ctx.userConfig.字段key</code> 读取（类型按字段声明自动提示）。
+          </div>
+          <v-table
+            v-if="form.userConfigFields.length"
+            density="compact"
+          >
+            <thead>
+              <tr>
+                <th class="text-left">
+                  key
+                </th>
+                <th class="text-left">
+                  显示名
+                </th>
+                <th class="text-left">
+                  类型
+                </th>
+                <th class="text-left">
+                  默认值
+                </th>
+                <th class="text-left">
+                  说明
+                </th>
+                <th class="text-right" />
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(field, i) in form.userConfigFields"
+                :key="i"
+              >
+                <td style="min-width: 120px">
+                  <v-text-field
+                    v-model="field.key"
+                    placeholder="如 model"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                  />
+                </td>
+                <td style="min-width: 110px">
+                  <v-text-field
+                    v-model="field.name"
+                    placeholder="如 模型名称"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                  />
+                </td>
+                <td style="min-width: 100px">
+                  <v-select
+                    v-model="field.type"
+                    :items="userConfigFieldTypeOptions"
+                    item-title="title"
+                    item-value="value"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                  />
+                </td>
+                <td style="min-width: 110px">
+                  <v-text-field
+                    v-model="field.defaultValue"
+                    placeholder="如 gpt-image-2"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                  />
+                </td>
+                <td style="min-width: 140px">
+                  <v-text-field
+                    v-model="field.description"
+                    placeholder="表单 hint（可选）"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                  />
+                </td>
+                <td class="text-right">
+                  <v-btn
+                    icon="mdi-delete"
+                    size="small"
+                    variant="text"
+                    color="error"
+                    :title="'删除字段「' + (field.key || '未命名') + '」'"
+                    @click="removeUserConfigField(i)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+          <div
+            v-else
+            class="text-caption text-medium-emphasis mb-2"
+          >
+            尚未配置用户配置字段。点击「新增字段」添加运行工作流时需要用户填写的参数。
+          </div>
+
           <!-- 代码编辑页签 -->
           <v-divider class="mb-2" />
           <v-tabs
@@ -228,6 +345,7 @@
             <MonacoEditor
               v-model="form.callCode"
               :extra-libs="editorLibs"
+              :refresh-key="dialogOpen ? 1 : 0"
               :height="360"
             />
           </div>
@@ -254,6 +372,7 @@
             <MonacoEditor
               v-model="form.extractCode"
               :extra-libs="editorLibs"
+              :refresh-key="dialogOpen ? 1 : 0"
               :height="360"
             />
           </div>
@@ -280,6 +399,7 @@
             <MonacoEditor
               v-model="form.cancelCode"
               :extra-libs="editorLibs"
+              :refresh-key="dialogOpen ? 1 : 0"
               :height="360"
             />
           </div>
@@ -320,6 +440,8 @@ import {
   normalizeWorkflowEntries,
   validateWorkflowEntry,
   type CustomWorkflowFormEntry,
+  type UserConfigFieldDef,
+  type UserConfigFieldType,
 } from '../../utils/custom-provider'
 
 const props = defineProps<{
@@ -354,13 +476,24 @@ const typeOptions = computed(() =>
   workflowTypes.value.map((id) => ({ title: workflowTypeLabel(id), value: id })),
 )
 
+/** 用户配置字段类型下拉选项（value 与 WorkflowUserParamType 一致，复用运行表单） */
+const userConfigFieldTypeOptions = [
+  { title: '字符串', value: 'string' },
+  { title: '整数', value: 'integer' },
+  { title: '小数', value: 'float' },
+  { title: '布尔', value: 'boolean' },
+] as Array<{ title: string; value: UserConfigFieldType }>
+
+/** 表单对象类型：userConfigFields 在表单内恒存在（数组） */
+type WorkflowFormEntry = CustomWorkflowFormEntry & { userConfigFields: UserConfigFieldDef[] }
+
 /** 表单对话框状态 */
 const dialogOpen = ref(false)
 /** 正在编辑的条目下标（null = 新增） */
 const editingIndex = ref<number | null>(null)
 const tab = ref('call')
 const formError = ref('')
-const form = ref<CustomWorkflowFormEntry>({
+const form = ref<WorkflowFormEntry>({
   name: '',
   types: [],
   async: false,
@@ -368,12 +501,13 @@ const form = ref<CustomWorkflowFormEntry>({
   callCode: '',
   extractCode: '',
   cancelCode: '',
+  userConfigFields: [],
 })
 
 /** 代码编辑器类型库：按所选类型动态组合 ctx.params 类型 + 通用代码导出全局声明 */
 const editorLibs = computed(() => {
   const libs: Array<{ content: string; filePath: string }> = [
-    { content: buildContextLib(form.value.types), filePath: 'custom-context.d.ts' },
+    { content: buildContextLib(form.value.types, form.value.userConfigFields), filePath: 'custom-context.d.ts' },
   ]
   const common = typeof props.commonCode === 'string' ? props.commonCode : ''
   const globals = buildCommonGlobalsLib(common)
@@ -417,6 +551,7 @@ function openCreate() {
     callCode: '',
     extractCode: '',
     cancelCode: '',
+    userConfigFields: [],
   }
   dialogOpen.value = true
 }
@@ -452,8 +587,22 @@ function openEdit(index: number) {
     callCode: row.callCode,
     extractCode: row.extractCode,
     cancelCode: row.cancelCode,
+    userConfigFields: (row.userConfigFields ?? []).map((field) => ({ ...field })),
   }
   dialogOpen.value = true
+}
+
+/** 新增一行用户配置字段（默认字符串类型，key 留空由用户填写） */
+function addUserConfigField() {
+  form.value.userConfigFields = [
+    ...(form.value.userConfigFields ?? []),
+    { key: '', name: '', type: 'string', defaultValue: '', description: '' } as UserConfigFieldDef,
+  ]
+}
+
+/** 删除指定下标的用户配置字段 */
+function removeUserConfigField(index: number) {
+  form.value.userConfigFields = (form.value.userConfigFields ?? []).filter((_, i) => i !== index)
 }
 
 /** 保存表单：校验后新增或更新条目 */

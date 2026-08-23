@@ -105,6 +105,8 @@ export interface WorkflowRunContext<TVars extends WorkflowVarsBase = WorkflowVar
   readFile(relPath: string): Promise<string>;
   /** 读取项目 assert/ 下的二进制文件为 File 对象；路径须以 assert/ 开头，相对 design/{project}/ */
   readAssertFile(relPath: string): Promise<File>;
+  /** 读取项目内任意文件并转为 Base64 字符串；withDataPrefix 为 true 时自动添加 data:<mime>;base64, 前缀（MIME 按扩展名推断）；引擎未注入时为 undefined */
+  readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>;
 }
 
 /** 工作流用户可手动传入的参数类型 */

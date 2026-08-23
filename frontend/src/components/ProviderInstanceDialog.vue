@@ -359,7 +359,10 @@ function cloneConfigValue(value: ProviderConfigValue): ProviderConfigValue {
  */
 function componentExtraProps(f: ProviderConfigField): Record<string, unknown> {
   const out: Record<string, unknown> = { field: f }
-  if (f.component === 'CustomWorkflowsEditorField') {
+  // 工作流编辑器注入通用代码（生成导出函数提示）；测试代码编辑器同样注入；
+  // 通用代码块自身不注入（编辑时无需提示自己的导出）
+  if (f.component === 'CustomWorkflowsEditorField'
+    || (f.component === 'CustomCodeEditorField' && f.key !== 'commonCode')) {
     out.commonCode = form.value.config.commonCode
   }
   return out

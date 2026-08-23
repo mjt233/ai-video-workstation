@@ -53,6 +53,63 @@ describe('syncCustomInstance', () => {
     expect(impl?.capabilities?.cancelable).toBe(true);
   });
 
+  it('用户配置字段注册为 params 声明（前端运行表单数据源）', async () => {
+    await syncCustomInstance(makeInstance([entry('wf-uc', ['text-to-image'], {
+      userConfigFields: [
+        { key: 'model', name: '模型名称', type: 'string', defaultValue: 'gpt-image-2', description: '选择模型' },
+        { key: 'steps', name: '步数', type: 'integer', defaultValue: '20' },
+        { key: 'enhance', name: '增强', type: 'boolean', defaultValue: 'false' },
+      ],
+    })]));
+    const impl = getImpl('text-to-image', 'custom-wf-uc-' + INSTANCE_ID);
+    expect(impl?.params).toEqual([
+      { name: '模型名称', key: 'model', type: 'string', defaultValue: 'gpt-image-2', description: '选择模型' },
+      { name: '步数', key: 'steps', type: 'integer', defaultValue: 20 },
+      { name: '增强', key: 'enhance', type: 'boolean', defaultValue: false },
+    ]);
+  });
+
+  it('submit 组装 userConfig（默认值回退 + 按类型转换）并透传 readFileToBase64', async () => {
+    await syncCustomInstance(makeInstance([entry('wf-uc2', ['text-to-image'], {
+      userConfigFields: [
+        { key: 'model', name: '模型', type: 'string', defaultValue: 'gpt-image-2' },
+        { key: 'steps', name: '步数', type: 'integer', defaultValue: '20' },
+        { key: 'enhance', name: '增强', type: 'boolean', defaultValue: 'false' },
+      ],
+    })]));
+    const impl = getImpl('text-to-image', 'custom-wf-uc2-' + INSTANCE_ID);
+    expect(impl).toBeDefined();
+    const execute = vi.fn(async (_p: {
+      workflowId: string;
+      workflowType?: string;
+      userConfig?: Record<string, boolean | number | string>;
+      readFileToBase64?: (p: string, withDataPrefix?: boolean) => Promise<string>;
+    }) => ({ taskId: 'task-1' }));
+    const fakeProvider = { execute } as unknown as CustomProviderClient;
+    const readFileToBase64 = async (p: string, withDataPrefix?: boolean) =>
+      (withDataPrefix ? 'data:image/png;base64,' : '') + 'b64:' + p;
+    const ctx = {
+      vars: { promptPath: 'prompt/a.md', model: 'gpt-4o', steps: '30' },
+      projectConfig: { width: 1080, height: 1920, fps: 24 },
+      readFile: async (p: string) => '提示词:' + p,
+      readAssertFile: async () => new File([], 'x.png'),
+      readFileToBase64,
+      provider: fakeProvider,
+    } as never;
+    await impl!.submit(ctx);
+    expect(execute).toHaveBeenCalledTimes(1);
+    const arg = execute.mock.calls[0][0] as {
+      workflowType?: string;
+      userConfig?: Record<string, unknown>;
+      readFileToBase64?: (p: string, withDataPrefix?: boolean) => Promise<string>;
+    };
+    // vars 有值优先；enhance 未填写回退默认值 false；steps 字符串转数字
+    expect(arg.workflowType).toBe('text-to-image');
+    expect(arg.userConfig).toEqual({ model: 'gpt-4o', steps: 30, enhance: false });
+    expect(await arg.readFileToBase64?.('assert/a.png')).toBe('b64:assert/a.png');
+    expect(await arg.readFileToBase64?.('assert/a.png', true)).toBe('data:image/png;base64,b64:assert/a.png');
+  });
+
   it('重同步清理已删除的工作流', async () => {
     await syncCustomInstance(makeInstance([entry('wf-a', ['text-to-image']), entry('wf-b', ['text-to-image'])]));
     expect(getImpl('text-to-image', 'custom-wf-b-' + INSTANCE_ID)).toBeDefined();

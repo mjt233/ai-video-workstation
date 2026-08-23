@@ -35,12 +35,15 @@ const props = withDefaults(
     readOnly?: boolean
     /** 编辑器高度（css 值或像素数字，默认 420px） */
     height?: string | number
+    /** 刷新令牌：变化时重新登记类型库（用于对话框重新打开时让本编辑器的库重新生效） */
+    refreshKey?: number
   }>(),
   {
     extraLibs: () => [],
     language: 'typescript',
     readOnly: false,
     height: 420,
+    refreshKey: 0,
   },
 )
 
@@ -55,19 +58,32 @@ let editor: monaco.editor.IStandaloneCodeEditor | null = null
 const LIB_PREFIX = 'file:///custom-provider-types/'
 
 /**
- * 把 props.extraLibs 整体替换进 Monaco TypeScript 默认配置。
+ * 模块级额外库注册表：每个编辑器实例登记自己的类型库。
  *
- * setExtraLibs 会整体替换用户额外库（不影响内置 lib.d.ts / dom.d.ts），
- * 因此动态 params 类型与通用代码导出提示随 props 变化即时刷新。
+ * typescriptDefaults 是全局单例，若每个编辑器挂载/更新时各自 setExtraLibs
+ * 整体替换，会互相覆盖（如打开「通用代码块」对话框后工作流编辑器里的
+ * 通用代码导出提示丢失、修改通用代码后不刷新）。这里改为登记到共享注册表，
+ * 统一合并为并集后写入，保证所有已挂载编辑器的提示始终是最新并集。
  */
-function applyExtraLibs() {
-  const defaults = monaco.languages.typescript.typescriptDefaults
-  defaults.setExtraLibs(
-    (props.extraLibs ?? []).map((lib) => ({
-      content: lib.content,
-      filePath: lib.filePath.startsWith('file://') ? lib.filePath : LIB_PREFIX + lib.filePath,
-    })),
-  )
+const libRegistry = new Map<number, Array<{ content: string; filePath: string }>>()
+let nextLibId = 1
+
+/**
+ * 把注册表中的全部类型库合并后写入 Monaco 全局默认。
+ *
+ * 同名 filePath 后登记的内容覆盖先登记的（各编辑器对同一虚拟文件的内容
+ * 应保持一致或互为超集，覆盖不会破坏提示）。
+ */
+function flushExtraLibs() {
+  const byPath = new Map<string, string>()
+  for (const [, libs] of libRegistry) {
+    for (const lib of libs) byPath.set(lib.filePath, lib.content)
+  }
+  const all: Array<{ content: string; filePath: string }> = []
+  for (const [filePath, content] of byPath) {
+    all.push({ content, filePath })
+  }
+  monaco.languages.typescript.typescriptDefaults.setExtraLibs(all)
 }
 
 onMounted(() => {
@@ -84,7 +100,7 @@ onMounted(() => {
     noSemanticValidation: false,
     noSyntaxValidation: false,
   })
-  applyExtraLibs()
+  syncRegistry()
   editor = monaco.editor.create(container.value, {
     value: props.modelValue,
     language: props.language,
@@ -109,14 +125,36 @@ watch(
   },
 )
 
-/** 类型库变化时刷新提示 */
+/**
+ * 把当前编辑器的类型库登记进共享注册表并刷新全局并集。
+ */
+function syncRegistry() {
+  libRegistry.set(libId, (props.extraLibs ?? []).map((lib) => ({
+    content: lib.content,
+    filePath: lib.filePath.startsWith('file://') ? lib.filePath : LIB_PREFIX + lib.filePath,
+  })))
+  flushExtraLibs()
+}
+
+/** 类型库变化时刷新提示（含通用代码块修改、用户配置字段增删等场景） */
 watch(
   () => props.extraLibs,
-  () => applyExtraLibs(),
+  () => syncRegistry(),
   { deep: true },
 )
 
+/** 刷新令牌变化时重新登记（对话框重新打开时覆盖其他编辑器对同名虚拟文件的旧内容） */
+watch(
+  () => props.refreshKey,
+  () => syncRegistry(),
+)
+
+/** 本实例在注册表中的唯一 id（卸载时移除自己的登记） */
+const libId = nextLibId++
+
 onBeforeUnmount(() => {
+  libRegistry.delete(libId)
+  flushExtraLibs()
   editor?.dispose()
   editor = null
 })

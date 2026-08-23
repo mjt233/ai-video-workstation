@@ -137,3 +137,39 @@ interface WorkflowCallContext {
 
 - 当工作流配置为异步请求时，【结果提取】会被多次调用，直到 `isFinish` 为 true，或报错持续时间达到设定的超时时间
 - 当工作流配置为非异步请求时，【结果提取】只会被调用一次。
+
+## 工作流用户配置字段
+
+工作流条目可配置「用户配置字段」列表（key / 显示名 / 类型 / 默认值 / 说明）：
+
+- 类型支持：string（字符串）、integer（整数）、float（小数）、boolean（布尔）
+- 运行工作流时，前端按声明渲染输入表单（默认值回填），用户填写后经 vars 注入自定义工作流
+- 代码中通过 `ctx.userConfig.字段key` 读取（按声明类型转换为原生值：boolean / number / string；
+  未填写时回退声明默认值，保证每个声明字段都存在）
+- 编辑器按当前表单中的字段声明生成 `ctx.userConfig` 类型提示（boolean → boolean，
+  integer/float → number，string → string），新增/删除/修改字段后实时刷新
+
+## ctx.readFileToBase64
+
+`ctx.readFileToBase64(relPath: string, withDataPrefix?: boolean): Promise<string>`
+—— 读取项目内任意文件并转为 Base64 字符串。路径相对 `design/{project}/`，越界抛错。
+
+- `withDataPrefix` 缺省 / false：返回纯 Base64（不含 `data:` 前缀）
+- `withDataPrefix` 为 true：自动添加 `data:<mime>;base64,` 前缀（MIME 按文件扩展名推断：
+  png → image/png、webp → image/webp、flac → audio/flac、mp4 → video/mp4，其余默认 image/jpeg）
+
+## ctx.workflowType
+
+`ctx.workflowType?: WorkflowTypeId` —— 本次调用的工作流类型，类型约束为系统支持的工作流类型
+联合（`'text-to-image' | 'image-edit' | 'tts-voice-design' | 'tts-voice-clone' | 'image-to-video'`，
+与 `workflows/types.ts` 的 `WorkflowTypeId` 一致）。由同步器按注册的工作流类型注入；
+测试连接等非工作流执行场景不存在该字段。前端 Monaco 声明库同样以联合类型约束
+（`CustomWorkflowTypeId`，与 `FALLBACK_WORKFLOW_TYPES` 保持一致），编辑器内赋值/比较
+非系统类型会直接报 TS 错误。
+
+## 编辑器类型提示实时刷新
+
+- 修改「通用代码块」后，工作流调用发起 / 结果提取 / 取消调用 / 测试代码编辑器中的
+  通用代码导出提示实时更新
+- 修复：Monaco 额外类型库改为共享注册表合并（避免多个编辑器互相覆盖全局
+  typescriptDefaults 导致提示丢失/不刷新）

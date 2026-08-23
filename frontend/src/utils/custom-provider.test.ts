@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCommonGlobalsLib,
   buildContextLib,
+  buildUserConfigLib,
   insertCodeTemplate,
   normalizeWorkflowEntries,
   validateWorkflowEntry,
@@ -21,6 +22,37 @@ describe('buildContextLib', () => {
     expect(lib).toContain('declare interface ImageEditParams')
     expect(lib).toContain('type CustomParams = TextToImageParams & ImageEditParams')
     expect(lib).not.toContain('TtsVoiceDesignParams')
+  })
+
+  it('ctx 含 readFileToBase64 与 userConfig（无字段时宽松索引签名）', () => {
+    const lib = buildContextLib([])
+    expect(lib).toContain('readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>')
+    expect(lib).toContain('workflowType?: CustomWorkflowTypeId')
+    expect(lib).toContain('userConfig: CustomUserConfig')
+    expect(lib).toContain('type CustomUserConfig = Record<string, boolean | number | string>')
+  })
+
+  it('workflowType 类型约束为系统支持的工作流类型联合', () => {
+    const lib = buildContextLib([])
+    expect(lib).toContain("type CustomWorkflowTypeId = 'text-to-image' | 'image-edit' | 'tts-voice-design' | 'tts-voice-clone' | 'image-to-video'")
+  })
+
+  it('用户配置字段生成 ctx.userConfig 类型提示（按类型映射）', () => {
+    const lib = buildContextLib([], [
+      { key: 'model', name: '模型', type: 'string', defaultValue: 'gpt-image-2' },
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: '20' },
+      { key: 'rate', name: '比例', type: 'float', defaultValue: '1.5' },
+      { key: 'enhance', name: '增强', type: 'boolean', defaultValue: 'false' },
+    ])
+    expect(lib).toContain("'model'?: string")
+    expect(lib).toContain("'steps'?: number")
+    expect(lib).toContain("'rate'?: number")
+    expect(lib).toContain("'enhance'?: boolean")
+  })
+
+  it('buildUserConfigLib 空字段返回宽松索引签名', () => {
+    expect(buildUserConfigLib([])).toContain('Record<string, boolean | number | string>')
+    expect(buildUserConfigLib(undefined)).toContain('Record<string, boolean | number | string>')
   })
 })
 
@@ -55,6 +87,7 @@ describe('normalizeWorkflowEntries', () => {
         callCode: '',
         extractCode: '',
         cancelCode: '',
+        userConfigFields: [],
       },
     ])
   })
@@ -67,6 +100,25 @@ describe('normalizeWorkflowEntries', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].types).toEqual(['text-to-image'])
     expect(rows[0].cancelable).toBe(true)
+  })
+
+  it('用户配置字段规范化：非法 type 回退 string、空 key 丢弃', () => {
+    const rows = normalizeWorkflowEntries([
+      {
+        name: 'wf',
+        types: ['text-to-image'],
+        userConfigFields: [
+          { key: 'model', name: '模型', type: 'integer', defaultValue: '20' },
+          { key: '', name: 'x', type: 'string', defaultValue: '' },
+          { key: 'broken', name: 'b', type: 'unknown-type', defaultValue: '' },
+          'not-object',
+        ],
+      },
+    ])
+    expect(rows[0].userConfigFields).toEqual([
+      { key: 'model', name: '模型', type: 'integer', defaultValue: '20' },
+      { key: 'broken', name: 'b', type: 'string', defaultValue: '' },
+    ])
   })
 })
 
@@ -108,5 +160,18 @@ describe('validateWorkflowEntry', () => {
   it('支持取消但未写取消代码时报错', () => {
     const errors = validateWorkflowEntry({ ...base, cancelable: true, cancelCode: '' })
     expect(errors.join('')).toContain('取消调用')
+  })
+
+  it('用户配置字段：空 key 与重复 key 报错', () => {
+    const errors = validateWorkflowEntry({
+      ...base,
+      userConfigFields: [
+        { key: '', name: 'a', type: 'string', defaultValue: '' },
+        { key: 'model', name: 'b', type: 'string', defaultValue: '' },
+        { key: 'model', name: 'c', type: 'string', defaultValue: '' },
+      ],
+    })
+    expect(errors.join('')).toContain('空的 key')
+    expect(errors.join('')).toContain('不能重复')
   })
 })
