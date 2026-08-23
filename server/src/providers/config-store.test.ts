@@ -16,6 +16,7 @@ const mkTestProvider = (id: string): ProviderDefinition => ({
     { key: 'url', label: '地址', type: 'string', required: true },
     { key: 'key', label: '密钥', type: 'password', secret: true },
     { key: 'timeout', label: '超时', type: 'number', defaultValue: 10 },
+    { key: 'models', label: '模型', type: 'component', component: 'OpenAICompatibleModelsEditor', defaultValue: [] },
   ],
   createClient: () => ({ execute: async () => ({ taskId: 't' }), poll: async () => ({ status: 'done', done: true }), getOutput: async () => null, cancel: async () => {} }),
   listWorkflows: async () => [],
@@ -64,6 +65,35 @@ describe('config-store 实例 CRUD', () => {
 
   it('必填字段缺失时报错', async () => {
     await expect(createInstance({ type: 'test-store', name: 'A', config: {} }, configPath)).rejects.toThrow('必填');
+  });
+
+  it('component 字段以对象/数组原样往返，脱敏不改写', async () => {
+    const models = [{ id: 'gpt-image-1', capabilities: ['text-to-image', 'image-edit'] }];
+    const inst = await createInstance(
+      { type: 'test-store', name: 'A', config: { url: 'http://a', models } },
+      configPath,
+    );
+    expect(inst.config.models).toEqual(models);
+    const masked = getInstanceConfigMasked(inst);
+    expect(masked.models).toEqual(models);
+    const resolved = resolveInstanceConfig(inst);
+    expect(resolved.models).toEqual(models);
+  });
+
+  it('component 字段非法值报错', async () => {
+    await expect(
+      createInstance({ type: 'test-store', name: 'A', config: { url: 'http://a', models: 'oops' } }, configPath),
+    ).rejects.toThrow('对象或数组');
+  });
+
+  it('更新未提交 component 字段时保留原值', async () => {
+    const models = [{ id: 'm1', capabilities: ['text-to-image'] }];
+    const inst = await createInstance(
+      { type: 'test-store', name: 'A', config: { url: 'http://a', models } },
+      configPath,
+    );
+    const updated = await updateInstance(inst.id, { config: { url: 'http://b' } }, configPath);
+    expect(updated.config.models).toEqual(models);
   });
 });
 

@@ -19,7 +19,7 @@ import {
   updateInstance,
 } from '../providers/config-store.js';
 import { getAllProviders, getProvider } from '../providers/registry.js';
-import type { ProviderDefinition } from '../providers/types.js';
+import type { ProviderConfigValue, ProviderDefinition } from '../providers/types.js';
 import { syncInstance } from '../providers/instance-sync.js';
 import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities, WorkflowDefinition } from '../workflows/types.js';
@@ -221,8 +221,8 @@ async function mergeSavedSecrets(
   providerDef: ProviderDefinition,
   config: Record<string, unknown>,
   instanceId?: string,
-): Promise<Record<string, string | number | boolean>> {
-  const base = config as Record<string, string | number | boolean>;
+): Promise<Record<string, ProviderConfigValue>> {
+  const base = config as Record<string, ProviderConfigValue>;
   if (!instanceId) return base;
   const inst = await getInstance(instanceId);
   if (!inst) throw new Error(`实例不存在: ${instanceId}`);

@@ -35,6 +35,19 @@ describe('Provider 类型定义（多实例扩展）', () => {
     expect(entry.description).toBe('火山方舟 Seedream 5.0 文生图');
   });
 
+  it('ProviderConfigField 支持 type=component 与结构化 config 值', () => {
+    const instance: ProviderInstance = {
+      id: 'inst-oai',
+      type: 'openai-compatible',
+      name: '中转',
+      config: {
+        baseUrl: 'https://api.openai.com/v1',
+        models: [{ id: 'gpt-image-1', capabilities: ['text-to-image'] }],
+      },
+    };
+    expect(Array.isArray(instance.config.models)).toBe(true);
+  });
+
   it('ProviderWorkflowEntry 的 type / description 为可选字段', () => {
     const entry: ProviderWorkflowEntry = {
       key: 'ceb-文生图工作流',

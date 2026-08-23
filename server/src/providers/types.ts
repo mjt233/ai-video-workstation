@@ -8,6 +8,12 @@
  */
 
 /**
+ * Provider 配置值：标量字段为 string/number/boolean，
+ * `type: 'component'` 字段为可 JSON 序列化的对象或数组。
+ */
+export type ProviderConfigValue = string | number | boolean | object;
+
+/**
  * Provider 配置字段声明（驱动设置表单 + 校验 + 环境变量兜底）。
  */
 export interface ProviderConfigField {
@@ -15,15 +21,18 @@ export interface ProviderConfigField {
   key: string;
   /** 中文标签 */
   label: string;
-  /** 字段类型（决定前端表单控件与后端类型强转） */
-  type: 'string' | 'password' | 'number' | 'boolean' | 'select';
+  /**
+   * 字段类型（决定前端表单控件与后端类型强转）。
+   * `component`：前端按 `component` 名渲染自定义组件，值通过 v-model 绑定结构化对象/数组。
+   */
+  type: 'string' | 'password' | 'number' | 'boolean' | 'select' | 'component';
   /** 是否必填（文件值 / 环境变量 / 默认值均缺失时报错） */
   required?: boolean;
-  /** 默认值（表单初始值；文件与环境变量均未提供时使用） */
-  defaultValue?: string | number | boolean;
+  /** 默认值（表单初始值；文件与环境变量均未提供时使用；component 字段可为对象/数组） */
+  defaultValue?: ProviderConfigValue;
   /** 输入框占位文案 */
   placeholder?: string;
-  /** 敏感字段：GET 返回时脱敏为 '__set__'；保存时空串 = 保留原值 */
+  /** 敏感字段：GET 返回时脱敏为空串；保存时空串 = 保留原值。component 字段不使用 */
   secret?: boolean;
   /** select 类型可选项 */
   options?: { label: string; value: string }[];
@@ -31,10 +40,12 @@ export interface ProviderConfigField {
   description?: string;
   /** 环境变量兜底名，如 COMFYUI_BRIDGE_URL；文件值优先 */
   envVar?: string;
+  /** type=component 时：前端映射表中的组件名，如 OpenAICompatibleModelsEditor */
+  component?: string;
 }
 
 /** 已解析的 Provider 配置值（文件值 > envVar > defaultValue 合并后） */
-export type ResolvedProviderConfig = Record<string, string | number | boolean>;
+export type ResolvedProviderConfig = Record<string, ProviderConfigValue>;
 
 /**
  * Provider 插件定义：配置 schema + 客户端工厂。
@@ -119,8 +130,8 @@ export interface ProviderInstance {
   type: string;
   /** 用户手填的显示名，如「火山方舟-主账号」 */
   name: string;
-  /** 该实例的配置参数（secret 字段保存时脱敏处理） */
-  config: Record<string, string | number | boolean>;
+  /** 该实例的配置参数（secret 字段保存时脱敏处理；component 字段为结构化对象/数组） */
+  config: Record<string, ProviderConfigValue>;
 }
 
 /** 服务商实例可提供的工作流条目（listWorkflows 返回） */

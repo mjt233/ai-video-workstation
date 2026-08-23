@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { getProvider } from './registry.js';
-import type { ProviderConfigField, ProviderInstance, ResolvedProviderConfig } from './types.js';
+import type { ProviderConfigField, ProviderConfigValue, ProviderInstance, ResolvedProviderConfig } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,9 +19,32 @@ interface ProvidersFile {
 }
 
 /** 判断是否为旧格式（按 provider 类型一份配置） */
-function isLegacyFormat(parsed: unknown): parsed is Record<string, Record<string, string | number | boolean>> {
+function isLegacyFormat(parsed: unknown): parsed is Record<string, Record<string, ProviderConfigValue>> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
   return !('instances' in (parsed as object));
+}
+
+/**
+ * 把 component 字段值规范为可 JSON 序列化的对象或数组。
+ *
+ * @param label 字段中文标签（用于报错）
+ * @param raw 前端提交的原始值
+ * @returns 深拷贝后的纯 JSON 对象/数组
+ */
+export function normalizeComponentValue(label: string, raw: unknown): object {
+  if (raw === null || typeof raw !== 'object') {
+    throw new Error(`字段 ${label} 需要对象或数组`);
+  }
+  let cloned: unknown;
+  try {
+    cloned = JSON.parse(JSON.stringify(raw)) as unknown;
+  } catch {
+    throw new Error(`字段 ${label} 含有不可序列化的值`);
+  }
+  if (cloned === null || typeof cloned !== 'object') {
+    throw new Error(`字段 ${label} 需要对象或数组`);
+  }
+  return cloned;
 }
 
 async function readConfigFile(configPath: string): Promise<ProvidersFile> {
@@ -63,7 +86,7 @@ function envValue(field: ProviderConfigField): string | undefined {
 /** 合并配置：文件值 > 环境变量 > 默认值 */
 export function resolveProviderConfig(
   schema: ProviderConfigField[],
-  fileValues: Record<string, string | number | boolean> | undefined,
+  fileValues: Record<string, ProviderConfigValue> | undefined,
 ): ResolvedProviderConfig {
   const out: ResolvedProviderConfig = {};
   for (const field of schema) {
@@ -100,17 +123,30 @@ export function getInstanceConfigMasked(instance: ProviderInstance): ResolvedPro
 function normalizeConfig(
   providerId: string,
   values: Record<string, unknown>,
-  current: Record<string, string | number | boolean>,
-): Record<string, string | number | boolean> {
+  current: Record<string, ProviderConfigValue>,
+): Record<string, ProviderConfigValue> {
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`Provider 未注册: ${providerId}`);
-  const out: Record<string, string | number | boolean> = { ...current };
+  const out: Record<string, ProviderConfigValue> = { ...current };
   for (const field of provider.configSchema) {
     const raw = values[field.key];
     if (raw === undefined) continue;
+    if (field.type === 'component') {
+      // null / 空串视为清空：有默认值则回落到默认值，否则删键
+      if (raw === null || raw === '') {
+        if (field.defaultValue !== undefined) {
+          out[field.key] = normalizeComponentValue(field.label, field.defaultValue);
+        } else {
+          delete out[field.key];
+        }
+        continue;
+      }
+      out[field.key] = normalizeComponentValue(field.label, raw);
+      continue;
+    }
     if (field.secret && (raw === '' || raw === MASKED_SECRET)) continue; // 保留原值
     if (raw === '') { delete out[field.key]; continue; }
-    let parsed: string | number | boolean = String(raw);
+    let parsed: ProviderConfigValue = String(raw);
     if (field.type === 'number') {
       const n = Number(raw);
       if (!Number.isFinite(n)) throw new Error(`字段 ${field.label} 需要数字，收到: ${String(raw)}`);
@@ -203,7 +239,7 @@ export async function migrateLegacyConfig(configPath: string = CONFIG_PATH): Pro
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
   if ('instances' in (parsed as object)) return false; // 已是新格式
-  const legacy = parsed as Record<string, Record<string, string | number | boolean>>;
+  const legacy = parsed as Record<string, Record<string, ProviderConfigValue>>;
   const instances: ProviderInstance[] = [];
   for (const [type, config] of Object.entries(legacy)) {
     const provider = getProvider(type);

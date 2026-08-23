@@ -36,7 +36,7 @@ export async function syncStaticInstance(instance: ProviderInstance): Promise<vo
 }
 
 /**
- * 同步单个实例（按类型分发：Bridge 走 bridge-sync，其余走静态同步）。
+ * 同步单个实例（按类型分发：Bridge / OpenAI 兼容走动态同步，其余走静态同步）。
  *
  * @param instance 服务商实例
  */
@@ -44,6 +44,9 @@ export async function syncInstance(instance: ProviderInstance): Promise<void> {
   if (instance.type === 'comfyui-bridge') {
     const { syncBridgeInstance } = await import('../workflows/bridge-sync.js');
     await syncBridgeInstance(instance);
+  } else if (instance.type === 'openai-compatible') {
+    const { syncOpenAICompatibleInstance } = await import('../workflows/openai-compatible-sync.js');
+    await syncOpenAICompatibleInstance(instance);
   } else {
     await syncStaticInstance(instance);
   }

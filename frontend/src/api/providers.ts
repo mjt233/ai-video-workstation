@@ -1,7 +1,13 @@
 import client from './client'
 
 /** Provider 配置字段类型 */
-export type ProviderConfigFieldType = 'string' | 'password' | 'number' | 'boolean' | 'select'
+export type ProviderConfigFieldType = 'string' | 'password' | 'number' | 'boolean' | 'select' | 'component'
+
+/**
+ * Provider 配置值：标量字段为 string/number/boolean，
+ * `type: 'component'` 字段为可 JSON 序列化的对象或数组。
+ */
+export type ProviderConfigValue = string | number | boolean | object
 
 /** Provider 配置字段声明（服务端 configSchema 透传，驱动设置表单） */
 export interface ProviderConfigField {
@@ -9,12 +15,15 @@ export interface ProviderConfigField {
   key: string
   /** 中文标签 */
   label: string
-  /** 字段类型 */
+  /**
+   * 字段类型。
+   * `component`：按 `component` 名渲染自定义组件，值通过 v-model 绑定结构化对象/数组。
+   */
   type: ProviderConfigFieldType
   /** 是否必填 */
   required?: boolean
-  /** 默认值 */
-  defaultValue?: string | number | boolean
+  /** 默认值（component 字段可为对象/数组） */
+  defaultValue?: ProviderConfigValue
   /** 输入框占位文案 */
   placeholder?: string
   /** 敏感字段：已保存时服务端返回空串（不回显真实值，也不使用占位符） */
@@ -25,6 +34,8 @@ export interface ProviderConfigField {
   description?: string
   /** 环境变量兜底名 */
   envVar?: string
+  /** type=component 时：前端映射表中的组件名，如 OpenAICompatibleModelsEditor */
+  component?: string
 }
 
 /** Provider 信息（GET /api/providers 返回） */
@@ -34,7 +45,7 @@ export interface ProviderInfo {
   description?: string
   configSchema: ProviderConfigField[]
   /** 当前已保存配置；secret 字段有值时为空串（不回显，保存空串 = 服务端保留原值） */
-  config: Record<string, string | number | boolean>
+  config: Record<string, ProviderConfigValue>
 }
 
 /** 服务商类型信息（GET /api/providers 返回的 types 元素） */
@@ -50,7 +61,7 @@ export interface ProviderInstanceInfo {
   id: string
   type: string
   name: string
-  config: Record<string, string | number | boolean>
+  config: Record<string, ProviderConfigValue>
 }
 
 /** 实例工作流条目（GET /api/providers/instances/:id/workflows 返回） */

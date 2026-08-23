@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { syncAllInstances } from './instance-sync.js';
+import { syncAllInstances, syncInstance } from './instance-sync.js';
 import { getImplementations, register } from '../workflows/registry.js';
 import type { WorkflowDefinition } from '../workflows/types.js';
 
@@ -8,6 +8,12 @@ vi.mock('./config-store.js', () => ({
     { id: 'inst-1', type: 'volcengine-ark', name: '方舟A', config: {} },
     { id: 'inst-2', type: 'volcengine-ark', name: '方舟B', config: {} },
   ]),
+  resolveInstanceConfig: vi.fn((inst: { config: Record<string, unknown> }) => inst.config),
+}));
+
+const syncOpenAICompatibleInstance = vi.fn(async () => {});
+vi.mock('../workflows/openai-compatible-sync.js', () => ({
+  syncOpenAICompatibleInstance,
 }));
 
 vi.mock('./registry.js', () => ({
@@ -38,5 +44,16 @@ describe('instance-sync', () => {
     const impls = getImplementations('image-edit');
     expect(impls).toHaveLength(2);
     expect(impls.map((i) => i.providerInstanceId).sort()).toEqual(['inst-1', 'inst-2']);
+  });
+
+  it('openai-compatible 走动态同步，不按静态候选注册', async () => {
+    await syncInstance({
+      id: 'inst-oai',
+      type: 'openai-compatible',
+      name: '中转',
+      config: { models: [{ id: 'gpt-image-1', capabilities: ['text-to-image'] }] },
+    });
+    expect(syncOpenAICompatibleInstance).toHaveBeenCalledTimes(1);
+    expect(getImplementations('text-to-image').some((i) => i.providerInstanceId === 'inst-oai')).toBe(false);
   });
 });

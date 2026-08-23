@@ -98,6 +98,16 @@
             variant="outlined"
             @click:append-inner="toggleSecret(f)"
           />
+          <component
+            :is="resolveProviderFieldComponent(f.component)"
+            v-for="f in componentFields"
+            :key="f.key"
+            :model-value="form.config[f.key]"
+            :label="f.label"
+            :description="f.description"
+            :name="f.component || ''"
+            @update:model-value="form.config[f.key] = $event"
+          />
         </template>
 
         <!-- 连接测试 -->
@@ -212,10 +222,12 @@ import {
   testProviderConnection,
   updateProviderInstance,
   type ProviderConfigField,
+  type ProviderConfigValue,
   type ProviderInstanceInfo,
   type ProviderTypeInfo,
   type ProviderWorkflowEntry,
 } from '../api/providers'
+import { resolveProviderFieldComponent } from './provider-fields'
 
 const props = defineProps<{
   modelValue: boolean
@@ -243,7 +255,7 @@ const schemaFields = computed<ProviderConfigField[]>(() => {
 const form = ref<{
   type: string
   name: string
-  config: Record<string, string | number | boolean>
+  config: Record<string, ProviderConfigValue>
 }>({
   type: '',
   name: '',
@@ -261,17 +273,35 @@ const workflowsLoading = ref(false)
 const workflowsError = ref('')
 const workflowEntries = ref<ProviderWorkflowEntry[]>([])
 
+/**
+ * 深拷贝 component 字段默认值 / 已保存值，避免多个实例共享同一引用。
+ * @param value 原始值
+ * @returns 拷贝后的值；无法序列化时原样返回
+ */
+function cloneConfigValue(value: ProviderConfigValue): ProviderConfigValue {
+  if (value !== null && typeof value === 'object') {
+    try {
+      return JSON.parse(JSON.stringify(value)) as ProviderConfigValue
+    } catch {
+      return value
+    }
+  }
+  return value
+}
+
 /** 构建表单初始值：secret 字段恒为空；其余用已保存值或 defaultValue */
-function buildForm(type: string, config: Record<string, string | number | boolean>): Record<string, string | number | boolean> {
+function buildForm(type: string, config: Record<string, ProviderConfigValue>): Record<string, ProviderConfigValue> {
   const t = props.types.find((x) => x.id === type)
-  const formConfig: Record<string, string | number | boolean> = {}
+  const formConfig: Record<string, ProviderConfigValue> = {}
   for (const f of t?.configSchema ?? []) {
     if (f.secret) {
       formConfig[f.key] = ''
     } else if (config[f.key] !== undefined) {
-      formConfig[f.key] = config[f.key]
+      formConfig[f.key] = cloneConfigValue(config[f.key])
     } else if (f.defaultValue !== undefined) {
-      formConfig[f.key] = f.defaultValue
+      formConfig[f.key] = cloneConfigValue(f.defaultValue)
+    } else if (f.type === 'component') {
+      formConfig[f.key] = []
     } else {
       formConfig[f.key] = f.type === 'boolean' ? false : ''
     }
@@ -409,4 +439,6 @@ const selectFields = computed(() => schemaFields.value.filter((f) => f.type === 
 const textFields = computed(() =>
   schemaFields.value.filter((f) => f.type === 'string' || f.type === 'password' || f.type === 'number'),
 )
+/** type=component 的自定义字段（按映射表渲染） */
+const componentFields = computed(() => schemaFields.value.filter((f) => f.type === 'component'))
 </script>
