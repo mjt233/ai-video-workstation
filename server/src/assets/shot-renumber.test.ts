@@ -77,4 +77,45 @@ describe('rewriteSceneShotPathsInText', () => {
     expect(out).toContain('assert/scene/1/1/canvas/a/v1.jpg');
     expect(out).toContain('assert/scene/1/2/canvas/b/v1.jpg');
   });
+
+  it('分镜自定义资产路径随分镜号一起改写（插入 +1）', () => {
+    const text = JSON.stringify({
+      own: 'assert/custom/scene/1/2/ref.mp4',
+      other: 'assert/custom/scene/1/3/audio.mp3',
+    });
+    const out = rewriteSceneShotPathsInText(text, '1', [
+      { from: '2', to: '3' },
+      { from: '3', to: '4' },
+    ]);
+    expect(out).toContain('assert/custom/scene/1/3/ref.mp4');
+    expect(out).not.toContain('assert/custom/scene/1/4/ref.mp4');
+    expect(out).toContain('assert/custom/scene/1/4/audio.mp3');
+    expect(out).not.toContain('assert/custom/scene/1/3/audio.mp3');
+  });
+
+  it('分镜自定义资产路径随分镜号一起改写（删除 -1）', () => {
+    const text = '{"own": "assert/custom/scene/1/4/clip.mp4"}';
+    const out = rewriteSceneShotPathsInText(text, '1', [
+      { from: '4', to: '3' },
+      { from: '5', to: '4' },
+    ]);
+    expect(out).toContain('assert/custom/scene/1/3/clip.mp4');
+    expect(out).not.toContain('assert/custom/scene/1/4/clip.mp4');
+  });
+
+  it('非合法前缀中的 scene/{ep}/{shot} 片段不改写', () => {
+    const text = JSON.stringify({
+      formal: 'assert/scene/1/2/stage/0.jpg',
+      custom: 'assert/custom/scene/1/2/a.png',
+      prompt: 'prompt/scene/1/2/canvas.json',
+      unrelated: 'foo/scene/1/2/keep.jpg',
+      text: '提示词里提到 scene/1/2 也保持原样',
+    });
+    const out = rewriteSceneShotPathsInText(text, '1', [{ from: '2', to: '3' }]);
+    expect(out).toContain('assert/scene/1/3/stage/0.jpg');
+    expect(out).toContain('assert/custom/scene/1/3/a.png');
+    expect(out).toContain('prompt/scene/1/3/canvas.json');
+    expect(out).toContain('foo/scene/1/2/keep.jpg');
+    expect(out).toContain('提示词里提到 scene/1/2 也保持原样');
+  });
 });

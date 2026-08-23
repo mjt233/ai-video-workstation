@@ -295,6 +295,7 @@ assetsRouter.delete('/assets/:project/episode/:episode', async (req: Request, re
     if (!(await pathExists(dir))) throw Object.assign(new Error('集数不存在'), { code: 'NOT_FOUND' });
     await removeDirIfExists(dir);
     await removeDirIfExists(resolveProjectPath(project, `assert/scene/${episode}`));
+    await removeDirIfExists(resolveProjectPath(project, `assert/custom/scene/${episode}`));
     res.json({ success: true });
   } catch (err) {
     httpError(res, err);
@@ -313,6 +314,9 @@ assetsRouter.delete('/assets/:project/shot/:episode/:shot', async (req: Request,
     if (!(await pathExists(dir))) throw Object.assign(new Error('分镜不存在'), { code: 'NOT_FOUND' });
     await removeDirIfExists(dir);
     await removeDirIfExists(resolveProjectPath(project, `assert/scene/${episode}/${shot}`));
+    // 分镜自定义资产随分镜号成组 rename；先删除本分镜的自定义目录，
+    // 避免后续 -1 移动时与被删号目录冲突（历史数据可能残留）。
+    await removeDirIfExists(resolveProjectPath(project, `assert/custom/scene/${episode}/${shot}`));
     const renames = await shiftShotsDownAfterDelete(project, episode, shot);
     res.json({ success: true, renames });
   } catch (err) {
