@@ -21,7 +21,7 @@ const DESIGN_DIR = path.resolve(__dirname, '../../../design');
 export interface DiscoveredTask {
   /** 工作流类型 ID */
   workflowId: string;
-  /** 实现标识（可缺省：批量创建端按资产类型解析，缺省时回退到该类型第一个实现） */
+  /** 实现标识（必须由批量创建端显式指定；缺失/非法时批量创建接口整体拒绝，不做回退） */
   impl?: string;
   /** 业务变量 */
   vars: WorkflowVarsBase & Record<string, string>;
@@ -54,7 +54,7 @@ async function fileExists(filePath: string): Promise<boolean> {
  * @param project   – project name (subdirectory under design/)
  * @param assetTypes – array of asset type identifiers to discover
  * @param overwrite  – if true, include tasks even if the output file already exists
- * @param implByAssetType – 按资产类型覆盖工作流实现（前端勾选资产类型后手动选择，默认取第一个实现）
+ * @param implByAssetType – 按资产类型覆盖工作流实现（前端必须显式提供；缺失时任务在创建阶段被拒绝）
  * @returns an array of discovered tasks
  */
 export async function discoverTasks(

@@ -47,6 +47,20 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   }
 
   /**
+   * 校验节点是否已选择可提交的工作流实现（仅检查非空；实现是否仍存在由服务端严格校验兜底）。
+   *
+   * 覆盖不经过配置面板的生成入口（右键菜单「生成」、节点卡片重试等）：
+   * 未选择时不发起请求，直接以 snackbar 提示，保证提交值与界面显示一致。
+   *
+   * @param node 生成节点数据
+   * @returns 未选择时的提示文案；已选择（非空字符串）返回 null
+   */
+  function missingWorkflowImplMessage(node: CanvasNodeData): string | null {
+    const v = node.config.workflowImpl
+    return typeof v === 'string' && v !== '' ? null : '请先在节点配置中选择工作流实现'
+  }
+
+  /**
    * 触发生成节点：收集输入路径 → 注入 → 跑工作流；结果由服务端写盘，完成后回调刷新展示。
    * 获取视频帧/拼接视频/裁剪视频节点走本地 ffmpeg 路由（不走工作流）。
    *
@@ -72,6 +86,11 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       return
     }
     if (node.prototypeId === 'video-generate') {
+      const implMsg = missingWorkflowImplMessage(node)
+      if (implMsg) {
+        showSnackbar(implMsg, 'error')
+        return
+      }
       const videoParams = buildVideoSubmitParams(node, {
         images: videoInputsOf(nodeId, 'image'),
         videos: videoInputsOf(nodeId, 'video'),
@@ -81,6 +100,11 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       return
     }
     if (node.prototypeId === 'tts-generate') {
+      const implMsg = missingWorkflowImplMessage(node)
+      if (implMsg) {
+        showSnackbar(implMsg, 'error')
+        return
+      }
       // TTS 声音生成：收集音频输入路径（克隆模式参考音色）后走通用生成流程
       const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config, undefined, getScope())
       gen.setInputPaths(nodeId, paths)
@@ -88,6 +112,11 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       return
     }
     if (node.prototypeId !== 'image-generate') return
+    const implMsg = missingWorkflowImplMessage(node)
+    if (implMsg) {
+      showSnackbar(implMsg, 'error')
+      return
+    }
     const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config, undefined, getScope())
     gen.setInputPaths(nodeId, paths)
     await gen.generate(node, undefined, applyResult)

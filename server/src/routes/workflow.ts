@@ -3,9 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 import * as db from '../db.js';
 import type { TaskRecord } from '../db.js';
 import { getAllWorkflows } from '../workflow-engine.js';
-import { getImpl, getImplementations, unregisterByInstance } from '../workflows/registry.js';
+import { getImpl, unregisterByInstance } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
-import { discoverTasks } from '../workflows/discovery.js';
+import { discoverTasks, type DiscoveredTask } from '../workflows/discovery.js';
 import { markCancelRequested, stripCancelRequested } from '../workflows/cancel.js';
 import {
   MASKED_SECRET,
@@ -22,35 +22,72 @@ import { getAllProviders, getProvider } from '../providers/registry.js';
 import type { ProviderDefinition } from '../providers/types.js';
 import { syncInstance } from '../providers/instance-sync.js';
 import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
-import type { VideoWorkflowSubmitParams, WorkflowCapabilities } from '../workflows/types.js';
+import type { VideoWorkflowSubmitParams, WorkflowCapabilities, WorkflowDefinition } from '../workflows/types.js';
 
 export const workflowRouter = Router();
 
 /**
- * 解析工作流实现：指定实现存在则用之，否则回退到该工作流类型的实现。
+ * 校验用户显式提交的工作流实现。
  *
- * 画布【生成视频】节点新建时 workflowImpl 可能未初始化（提交 'default'），
- * 而部分工作流类型（如 image-to-video）没有名为 default 的实现；
- * 此处兜底保证任务总能落到一个真实实现上。
+ * 后端不再为缺失/非法 impl 做任何兜底：调用方必须明确指定一个已注册的可执行实现
+ * （getImpl 仅返回已绑定服务商实例的定义），避免「界面显示某个默认实现、实际执行
+ * 另一个实现」的隐性不一致，也避免静默切换到付费云或本地 Bridge。
  *
- * 未显式指定时优先本地 Bridge 实现（provider=comfyui-bridge，即 ceb-*）：
- * text-to-image / image-edit 等类型注册的第一个实现可能是付费云（volcengine-ark），
- * 直接回退 impls[0] 会让批量生成静默切到云模型，因此优先选本地 Bridge，
- * 仅当类型下不存在 Bridge 实现（如纯 seedream 类型）才回退第一个实现。
- *
- * @param workflowId 工作流类型 ID
- * @param impl 请求的实现标识（可能缺失或非法）
- * @returns 可用的实现标识
+ * @param workflowId 工作流类型 ID（如 image-edit）
+ * @param impl 请求的实现标识（可为 undefined / 空串 / 非法值）
+ * @returns 校验通过时返回 ok=true 与规范化实现标识/定义；否则 ok=false 与错误码/提示
  */
-export function resolveImpl(workflowId: string, impl?: string): string {
-  const requested = impl ?? 'default';
-  const impls = getImplementations(workflowId);
-  if (impls.some((w) => w.impl === requested)) {
-    return requested;
+export function validateWorkflowImpl(
+  workflowId: string,
+  impl: string | undefined,
+): { ok: true; impl: string; implDef: WorkflowDefinition } | { ok: false; code: string; message: string } {
+  const trimmed = typeof impl === 'string' ? impl.trim() : '';
+  if (!trimmed) {
+    return { ok: false, code: 'workflow_impl_required', message: `工作流类型 ${workflowId} 必须显式指定工作流实现（impl）` };
   }
-  // 未显式指定时优先本地 Bridge 实现（provider=comfyui-bridge），避免批量默认切到付费云
-  const bridgeImpl = impls.find((w) => w.provider === 'comfyui-bridge');
-  return bridgeImpl?.impl ?? impls[0]?.impl ?? 'default';
+  const implDef = getImpl(workflowId, trimmed);
+  if (!implDef) {
+    return { ok: false, code: 'workflow_impl_not_found', message: `工作流实现不存在或未绑定服务商实例: ${workflowId}/${trimmed}` };
+  }
+  return { ok: true, impl: trimmed, implDef };
+}
+
+/** 批量任务解析结果条目：任务描述 + 已校验的实现标识与定义 */
+export interface ValidatedDiscoveredTask {
+  /** 发现阶段生成的任务描述 */
+  task: DiscoveredTask;
+  /** 规范化后的实现标识（非空、已绑定实例） */
+  impl: string;
+  /** 实现定义（参数规范化/提供商判断用） */
+  implDef: WorkflowDefinition;
+}
+
+/**
+ * 批量校验发现任务的实现选择：任一任务缺失/非法实现即整体失败。
+ *
+ * 与 /workflow/run 同一语义：校验失败时不创建任何任务（避免半截批次），
+ * 错误消息汇总全部失败任务，供前端一次性展示。
+ *
+ * @param tasks 发现阶段生成的任务列表
+ * @returns 全部合法时 ok=true 与解析结果；否则 ok=false 与汇总错误消息
+ */
+export function validateDiscoveredImpls(
+  tasks: DiscoveredTask[],
+): { ok: true; resolved: ValidatedDiscoveredTask[] } | { ok: false; message: string } {
+  const resolved: ValidatedDiscoveredTask[] = [];
+  const missing: string[] = [];
+  for (const task of tasks) {
+    const v = validateWorkflowImpl(task.workflowId, task.impl);
+    if (!v.ok) {
+      missing.push(`${task.assetType ?? task.workflowId}: ${v.message}`);
+      continue;
+    }
+    resolved.push({ task, impl: v.impl, implDef: v.implDef });
+  }
+  if (missing.length > 0) {
+    return { ok: false, message: `以下任务未显式指定可用的工作流实现：${missing.join('；')}` };
+  }
+  return { ok: true, resolved };
 }
 
 /**
@@ -297,22 +334,26 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     return;
   }
 
+  // 工作流实现必须显式指定且合法（不兜底），否则直接拒绝创建任务
+  const validated = validateWorkflowImpl(workflowId, impl);
+  if (!validated.ok) {
+    res.status(400).json({ error: validated.code, message: validated.message });
+    return;
+  }
+  const implDef = validated.implDef;
   // 用户手动传入的参数：仅保留所选实现声明的 key，按类型规范化后合并进 vars
-  // 实现缺失/非法时回退到第一个实现（如 image-to-video 无 default 实现）
-  const resolvedImpl = resolveImpl(workflowId, impl);
-  const implDef = getImpl(workflowId, resolvedImpl);
-  const userVars = normalizeUserParams(implDef?.params, params.userParams);
+  const userVars = normalizeUserParams(implDef.params, params.userParams);
   // ComfyUI 提供商选择（Bridge 执行保留键 providerId）：仅 comfyui-bridge 工作流生效，
   // 独立存于任务 params，不混入 vars（providerId 不是工作流参数，避免注入 Bridge 请求参数）
   const comfyuiProviderId =
-    implDef?.provider === 'comfyui-bridge' ? extractComfyuiProviderId(params.userParams) : undefined;
+    implDef.provider === 'comfyui-bridge' ? extractComfyuiProviderId(params.userParams) : undefined;
 
   const taskId = uuidv4();
   db.createTask({
     id: taskId,
     project,
     workflow_id: workflowId,
-    impl: resolvedImpl,
+    impl: validated.impl,
     params: {
       vars: { ...(params.vars ?? {}), ...userVars },
       promptPaths: params.promptPaths ?? [],
@@ -322,7 +363,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     },
   });
 
-  db.addLog(taskId, 'info', `Task created: ${workflowId}/${resolvedImpl}`);
+  db.addLog(taskId, 'info', `Task created: ${workflowId}/${validated.impl}`);
 
   res.json({ taskId, status: 'pending' });
 });
@@ -449,6 +490,16 @@ workflowRouter.post('/workflow/retry/:taskId', (req: Request, res: Response) => 
     return;
   }
 
+  // 重试前校验原实现仍可执行：旧任务可能在实例删除/工作流下线后失效，
+  // 直接复制会创建必败任务
+  if (!getImpl(existing.workflow_id, existing.impl)) {
+    res.status(400).json({
+      error: 'workflow_impl_not_found',
+      message: `原任务工作流实现已不存在或未绑定服务商实例: ${existing.workflow_id}/${existing.impl}`,
+    });
+    return;
+  }
+
   const newTaskId = uuidv4();
   db.createTask({
     id: newTaskId,
@@ -553,20 +604,23 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
 
     const batchId = uuidv4();
 
-    for (const task of discovered) {
+    // 发现任务必须全部显式绑定合法实现，否则整体拒绝（不创建半截批次）
+    const validatedBatch = validateDiscoveredImpls(discovered);
+    if (!validatedBatch.ok) {
+      res.status(400).json({ error: 'workflow_impl_required', message: validatedBatch.message });
+      return;
+    }
+
+    for (const { task, impl: resolvedImpl, implDef } of validatedBatch.resolved) {
       const phase = ASSET_PHASE[task.assetType ?? ''] ?? 0;
-      // 任务不再携带默认 impl（发现阶段仅在按资产类型手动覆盖时设置）：
-      // 缺省或非法实现由 resolveImpl 回退到该工作流类型的第一个实现
-      const resolvedImpl = resolveImpl(task.workflowId, task.impl);
       // 用户手动传入的参数：按该任务实际实现（workflowId + resolvedImpl）的声明规范化后合并进 vars
-      const implDef = getImpl(task.workflowId, resolvedImpl);
       const userVars = normalizeUserParams(
-        implDef?.params,
+        implDef.params,
         task.assetType ? userParamsByAssetType?.[task.assetType] : undefined,
       );
       // ComfyUI 提供商选择：按资产类型从用户参数提取，仅 comfyui-bridge 实现入库（与 /workflow/run 同语义）
       const comfyuiProviderId =
-        implDef?.provider === 'comfyui-bridge'
+        implDef.provider === 'comfyui-bridge'
           ? extractComfyuiProviderId(task.assetType ? userParamsByAssetType?.[task.assetType] : undefined)
           : undefined;
       db.createTask({

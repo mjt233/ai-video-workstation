@@ -601,6 +601,12 @@ async function startGenerate() {
   submitError.value = null
   configWarning.value = null
   try {
+    // 后端不再为缺失实现兜底：任一已勾选资产类型无可用实现时直接阻断提交
+    const unavailable = selectedTypes.value.filter((id) => implOptionsFor(id).length === 0)
+    if (unavailable.length > 0) {
+      configWarning.value = `以下资产类型暂无可用工作流实现，请先在服务商设置中配置实例：${unavailable.map((id) => assetTypes.find((a) => a.id === id)?.label ?? id).join('、')}`
+      return
+    }
     // 组装每个资产类型选定的工作流实现（默认取第一个可用实现）
     const implByAssetType: Record<string, string> = {}
     for (const id of selectedTypes.value) {

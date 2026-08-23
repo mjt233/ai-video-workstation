@@ -91,9 +91,12 @@
       item-title="label"
       item-value="value"
       label="工作流实现"
+      placeholder="请选择工作流实现"
       density="compact"
       variant="outlined"
-      hide-details
+      :disabled="workflowsLoaded && implItems.length === 0"
+      :error="!!implError"
+      :error-messages="implError ? [implError] : []"
       class="mb-2"
       @update:model-value="onImplChange"
     >
@@ -129,7 +132,7 @@
         color="primary"
         size="small"
         :loading="isRunning"
-        @click="emit('generate', node.id)"
+        @click="requestGenerate"
       >
         {{ hasOutput ? '重新生成' : '生成' }}
       </v-btn>
@@ -192,6 +195,10 @@ const emit = defineEmits<{
 }>()
 
 const workflows = ref<WorkflowInfo[]>([])
+/** 工作流列表是否已加载完成（区分「加载中」与「类型下没有可用实现」的校验提示） */
+const workflowsLoaded = ref(false)
+/** 工作流实现校验错误（未选择实现时点击生成显示，选择后清除） */
+const implError = ref('')
 
 /** 节点当前是否已有产物（生成按钮文案/历史/设为分镜场景图入口用；产物为固定路径文件，由服务端落盘） */
 const hasOutput = computed(() => !!(props.output || props.node.config.current))
@@ -316,18 +323,19 @@ function providerLabel(raw: { providerName?: string; provider?: string }): strin
   return raw?.providerName ?? raw?.provider ?? ''
 }
 
-/** 当前选择的工作流实现标识（config.workflowImpl；非法/未初始化时回退第一个实现） */
+/** 当前选择的工作流实现标识（仅回显 config.workflowImpl；缺失/非法时为空，不展示虚假默认值） */
 const currentImplId = computed(() => {
   const impl = props.node.config.workflowImpl
   if (typeof impl === 'string' && implItems.value.some((i) => i.value === impl)) return impl
-  return implItems.value[0]?.value ?? ''
+  return ''
 })
 
 /**
- * 切换工作流类型：显式写入 workflowId，重置实现与参数（实现回退到新类型第一个）。
+ * 切换工作流类型：显式写入 workflowId，重置实现与参数（实现置空，须用户重新选择）。
  * @param v 工作流类型（text-to-image / image-edit）
  */
 function onTypeChange(v: string) {
+  implError.value = ''
   emit('update:config', { workflowId: v, workflowImpl: undefined, workflowParams: {} })
 }
 
@@ -336,7 +344,25 @@ function onTypeChange(v: string) {
  * @param v 实现标识（impl）
  */
 function onImplChange(v: string) {
+  implError.value = ''
   emit('update:config', { workflowImpl: v, workflowParams: {} })
+}
+
+/**
+ * 点击「生成」：未选择工作流实现时展示校验错误且不触发生成，
+ * 保证实际提交的实现与界面显示一致。
+ */
+function requestGenerate() {
+  if (!currentImplId.value) {
+    implError.value = !workflowsLoaded.value
+      ? '工作流列表加载中，请稍候再试'
+      : implItems.value.length === 0
+        ? '当前工作流类型没有可用实现，请先在服务商设置中配置实例'
+        : '请先选择工作流实现'
+    return
+  }
+  implError.value = ''
+  emit('generate', props.node.id)
 }
 
 /** 当前选择的工作流实现（找不到时为 undefined） */
@@ -369,6 +395,7 @@ watch(
 getWorkflows()
   .then((list) => { workflows.value = list })
   .catch(() => { workflows.value = [] })
+  .finally(() => { workflowsLoaded.value = true })
 </script>
 
 <style scoped>

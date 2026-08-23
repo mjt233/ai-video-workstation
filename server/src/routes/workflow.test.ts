@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseTaskParams, canCancelTask, getRemoteTaskId, resolveImpl, extractComfyuiProviderId } from './workflow.js';
+import { parseTaskParams, canCancelTask, getRemoteTaskId, validateWorkflowImpl, validateDiscoveredImpls, extractComfyuiProviderId } from './workflow.js';
 import { register } from '../workflows/registry.js';
 import type { TaskRecord } from '../db.js';
 import type { WorkflowDefinition } from '../workflows/types.js';
+import type { DiscoveredTask } from '../workflows/discovery.js';
 
-/** 注册一个最小假实现（与 capabilities.test.ts 一致），供 resolveImpl 用例使用 */
+/** 注册一个最小假实现（与 capabilities.test.ts 一致），供 validateWorkflowImpl 用例使用 */
 function registerFake(type: string, impl: string, provider?: string): void {
   register({
     type,
@@ -17,34 +18,71 @@ function registerFake(type: string, impl: string, provider?: string): void {
   } as WorkflowDefinition);
 }
 
-describe('resolveImpl', () => {
-  it('指定实现存在时返回之', () => {
-    registerFake('resolve-impl-test', 'ltx');
-    expect(resolveImpl('resolve-impl-test', 'ltx')).toBe('ltx');
+describe('validateWorkflowImpl', () => {
+  it('合法显式实现返回 ok 与规范化定义', () => {
+    registerFake('validate-impl-ok', 'seedream-5-pro');
+    const r = validateWorkflowImpl('validate-impl-ok', '  seedream-5-pro  ');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.impl).toBe('seedream-5-pro');
+      expect(r.implDef.impl).toBe('seedream-5-pro');
+    }
   });
 
-  it('指定实现缺失时回退到第一个实现', () => {
-    // 该工作流类型只有 ltx（无 default 实现）→ 回退到 ltx
-    expect(resolveImpl('resolve-impl-test', 'default')).toBe('ltx');
-    expect(resolveImpl('resolve-impl-test', undefined)).toBe('ltx');
+  it('缺失/空串/纯空白拒绝', () => {
+    registerFake('validate-impl-empty', 'ceb-x');
+    for (const impl of [undefined, '', '   ']) {
+      const r = validateWorkflowImpl('validate-impl-empty', impl);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.code).toBe('workflow_impl_required');
+    }
   });
 
-  it('未显式指定时优先本地 Bridge 实现（provider=comfyui-bridge）', () => {
-    // 第一个实现是 volcengine-ark（付费云）、第二个是 comfyui-bridge（本地）→ 无显式 impl 返回 Bridge 实现
-    registerFake('resolve-impl-bridge-pref', 'seedream-5-pro', 'volcengine-ark');
-    registerFake('resolve-impl-bridge-pref', 'ceb-xx', 'comfyui-bridge');
-    expect(resolveImpl('resolve-impl-bridge-pref', undefined)).toBe('ceb-xx');
-    expect(resolveImpl('resolve-impl-bridge-pref', 'default')).toBe('ceb-xx');
+  it('不存在的实现拒绝', () => {
+    registerFake('validate-impl-missing', 'ceb-x');
+    const r = validateWorkflowImpl('validate-impl-missing', 'seedream-5-pro');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe('workflow_impl_not_found');
   });
 
-  it('无 comfyui-bridge 实现时回退到第一个实现', () => {
-    registerFake('resolve-impl-no-bridge', 'seedream-5-pro', 'volcengine-ark');
-    registerFake('resolve-impl-no-bridge', 'seedream-2.1', 'volcengine-ark');
-    expect(resolveImpl('resolve-impl-no-bridge', undefined)).toBe('seedream-5-pro');
+  it('候选定义（未绑定实例）不可执行，拒绝', () => {
+    register({
+      type: 'validate-impl-candidate',
+      name: '候选',
+      impl: 'seedream',
+      provider: 'volcengine-ark',
+      // 不填 providerInstanceId：仅候选定义，不可执行
+      submit: async () => ({ taskId: 't' }),
+    } as WorkflowDefinition);
+    const r = validateWorkflowImpl('validate-impl-candidate', 'seedream');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe('workflow_impl_not_found');
+  });
+});
+
+describe('validateDiscoveredImpls', () => {
+  it('全部显式合法时返回解析结果', () => {
+    registerFake('validate-batch-ok', 'ceb-t2i');
+    const tasks: DiscoveredTask[] = [
+      { workflowId: 'validate-batch-ok', impl: 'ceb-t2i', vars: {}, promptPaths: [], outputPath: 'assert/a.jpg', assetType: 'stage-image' },
+    ];
+    const r = validateDiscoveredImpls(tasks);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.resolved).toHaveLength(1);
   });
 
-  it('未知工作流类型时回退 default', () => {
-    expect(resolveImpl('no-such-workflow', 'x')).toBe('default');
+  it('任一任务缺失/非法实现时整体失败并列出资产类型', () => {
+    registerFake('validate-batch-mixed', 'ceb-t2i');
+    const tasks: DiscoveredTask[] = [
+      { workflowId: 'validate-batch-mixed', impl: 'ceb-t2i', vars: {}, promptPaths: [], outputPath: 'assert/a.jpg', assetType: 'stage-image' },
+      { workflowId: 'validate-batch-mixed', vars: {}, promptPaths: [], outputPath: 'assert/b.jpg', assetType: 'variant-edit' },
+    ];
+    const r = validateDiscoveredImpls(tasks);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.message).toContain('variant-edit');
+      expect(r.message).toContain('必须显式指定工作流实现');
+    }
   });
 });
 

@@ -257,6 +257,11 @@ watch(() => polling.status, (newStatus) => {
 })
 
 async function submit() {
+  // 后端要求显式指定合法实现：实现列表为空或选中值失效时直接提示，不发请求
+  if (!implementations.value.some((i) => i.impl === selectedImpl.value)) {
+    submitError.value = '暂无可用工作流实现，请先在服务商设置中配置实例'
+    return
+  }
   submitting.value = true
   submitError.value = null
   polling.error = null

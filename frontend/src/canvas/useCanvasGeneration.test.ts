@@ -39,7 +39,7 @@ const RUNNING_TASK = {
 function makeNode(prompt: string, workflowId?: string): CanvasNodeData {
   return {
     id: 'n1', prototypeId: 'image-generate', name: '生成', x: 0, y: 0, width: 240, height: 160,
-    config: { prompt, ...(workflowId ? { workflowId } : {}) },
+    config: { prompt, workflowImpl: 'ceb-canvas-image', ...(workflowId ? { workflowId } : {}) },
   }
 }
 
@@ -92,6 +92,15 @@ describe('useCanvasGeneration', () => {
         }),
       }),
     )
+  })
+
+  it('图片节点未选择工作流实现：error 且不调用 runWorkflow', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = { ...makeNode('一只猫'), config: { prompt: '一只猫' } }
+    await gen.generate(node)
+    expect(runWorkflow).not.toHaveBeenCalled()
+    expect(gen.statusByNode.value.n1?.status).toBe('error')
+    expect(gen.statusByNode.value.n1?.errorMsg).toContain('工作流实现')
   })
 
   it('场景画布（含子场景标签）：prompt 与产物路径包含 label', async () => {
@@ -152,6 +161,19 @@ describe('useCanvasGeneration', () => {
     expect(gen.statusByNode.value.vg?.errorMsg).toBe('缺少视频提交参数')
   })
 
+  it('视频节点未选择工作流实现：error 且不调用 runWorkflow', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
+      config: {},
+    }
+    const videoParams = { mode: 'director' as const, resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', extraParams: {} }
+    await gen.generate(node, videoParams)
+    expect(runWorkflow).not.toHaveBeenCalled()
+    expect(gen.statusByNode.value.vg?.status).toBe('error')
+    expect(gen.statusByNode.value.vg?.errorMsg).toContain('工作流实现')
+  })
+
   it('TTS 声音生成（设计模式）：tts-voice-design + prompt/text + .flac 产物', async () => {
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
@@ -201,6 +223,18 @@ describe('useCanvasGeneration', () => {
     expect(runWorkflow).not.toHaveBeenCalled()
     expect(gen.statusByNode.value.tg?.status).toBe('error')
     expect(gen.statusByNode.value.tg?.errorMsg).toContain('需先连接音频输入')
+  })
+
+  it('TTS 节点未选择工作流实现：error 且不调用 runWorkflow', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'tg', prototypeId: 'tts-generate', name: 'TTS声音生成', x: 0, y: 0, width: 240, height: 160,
+      config: { mode: 'design', text: '你好', prompt: '温柔女声' },
+    }
+    await gen.generate(node)
+    expect(runWorkflow).not.toHaveBeenCalled()
+    expect(gen.statusByNode.value.tg?.status).toBe('error')
+    expect(gen.statusByNode.value.tg?.errorMsg).toContain('工作流实现')
   })
 
   it('拼接视频节点：调用服务端 concat-video 并通知 .mp4 结果', async () => {

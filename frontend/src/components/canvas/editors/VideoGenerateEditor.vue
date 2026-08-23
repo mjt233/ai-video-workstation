@@ -15,9 +15,12 @@
           item-title="label"
           item-value="value"
           label="工作流"
+          placeholder="请选择工作流实现"
           density="compact"
           variant="outlined"
-          hide-details
+          :disabled="workflowsLoaded && impls.length === 0"
+          :error="!!implError"
+          :error-messages="implError ? [implError] : []"
           class="flex-grow-1"
           @update:model-value="onWorkflowChange"
         >
@@ -262,7 +265,7 @@
           size="small"
           :loading="isRunning"
           :disabled="!canGenerate"
-          @click="emit('generate', node.id)"
+          @click="requestGenerate"
         >
           {{ hasOutput ? '重新生成' : '生成' }}
         </v-btn>
@@ -407,6 +410,10 @@ onBeforeUnmount(() => {
 
 /** 已加载的视频工作流列表（image-to-video 类） */
 const workflows = ref<WorkflowInfo[]>([])
+/** 工作流列表是否已加载完成（区分「加载中」与「类型下没有可用实现」的校验提示） */
+const workflowsLoaded = ref(false)
+/** 工作流实现校验错误（未选择实现时点击生成显示，选择后清除） */
+const implError = ref('')
 
 /** 节点当前是否已有产物（生成按钮文案/历史/设为分镜视频入口用；产物为固定路径文件，由服务端落盘） */
 const hasOutput = computed(() => !!(props.output || props.node.config.current))
@@ -417,11 +424,11 @@ const imageToVideoType = computed(() => workflows.value.find((w) => w.type === '
 /** 图生视频类型下的所有实现（如 LTX-2.3 / MiniMax H2V） */
 const impls = computed(() => imageToVideoType.value?.implementations ?? [])
 
-/** 当前选择的工作流实现标识（config.workflowImpl；非法/未初始化时回退第一个实现） */
+/** 当前选择的工作流实现标识（仅回显 config.workflowImpl；缺失/非法时为空，不展示虚假默认值） */
 const workflowImpl = computed(() => {
   const impl = props.node.config.workflowImpl
   if (typeof impl === 'string' && impls.value.some((i) => i.impl === impl)) return impl
-  return impls.value[0]?.impl ?? ''
+  return ''
 })
 
 /** 当前提示词（config.prompt） */
@@ -441,9 +448,9 @@ const directorConfig = computed<CanvasDirectorConfig>(() => {
   return { duration: 0, width: 0, height: 0, fps: 0, imageClips: [], audioClips: [] }
 })
 
-/** 当前选择的工作流实现（找不到时回退第一个实现） */
+/** 当前选择的工作流实现（未选择/找不到时为 undefined） */
 const currentImpl = computed(() =>
-  impls.value.find((i) => i.impl === workflowImpl.value) ?? impls.value[0],
+  impls.value.find((i) => i.impl === workflowImpl.value),
 )
 
 /** 当前实现支持的生成模式列表（能力未声明 video.modes 时默认仅导演台） */
@@ -514,7 +521,25 @@ const modeItems = computed(() =>
  * @param v 实现标识（impl）
  */
 function onWorkflowChange(v: string) {
+  implError.value = ''
   emit('update:config', { workflowImpl: v, workflowParams: {} })
+}
+
+/**
+ * 点击「生成」：未选择工作流实现时展示校验错误且不触发生成，
+ * 保证实际提交的实现与界面显示一致。
+ */
+function requestGenerate() {
+  if (!workflowImpl.value) {
+    implError.value = !workflowsLoaded.value
+      ? '工作流列表加载中，请稍候再试'
+      : impls.value.length === 0
+        ? '当前工作流类型没有可用实现，请先在服务商设置中配置实例'
+        : '请先选择工作流实现'
+    return
+  }
+  implError.value = ''
+  emit('generate', props.node.id)
 }
 
 // config.workflowParams → 本地（外部初始化/回显，如画布配置面板重挂载后恢复已保存参数）
@@ -746,6 +771,7 @@ const canGenerate = computed(() => {
 getWorkflows()
   .then((list) => { workflows.value = list })
   .catch(() => { workflows.value = [] })
+  .finally(() => { workflowsLoaded.value = true })
 </script>
 
 <style scoped>

@@ -264,13 +264,18 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
         statusByNode.value[nodeId] = { status: 'error', errorMsg: '缺少视频提交参数' }
         return
       }
+      const impl = String(node.config.workflowImpl ?? '')
+      if (!impl) {
+        statusByNode.value[nodeId] = { status: 'error', errorMsg: '请先在节点配置中选择工作流实现' }
+        return
+      }
       statusByNode.value[nodeId] = { status: 'running' }
       try {
         const outputPath = computeOutputPath(node)
         const { taskId } = await runWorkflow({
           project,
           workflowId: 'image-to-video',
-          impl: String(node.config.workflowImpl ?? ''),
+          impl,
           params: {
             vars: {},
             outputPath,
@@ -305,6 +310,10 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
           ? { text, refText: String(node.config.refText ?? ''), refAudioPath: JSON.stringify(inputPaths) }
           : { text, prompt: String(node.config.prompt ?? '') }
       const impl = String(node.config.workflowImpl ?? '')
+      if (!impl) {
+        statusByNode.value[nodeId] = { status: 'error', errorMsg: '请先在节点配置中选择工作流实现' }
+        return
+      }
       const outputPath = computeOutputPath(node)
       const userParams = (node.config.workflowParams as Record<string, WorkflowUserParamValue> | undefined) ?? {}
       statusByNode.value[nodeId] = { status: 'running' }
@@ -333,6 +342,10 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     const explicitWorkflow = typeof config.workflowId === 'string' && config.workflowId ? config.workflowId : undefined
     const workflowId = explicitWorkflow ?? (inputPaths.length > 0 ? 'image-edit' : 'text-to-image')
     const impl = String(config.workflowImpl ?? '')
+    if (!impl) {
+      statusByNode.value[nodeId] = { status: 'error', errorMsg: '请先在节点配置中选择工作流实现' }
+      return
+    }
     const outputPath = computeOutputPath(node)
 
     let vars: Record<string, string>
