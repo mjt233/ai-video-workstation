@@ -28,6 +28,8 @@ import { mergeSceneAudio, deleteMergedAudio } from '../assets/audio-merge.js';
 import { addStageFrame, deleteStageFrame, updateStageFrame, type StageFrameInput } from '../assets/stage-frames.js';
 import {
   activateHistoryVersion,
+  assertUploadableImagePath,
+  copyExistingAssetToHistory,
   deleteHistoryVersion,
   listAssetHistory,
   saveUploadedAsset,
@@ -532,6 +534,24 @@ assetsRouter.delete('/assets/:project/history', async (req: Request, res: Respon
     }
     const result = await deleteHistoryVersion(project, assetPath, versionPath);
     res.json({ success: true, ...result });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 归档当前资产为历史版本（copy 保留原文件，随后由调用方覆盖当前路径）
+// 用于画布「保存为」覆盖角色外观 / 场景图 / 衍生变体前保留旧版本
+// body: { path: "assert/..." }
+assetsRouter.post('/assets/:project/history/archive', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const { path: assetPath } = req.body as { path?: string };
+    if (!assetPath) throw Object.assign(new Error('path 必填'), { code: 'INVALID' });
+    const archived = await copyExistingAssetToHistory(
+      project,
+      assertUploadableImagePath(assetPath),
+    );
+    res.json({ success: true, archived });
   } catch (err) {
     httpError(res, err);
   }

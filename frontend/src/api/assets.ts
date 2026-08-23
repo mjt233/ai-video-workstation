@@ -315,6 +315,27 @@ export async function deleteAssetHistory(
 }
 
 /**
+ * 把当前资产复制归档为历史版本（原文件保留）。
+ * 用于画布「保存为」覆盖角色外观 / 场景图 / 衍生变体前保留旧版本；
+ * 归档目录由服务端按 historyDirForAsset 推导（如 assert/character/…/history/appearance/）。
+ *
+ * @param project 项目名
+ * @param assetPath 当前资产相对路径（assert/ 下，仅允许角色外观/场景图/衍生变体等图片资产）
+ * @returns archived 为归档后的历史版本相对路径（当前资产不存在时返回 null）
+ */
+export async function archiveAssetHistory(
+  project: string,
+  assetPath: string,
+) {
+  try {
+    const { data } = await client.post(`/assets/${project}/history/archive`, {
+      path: assetPath,
+    })
+    return data as { success: boolean; archived: string | null }
+  } catch (e) { rethrow(e) }
+}
+
+/**
  * 上传图片资产到指定 assert 路径。
  * 服务端会先归档已有当前资产，再写入新文件。
  */

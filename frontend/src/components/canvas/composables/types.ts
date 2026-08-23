@@ -25,6 +25,12 @@ export type NodeMap = ComputedRef<Record<string, CanvasNodeData>>
 /** 操作反馈提示函数（snackbar 状态由 AssetCanvas 持有） */
 export type ShowSnackbar = (text: string, color?: 'success' | 'error' | 'primary') => void
 
+/** 「保存为」目标类型（图片节点右键菜单「保存为」子菜单的 5 个选项） */
+export type SaveAsType = 'character' | 'character-variant' | 'stage' | 'stage-variant' | 'custom'
+
+/** 非自定义资产的「保存为」类型（走 SaveAsDialog 目标选择对话框） */
+export type SaveAsAssetType = Exclude<SaveAsType, 'custom'>
+
 /** Vue Flow 屏幕坐标 → 流坐标换算函数 */
 export type ScreenToFlow = (pos: { x: number; y: number }) => { x: number; y: number }
 

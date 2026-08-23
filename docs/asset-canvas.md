@@ -111,7 +111,7 @@
 | 双击节点名称 | 内联重命名（回车/失焦提交、Esc 取消、空名放弃） |
 | 拖拽节点 | 移动位置，结束回写 store（防误触：拖拽中隐藏配置面板） |
 | 悬浮/选中节点后拖拽边缘或四角 | 调整节点大小（**全部节点类型**可缩放，最小 120×80px，`@vue-flow/node-resizer` 渲染控制点；缩放中控制点保持可见，结束才回写 store） |
-| 右键节点 | 菜单：重新生成 / 历史 / 断开连接 / 重命名 / 复制 / 删除（删除需 `confirm` 确认） |
+| 右键节点 | 菜单：重新生成 / 历史 / 保存为（hover 子菜单：角色设计 / 角色设计-衍生变体 / 场景图 / 场景图-衍生变体 / 自定义资产，仅输出类型为图片且有产物的节点显示）/ 断开连接 / 重命名 / 复制 / 删除（删除需 `confirm` 确认） |
 | 右键连线 | 菜单：断开连接 |
 | 单击空白 | 取消选中、关闭菜单 |
 | 双击空白 | 在鼠标双击处弹出「添加节点」VMenu（选择节点原型后在该处添加节点） |
@@ -200,6 +200,23 @@
   - 无基础场景时复用现有帧第一个的 `基础场景`，仍无则禁用「新增」并提示。
 - 服务端 `addStageFrame` 约束：`基础场景` 必填（`场景名/标签` 或 `prev`）；有登场角色时必须填 prompt。
 
+### 10.1 保存为（图片节点右键菜单）
+
+输出类型为图片且有当前产物的节点（加载图片 / 生成图片 / 获取视频帧），右键菜单显示「保存为」hover 子菜单，5 个目标类型（自定义资产走 `SaveAssetDialog`，其余四类走 `SaveAsDialog` 目标选择对话框）：
+
+| 类型 | 目标路径 | 对话框交互 |
+|------|----------|------------|
+| 角色设计 | `assert/character/{角色}/appearance.jpg` | SaveAsDialog：角色 v-combobox（选已有角色覆盖，或输入新角色名自动创建角色） |
+| 角色设计-衍生变体 | `assert/character/{角色}/variants/{变体id}.jpg` | SaveAsDialog：角色下拉 + 变体 id 输入 |
+| 场景图 | `assert/stage/{场景}/{子场景}.jpg` | SaveAsDialog：场景下拉 + 子场景 v-combobox（选已有子场景覆盖，或输入新场景图名称自动创建子场景） |
+| 场景图-衍生变体 | `assert/stage/{场景}/variants/{子场景}/{变体id}.jpg` | SaveAsDialog：场景 / 子场景下拉 + 变体 id 输入 |
+| 自定义资产 | `assert/custom/...` | SaveAssetDialog：双根目录导航 + 文件名可编辑 |
+
+- SaveAsDialog 目标列表来自 `prompt/character`、`prompt/stage` 目录与子场景 `.md` 文件名；默认定位当前画布实体（场景画布 → 当前场景 + 子场景；分镜画布 → `stage.json` 首帧 `基础场景` 推导，`prev` / `custom/` 引用不预选）。变体 id 手动输入并校验非法字符。「角色设计」与「场景图」用 v-combobox（下拉箭头展开已有实体列表）：可选择已有实体覆盖其外观图/场景图，也可手动输入新名称——保存时自动创建实体（角色：`POST /assets/:project/character` 生成 `prompt/character/{name}/` 三模板文件；子场景：`POST /assets/:project/subscene` 生成 `prompt/stage/{场景}/{标签}.md`；重名则按已存在处理走覆盖流程）。衍生变体的角色/子场景仍为下拉选择（变体须挂在已存在实体下）。
+- 仅复制图片文件（`POST /fs/:project/copy`）；**衍生变体（角色/场景）在元数据 `prompt/.../variants/{id}.json` 不存在时自动创建**（调 `POST /assets/:project/.../variants` 创建接口，desc 用对话框「衍生描述」输入，默认预填节点提示词，为空回退「由画布保存的衍生变体」，baseImage 由服务端默认推导；元数据已存在时仅覆盖图片）——角色/场景详情页的衍生变体列表按元数据扫描，缺元数据会看不到已保存的图。
+- 目标文件已存在时 `confirm` 确认后覆盖，覆盖前先把原文件归档为历史版本（`POST /assets/:project/history/archive`，服务端 `copyExistingAssetToHistory` 复制归档，目录按 `historyDirForAsset` 推导，如 `assert/character/{角色}/history/appearance/`、`assert/character/{角色}/variants/history/{变体id}/`；与生成/上传覆盖的历史机制一致，可在资产历史对话框中查看/激活）。
+- SaveAssetDialog 文件名可手动编辑（默认节点名 + 源扩展名，空名回退「未命名」，非法字符校验），重名自动追加 `(1)`、`(2)`… 后缀；**音频/视频节点不再提供保存入口**（原平级菜单「保存为自定义资产」已删除）。
+
 ---
 
 ## 11. 切换分镜跟随加载
@@ -240,7 +257,7 @@ frontend/src/
     ├── CanvasContextMenu.vue     # 节点/连线右键菜单（纯展示）
     ├── CanvasAddNodeMenu.vue     # 添加节点菜单（锚点 + VMenu 列表）
     ├── SetAsSceneDialog.vue      # 设为分镜场景图对话框（帧加载/选中/覆盖/新增）
-    ├── CanvasAssertHistoryDialog.vue / SaveAssetDialog.vue  # 历史/保存资产对话框
+    ├── CanvasAssertHistoryDialog.vue / SaveAssetDialog.vue / SaveAsDialog.vue  # 历史/保存为自定义资产/保存为（目标选择）对话框
     ├── composables/              # 画布交互组合式（与组件同域，store/gen/VueFlow 工具以参数注入）
     │   ├── types.ts              # 共享类型（CanvasStoreApi/CanvasGenerationApi/NodeMap 等）
     │   ├── useCanvasFlow.ts      # Vue Flow 数据映射、拖拽/缩放回写、连线交互

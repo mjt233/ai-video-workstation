@@ -110,12 +110,16 @@
           :node-menu="contextMenu"
           :can-generate="canGenerateOf(contextMenuNode)"
           :has-history="hasHistoryOf(contextMenuNode)"
-          :can-save="canSaveAsAsset(contextMenuNode)"
+          :can-save="canSaveImage(contextMenuNode)"
           :has-connections="!!contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
           :edge-menu="edgeMenu"
           @generate="contextGenerate"
           @history="contextHistory"
-          @save-asset="contextSaveAsset"
+          @save-as-character="contextSaveAs('character')"
+          @save-as-character-variant="contextSaveAs('character-variant')"
+          @save-as-stage="contextSaveAs('stage')"
+          @save-as-stage-variant="contextSaveAs('stage-variant')"
+          @save-as-custom="contextSaveAs('custom')"
           @disconnect="contextDisconnect"
           @rename="contextRename"
           @copy="contextCopy"
@@ -162,7 +166,7 @@
         @notify="(text: string, color: 'success' | 'error' | 'primary') => showSnackbar(text, color)"
       />
 
-      <!-- 保存为自定义资产对话框（场景/分镜双根 + 新建目录） -->
+      <!-- 保存为自定义资产对话框（场景/分镜双根 + 新建目录 + 文件名可编辑） -->
       <SaveAssetDialog
         v-model="saveDialog.show"
         :project="props.project"
@@ -172,6 +176,22 @@
         :shot="props.shot"
         :node-name="saveDialogNode?.name ?? ''"
         :source-path="saveSourcePath"
+        @saved="(p: string) => showSnackbar(`已保存到 ${p}`, 'success')"
+        @save-error="(msg: string) => showSnackbar(msg, 'error')"
+      />
+
+      <!-- 保存为（角色设计/角色设计-衍生变体/场景图/场景图-衍生变体）目标选择对话框 -->
+      <SaveAsDialog
+        v-model="saveAsDialog.show"
+        :project="props.project"
+        :kind="target.kind"
+        :stage="props.stage"
+        :label="props.label"
+        :episode="props.episode"
+        :shot="props.shot"
+        :type="saveAsDialog.type"
+        :source-path="saveAsSourcePath"
+        :node-prompt="saveAsDialogNode ? String(saveAsDialogNode.config?.prompt ?? '') : ''"
         @saved="(p: string) => showSnackbar(`已保存到 ${p}`, 'success')"
         @save-error="(msg: string) => showSnackbar(msg, 'error')"
       />
@@ -229,6 +249,7 @@ import type { CanvasScope } from '../../canvas/paths'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
 import SaveAssetDialog from './SaveAssetDialog.vue'
+import SaveAsDialog from './SaveAsDialog.vue'
 import CanvasToolbar from './CanvasToolbar.vue'
 import CanvasNodeCard from './CanvasNodeCard.vue'
 import CanvasEditorPanel from './CanvasEditorPanel.vue'
@@ -441,7 +462,8 @@ const menus = useCanvasMenus({
   nodeMap,
   selection: { setSelectedNode: selection.setSelectedNode, deleteNode: selection.deleteNode },
   rename: { startRename: rename.startRename },
-  dialogs: { openHistory: dialogs.openHistory, openSaveAsset: dialogs.openSaveAsset },
+  dialogs: { openHistory: dialogs.openHistory, openSaveAsset: dialogs.openSaveAsset, openSaveAs: dialogs.openSaveAs },
+  getScope: () => scope.value,
   generate: (nodeId: string) => void nodeOps.generateNode(nodeId),
 })
 
@@ -474,8 +496,8 @@ const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } =
 const { editorPanel, suppressEditor, suppressPanelOnSelect, onEdgeClick, onNodeDragStart } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig } = nodeOps
 const { flowNodes, flowEdges, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
-const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, openAssetPicker, onPickerConfirm, openHistory } = dialogs
-const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveAsAsset, contextGenerate, contextHistory, contextSaveAsset, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, addMenu, addNodeAt } = menus
+const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, openAssetPicker, onPickerConfirm, openHistory } = dialogs
+const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
 
 /** 配置面板可见性：选中且未被拖拽/程序化选中抑制 */

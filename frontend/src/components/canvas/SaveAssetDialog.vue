@@ -112,8 +112,19 @@
           </div>
         </div>
 
+        <!-- 文件名（可手动编辑；默认 = 节点名 + 源扩展名） -->
+        <v-text-field
+          v-model="fileNameInput"
+          label="文件名"
+          variant="outlined"
+          density="comfortable"
+          class="mt-2"
+          :error-messages="fileNameError"
+          @keyup.enter="save"
+        />
+
         <!-- 保存目标提示 -->
-        <div class="d-flex align-center ga-2 mt-3">
+        <div class="d-flex align-center ga-2 mt-1">
           <div class="text-body-small text-medium-emphasis">
             将保存为：
           </div>
@@ -137,7 +148,7 @@
         <v-btn
           color="primary"
           :loading="saving"
-          :disabled="!sourcePath"
+          :disabled="!sourcePath || !!fileNameError"
           @click="save"
         >
           保存
@@ -203,7 +214,8 @@ import { extname, fileIcon, validateEntryName } from '../../utils/customAssetFil
  * 把画布节点的当前输出资产（图片/音频/视频）复制到自定义资产目录：
  * - 双根切换：场景（assert/custom/stage/…）与分镜（assert/custom/scene/…）自定义资产；
  * - 支持目录导航（面包屑 + 网格进入）与「新建目录」（mkdirFs）；
- * - 目标文件名 = 节点名 + 源扩展名，重名自动追加 (1)、(2)… 后缀。
+ * - 文件名可手动编辑（默认 = 节点名 + 源扩展名），非法字符校验、空名回退「未命名」；
+ *   重名自动追加 (1)、(2)… 后缀。
  *
  * 默认定位当前画布所属实体：分镜画布 → 分镜根 scene/{集数}/{分镜} 且场景根尽力推导当前场景；
  * 场景画布 → 场景根 stage/{场景}。
@@ -284,12 +296,29 @@ const breadcrumbs = computed(() => {
   return items
 })
 
-/** 目标文件名：节点名（清洗非法字符）+ 源资产扩展名 */
-const targetFileName = computed(() => {
+/** 默认文件名：节点名（清洗非法字符）+ 源资产扩展名 */
+const defaultFileName = computed(() => {
   const ext = extname(props.sourcePath)
   const base = props.nodeName.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/^\.+$/, '')
   return `${base || '未命名'}${ext}`
 })
+
+/** 用户编辑的文件名输入（打开对话框时重置为默认文件名） */
+const fileNameInput = ref('')
+
+/** 文件名校验错误（空名回退「未命名」不报错；含非法字符时报错） */
+const fileNameError = computed(() => {
+  const name = fileNameInput.value.trim()
+  if (!name) return ''
+  if (/[\\/:*?"<>|]/.test(name)) return '文件名包含非法字符：\\ / : * ? " < > |'
+  return ''
+})
+
+/** 生效文件名：空名回退「未命名」 */
+const effectiveFileName = computed(() => fileNameInput.value.trim() || '未命名')
+
+/** 目标文件名（可手动编辑，默认节点名 + 源扩展名） */
+const targetFileName = computed(() => effectiveFileName.value)
 
 /** 目标相对项目路径（展示用，如 assert/custom/stage/商场/门口.png） */
 const targetRelPath = computed(() => `assert/custom/${customRelPath.value}/${targetFileName.value}`)
@@ -381,6 +410,7 @@ async function initDefaults() {
   activeRoot.value = props.kind === 'scene' ? 'scene' : 'stage'
   stageSub.value = ''
   sceneSub.value = ''
+  fileNameInput.value = defaultFileName.value
   if (props.kind === 'stage') {
     stageSub.value = props.stage ?? ''
   } else {

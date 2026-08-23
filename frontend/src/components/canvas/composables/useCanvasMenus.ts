@@ -1,5 +1,5 @@
 /**
- * 右键菜单与添加节点菜单组合式：节点右键菜单（重新生成/历史/保存资产/断开/重命名/复制/删除）、
+ * 右键菜单与添加节点菜单组合式：节点右键菜单（重新生成/历史/保存为（子菜单）/断开/重命名/复制/删除）、
  * 添加节点菜单（双击空白/工具栏「＋」）的状态与动作。
  * 菜单能力显隐由节点原型能力标志（registry.canGenerate/hasHistory）与运行状态推导。
  */
@@ -9,7 +9,8 @@ import { getPrototype } from '../../../canvas/registry'
 import { getNodeOutputType } from '../../../canvas/connection'
 import { getNodeCurrentAssetPath } from '../../../canvas/generate'
 import type { CanvasNodeData } from '../../../canvas/types'
-import type { CanvasStoreApi, NodeMap } from './types'
+import type { CanvasScope } from '../../../canvas/paths'
+import type { CanvasStoreApi, NodeMap, SaveAsType } from './types'
 
 /** useCanvasMenus 参数 */
 export interface UseCanvasMenusOptions {
@@ -24,11 +25,14 @@ export interface UseCanvasMenusOptions {
   }
   /** 内联重命名（右键「重命名」复用） */
   rename: { startRename: (nodeId: string) => void }
-  /** 对话框入口（历史/保存为自定义资产） */
+  /** 对话框入口（历史/保存为） */
   dialogs: {
     openHistory: (nodeId: string) => void
     openSaveAsset: (nodeId: string) => void
+    openSaveAs: (nodeId: string, type: Exclude<SaveAsType, 'custom'>) => void
   }
+  /** 画布作用域 getter（生成类节点产物固定路径推导需要；随切换目标实时更新） */
+  getScope: () => CanvasScope
   /** 生成调度（右键「重新生成」） */
   generate: (nodeId: string) => void
 }
@@ -40,7 +44,7 @@ export interface UseCanvasMenusOptions {
  * @returns 菜单状态与操作 API
  */
 export function useCanvasMenus(options: UseCanvasMenusOptions) {
-  const { store, nodeMap, selection, rename, dialogs, generate } = options
+  const { store, nodeMap, selection, rename, dialogs, getScope, generate } = options
 
   // ── 节点右键菜单 ────────────────────────────────────────
 
@@ -73,16 +77,16 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
   }
 
   /**
-   * 节点是否可保存为自定义资产：输出类型为图片/音频/视频且有当前资产。
+   * 节点是否显示「保存为」菜单：输出类型为图片且有当前产物。
+   * （音频/视频节点不再提供保存入口；「保存为」仅面向图片输出节点）
    *
    * @param node 右键菜单对应节点
-   * @returns 可保存返回 true
+   * @returns 显示「保存为」返回 true
    */
-  function canSaveAsAsset(node: CanvasNodeData | undefined): boolean {
+  function canSaveImage(node: CanvasNodeData | undefined): boolean {
     if (!node || !contextMenu.nodeId) return false
-    const out = getNodeOutputType(contextMenu.nodeId, store.nodes.value)
-    if (out !== 'image' && out !== 'video' && out !== 'audio') return false
-    return !!getNodeCurrentAssetPath(node)
+    if (getNodeOutputType(contextMenu.nodeId, store.nodes.value) !== 'image') return false
+    return !!getNodeCurrentAssetPath(node, getScope())
   }
 
   /**
@@ -115,11 +119,18 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     if (id) dialogs.openHistory(id)
   }
 
-  /** 菜单：保存为自定义资产 */
-  function contextSaveAsset(): void {
+  /**
+   * 菜单：保存为（按目标类型分派）——
+   * 自定义资产走 SaveAssetDialog（openSaveAsset），其余四类走 SaveAsDialog 目标选择（openSaveAs）。
+   *
+   * @param type 保存目标类型
+   */
+  function contextSaveAs(type: SaveAsType): void {
     const id = contextMenu.nodeId
     contextMenu.show = false
-    if (id) dialogs.openSaveAsset(id)
+    if (!id) return
+    if (type === 'custom') dialogs.openSaveAsset(id)
+    else dialogs.openSaveAs(id, type)
   }
 
   /** 节点是否关联了连线（驱动右键菜单「断开连接」显隐） */
@@ -208,11 +219,11 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     contextMenuNode,
     canGenerateOf,
     hasHistoryOf,
-    canSaveAsAsset,
+    canSaveImage,
     openContextMenu,
     contextGenerate,
     contextHistory,
-    contextSaveAsset,
+    contextSaveAs,
     nodeHasConnections,
     contextDisconnect,
     contextRename,

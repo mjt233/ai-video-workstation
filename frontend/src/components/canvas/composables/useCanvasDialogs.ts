@@ -12,7 +12,7 @@ import type { CanvasScope } from '../../../canvas/paths'
 import { copyFs } from '../../../api/client'
 import { confirm } from '../../../utils/confirm'
 import type { AssetTab } from '../../asset-picker/types'
-import type { CanvasStoreApi, NodeMap, ShowSnackbar } from './types'
+import type { CanvasStoreApi, NodeMap, SaveAsAssetType, ShowSnackbar } from './types'
 
 /** useCanvasDialogs 参数 */
 export interface UseCanvasDialogsOptions {
@@ -78,6 +78,34 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
     if (!node || !getNodeCurrentAssetPath(node, getScope())) return
     saveDialog.nodeId = nodeId
     saveDialog.show = true
+  }
+
+  // ── 保存为（角色设计/角色设计-衍生变体/场景图/场景图-衍生变体）────
+
+  /** 保存为（目标选择）对话框状态：nodeId 为源节点，type 为保存目标类型 */
+  const saveAsDialog = reactive({ show: false, nodeId: '', type: 'character' as SaveAsAssetType })
+
+  /** 保存对话框对应节点 */
+  const saveAsDialogNode = computed(() => (saveAsDialog.nodeId ? nodeMap.value[saveAsDialog.nodeId] : undefined))
+
+  /** 保存对话框源资产路径（节点当前输出资产；生成类节点按固定产物路径推导） */
+  const saveAsSourcePath = computed(() =>
+    saveAsDialogNode.value ? getNodeCurrentAssetPath(saveAsDialogNode.value, getScope()) ?? '' : '',
+  )
+
+  /**
+   * 打开「保存为」目标选择对话框：把节点当前输出图片复制到
+   * 角色外观 / 角色衍生变体 / 场景图 / 场景衍生变体路径（目标实体在对话框中选择）。
+   *
+   * @param nodeId 节点 id
+   * @param type 保存目标类型（自定义资产走 openSaveAsset，不走这里）
+   */
+  function openSaveAs(nodeId: string, type: SaveAsAssetType): void {
+    const node = nodeMap.value[nodeId]
+    if (!node || !getNodeCurrentAssetPath(node, getScope())) return
+    saveAsDialog.nodeId = nodeId
+    saveAsDialog.type = type
+    saveAsDialog.show = true
   }
 
   // ── 设为分镜场景图 ──────────────────────────────────────
@@ -172,6 +200,8 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
     historyDialog.nodeId = ''
     saveDialog.show = false
     saveDialog.nodeId = ''
+    saveAsDialog.show = false
+    saveAsDialog.nodeId = ''
     sceneDialog.show = false
     sceneDialog.nodeId = ''
     picker.show = false
@@ -186,6 +216,10 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
     saveDialogNode,
     saveSourcePath,
     openSaveAsset,
+    saveAsDialog,
+    saveAsDialogNode,
+    saveAsSourcePath,
+    openSaveAs,
     sceneDialog,
     sceneDialogNode,
     openSetAsScene,
