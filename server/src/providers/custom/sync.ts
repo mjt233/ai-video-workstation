@@ -10,17 +10,47 @@ import type { ProviderInstance } from '../types.js';
 import { registerOrReplace, unregisterByInstance } from '../../workflows/registry.js';
 import type {
   VideoWorkflowSubmitData,
+  WorkflowCapabilities,
   WorkflowDefinition,
   WorkflowRunContext,
   WorkflowVarsBase,
 } from '../../workflows/types.js';
 import type { CustomProviderClient } from './client.js';
-import { parseCustomWorkflows, sanitizeWorkflowName, type CustomUserConfigFieldType, type CustomWorkflowEntry, type CustomWorkflowType } from './types.js';
+import {
+  DEFAULT_CUSTOM_WORKFLOW_SIZE_CONFIG,
+  parseCustomWorkflows,
+  sanitizeWorkflowName,
+  type CustomUserConfigFieldType,
+  type CustomWorkflowEntry,
+  type CustomWorkflowSizeConfig,
+  type CustomWorkflowType,
+} from './types.js';
 import { toNativeUserParams } from '../../workflows/user-params.js';
 import type { WorkflowUserParamDeclaration } from '../../workflows/types.js';
 
 /** 自定义服务商 Provider 插件 id */
 const PROVIDER_ID = 'custom';
+
+/** 支持统一尺寸配置的工作流类型（生图 / 生视频；TTS 无尺寸概念） */
+const SIZE_TYPES: CustomWorkflowType[] = ['text-to-image', 'image-edit', 'image-to-video'];
+
+/**
+ * 把条目尺寸配置映射为工作流尺寸能力声明（WorkflowCapabilities.size）。
+ * 未配置或清单为空 → 使用默认全量；supportCustomSize 取配置值。
+ *
+ * @param sizeConfig 条目尺寸配置（可为 null = 未配置）
+ * @returns 尺寸能力声明
+ */
+function resolveCustomWorkflowSizeCapability(
+  sizeConfig: CustomWorkflowSizeConfig | null,
+): WorkflowCapabilities['size'] {
+  const base = sizeConfig ?? DEFAULT_CUSTOM_WORKFLOW_SIZE_CONFIG;
+  return {
+    ratio: base.ratio.length > 0 ? base.ratio : DEFAULT_CUSTOM_WORKFLOW_SIZE_CONFIG.ratio,
+    size: base.size.length > 0 ? base.size : DEFAULT_CUSTOM_WORKFLOW_SIZE_CONFIG.size,
+    supportCustomSize: base.supportCustomSize,
+  };
+}
 
 /**
  * 解析字符串为正整数（非法/空返回 undefined）。
@@ -68,13 +98,25 @@ async function buildCustomParams(
   const base: Record<string, unknown> = { ...vars };
   const seed = vars.seed;
 
+  // 统一尺寸配置（引擎注入 ctx.sizeConfig；生图/生视频类型透传给脚本读取）
+  const sizeConfig =
+    ctx.sizeConfig && (ctx.sizeConfig.ratio !== undefined || ctx.sizeConfig.size !== undefined)
+      ? {
+          ratio: typeof ctx.sizeConfig.ratio === 'string' && ctx.sizeConfig.ratio !== '' ? ctx.sizeConfig.ratio : 'auto',
+          size: typeof ctx.sizeConfig.size === 'string' && ctx.sizeConfig.size !== '' ? ctx.sizeConfig.size : 'auto',
+          ...(ctx.sizeConfig.width != null && ctx.sizeConfig.height != null
+            ? { width: Math.round(ctx.sizeConfig.width), height: Math.round(ctx.sizeConfig.height) }
+            : {}),
+        }
+      : undefined;
+
   if (type === 'text-to-image') {
     const promptPath = (vars.promptPath ?? '').trim();
     if (!promptPath) throw new Error('text-to-image 需要 vars.promptPath');
     const prompt = await ctx.readFile(promptPath);
     const width = toPositiveNumber(vars.width);
     const height = toPositiveNumber(vars.height);
-    return { ...base, prompt, ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}), seed };
+    return { ...base, prompt, ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}), seed, ...(sizeConfig ? { sizeConfig } : {}) };
   }
 
   if (type === 'image-edit') {
@@ -83,7 +125,7 @@ async function buildCustomParams(
     const imagePaths = parseStringArray(vars.imagePaths, 'imagePaths');
     const width = toPositiveNumber(vars.width);
     const height = toPositiveNumber(vars.height);
-    return { ...base, prompt, imagePaths, ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}), seed };
+    return { ...base, prompt, imagePaths, ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}), seed, ...(sizeConfig ? { sizeConfig } : {}) };
   }
 
   if (type === 'tts-voice-design') {
@@ -114,6 +156,7 @@ async function buildCustomParams(
         resolution: video.resolution,
         ...(video.fps !== undefined ? { fps: video.fps } : {}),
         ...(video.seed !== undefined ? { seed: video.seed } : {}),
+        ...(sizeConfig ? { sizeConfig } : {}),
         ...(video.director
           ? {
               director: {
@@ -245,7 +288,13 @@ export async function syncCustomInstance(instance: ProviderInstance): Promise<vo
         providerInstanceId: instance.id,
         providerName: instance.name,
         workflowKey: key,
-        capabilities: { cancelable: entry.cancelable },
+        capabilities: {
+          cancelable: entry.cancelable,
+          // 生图/生视频类型声明统一尺寸能力（用户配置的比例/尺寸/自定义分辨率；TTS 类型不声明）
+          ...(SIZE_TYPES.includes(type as CustomWorkflowType)
+            ? { size: resolveCustomWorkflowSizeCapability(entry.sizeConfig) }
+            : {}),
+        },
         // 用户配置字段声明 → 前端运行表单（WorkflowParamsForm）据此渲染输入
         params: toUserParamDeclarations(entry),
         submit: buildSubmit(entry, type),

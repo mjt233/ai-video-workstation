@@ -57,6 +57,12 @@ describe('syncOpenAICompatibleInstance', () => {
     expect(t2i?.name).toBe('gpt-image-1 文生图');
     expect(t2i?.providerName).toBe('中转A');
     expect(t2i?.workflowKey).toBe('text-to-image:gpt-image-1');
+    // 尺寸能力声明：支持自定义任意宽高，直传 "WxH"
+    expect(t2i?.capabilities?.size).toEqual({
+      ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
+      size: ['auto'],
+      supportCustomSize: true,
+    });
     expect(getImpl('image-edit', 'oai-gpt-image-1-inst-oai')).toBeDefined();
     expect(getImpl('image-edit', 'oai-edit-only-inst-oai')).toBeDefined();
     expect(getImpl('text-to-image', 'oai-edit-only-inst-oai')).toBeUndefined();
@@ -98,6 +104,54 @@ describe('syncOpenAICompatibleInstance', () => {
     expect(executeMock).toHaveBeenCalledWith({
       workflowId: 'gpt-image-1',
       params: { prompt: '一只猫', size: '512x768' },
+    });
+  });
+
+  it('文生图 sizeConfig 宽高优先于 vars 门控（统一尺寸配置直传 "WxH"）', async () => {
+    await syncOpenAICompatibleInstance({
+      id: 'inst-oai',
+      type: 'openai-compatible',
+      name: '中转A',
+      config: { models: [{ id: 'gpt-image-1', capabilities: ['text-to-image'] }] },
+    });
+    const impl = getImpl('text-to-image', 'oai-gpt-image-1-inst-oai')!;
+    const ctx: WorkflowRunContext<TextToImageVars> = {
+      project: 'p',
+      projectConfig: { width: 1080, height: 1920 },
+      vars: { promptPath: 'prompt/a.md', enable_specified_size: 'false', width: '512', height: '768' },
+      sizeConfig: { ratio: '1:1', size: 'auto', width: 1024, height: 1024 },
+      provider: stubProvider,
+      readFile: async () => '一只猫',
+      readAssertFile: async () => new File(['x'], 'x.png'),
+    };
+    await impl.submit(ctx);
+    expect(executeMock).toHaveBeenCalledWith({
+      workflowId: 'gpt-image-1',
+      params: { prompt: '一只猫', size: '1024x1024' },
+    });
+  });
+
+  it('文生图 sizeConfig 仅带比例/尺寸档（无宽高）时回退 projectConfig 尺寸', async () => {
+    await syncOpenAICompatibleInstance({
+      id: 'inst-oai',
+      type: 'openai-compatible',
+      name: '中转A',
+      config: { models: [{ id: 'gpt-image-1', capabilities: ['text-to-image'] }] },
+    });
+    const impl = getImpl('text-to-image', 'oai-gpt-image-1-inst-oai')!;
+    const ctx: WorkflowRunContext<TextToImageVars> = {
+      project: 'p',
+      projectConfig: { width: 1080, height: 1920 },
+      vars: { promptPath: 'prompt/a.md' },
+      sizeConfig: { ratio: '16:9', size: 'auto' },
+      provider: stubProvider,
+      readFile: async () => '一只猫',
+      readAssertFile: async () => new File(['x'], 'x.png'),
+    };
+    await impl.submit(ctx);
+    expect(executeMock).toHaveBeenCalledWith({
+      workflowId: 'gpt-image-1',
+      params: { prompt: '一只猫', size: '1080x1920' },
     });
   });
 

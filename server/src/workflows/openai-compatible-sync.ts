@@ -5,12 +5,40 @@ import { registerOrReplace, unregisterByInstance } from './registry.js';
 import type {
   ImageEditVars,
   TextToImageVars,
+  WorkflowCapabilities,
   WorkflowRunContext,
+  WorkflowSizeConfig,
   WorkflowUserParamDeclaration,
 } from './types.js';
 
 /** OpenAI 兼容 Provider 插件 id */
 const PROVIDER_ID = 'openai-compatible';
+
+/** 统一尺寸能力声明（OpenAI 兼容：支持自定义任意宽高，直传 "WxH"） */
+const SIZE_CAPABILITIES: WorkflowCapabilities['size'] = {
+  ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
+  size: ['auto'],
+  supportCustomSize: true,
+};
+
+/**
+ * 判断统一尺寸配置是否携带明确尺寸选择（宽高任一有效，或比例/尺寸档非自适应）。
+ *
+ * 新交互下前端提交的 sizeConfig 只要用户操作过（非 自动/自动）即视为显式指定；
+ * 此时宽高缺失会回退 projectConfig，保证输出尺寸明确。
+ *
+ * @param sizeConfig 引擎注入的统一尺寸配置（可为空）
+ * @returns 是否显式指定尺寸
+ */
+function hasExplicitSize(sizeConfig: WorkflowSizeConfig | undefined): boolean {
+  if (!sizeConfig) return false;
+  return (
+    (sizeConfig.width != null && sizeConfig.width > 0) ||
+    (sizeConfig.height != null && sizeConfig.height > 0) ||
+    (sizeConfig.ratio !== undefined && sizeConfig.ratio !== 'auto' && sizeConfig.ratio !== 'adaptive') ||
+    (sizeConfig.size !== undefined && sizeConfig.size !== 'auto')
+  );
+}
 
 /** 文生图 / 图片编辑共用的尺寸参数声明 */
 const SIZE_PARAMS: WorkflowUserParamDeclaration[] = [
@@ -80,11 +108,12 @@ function textToImageSubmit(modelId: string) {
     const promptPath = ctx.vars.promptPath?.trim();
     if (!promptPath) throw new Error('text-to-image 需要 vars.promptPath');
     const prompt = await ctx.readFile(promptPath);
-    const specified = ctx.vars.enable_specified_size === 'true';
+    // 尺寸：统一尺寸配置（新交互）与旧 vars 门控并存；宽高有效 → "WxH"，否则回退 projectConfig
+    const specified = ctx.vars.enable_specified_size === 'true' || hasExplicitSize(ctx.sizeConfig);
     const size = resolveOpenAICompatibleSize(
       specified,
-      ctx.vars.width,
-      ctx.vars.height,
+      ctx.sizeConfig?.width ?? ctx.vars.width,
+      ctx.sizeConfig?.height ?? ctx.vars.height,
       ctx.projectConfig.width,
       ctx.projectConfig.height,
     );
@@ -131,11 +160,14 @@ function imageEditSubmit(modelId: string) {
       }
     }
     const up = ctx.userParams ?? {};
-    const specified = String(up.enable_specified_size ?? ctx.vars.enable_specified_size) === 'true';
+    // 尺寸：统一尺寸配置（新交互）与旧 userParams/vars 门控并存；宽高有效 → "WxH"，否则回退 projectConfig
+    const specified =
+      String(up.enable_specified_size ?? ctx.vars.enable_specified_size) === 'true'
+      || hasExplicitSize(ctx.sizeConfig);
     const size = resolveOpenAICompatibleSize(
       specified,
-      up.width ?? ctx.vars.width,
-      up.height ?? ctx.vars.height,
+      ctx.sizeConfig?.width ?? up.width ?? ctx.vars.width,
+      ctx.sizeConfig?.height ?? up.height ?? ctx.vars.height,
       ctx.projectConfig.width,
       ctx.projectConfig.height,
     );
@@ -171,7 +203,7 @@ export async function syncOpenAICompatibleInstance(instance: ProviderInstance): 
         providerInstanceId: instance.id,
         providerName: instance.name,
         workflowKey: key,
-        capabilities: { cancelable: true, deferredCancel: true },
+        capabilities: { cancelable: true, deferredCancel: true, size: SIZE_CAPABILITIES },
         params: SIZE_PARAMS,
         submit: textToImageSubmit(m.id),
       });
@@ -188,7 +220,7 @@ export async function syncOpenAICompatibleInstance(instance: ProviderInstance): 
         providerInstanceId: instance.id,
         providerName: instance.name,
         workflowKey: key,
-        capabilities: { cancelable: true, deferredCancel: true },
+        capabilities: { cancelable: true, deferredCancel: true, size: SIZE_CAPABILITIES },
         params: SIZE_PARAMS,
         submit: imageEditSubmit(m.id),
       });

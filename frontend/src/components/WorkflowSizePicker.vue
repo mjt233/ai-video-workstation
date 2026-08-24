@@ -1,290 +1,357 @@
 <template>
   <div class="workflow-size-picker">
-    <!-- 模式选择 -->
-    <v-select
-      :model-value="mode"
-      :items="modeOptions"
-      item-title="label"
-      item-value="value"
-      label="输出尺寸"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="setMode"
-    />
-
-    <!-- 比例 × 分辨率 -->
-    <div
-      v-if="mode === 'preset'"
-      class="d-flex ga-2"
+    <v-menu
+      v-model="menu"
+      :close-on-content-click="false"
+      offset="4"
+      :max-width="400"
     >
-      <v-select
-        :model-value="ratio"
-        :items="SIZE_RATIOS"
-        item-title="key"
-        item-value="key"
-        label="比例"
-        density="compact"
-        variant="outlined"
-        hide-details
-        class="flex-grow-1"
-        @update:model-value="(v) => setRatio(v as SizeRatioKey)"
-      />
-      <v-select
-        :model-value="resolution"
-        :items="SIZE_RESOLUTIONS"
-        item-title="key"
-        item-value="key"
-        label="分辨率"
-        density="compact"
-        variant="outlined"
-        hide-details
-        class="flex-grow-1"
-        @update:model-value="(v) => setResolution(v as SizeResolutionKey)"
-      />
-    </div>
+      <template #activator="{ props: menuProps }">
+        <!-- 单行显示文案（如 `16:9 / 1K`、`自动 / 自动`、`1:1 / 2K / 1024x1024`），点击打开配置面板 -->
+        <div
+          v-bind="menuProps"
+          class="workflow-size-picker__trigger"
+          role="button"
+          :title="'点击配置输出尺寸'"
+        >
+          <span class="workflow-size-picker__text">{{ displayText }}</span>
+          <v-icon
+            size="small"
+            class="workflow-size-picker__caret"
+          >
+            mdi-chevron-down
+          </v-icon>
+        </div>
+      </template>
 
-    <!-- 手动填写 -->
-    <div
-      v-else-if="mode === 'manual'"
-      class="d-flex ga-2"
-    >
-      <v-text-field
-        :model-value="manualWidth"
-        label="宽度 (px)"
-        type="number"
-        min="1"
-        density="compact"
-        variant="outlined"
-        hide-details
-        class="flex-grow-1"
-        @update:model-value="setManualWidth"
-      />
-      <v-text-field
-        :model-value="manualHeight"
-        label="高度 (px)"
-        type="number"
-        min="1"
-        density="compact"
-        variant="outlined"
-        hide-details
-        class="flex-grow-1"
-        @update:model-value="setManualHeight"
-      />
-    </div>
+      <v-card
+        min-width="340"
+        max-width="400"
+      >
+        <v-card-text class="pa-3">
+          <!-- 比例：动态按钮组（声明含 auto 时「自适应」放首位） -->
+          <div class="workflow-size-picker__label">
+            比例
+          </div>
+          <v-btn-toggle
+            :model-value="state.ratio"
+            mandatory
+            divided
+            variant="outlined"
+            density="compact"
+            class="workflow-size-picker__group"
+            @update:model-value="selectRatio"
+          >
+            <v-btn
+              v-for="opt in ratioOptions"
+              :key="opt.value"
+              :value="opt.value"
+              size="small"
+            >
+              {{ opt.label }}
+            </v-btn>
+          </v-btn-toggle>
+
+          <!-- 分辨率：动态按钮组（声明含 auto 时「自动」放首位） -->
+          <div class="workflow-size-picker__label">
+            分辨率
+          </div>
+          <v-btn-toggle
+            :model-value="state.size"
+            mandatory
+            divided
+            variant="outlined"
+            density="compact"
+            class="workflow-size-picker__group"
+            @update:model-value="selectSize"
+          >
+            <v-btn
+              v-for="opt in sizeOptions"
+              :key="opt.value"
+              :value="opt.value"
+              size="small"
+            >
+              {{ opt.label }}
+            </v-btn>
+          </v-btn-toggle>
+
+          <!-- 自定义宽高：仅工作流支持指定任意高宽时显示 -->
+          <template v-if="caps.supportCustomSize">
+            <div class="workflow-size-picker__label">
+              宽度 / 高度（像素）
+            </div>
+            <div class="d-flex ga-2">
+              <v-text-field
+                :model-value="state.width"
+                label="宽度"
+                type="number"
+                min="1"
+                density="compact"
+                variant="outlined"
+                hide-details
+                @update:model-value="setWidth"
+              />
+              <v-text-field
+                :model-value="state.height"
+                label="高度"
+                type="number"
+                min="1"
+                density="compact"
+                variant="outlined"
+                hide-details
+                @update:model-value="setHeight"
+              />
+            </div>
+            <div class="workflow-size-picker__hint">
+              选择比例/分辨率后自动填入对应宽高；手动修改宽高后按钮组保持不变。
+            </div>
+          </template>
+        </v-card-text>
+      </v-card>
+    </v-menu>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { readFs } from '../api/client'
-import type { WorkflowUserParamValue } from '../api/workflow'
+import type { WorkflowSizeConfig } from '../api/workflow'
 import {
-  SIZE_RATIOS,
-  SIZE_RESOLUTIONS,
-  computePresetSize,
-  resolveSizeMode,
-  type SizeMode,
-  type SizeRatioKey,
-  type SizeResolutionKey,
+  AUTO_SIZE_LABEL,
+  formatSizeConfigText,
+  normalizeSizeCapabilities,
+  normalizeSizeConfig,
+  resolvePresetSize,
+  toSizeConfig,
+  type SizeConfigState,
+  type WorkflowSizeCapabilities,
 } from '../utils/workflowSize'
 
 const props = defineProps<{
-  /** 项目名（用于「使用项目尺寸」读取 project.json；为空时隐藏该模式） */
-  project?: string
-  /** 外部初始值/回显（key → 值），含 enable_specified_size / width / height */
-  modelValue: Record<string, WorkflowUserParamValue>
+  /** 工作流输出尺寸能力声明（capabilities.size；未传使用默认全量） */
+  sizeCapabilities?: { ratio?: string[]; size?: string[]; supportCustomSize?: boolean }
+  /** 外部回显值（持久化的 sizeConfig；null / 缺省 = 自动 / 自动） */
+  modelValue?: WorkflowSizeConfig | null
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', v: Record<string, WorkflowUserParamValue>): void
+  (e: 'update:modelValue', v: WorkflowSizeConfig): void
 }>()
 
-/** 当前选中模式 */
-const mode = ref<SizeMode>('none')
-/** 比例档 */
-const ratio = ref<SizeRatioKey>('9:16')
-/** 分辨率档 */
-const resolution = ref<SizeResolutionKey>('1080P')
-/** 手动填写宽度（像素） */
-const manualWidth = ref<number | null>(null)
-/** 手动填写高度（像素） */
-const manualHeight = ref<number | null>(null)
-/** 项目尺寸（project.json），读取失败为 null */
-const projectSize = ref<{ width: number; height: number } | null>(null)
-/** 自触发标记：组件 emit 后跳过下一次回显，避免反馈循环 */
-const skipNextEcho = ref(false)
-/** 用户是否已手动操作过组件（此后不再因项目尺寸加载完成而重推断模式） */
-const hasInteracted = ref(false)
+/** 配置面板是否展开 */
+const menu = ref(false)
 
-/** 模式选项（无 project 时隐藏「使用项目尺寸」；项目尺寸未就绪时禁用） */
-const modeOptions = computed(() => {
-  const options: Array<{ label: string; value: SizeMode; disabled?: boolean }> = [
-    { label: '不指定', value: 'none' },
-    { label: '比例 + 分辨率', value: 'preset' },
-    { label: '手动填写', value: 'manual' },
-  ]
-  if (props.project) {
-    options.push({ label: '使用项目尺寸', value: 'project', disabled: !projectSize.value })
-  }
-  return options
+/** 归一化后的尺寸能力（决定可选按钮组与是否显示自定义宽高） */
+const caps = computed<WorkflowSizeCapabilities>(() => normalizeSizeCapabilities(props.sizeCapabilities))
+
+/** 组件内部状态（比例/尺寸档 + 可选自定义宽高） */
+const state = ref<SizeConfigState>({ ratio: 'auto', size: 'auto', width: null, height: null })
+
+/** 自触发标记：emit 后跳过下一次回显，避免反馈循环 */
+const skipNextEcho = ref(false)
+
+/** 单行显示文案（如 `16:9 / 1K`、`自动 / 自动 / 1024x1024`） */
+const displayText = computed(() => formatSizeConfigText(state.value, caps.value))
+
+/** 比例选项：自适应（auto/adaptive）放首位，其余按声明顺序去重 */
+const ratioOptions = computed(() => {
+  const values = [...new Set(caps.value.ratio)]
+  const auto = values.filter((v) => v === 'auto' || v === 'adaptive')
+  const rest = values.filter((v) => v !== 'auto' && v !== 'adaptive')
+  return [...auto, ...rest].map((v) => ({
+    value: v,
+    // 自适应档按钮文案（区分 display 行使用的「自动」）
+    label: v === 'auto' || v === 'adaptive' ? '自适应' : v,
+  }))
+})
+
+/** 尺寸选项：自动放首位，其余按声明顺序去重 */
+const sizeOptions = computed(() => {
+  const values = [...new Set(caps.value.size)]
+  const auto = values.filter((v) => v === 'auto')
+  const rest = values.filter((v) => v !== 'auto')
+  return [...auto, ...rest].map((v) => ({
+    value: v,
+    label: v === 'auto' ? AUTO_SIZE_LABEL : v,
+  }))
 })
 
 /**
- * 按当前内部状态输出尺寸值并通知父组件。
- * - none → { enable_specified_size: false }
- * - 其他模式 → { enable_specified_size: true, width, height }
+ * 把当前内部状态按能力声明钳制到合法选项：
+ * 持久化值可能来自旧数据（如 "auto" 而声明不含 auto），回退到声明的第一个选项。
+ * 注意：「auto」（自动）视为「未选择」状态，不参与钳制——
+ * 部分工作流（如 Bridge）声明清单不含 auto，未选择时仍应保持 自动/自动 默认。
+ *
+ * @param s 当前内部状态
+ * @returns 钳制后的状态（不修改入参）
  */
-function emitSize() {
-  const out: Record<string, WorkflowUserParamValue> = {}
-  if (mode.value === 'none') {
-    out.enable_specified_size = false
-  } else {
-    out.enable_specified_size = true
-    if (mode.value === 'preset') {
-      const s = computePresetSize(ratio.value, resolution.value)
-      out.width = s.width
-      out.height = s.height
-    } else if (mode.value === 'manual') {
-      if (manualWidth.value != null && manualWidth.value > 0) out.width = manualWidth.value
-      if (manualHeight.value != null && manualHeight.value > 0) out.height = manualHeight.value
-    } else if (mode.value === 'project') {
-      if (projectSize.value) {
-        out.width = projectSize.value.width
-        out.height = projectSize.value.height
-      }
-    }
+function clampToCapabilities(s: SizeConfigState): SizeConfigState {
+  const next = { ...s }
+  if (
+    next.ratio !== 'auto' &&
+    next.ratio !== 'adaptive' &&
+    caps.value.ratio.length > 0 &&
+    !caps.value.ratio.includes(next.ratio)
+  ) {
+    next.ratio = caps.value.ratio[0]
   }
+  if (
+    next.size !== 'auto' &&
+    caps.value.size.length > 0 &&
+    !caps.value.size.includes(next.size)
+  ) {
+    next.size = caps.value.size[0]
+  }
+  return next
+}
+
+/**
+ * 输出当前内部状态为尺寸配置并通知父级（跳过下一次回显）。
+ */
+function emitChange() {
   skipNextEcho.value = true
-  emit('update:modelValue', out)
-}
-
-/** 切换模式 */
-function setMode(v: unknown) {
-  mode.value = v as SizeMode
-  hasInteracted.value = true
-  emitSize()
-}
-
-/** 切换比例档 */
-function setRatio(v: SizeRatioKey) {
-  ratio.value = v
-  hasInteracted.value = true
-  emitSize()
-}
-
-/** 切换分辨率档 */
-function setResolution(v: SizeResolutionKey) {
-  resolution.value = v
-  hasInteracted.value = true
-  emitSize()
-}
-
-/** 更新手动宽度 */
-function setManualWidth(v: unknown) {
-  manualWidth.value = v === '' || v === null || v === undefined ? null : Number(v)
-  hasInteracted.value = true
-  emitSize()
-}
-
-/** 更新手动高度 */
-function setManualHeight(v: unknown) {
-  manualHeight.value = v === '' || v === null || v === undefined ? null : Number(v)
-  hasInteracted.value = true
-  emitSize()
+  emit('update:modelValue', toSizeConfig(state.value, caps.value.supportCustomSize))
 }
 
 /**
- * 读取项目尺寸（project.json 的 width/height，取整）。
- * 读取失败或无效时置 null（「使用项目尺寸」模式将无法输出尺寸）。
- * 加载完成后若用户尚未手动操作，重跑一次回显推断，
- * 使「保存值等于项目尺寸」的初始场景能正确显示为 project 模式。
- * 用户已手动操作过则不再重推断，避免覆盖其当前选择（hasInteracted 守卫）。
+ * 选择比例档：更新状态；支持自定义宽高时若比例×尺寸可换算，自动填入对应宽高。
+ *
+ * @param v 按钮值（比例档）
  */
-async function loadProjectSize() {
-  if (!props.project) {
-    projectSize.value = null
-    if (!hasInteracted.value) applyEcho(true)
-    return
-  }
-  try {
-    const data = await readFs(props.project, 'project.json')
-    if (data && typeof data === 'object' && 'width' in data && 'height' in data) {
-      const w = Math.round(Number((data as { width: unknown }).width))
-      const h = Math.round(Number((data as { height: unknown }).height))
-      if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-        projectSize.value = { width: w, height: h }
-        if (!hasInteracted.value) applyEcho(true)
-        return
-      }
+function selectRatio(v: unknown) {
+  const value = String(v ?? '')
+  if (!value || value === state.value.ratio) return
+  state.value = { ...state.value, ratio: value }
+  applyPresetToSize()
+}
+
+/**
+ * 选择尺寸档：更新状态；支持自定义宽高时若比例×尺寸可换算，自动填入对应宽高。
+ *
+ * @param v 按钮值（尺寸档）
+ */
+function selectSize(v: unknown) {
+  const value = String(v ?? '')
+  if (!value || value === state.value.size) return
+  state.value = { ...state.value, size: value }
+  applyPresetToSize()
+}
+
+/**
+ * 按「比例 × 尺寸」预设自动设置宽高（仅支持自定义宽高的工作流且两档均已知时）。
+ * 任一项为自适应/未注册档时保持现有宽高不变（由用户自定义或留空）。
+ */
+function applyPresetToSize() {
+  if (caps.value.supportCustomSize) {
+    const preset = resolvePresetSize(state.value.ratio, state.value.size)
+    if (preset) {
+      state.value = { ...state.value, width: preset.width, height: preset.height }
     }
-  } catch {
-    // project.json 缺失或无效
   }
-  projectSize.value = null
-  if (!hasInteracted.value) applyEcho(true)
+  emitChange()
 }
-
-// 项目变化时重新读取项目尺寸（新项目视为全新的尺寸上下文，重置交互标记）
-watch(() => props.project, () => {
-  hasInteracted.value = false
-  loadProjectSize()
-}, { immediate: true })
-
-/** 最近一次回显时的尺寸子集（enable/width/height），用于判断外部是否真的改了尺寸相关值 */
-let lastEchoedSize = ''
 
 /**
- * 依据外部 modelValue 推断并应用内部状态（模式/比例/分辨率/手动值）。
+ * 手动修改宽度：仅更新宽高，不触碰比例/尺寸按钮组。
+ * 非法（空/非正数）置 null（对应「不指定」）。
  *
- * - 组件自身 emit 后（skipNextEcho）跳过下一次回显，避免反馈循环
- * - 尺寸相关值（enable/width/height）未变化时不重推断，
- *   避免用户编辑其他非尺寸参数时覆盖当前选择
- * - force 为 true 时无视尺寸子集比对强制重推断（项目尺寸加载完成后使用）
- *
- * @param force 是否强制重推断（忽略尺寸子集比对）
+ * @param v 输入值（数字字符串或空串）
  */
-function applyEcho(force = false) {
-  const v = props.modelValue
-  const sizeSubset = JSON.stringify({
-    enable: v.enable_specified_size ?? null,
-    width: v.width ?? null,
-    height: v.height ?? null,
-  })
-  if (skipNextEcho.value) {
-    skipNextEcho.value = false
-    lastEchoedSize = sizeSubset
-    return
-  }
-  if (!force && sizeSubset === lastEchoedSize) return
-  lastEchoedSize = sizeSubset
-  const inferred = resolveSizeMode({
-    enableSpecifiedSize: v.enable_specified_size,
-    width: v.width as number | string | undefined,
-    height: v.height as number | string | undefined,
-    projectSize: projectSize.value,
-  })
-  mode.value = inferred
-  if (inferred === 'preset') {
-    const w = Number(v.width)
-    const h = Number(v.height)
-    const r = SIZE_RATIOS.find((x) => Math.abs(x.ratio - w / h) < 0.01)
-    const res = SIZE_RESOLUTIONS.find(
-      (x) => x.base === w || x.base === h,
-    )
-    if (r) ratio.value = r.key
-    if (res) resolution.value = res.key
-  } else if (inferred === 'manual') {
-    manualWidth.value = v.width !== undefined && v.width !== '' ? Number(v.width) : null
-    manualHeight.value = v.height !== undefined && v.height !== '' ? Number(v.height) : null
-  }
+function setWidth(v: unknown) {
+  const n = v === '' || v === null || v === undefined ? null : Number(v)
+  const width = Number.isFinite(Number(n)) && Number(n) > 0 ? Math.round(Number(n)) : null
+  state.value = { ...state.value, width }
+  emitChange()
 }
 
-// 外部值变化（如表单重置/回显）时推断模式
+/**
+ * 手动修改高度：仅更新宽高，不触碰比例/尺寸按钮组。
+ * 非法（空/非正数）置 null（对应「不指定」）。
+ *
+ * @param v 输入值（数字字符串或空串）
+ */
+function setHeight(v: unknown) {
+  const n = v === '' || v === null || v === undefined ? null : Number(v)
+  const height = Number.isFinite(Number(n)) && Number(n) > 0 ? Math.round(Number(n)) : null
+  state.value = { ...state.value, height }
+  emitChange()
+}
+
+// 外部回显（持久化 sizeConfig / 表单重置）：归一化 + 按能力钳制后应用到内部状态
 watch(
   () => props.modelValue,
-  () => applyEcho(),
+  (v) => {
+    if (skipNextEcho.value) {
+      skipNextEcho.value = false
+      return
+    }
+    state.value = clampToCapabilities(normalizeSizeConfig(v ?? undefined))
+  },
   { immediate: true, deep: true },
 )
+
+// 能力声明变化（切换工作流实现）：把当前选择钳制到新声明的合法选项并回写
+watch(
+  caps,
+  () => {
+    const next = clampToCapabilities(state.value)
+    if (next.ratio !== state.value.ratio || next.size !== state.value.size) {
+      state.value = next
+      emitChange()
+    }
+  },
+)
 </script>
+
+<style scoped>
+/* 触发行：类输入框外观（圆角描边 + 可点击），点击打开配置面板 */
+.workflow-size-picker__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.23);
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  max-width: 100%;
+}
+
+.workflow-size-picker__trigger:hover {
+  border-color: rgba(var(--v-theme-primary), 0.7);
+}
+
+.workflow-size-picker__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-size-picker__caret {
+  opacity: 0.6;
+  flex: 0 0 auto;
+}
+
+/* 面板内分区标题 */
+.workflow-size-picker__label {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+  margin-bottom: 4px;
+}
+
+.workflow-size-picker__label:not(:first-child) {
+  margin-top: 12px;
+}
+
+/* 按钮组：允许换行 */
+.workflow-size-picker__group {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.workflow-size-picker__hint {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+  margin-top: 6px;
+}
+</style>

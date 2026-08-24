@@ -124,7 +124,10 @@
       :declarations="currentDeclarations"
       :provider="currentImpl?.providerInstanceId"
       :provider-type="currentImpl?.provider"
+      :size-capabilities="currentImpl?.capabilities?.size"
+      :model-size-config="sizeConfig"
       :project="props.project"
+      @update:size-config="(v) => onSizeConfigChange(v)"
     />
 
     <div class="d-flex align-center ga-2 mb-2">
@@ -173,7 +176,7 @@ import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
-import type { WorkflowUserParamValue } from '../../../api/workflow'
+import type { WorkflowSizeConfig, WorkflowUserParamValue } from '../../../api/workflow'
 
 const props = defineProps<{
   project: string
@@ -336,7 +339,7 @@ const currentImplId = computed(() => {
  */
 function onTypeChange(v: string) {
   implError.value = ''
-  emit('update:config', { workflowId: v, workflowImpl: undefined, workflowParams: {} })
+  emit('update:config', { workflowId: v, workflowImpl: undefined, workflowParams: {}, sizeConfig: undefined })
 }
 
 /**
@@ -345,7 +348,7 @@ function onTypeChange(v: string) {
  */
 function onImplChange(v: string) {
   implError.value = ''
-  emit('update:config', { workflowImpl: v, workflowParams: {} })
+  emit('update:config', { workflowImpl: v, workflowParams: {}, sizeConfig: undefined })
 }
 
 /**
@@ -390,6 +393,39 @@ watch(
     if (!same) emit('update:config', { workflowParams: v })
   },
 )
+
+/** 统一尺寸配置（config.sizeConfig 的本地副本；表单更新后持久化到节点配置）。 */
+const sizeConfig = ref<WorkflowSizeConfig | null>(null)
+
+// config.sizeConfig → 本地（配置面板重挂载后恢复已保存的尺寸配置）
+watch(
+  () => props.node.config.sizeConfig,
+  (v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const rec = v as Record<string, unknown>
+      if (typeof rec.ratio === 'string' && rec.ratio !== '' && typeof rec.size === 'string' && rec.size !== '') {
+        sizeConfig.value = v as WorkflowSizeConfig
+        return
+      }
+    }
+    sizeConfig.value = null
+  },
+  { immediate: true, deep: true },
+)
+
+/**
+ * 统一尺寸配置变化（WorkflowParamsForm 输出）回写节点持久化配置。
+ * 相等性守卫避免「本地 → emit → config → 本地」循环；画布图片节点提交时
+ * 由 useCanvasGeneration 读取 config.sizeConfig 并入 params.sizeConfig。
+ *
+ * @param v 用户选择的尺寸配置
+ */
+function onSizeConfigChange(v: WorkflowSizeConfig) {
+  sizeConfig.value = v
+  const cur = props.node.config.sizeConfig
+  const same = cur != null && typeof cur === 'object' && JSON.stringify(cur) === JSON.stringify(v)
+  if (!same) emit('update:config', { sizeConfig: v })
+}
 
 // 加载工作流列表（初始化一次）
 getWorkflows()

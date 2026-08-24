@@ -2,10 +2,18 @@ import { describe, expect, it } from 'vitest'
 import {
   computePresetSize,
   findSizeParamKeys,
+  formatSizeConfigText,
+  inferSizeConfigFromWidthHeight,
   mergeSizeValues,
+  normalizeSizeCapabilities,
+  normalizeSizeConfig,
+  ratioLabel,
+  resolvePresetSize,
   resolveSizeMode,
   SIZE_RATIOS,
   SIZE_RESOLUTIONS,
+  sizeLabel,
+  toSizeConfig,
 } from './workflowSize'
 import type { WorkflowUserParamDeclaration } from '../api/workflow'
 
@@ -37,16 +45,25 @@ describe('computePresetSize', () => {
   it('1:1 + 8K → 7680×7680', () => {
     expect(computePresetSize('1:1', '8K')).toEqual({ width: 7680, height: 7680 })
   })
+
+  it('扩展档位：1:1 + 1K → 1024×1024；3:2 + 768P → 1152×768', () => {
+    expect(computePresetSize('1:1', '1K')).toEqual({ width: 1024, height: 1024 })
+    expect(computePresetSize('3:2', '768P')).toEqual({ width: 1152, height: 768 })
+  })
 })
 
 describe('SIZE_RATIOS / SIZE_RESOLUTIONS', () => {
-  it('比例档包含 5 个预设', () => {
-    expect(SIZE_RATIOS.map((r) => r.key)).toEqual(['1:1', '16:9', '9:16', '4:3', '3:4'])
+  it('比例档包含 8 个预设（含 3:2 / 2:3 / 21:9）', () => {
+    expect(SIZE_RATIOS.map((r) => r.key)).toEqual(['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'])
   })
 
-  it('分辨率档包含 6 个预设，P 档基准为高度、K 档基准为宽度', () => {
-    expect(SIZE_RESOLUTIONS.map((r) => r.key)).toEqual(['360P', '720P', '1080P', '2K', '4K', '8K'])
+  it('分辨率档包含 11 个预设，P 档基准为高度、K 档基准为宽度', () => {
+    expect(SIZE_RESOLUTIONS.map((r) => r.key)).toEqual([
+      '360P', '480P', '720P', '768P', '1080P', '1K', '1.5K', '2K', '3K', '4K', '8K',
+    ])
     expect(SIZE_RESOLUTIONS.find((r) => r.key === '1080P')?.baseOn).toBe('height')
+    expect(SIZE_RESOLUTIONS.find((r) => r.key === '768P')?.base).toBe(768)
+    expect(SIZE_RESOLUTIONS.find((r) => r.key === '1K')?.base).toBe(1024)
     expect(SIZE_RESOLUTIONS.find((r) => r.key === '4K')?.baseOn).toBe('width')
   })
 })
@@ -152,5 +169,133 @@ describe('mergeSizeValues', () => {
     const values = { width: '', height: '' }
     mergeSizeValues(values, keys, { enable_specified_size: true, width: 100, height: 200 })
     expect(values).toEqual({ width: '', height: '' })
+  })
+})
+
+describe('ratioLabel / sizeLabel', () => {
+  it('auto / adaptive 归一为「自动」，其余原样', () => {
+    expect(ratioLabel('auto')).toBe('自动')
+    expect(ratioLabel('adaptive')).toBe('自动')
+    expect(ratioLabel('16:9')).toBe('16:9')
+    expect(sizeLabel('auto')).toBe('自动')
+    expect(sizeLabel('2K')).toBe('2K')
+  })
+})
+
+describe('normalizeSizeCapabilities', () => {
+  it('未声明 → 默认全量', () => {
+    expect(normalizeSizeCapabilities()).toEqual({
+      ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
+      size: ['360P', '720P', '1080P', '2K', '4K', 'auto'],
+      supportCustomSize: true,
+    })
+  })
+
+  it('空数组回退默认，非空按声明，supportCustomSize 缺省 true', () => {
+    expect(normalizeSizeCapabilities({ ratio: [], size: ['1K', '2K', 'auto'] })).toEqual({
+      ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
+      size: ['1K', '2K', 'auto'],
+      supportCustomSize: true,
+    })
+    expect(normalizeSizeCapabilities({ supportCustomSize: false }).supportCustomSize).toBe(false)
+  })
+})
+
+describe('normalizeSizeConfig', () => {
+  it('null / 部分字段 → 补默认（auto、无宽高）', () => {
+    expect(normalizeSizeConfig(null)).toEqual({ ratio: 'auto', size: 'auto', width: null, height: null })
+    expect(normalizeSizeConfig({ ratio: '16:9' })).toEqual({ ratio: '16:9', size: 'auto', width: null, height: null })
+  })
+
+  it('字符串数字宽高转为整数，非法置 null', () => {
+    expect(normalizeSizeConfig({ ratio: '1:1', size: '2K', width: '1024', height: '1024.6' })).toEqual({
+      ratio: '1:1', size: '2K', width: 1024, height: 1025,
+    })
+    expect(normalizeSizeConfig({ ratio: '1:1', size: '2K', width: 'abc', height: 0 })).toEqual({
+      ratio: '1:1', size: '2K', width: null, height: null,
+    })
+  })
+})
+
+describe('resolvePresetSize', () => {
+  it('已知档位换算宽高', () => {
+    expect(resolvePresetSize('16:9', '1K')).toEqual({ width: 1024, height: 576 })
+    expect(resolvePresetSize('1:1', '2K')).toEqual({ width: 2560, height: 2560 })
+  })
+
+  it('auto / 未注册档位返回 null', () => {
+    expect(resolvePresetSize('auto', '1K')).toBeNull()
+    expect(resolvePresetSize('16:9', 'auto')).toBeNull()
+    expect(resolvePresetSize('bad', '1K')).toBeNull()
+    expect(resolvePresetSize('16:9', 'bad')).toBeNull()
+  })
+})
+
+describe('inferSizeConfigFromWidthHeight', () => {
+  it('命中预设组合（16:9 + 1080P）→ 反推出比例与尺寸档', () => {
+    expect(inferSizeConfigFromWidthHeight(1920, 1080)).toEqual({
+      ratio: '16:9', size: '1080P', width: 1920, height: 1080,
+    })
+  })
+
+  it('竖屏 K 档（1:1 + 1K）→ 反推 1:1 / 1K', () => {
+    expect(inferSizeConfigFromWidthHeight(1024, 1024)).toEqual({
+      ratio: '1:1', size: '1K', width: 1024, height: 1024,
+    })
+  })
+
+  it('竖屏 P 档（9:16 + 720P = 720×1280）→ 反推', () => {
+    expect(inferSizeConfigFromWidthHeight(720, 1280)).toEqual({
+      ratio: '9:16', size: '720P', width: 720, height: 1280,
+    })
+  })
+
+  it('非预设宽高 → ratio/size 回退 auto，宽高保留', () => {
+    expect(inferSizeConfigFromWidthHeight(1234, 567)).toEqual({
+      ratio: 'auto', size: 'auto', width: 1234, height: 567,
+    })
+  })
+
+  it('无效宽高 → 全默认', () => {
+    expect(inferSizeConfigFromWidthHeight('', '')).toEqual({
+      ratio: 'auto', size: 'auto', width: null, height: null,
+    })
+  })
+})
+
+describe('toSizeConfig', () => {
+  it('支持自定义时输出宽高，否则只输出比例/尺寸', () => {
+    const state = { ratio: '1:1', size: '2K', width: 1024, height: 1024 }
+    expect(toSizeConfig(state, true)).toEqual({ ratio: '1:1', size: '2K', width: 1024, height: 1024 })
+    expect(toSizeConfig(state, false)).toEqual({ ratio: '1:1', size: '2K' })
+  })
+
+  it('无宽高时省略字段', () => {
+    expect(toSizeConfig({ ratio: 'auto', size: 'auto', width: null, height: null }, true)).toEqual({
+      ratio: 'auto', size: 'auto',
+    })
+  })
+})
+
+describe('formatSizeConfigText', () => {
+  it('预设组合不追加自定义宽高：16:9 / 1K', () => {
+    expect(formatSizeConfigText({ ratio: '16:9', size: '1K', width: 1024, height: 576 })).toBe('16:9 / 1K')
+  })
+
+  it('手动改过宽高追加后缀：1:1 / 2K / 1024x1024', () => {
+    expect(formatSizeConfigText({ ratio: '1:1', size: '2K', width: 1024, height: 1024 })).toBe('1:1 / 2K / 1024x1024')
+  })
+
+  it('默认状态显示 自动 / 自动', () => {
+    expect(formatSizeConfigText({ ratio: 'auto', size: 'auto', width: null, height: null })).toBe('自动 / 自动')
+  })
+
+  it('不支持自定义宽高时不显示后缀', () => {
+    const caps = { ratio: ['16:9'], size: ['1K'], supportCustomSize: false }
+    expect(formatSizeConfigText({ ratio: '16:9', size: '1K', width: 640, height: 360 }, caps)).toBe('16:9 / 1K')
+  })
+
+  it('adaptive 显示为 自动', () => {
+    expect(formatSizeConfigText({ ratio: 'adaptive', size: '768P', width: null, height: null })).toBe('自动 / 768P')
   })
 })

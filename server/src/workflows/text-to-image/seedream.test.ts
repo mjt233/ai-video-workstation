@@ -40,11 +40,16 @@ describe('text-to-image/seedream', () => {
     executeMock.mockResolvedValue({ taskId: 't1' });
   });
 
-  it('注册 seedream-5-pro / seedream-5-lite，provider=volcengine-ark，能力含 deferredCancel', () => {
+  it('注册 seedream-5-pro / seedream-5-lite，provider=volcengine-ark，能力含 deferredCancel 与尺寸声明', () => {
     const pro = getImpl('text-to-image', 'seedream-5-pro');
     expect(pro).toBeDefined();
     expect(pro!.provider).toBe('volcengine-ark');
     expect(pro!.capabilities).toMatchObject({ cancelable: true, deferredCancel: true });
+    expect(pro!.capabilities?.size).toEqual({
+      ratio: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+      size: ['1K', '2K'],
+      supportCustomSize: true,
+    });
     expect(getImpl('text-to-image', 'seedream-5-lite')).toBeDefined();
   });
 
@@ -100,6 +105,40 @@ describe('text-to-image/seedream', () => {
     await impl.submit(mkCtx({ vars: { promptPath: 'x.md', width: '720', height: '1280' } }));
     const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
     expect(call.params.size).toBe('1080x1920');
+  });
+
+  it('sizeConfig.width/height 优先于 vars 门控（统一尺寸配置直传宽高）', async () => {
+    const impl = getImpl('text-to-image', 'seedream-5-pro')!;
+    await impl.submit(mkCtx({
+      vars: { promptPath: 'x.md', enable_specified_size: 'false', width: '720', height: '1280' },
+      sizeConfig: { ratio: '1:1', size: '2K', width: 1024, height: 1024 },
+    }));
+    const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
+    expect(call.params.size).toBe('1024x1024');
+  });
+
+  it('sizeConfig 仅带比例/尺寸档（无宽高）时回退项目尺寸', async () => {
+    const impl = getImpl('text-to-image', 'seedream-5-pro')!;
+    await impl.submit(mkCtx({
+      vars: { promptPath: 'x.md' },
+      sizeConfig: { ratio: '16:9', size: '1K' },
+    }));
+    const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
+    expect(call.params.size).toBe('1080x1920');
+  });
+
+  it('sizeConfig 超出模型约束时自动匹配最接近的允许尺寸（保留约束规则）', async () => {
+    const impl = getImpl('text-to-image', 'seedream-5-pro')!;
+    // pro 总像素上限 4624220：8000x8000 超出 → 自动钳制
+    await impl.submit(mkCtx({
+      vars: { promptPath: 'x.md' },
+      sizeConfig: { ratio: '1:1', size: '2K', width: 8000, height: 8000 },
+    }));
+    const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
+    const size = String(call.params.size);
+    const [w, h] = size.split('x').map(Number);
+    expect(w * h).toBeLessThanOrEqual(4624220);
+    expect(w / h).toBeCloseTo(1, 0);
   });
 
   it('promptPath 缺失抛错', async () => {

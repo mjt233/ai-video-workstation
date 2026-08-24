@@ -9,7 +9,15 @@ for (const def of SEEDREAM_MODELS) {
     name: def.name,
     description: '使用火山方舟 Seedream 多图参考生单图，基于输入图片与编辑描述进行图像编辑/合成',
     provider: 'volcengine-ark',
-    capabilities: { cancelable: true, deferredCancel: true },
+    capabilities: {
+      cancelable: true,
+      deferredCancel: true,
+      size: {
+        ratio: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+        size: ['1K', '2K'],
+        supportCustomSize: true,
+      },
+    },
     params: [
       {
         name: '指定输出尺寸',
@@ -68,11 +76,19 @@ for (const def of SEEDREAM_MODELS) {
         dataUrls.push(await fileToDataUrl(f));
       }
 
-      // 尺寸：enable_specified_size=true 且宽高有效 → 显式 WxH；否则回退档位
+      // 尺寸：优先统一尺寸配置（ctx.sizeConfig，新交互），其次旧 userParams 门控
+      // （enable_specified_size===true 时用 width/height）；均未提供时回退模型默认档位。
       // 注：userParams 值类型为 boolean|number|string，需 String() 强转后再解析
       const up = ctx.userParams ?? {};
-      const size = String(up.enable_specified_size) === 'true'
-        ? resolveSeedreamSize(SEEDREAM_SIZE_LIMITS[def.kind], String(up.width ?? ''), String(up.height ?? ''))
+      const sc = ctx.sizeConfig;
+      const scValid = sc?.width != null && sc.width > 0 && sc?.height != null && sc.height > 0;
+      const specified = scValid || String(up.enable_specified_size) === 'true';
+      const size = specified
+        ? resolveSeedreamSize(
+            SEEDREAM_SIZE_LIMITS[def.kind],
+            scValid ? String(sc.width) : String(up.width ?? ''),
+            scValid ? String(sc.height) : String(up.height ?? ''),
+          )
         : resolveSeedreamSize(SEEDREAM_SIZE_LIMITS[def.kind]);
 
       return submitSeedreamImageEdit(ctx.provider, {

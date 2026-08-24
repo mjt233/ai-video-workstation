@@ -1,6 +1,6 @@
 <template>
   <div
-    v-if="declarations.length || isBridgeProvider"
+    v-if="declarations.length || isBridgeProvider || showSizePicker"
     class="workflow-params-form"
   >
     <!-- ComfyUI 提供商选择（provider=comfyui-bridge 的工作流显示；选项每次挂载实时从 Bridge 拉取，不缓存） -->
@@ -22,13 +22,14 @@
       @update:model-value="(v) => setProviderValue(v)"
     />
 
-    <!-- 尺寸参数（width/height）→ 通用尺寸选择组件 -->
+    <!-- 统一尺寸配置（capabilities.size 或 width/height 声明存在时渲染）：
+         单行文字 + v-menu 面板，输出 WorkflowSizeConfig，同时兼容回写 enable/width/height 标量 -->
     <WorkflowSizePicker
-      v-if="sizeKeys"
-      :project="project"
-      :model-value="sizeModelValue"
+      v-if="showSizePicker"
+      :size-capabilities="sizeCapabilities"
+      :model-value="sizeConfig"
       class="mb-2"
-      @update:model-value="onSizeChange"
+      @update:model-value="onSizeConfigChange"
     />
 
     <template
@@ -85,10 +86,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import WorkflowSizePicker from './WorkflowSizePicker.vue'
-import { findSizeParamKeys, mergeSizeValues } from '../utils/workflowSize'
+import { findSizeParamKeys, inferSizeConfigFromWidthHeight, mergeSizeValues } from '../utils/workflowSize'
 import { getComfyuiBridgeProviders, type ComfyuiBridgeProviderInfo } from '../api/providers'
 import { buildComfyuiProviderOptions, type ComfyuiProviderOption } from '../utils/comfyuiProviderOptions'
 import type {
+  WorkflowSizeConfig,
   WorkflowUserParamDeclaration,
   WorkflowUserParamValue,
 } from '../api/workflow'
@@ -98,16 +100,21 @@ const props = defineProps<{
   declarations: WorkflowUserParamDeclaration[]
   /** 当前参数值（key → 值），仅用于外部初始化/回显 */
   modelValue: Record<string, WorkflowUserParamValue>
-  /** 项目名（用于尺寸组件「使用项目尺寸」读取 project.json） */
+  /** 项目名（预留：尺寸组件未来可能的项目尺寸模式） */
   project?: string
   /** 服务商实例 ID（为 comfyui-bridge 类型实例时显示「ComfyUI 提供商」选择，并按实例拉取 Bridge 侧提供商） */
   provider?: string
   /** 服务商类型 ID（如 comfyui-bridge / volcengine-ark；决定是否显示「ComfyUI 提供商」选择） */
   providerType?: string
+  /** 工作流输出尺寸能力声明（capabilities.size；存在时渲染统一尺寸配置组件） */
+  sizeCapabilities?: { ratio?: string[]; size?: string[]; supportCustomSize?: boolean }
+  /** 外部回显的统一尺寸配置（已持久化的 sizeConfig；缺省时从保存的 width/height 标量反推） */
+  modelSizeConfig?: WorkflowSizeConfig | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', v: Record<string, WorkflowUserParamValue>): void
+  (e: 'update:sizeConfig', v: WorkflowSizeConfig): void
 }>()
 
 /** 表单内部值（key → 值） */
@@ -189,37 +196,46 @@ watch(isBridgeProvider, (isBridge) => {
   if (isBridge) void loadComfyuiProviders()
 })
 
-/** 尺寸相关 key（检测到 width + height 声明时非 null） */
+/** 尺寸相关 key（检测到 width + height 声明时非 null；兼容未声明 capabilities.size 的旧工作流） */
 const sizeKeys = computed(() => findSizeParamKeys(props.declarations))
+
+/** 是否渲染统一尺寸组件：工作流声明了 capabilities.size，或声明了 width/height 参数（旧约定） */
+const showSizePicker = computed(() => !!(sizeKeys.value || props.sizeCapabilities))
 
 /** 剔除尺寸相关 key 后的声明列表（其余参数仍走通用渲染） */
 const sizeFilteredDeclarations = computed(() => {
-  if (!sizeKeys.value) return props.declarations
-  const excluded = new Set([sizeKeys.value.widthKey, sizeKeys.value.heightKey])
-  if (sizeKeys.value.enableKey) excluded.add(sizeKeys.value.enableKey)
+  if (!showSizePicker.value) return props.declarations
+  const excluded = new Set<string>()
+  for (const key of ['width', 'height', 'enable_specified_size']) {
+    if (props.declarations.some((d) => d.key === key)) excluded.add(key)
+  }
   return props.declarations.filter((d) => !excluded.has(d.key))
 })
 
-/** 尺寸组件的外部值（仅含 width/height/enable_specified_size 三个 key 的现值） */
-const sizeModelValue = computed(() => {
-  if (!sizeKeys.value) return {}
-  const out: Record<string, WorkflowUserParamValue> = {}
-  for (const k of [sizeKeys.value.widthKey, sizeKeys.value.heightKey, sizeKeys.value.enableKey]) {
-    if (k && values.value[k] !== undefined) out[k] = values.value[k]
-  }
-  return out
-})
+/** 当前统一尺寸配置（组件双向；初始来自 props.modelSizeConfig 或保存的宽高标量反推） */
+const sizeConfig = ref<WorkflowSizeConfig>({ ratio: 'auto', size: 'auto' })
 
 /**
- * 尺寸组件值变化时合并进表单值。
- * 复用纯函数 `mergeSizeValues`：先清除旧的尺寸相关值，
- * 再并入组件输出中属于已声明尺寸 key 的新值。
+ * 统一尺寸组件值变化时：
+ * 1. 更新内部 sizeConfig 并通知父级（父级持久化/提交 params.sizeConfig）；
+ * 2. 兼容回写 enable_specified_size / width / height 标量进表单值
+ *    （仅写入已声明的 key，保证旧 vars 读取链路与任务回显不中断）。
  *
- * @param v 组件输出的尺寸值（enable_specified_size/width/height）
+ * @param v 组件输出的统一尺寸配置
  */
-function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
-  if (!sizeKeys.value) return
-  values.value = mergeSizeValues(values.value, sizeKeys.value, v)
+function onSizeConfigChange(v: WorkflowSizeConfig) {
+  sizeConfig.value = v
+  if (sizeKeys.value) {
+    const w = Number(v.width)
+    const h = Number(v.height)
+    const has = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
+    const incoming: Record<string, WorkflowUserParamValue> = {}
+    if (sizeKeys.value.enableKey) incoming[sizeKeys.value.enableKey] = has
+    incoming[sizeKeys.value.widthKey] = has ? w : ''
+    incoming[sizeKeys.value.heightKey] = has ? h : ''
+    values.value = mergeSizeValues(values.value, sizeKeys.value, incoming)
+  }
+  emit('update:sizeConfig', v)
   emit('update:modelValue', { ...values.value })
 }
 
@@ -237,14 +253,29 @@ function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
  *   则与旧行为一致（全部使用默认值）。
  * - ComfyUI 提供商选择（保留键 providerId）不属于工作流参数声明：Bridge 工作流表单
  *   额外恢复 modelValue.providerId（非空字符串）或置空串（不指定，Bridge 默认解析）。
+ * - 统一尺寸配置：优先外部传入的已保存 sizeConfig（props.modelSizeConfig）；
+ *   否则从保存的 width/height 标量反推（旧数据兼容），反推不出则自动/自动。
  *
  * @param decls 参数声明列表
  */
 function initFromDefaults(decls: WorkflowUserParamDeclaration[]) {
+  // 统一尺寸配置回显独立于参数声明：优先已保存的 sizeConfig，否则从 width/height 标量反推
+  const saved = props.modelValue
+  if (props.modelSizeConfig && (props.modelSizeConfig.ratio || props.modelSizeConfig.size)) {
+    sizeConfig.value = props.modelSizeConfig
+  } else if (saved && typeof saved === 'object') {
+    const inferred = inferSizeConfigFromWidthHeight(saved['width'], saved['height'])
+    sizeConfig.value = {
+      ratio: inferred.ratio,
+      size: inferred.size,
+      ...(inferred.width != null && inferred.height != null
+        ? { width: inferred.width, height: inferred.height }
+        : {}),
+    }
+  }
   if (!decls.length && !isBridgeProvider.value) return
   const next: Record<string, WorkflowUserParamValue> = {}
   for (const d of decls) next[d.key] = d.defaultValue
-  const saved = props.modelValue
   if (saved && typeof saved === 'object') {
     for (const d of decls) {
       const v = saved[d.key]
@@ -257,6 +288,7 @@ function initFromDefaults(decls: WorkflowUserParamDeclaration[]) {
   }
   values.value = next
   emit('update:modelValue', { ...next })
+  emit('update:sizeConfig', sizeConfig.value)
 }
 
 // 声明变化（如切换工作流实现）时，按新默认值重置表单

@@ -84,10 +84,10 @@
         />
 
         <WorkflowSizePicker
-          :project="props.project"
-          :model-value="sizeModelValue"
+          :size-capabilities="currentImpl?.capabilities?.size"
+          :model-value="sizeConfigState"
           class="flex-grow-1"
-          @update:model-value="onSizeChange"
+          @update:model-value="onSizeConfigChange"
         />
       </div>
 
@@ -309,8 +309,8 @@ import { buildPreviewUrl } from '../../../canvas/preview'
 import { mergeInputOrder as mergeGlobalInputOrder } from '../../../canvas/generate'
 import { canvasDirectorToProject, projectToCanvasDirector } from '../../../canvas/videoDirectorBridge'
 import type { CanvasDirectorConfig, VideoGenerateMode } from '../../../canvas/videoTypes'
-import type { WorkflowUserParamDeclaration, WorkflowUserParamValue } from '../../../api/workflow'
-import { findSizeParamKeys } from '../../../utils/workflowSize'
+import type { WorkflowUserParamDeclaration, WorkflowUserParamValue, WorkflowSizeConfig } from '../../../api/workflow'
+import { findSizeParamKeys, inferSizeConfigFromWidthHeight } from '../../../utils/workflowSize'
 import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
 import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
 import VideoDirector from '../../video-director/VideoDirector.vue'
@@ -688,35 +688,62 @@ const currentResolution = computed(() => {
   return { width: r?.width || 0, height: r?.height || 0 }
 })
 
-/** WorkflowSizePicker 外部回显值（enable_specified_size + width/height） */
-const sizeModelValue = computed<Record<string, WorkflowUserParamValue>>(() => {
-  const { width, height } = currentResolution.value
-  const has = width > 0 && height > 0
-  return {
-    enable_specified_size: has,
-    ...(has ? { width, height } : {}),
+/**
+ * 统一尺寸配置（WorkflowSizePicker 外部回显值）：
+ * 优先节点已保存的 config.sizeConfig；缺省时从当前输出尺寸（宽高）反推
+ * （旧节点只存了 resolution/director 宽高，无比例/尺寸概念）。
+ */
+const sizeConfigState = computed<WorkflowSizeConfig | null>(() => {
+  const saved = props.node.config.sizeConfig as Record<string, unknown> | undefined
+  if (saved && typeof saved === 'object' && typeof saved.ratio === 'string' && typeof saved.size === 'string') {
+    const w = Number(saved.width)
+    const h = Number(saved.height)
+    return {
+      ratio: saved.ratio,
+      size: saved.size,
+      ...(Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0 ? { width: w, height: h } : {}),
+    }
   }
+  const { width, height } = currentResolution.value
+  if (width > 0 && height > 0) {
+    const inferred = inferSizeConfigFromWidthHeight(width, height)
+    return {
+      ratio: inferred.ratio,
+      size: inferred.size,
+      ...(inferred.width != null && inferred.height != null
+        ? { width: inferred.width, height: inferred.height }
+        : {}),
+    }
+  }
+  return null
 })
 
 /**
  * 尺寸变化（WorkflowSizePicker 输出）回写配置：
- * - 有宽高 → 写入当前模式存储位置（director.width/height 或 resolution）
- * - 「不指定」→ 清空为 0，提交时回退默认尺寸
+ * - 持久化 config.sizeConfig（含比例/尺寸档与最终宽高），供视频 wire 提交给引擎；
+ * - 按当前模式同步写宽高到 director.width/height 或 resolution（后端 resolution 链路兼容）；
+ * - 「自动 / 自动」→ 宽高清 0（提交时回退默认尺寸）。
  *
- * @param v 组件输出的尺寸值（enable_specified_size / width / height）
+ * @param v 组件输出的统一尺寸配置（ratio/size + 可选 width/height）
  */
-function onSizeChange(v: Record<string, WorkflowUserParamValue>) {
+function onSizeConfigChange(v: WorkflowSizeConfig) {
   const w = Number(v.width)
   const h = Number(v.height)
   const has = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
+  const patch: Record<string, unknown> = {
+    sizeConfig: {
+      ratio: v.ratio,
+      size: v.size,
+      ...(has ? { width: w, height: h } : {}),
+    },
+  }
   if (mode.value === 'director') {
-    emit('update:config', {
-      director: { ...directorConfig.value, width: has ? w : 0, height: has ? h : 0 },
-    })
+    patch.director = { ...directorConfig.value, width: has ? w : 0, height: has ? h : 0 }
   } else {
     // first-last-frame / reference
-    emit('update:config', { resolution: has ? { width: w, height: h } : { width: 0, height: 0 } })
+    patch.resolution = has ? { width: w, height: h } : { width: 0, height: 0 }
   }
+  emit('update:config', patch)
 }
 
 /**

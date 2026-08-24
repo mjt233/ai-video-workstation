@@ -20,6 +20,16 @@ const TYPE_TAGS: Array<{ tag: string; type: BridgeDerivedType }> = [
 ];
 
 /**
+ * Bridge 图片/视频类工作流的统一尺寸能力声明（文生图 / 图片编辑 / 图生视频）。
+ * 尺寸清单来自 Easy Bridge 常见工作流配置；支持自定义任意宽高（直传 width/height）。
+ */
+const BRIDGE_SIZE_CAPABILITIES: WorkflowCapabilities['size'] = {
+  ratio: ['16:9', '9:16', '3:2', '2:3', '21:9', '1:1', '4:3', '3:4'],
+  size: ['360P', '480P', '720P', '768P', '1080P', '2K', '4K'],
+  supportCustomSize: true,
+};
+
+/**
  * 展平标签分组：返回工作流实际打上的全部标签 id（父 + 子）。
  *
  * @param tags Bridge 工作流详情返回的标签分组数组（可能嵌套）
@@ -86,6 +96,10 @@ function tagMetadata(tags: BridgeTagGroup[], id: string): Record<string, unknown
 export function deriveCapabilities(tags: BridgeTagGroup[], type: string): WorkflowCapabilities {
   const ids = new Set(collectTagIds(tags));
   const caps: WorkflowCapabilities = { cancelable: true };
+  // 图片/视频类工作流声明统一尺寸能力（前端尺寸组件据此渲染；宽高经 vars/video.resolution 直传 Bridge）
+  if (type === 'text-to-image' || type === 'image-edit' || type === 'image-to-video') {
+    caps.size = BRIDGE_SIZE_CAPABILITIES;
+  }
   if (type !== 'image-to-video') return caps;
   const modes: VideoGenerateMode[] = [];
   const video: VideoCapabilities = { modes };

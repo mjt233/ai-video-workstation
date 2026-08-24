@@ -22,6 +22,24 @@ export interface WorkflowUserParamDeclaration {
   description?: string
 }
 
+/**
+ * 统一尺寸配置（用户选择的原始完整尺寸）。
+ *
+ * 用户在前端统一尺寸组件中选定比例/尺寸档（可为 "auto"/"adaptive" 表示自适应），
+ * 并可选指定自定义宽高；随任务提交（params.sizeConfig 或 video.sizeConfig）并持久化，
+ * 工作流实现据此消费（如 MiniMax ratio、火山方舟档位、OpenAI 兼容 WxH）。
+ */
+export interface WorkflowSizeConfig {
+  /** 比例档（如 "16:9" / "auto"；MiniMax 场景可为 "adaptive"） */
+  ratio?: string
+  /** 尺寸档（如 "1K" / "auto"） */
+  size?: string
+  /** 自定义宽度（像素；仅支持指定任意高宽的工作流携带） */
+  width?: number
+  /** 自定义高度（像素；仅支持指定任意高宽的工作流携带） */
+  height?: number
+}
+
 /** 工作流实现信息 */
 export interface WorkflowImplementation {
   impl: string
@@ -41,6 +59,7 @@ export interface WorkflowImplementation {
    * - audio：是否支持传入外部音频（如导演台混音产物）
    * - cancelable：是否支持中断（true 时前端可调用取消接口）
    * - video：视频生成能力声明（支持的生成模式组合与参考模式素材上限）
+   * - size：输出尺寸能力声明（统一尺寸组件据此渲染比例/尺寸按钮组与自定义宽高）
    */
   capabilities?: {
     director?: boolean
@@ -74,6 +93,14 @@ export interface WorkflowImplementation {
         /** 音频是否必须与图像/视频一同输入（不能作为唯一输入） */
         audioRequiresVisual?: boolean
       }
+    }
+    size?: {
+      /** 支持的比例（如 "16:9"、"auto"；未声明默认全量） */
+      ratio?: string[]
+      /** 支持的尺寸（如 "1K"、"auto"；未声明默认全量） */
+      size?: string[]
+      /** 是否允许指定任意宽高（默认 true） */
+      supportCustomSize?: boolean
     }
   }
 }
@@ -134,6 +161,8 @@ export interface VideoWorkflowSubmitParams {
   director?: { frames: Array<{ path: string; cursor: number }>; audio?: { path: string } }
   /** 参考模式：按类型分组的引用素材 */
   references?: Array<{ type: 'image' | 'video' | 'audio'; path: string }>
+  /** 统一尺寸配置（用户选择的原始完整尺寸；画布视频节点随 video wire 携带） */
+  sizeConfig?: WorkflowSizeConfig
   /** 透传给工作流实现的额外参数（seed 已剥离） */
   extraParams: Record<string, unknown>
 }
@@ -150,6 +179,8 @@ export interface WorkflowRunParams {
     userParams?: Record<string, WorkflowUserParamValue>
     /** 视频自包含提交参数（画布【生成视频】节点提交） */
     video?: VideoWorkflowSubmitParams
+    /** 统一尺寸配置（用户选择的原始完整尺寸：比例/尺寸档 + 可选自定义宽高） */
+    sizeConfig?: WorkflowSizeConfig
   }
 }
 
@@ -167,6 +198,8 @@ export interface BatchRunParams {
   implByAssetType?: Record<string, string>
   /** 资产类型 → 用户手动传入的工作流参数（按该资产类型所选实现的声明 key） */
   userParamsByAssetType?: Record<string, Record<string, WorkflowUserParamValue>>
+  /** 资产类型 → 统一尺寸配置（用户选择的原始完整尺寸） */
+  sizeConfigByAssetType?: Record<string, WorkflowSizeConfig>
 }
 
 export interface BatchSummary {

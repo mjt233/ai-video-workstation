@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCommonGlobalsLib,
   buildContextLib,
+  buildSizeConfigLib,
   buildUserConfigLib,
   duplicateWorkflowEntry,
   insertCodeTemplate,
   nextDuplicatedWorkflowName,
   normalizeWorkflowEntries,
+  normalizeWorkflowSizeConfig,
   validateWorkflowEntry,
 } from './custom-provider'
 
@@ -55,6 +57,37 @@ describe('buildContextLib', () => {
   it('buildUserConfigLib 空字段返回宽松索引签名', () => {
     expect(buildUserConfigLib([])).toContain('Record<string, boolean | number | string>')
     expect(buildUserConfigLib(undefined)).toContain('Record<string, boolean | number | string>')
+  })
+
+  it('生图/生视频 params 含 sizeConfig 字段（带类型提示）', () => {
+    expect(buildContextLib(['text-to-image'])).toContain('sizeConfig?: CustomSizeConfig')
+    expect(buildContextLib(['image-to-video'])).toContain('sizeConfig?: CustomSizeConfig')
+    expect(buildContextLib(['tts-voice-design'])).not.toContain('sizeConfig?: CustomSizeConfig')
+  })
+
+  it('sizeConfig 按条目配置生成字面量联合类型提示', () => {
+    const lib = buildContextLib(['text-to-image'], undefined, {
+      ratio: ['16:9', '4:3', 'auto'],
+      size: ['1K', '2K'],
+      supportCustomSize: false,
+    })
+    expect(lib).toContain("ratio?: '16:9' | '4:3' | 'auto'")
+    expect(lib).toContain("size?: '1K' | '2K'")
+    expect(lib).toContain('width?: number')
+    expect(lib).toContain('height?: number')
+  })
+
+  it('sizeConfig 未配置时回退全部候选全集（宽松提示）', () => {
+    const lib = buildContextLib(['image-edit'])
+    expect(lib).toContain('declare interface CustomSizeConfig')
+    expect(lib).toContain("ratio?: '1:1' | '4:3' | '3:4' | '16:9' | '9:16' | '3:2' | '2:3' | '21:9' | 'auto' | 'adaptive'")
+    expect(lib).toContain("size?: '360P' | '480P' | '720P' | '768P' | '1080P' | '1K' | '1.5K' | '2K' | '3K' | '4K' | '8K' | 'auto'")
+  })
+
+  it('buildSizeConfigLib 空清单视为默认全量（回退全部候选全集）', () => {
+    const lib = buildSizeConfigLib({ ratio: [], size: [], supportCustomSize: true })
+    expect(lib).toContain("ratio?: '1:1' | '4:3' | '3:4' | '16:9' | '9:16' | '3:2' | '2:3' | '21:9' | 'auto' | 'adaptive'")
+    expect(lib).toContain("size?: '360P' | '480P' | '720P' | '768P' | '1080P' | '1K' | '1.5K' | '2K' | '3K' | '4K' | '8K' | 'auto'")
   })
 })
 
@@ -216,5 +249,65 @@ describe('validateWorkflowEntry', () => {
     })
     expect(errors.join('')).toContain('空的 key')
     expect(errors.join('')).toContain('不能重复')
+  })
+})
+
+describe('normalizeWorkflowSizeConfig', () => {
+  it('未配置/非对象返回 undefined（使用默认全量）', () => {
+    expect(normalizeWorkflowSizeConfig(undefined)).toBeUndefined()
+    expect(normalizeWorkflowSizeConfig(null)).toBeUndefined()
+    expect(normalizeWorkflowSizeConfig('oops')).toBeUndefined()
+  })
+
+  it('对象但非数组字段回退空数组（空 = 使用默认全量）', () => {
+    expect(normalizeWorkflowSizeConfig({ ratio: 'oops' })).toEqual({
+      ratio: [],
+      size: [],
+      supportCustomSize: false,
+    })
+  })
+
+  it('按候选全集过滤未知档位并去重，supportCustomSize 按 true 解析', () => {
+    expect(normalizeWorkflowSizeConfig({
+      ratio: ['16:9', '4:3', '4:3', '999P'],
+      size: ['1K', '2K', 'bad'],
+      supportCustomSize: true,
+    })).toEqual({
+      ratio: ['16:9', '4:3'],
+      size: ['1K', '2K'],
+      supportCustomSize: true,
+    })
+    expect(normalizeWorkflowSizeConfig({ ratio: [], size: [], supportCustomSize: false })?.supportCustomSize).toBe(false)
+  })
+})
+
+describe('normalizeWorkflowEntries sizeConfig', () => {
+  it('条目携带 sizeConfig 时规范化保留', () => {
+    const rows = normalizeWorkflowEntries([
+      {
+        name: 'wf',
+        types: ['text-to-image'],
+        sizeConfig: { ratio: ['16:9', 'auto'], size: ['1K'], supportCustomSize: false },
+      },
+    ])
+    expect(rows[0].sizeConfig).toEqual({ ratio: ['16:9', 'auto'], size: ['1K'], supportCustomSize: false })
+  })
+
+  it('duplicateWorkflowEntry 深拷贝 sizeConfig', () => {
+    const source = {
+      name: 'wf',
+      types: ['text-to-image'],
+      async: false,
+      cancelable: false,
+      callCode: 'x',
+      extractCode: 'y',
+      cancelCode: '',
+      userConfigFields: [],
+      sizeConfig: { ratio: ['16:9'], size: ['1K', '2K'], supportCustomSize: true },
+    }
+    const cloned = duplicateWorkflowEntry(source, [source.name])
+    expect(cloned.sizeConfig).toEqual(source.sizeConfig)
+    expect(cloned.sizeConfig).not.toBe(source.sizeConfig)
+    expect(cloned.sizeConfig!.ratio).not.toBe(source.sizeConfig!.ratio)
   })
 })

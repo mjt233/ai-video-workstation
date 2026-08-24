@@ -29,6 +29,31 @@ function frameCursor(index: number, total: number): number {
 }
 
 /**
+ * 从节点配置取统一尺寸配置（config.sizeConfig）。
+ * 非对象或缺 ratio/size 时返回 undefined（旧节点只有宽高的配置不携带，由引擎回退）。
+ *
+ * @param config 节点配置
+ * @returns 尺寸配置（ratio/size 恒在；宽高仅当均为正数时携带）
+ */
+function sizeConfigOf(config: CanvasNodeData['config']): VideoSubmitParams['sizeConfig'] | undefined {
+  const sc = config.sizeConfig
+  if (!sc || typeof sc !== 'object' || Array.isArray(sc)) return undefined
+  const rec = sc as Record<string, unknown>
+  if (typeof rec.ratio !== 'string' || rec.ratio === '' || typeof rec.size !== 'string' || rec.size === '') {
+    return undefined
+  }
+  const w = Number(rec.width)
+  const h = Number(rec.height)
+  return {
+    ratio: rec.ratio,
+    size: rec.size,
+    ...(Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0
+      ? { width: Math.round(w), height: Math.round(h) }
+      : {}),
+  }
+}
+
+/**
  * 由节点配置 + 输入资产组装视频工作流提交参数（wire 形态）。
  * 画布【生成视频】节点提交前调用。
  *
@@ -38,6 +63,9 @@ function frameCursor(index: number, total: number): number {
  * - first-last-frame：按 config.inputOrder 排列帧图片，cursor 按首尾帧自动均匀分布
  *   （首帧 0、尾帧 1），时长/分辨率取 config.duration / config.resolution，音频取第一条音频输入；
  * - reference：按 config.inputOrder 对三组端口输入统一排序，分组生成 references。
+ *
+ * 统一尺寸配置（config.sizeConfig：比例/尺寸档 + 可选自定义宽高）随 wire 携带，
+ * 引擎合并进 ctx.sizeConfig 供工作流实现消费（如 MiniMax ratio）。
  *
  * workflowParams.seed 会从 extraParams 中剥离并转换为数字型 seed（字符串数字也可转换）。
  *
@@ -62,6 +90,7 @@ export function buildVideoSubmitParams(node: CanvasNodeData, inputs: VideoNodeIn
         : undefined
   const extraParams = { ...((config.workflowParams as Record<string, unknown> | undefined) ?? {}) }
   delete extraParams.seed
+  const sizeConfig = sizeConfigOf(config)
 
   if (mode === 'reference') {
     const order: string[] = Array.isArray(config.inputOrder) ? (config.inputOrder as string[]) : []
@@ -84,6 +113,7 @@ export function buildVideoSubmitParams(node: CanvasNodeData, inputs: VideoNodeIn
       duration,
       prompt,
       ...(seed != null && !Number.isNaN(seed) ? { seed } : {}),
+      ...(sizeConfig ? { sizeConfig } : {}),
       references: refs,
       extraParams,
     }
@@ -110,6 +140,7 @@ export function buildVideoSubmitParams(node: CanvasNodeData, inputs: VideoNodeIn
       duration: d.duration || 5,
       prompt,
       ...(seed != null && !Number.isNaN(seed) ? { seed } : {}),
+      ...(sizeConfig ? { sizeConfig } : {}),
       director: {
         frames,
         ...(audioPath ? { audio: { path: audioPath } } : {}),
@@ -139,6 +170,7 @@ export function buildVideoSubmitParams(node: CanvasNodeData, inputs: VideoNodeIn
     duration: Number(config.duration) || 5,
     prompt,
     ...(seed != null && !Number.isNaN(seed) ? { seed } : {}),
+    ...(sizeConfig ? { sizeConfig } : {}),
     director: {
       frames,
       ...(audioPath ? { audio: { path: audioPath } } : {}),

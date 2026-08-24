@@ -94,6 +94,24 @@ describe('useCanvasGeneration', () => {
     )
   })
 
+  it('图片节点 config.sizeConfig 随 params.sizeConfig 提交', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      ...makeNode('一只猫'),
+      config: {
+        prompt: '一只猫',
+        workflowImpl: 'seedream-5-pro',
+        sizeConfig: { ratio: '1:1', size: '2K', width: 1024, height: 1024 },
+      },
+    }
+    await gen.generate(node)
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ sizeConfig: { ratio: '1:1', size: '2K', width: 1024, height: 1024 } }),
+      }),
+    )
+  })
+
   it('图片节点未选择工作流实现：error 且不调用 runWorkflow', async () => {
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = { ...makeNode('一只猫'), config: { prompt: '一只猫' } }

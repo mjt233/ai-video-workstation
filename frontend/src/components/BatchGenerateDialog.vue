@@ -94,17 +94,20 @@
                   </v-list-item>
                 </template>
               </v-select>
-              <!-- 所选工作流的用户参数输入表单（按实现切换自动重置） -->
+              <!-- 所选工作流的用户参数输入表单（按实现切换自动重置；含统一尺寸配置组件） -->
               <WorkflowParamsForm
                 v-if="selectedTypes.includes(at.id)"
                 :key="`params-${at.id}-${implSelections[at.id] ?? 'none'}`"
                 :declarations="paramsDeclarationsMap[at.id]"
                 :provider="implInstanceIdMap[at.id]"
                 :provider-type="implProviderTypeMap[at.id]"
+                :size-capabilities="sizeCapabilitiesMap[at.id]"
+                :model-size-config="sizeConfigByAssetType[at.id] ?? null"
                 :model-value="userParamsByAssetType[at.id] ?? {}"
                 :project="props.project"
                 class="mt-1"
                 @update:model-value="(v) => setUserParams(at.id, v)"
+                @update:size-config="(v) => setSizeConfig(at.id, v)"
               />
             </v-col>
           </v-row>
@@ -241,6 +244,7 @@ import {
   type TaskResponse,
   type WorkflowInfo,
   type WorkflowImplementation,
+  type WorkflowSizeConfig,
   type WorkflowUserParamDeclaration,
   type WorkflowUserParamValue,
 } from '../api/workflow'
@@ -322,6 +326,25 @@ const implSelections = ref<Record<string, string>>({})
 /** 资产类型 → 用户手动传入的工作流参数值（key → 值） */
 const userParamsByAssetType = ref<Record<string, Record<string, WorkflowUserParamValue>>>({})
 
+/** 资产类型 → 统一尺寸配置（用户选择的原始完整尺寸；随批量任务提交 params.sizeConfig） */
+const sizeConfigByAssetType = ref<Record<string, WorkflowSizeConfig>>({})
+
+/**
+ * 资产类型 → 所选工作流实现声明的尺寸能力（capabilities.size）。
+ * 与 paramsDeclarationsMap 平行：存在时表单渲染统一尺寸配置组件。
+ */
+const sizeCapabilitiesMap = computed<Record<string, { ratio?: string[]; size?: string[]; supportCustomSize?: boolean } | undefined>>(() => {
+  const m: Record<string, { ratio?: string[]; size?: string[]; supportCustomSize?: boolean } | undefined> = {}
+  for (const at of assetTypes) {
+    const wid = ASSET_TYPE_WORKFLOW[at.id]
+    const wf = wid ? workflowMap.value[wid] : undefined
+    const impl = implSelections.value[at.id]
+    const implDef = wf?.implementations.find((i) => i.impl === impl)
+    m[at.id] = implDef?.capabilities?.size
+  }
+  return m
+})
+
 /**
  * 资产类型 → 所选工作流实现声明的用户参数（供表单渲染）。
  *
@@ -348,6 +371,16 @@ const paramsDeclarationsMap = computed<Record<string, WorkflowUserParamDeclarati
  */
 function setUserParams(assetTypeId: string, v: Record<string, WorkflowUserParamValue>) {
   userParamsByAssetType.value = { ...userParamsByAssetType.value, [assetTypeId]: v }
+}
+
+/**
+ * 更新指定资产类型的统一尺寸配置（随批量任务提交 params.sizeConfig）。
+ *
+ * @param assetTypeId 资产类型 ID
+ * @param v 用户选择的尺寸配置
+ */
+function setSizeConfig(assetTypeId: string, v: WorkflowSizeConfig) {
+  sizeConfigByAssetType.value = { ...sizeConfigByAssetType.value, [assetTypeId]: v }
 }
 
 /**
@@ -572,6 +605,7 @@ function resetConfig() {
   configWarning.value = null
   implSelections.value = {}
   userParamsByAssetType.value = {}
+  sizeConfigByAssetType.value = {}
 }
 
 // When dialog opens: resume progress if batch is active, otherwise config
@@ -619,6 +653,12 @@ async function startGenerate() {
       const vals = userParamsByAssetType.value[id]
       if (vals && Object.keys(vals).length > 0) userParamsPayload[id] = vals
     }
+    // 组装每个资产类型的统一尺寸配置（仅发送用户配置过的类型）
+    const sizeConfigPayload: Record<string, WorkflowSizeConfig> = {}
+    for (const id of selectedTypes.value) {
+      const sc = sizeConfigByAssetType.value[id]
+      if (sc && typeof sc === 'object') sizeConfigPayload[id] = sc
+    }
     const result = await runBatch({
       project: props.project,
       assetTypes: selectedTypes.value,
@@ -626,6 +666,7 @@ async function startGenerate() {
       overwrite: overwrite.value,
       implByAssetType,
       userParamsByAssetType: userParamsPayload,
+      ...(Object.keys(sizeConfigPayload).length > 0 ? { sizeConfigByAssetType: sizeConfigPayload } : {}),
     })
 
     if (!result.batchId || result.totalTasks === 0) {

@@ -91,6 +91,27 @@ export function resolveMinimaxRatio(width: number, height: number): MinimaxRatio
 }
 
 /**
+ * 解析 R2VA 的输出比例：优先统一尺寸配置（sizeConfig.ratio，用户在尺寸组件选择），
+ * 其次按输出宽高命中标准比例推断；均未命中/自适应时返回 adaptive。
+ *
+ * @param width 输出宽度（像素）
+ * @param height 输出高度（像素）
+ * @param sizeConfigRatio 统一尺寸配置的比例档（可为 "adaptive" / 标准比例 / 缺失）
+ * @returns 提交给 MiniMax 的 ratio 值
+ */
+export function resolveR2vaRatio(
+  width: number,
+  height: number,
+  sizeConfigRatio?: string,
+): MinimaxRatio {
+  if (sizeConfigRatio === 'adaptive') return 'adaptive';
+  if (sizeConfigRatio && STANDARD_RATIOS.some((r) => r.ratio === sizeConfigRatio)) {
+    return sizeConfigRatio as Exclude<MinimaxRatio, 'adaptive'>;
+  }
+  return resolveMinimaxRatio(width, height);
+}
+
+/**
  * 图生视频（I2VA）提交实现。
  *
  * - 取视频数据 director.frames（按 cursor 升序），第 1 帧作为 first_frame；
@@ -192,7 +213,7 @@ async function submitR2va(ctx: WorkflowRunContext<WorkflowVarsBase>): Promise<{ 
     content.push({ type: 'audio_url', role: 'reference_audio', fileKey: key });
   });
 
-  const ratio = resolveMinimaxRatio(video.resolution.width, video.resolution.height);
+  const ratio = resolveR2vaRatio(video.resolution.width, video.resolution.height, ctx.sizeConfig?.ratio);
   return ctx.provider.execute({
     workflowId: 'MiniMax-H3',
     params: {
@@ -213,6 +234,12 @@ register({
   provider: 'minimax-h3',
   capabilities: {
     cancelable: true,
+    size: {
+      // I2VA 宽高比由输入图片决定：仅提供「自适应」，尺寸档为信息性展示（实际输出由模型决定）
+      ratio: ['adaptive'],
+      size: ['768P', '2K'],
+      supportCustomSize: false,
+    },
     video: {
       modes: ['first-last-frame'],
       firstLastFrame: { maxFrames: 2 },
@@ -231,6 +258,11 @@ register({
   provider: 'minimax-h3',
   capabilities: {
     cancelable: true,
+    size: {
+      ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'],
+      size: ['768P', '2K'],
+      supportCustomSize: false,
+    },
     video: {
       modes: ['reference'],
       reference: {

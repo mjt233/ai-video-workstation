@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getCandidatesByProvider, getImpl, registerOrReplace } from '../registry.js';
 import type { ProviderClient } from '../../providers/types.js';
-import type { VideoWorkflowSubmitData, WorkflowRunContext, WorkflowVarsBase } from '../types.js';
+import type { VideoWorkflowSubmitData, WorkflowRunContext, WorkflowSizeConfig, WorkflowVarsBase } from '../types.js';
 import {
   resolveMinimaxDuration,
   resolveMinimaxRatio,
+  resolveR2vaRatio,
 } from './minimax-h3.js';
 import './minimax-h3.js';
 
@@ -26,6 +27,7 @@ type ExecuteFn = ProviderClient['execute'];
 function makeCtx(
   video: Partial<VideoWorkflowSubmitData>,
   execute?: ExecuteFn,
+  sizeConfig?: WorkflowSizeConfig,
 ): WorkflowRunContext<WorkflowVarsBase> {
   return {
     project: 'p',
@@ -33,6 +35,7 @@ function makeCtx(
     vars: {},
     provider: { execute: execute ?? (async () => ({ taskId: 'remote-1' })) },
     video,
+    ...(sizeConfig ? { sizeConfig } : {}),
   } as unknown as WorkflowRunContext<WorkflowVarsBase>;
 }
 
@@ -89,6 +92,22 @@ describe('resolveMinimaxRatio', () => {
     expect(resolveMinimaxRatio(1280, 800)).toBe('adaptive');
     expect(resolveMinimaxRatio(0, 0)).toBe('adaptive');
     expect(resolveMinimaxRatio(Number.NaN, 1080)).toBe('adaptive');
+  });
+});
+
+describe('resolveR2vaRatio（统一尺寸配置优先）', () => {
+  it('sizeConfig.ratio 为标准比例时直接采用', () => {
+    expect(resolveR2vaRatio(0, 0, '21:9')).toBe('21:9');
+    expect(resolveR2vaRatio(1280, 800, '16:9')).toBe('16:9');
+  });
+
+  it('sizeConfig.ratio 为 adaptive 时返回 adaptive', () => {
+    expect(resolveR2vaRatio(1920, 1080, 'adaptive')).toBe('adaptive');
+  });
+
+  it('sizeConfig 缺失/非法时按宽高推断（回退原逻辑）', () => {
+    expect(resolveR2vaRatio(1920, 1080, undefined)).toBe('16:9');
+    expect(resolveR2vaRatio(1280, 800, 'bad-ratio')).toBe('adaptive');
   });
 });
 
@@ -251,6 +270,44 @@ describe('minimax-h3-r2v submit', () => {
     expect(call.params.ratio).toBeUndefined();
   });
 
+  it('sizeConfig.ratio 为标准比例时优先采用（覆盖宽高推断）', async () => {
+    const execute = vi.fn<ExecuteFn>(async () => ({ taskId: 'r6b' }));
+    const img = new File(['i'], 'i.png', { type: 'image/png' });
+    const ctx = makeCtx(
+      {
+        mode: 'reference',
+        prompt: 'x',
+        duration: 5,
+        resolution: { width: 1280, height: 800 },
+        references: [{ type: 'image', file: img }],
+      },
+      execute,
+      { ratio: '9:16', size: '768P' },
+    );
+    await getSubmit('minimax-h3-r2v')(ctx);
+    const call = firstExecuteCall(execute);
+    expect(call.params.ratio).toBe('9:16');
+  });
+
+  it('sizeConfig.ratio 为 adaptive 时不传 ratio（与宽高推断 adaptive 同语义）', async () => {
+    const execute = vi.fn<ExecuteFn>(async () => ({ taskId: 'r6c' }));
+    const img = new File(['i'], 'i.png', { type: 'image/png' });
+    const ctx = makeCtx(
+      {
+        mode: 'reference',
+        prompt: 'x',
+        duration: 5,
+        resolution: { width: 1920, height: 1080 },
+        references: [{ type: 'image', file: img }],
+      },
+      execute,
+      { ratio: 'adaptive', size: '768P' },
+    );
+    await getSubmit('minimax-h3-r2v')(ctx);
+    const call = firstExecuteCall(execute);
+    expect(call.params.ratio).toBeUndefined();
+  });
+
   it('仅音频参考 / 数量超上限 / 无提示词均抛错', async () => {
     const execute = vi.fn<ExecuteFn>(async () => ({ taskId: 'r7' }));
     const aud = new File(['a'], 'a.mp3', { type: 'audio/mpeg' });
@@ -285,11 +342,22 @@ describe('image-to-video 注册', () => {
     expect(i2v?.capabilities?.cancelable).toBe(true);
     expect(i2v?.capabilities?.video?.modes).toEqual(['first-last-frame']);
     expect(i2v?.capabilities?.video?.firstLastFrame?.maxFrames).toBe(2);
+    // I2VA 宽高比由输入图片决定：仅「自适应」可选
+    expect(i2v?.capabilities?.size).toEqual({
+      ratio: ['adaptive'],
+      size: ['768P', '2K'],
+      supportCustomSize: false,
+    });
 
     const r2v = getImpl('image-to-video', 'minimax-h3-r2v');
     expect(r2v?.provider).toBe('minimax-h3');
     expect(r2v?.capabilities?.cancelable).toBe(true);
     expect(r2v?.capabilities?.video?.modes).toEqual(['reference']);
+    expect(r2v?.capabilities?.size).toEqual({
+      ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'],
+      size: ['768P', '2K'],
+      supportCustomSize: false,
+    });
     expect(r2v?.capabilities?.video?.reference).toMatchObject({
       maxTotal: 15,
       audioRequiresVisual: true,

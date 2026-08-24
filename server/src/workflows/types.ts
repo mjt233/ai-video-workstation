@@ -91,6 +91,11 @@ export interface WorkflowRunContext<TVars extends WorkflowVarsBase = WorkflowVar
   director?: DirectorPayload;
   /** 用户手动传入的工作流参数（按实现声明 key） */
   userParams?: Record<string, boolean | number | string>;
+  /**
+   * 统一尺寸配置（用户选择的原始完整尺寸；engine 从任务 params.sizeConfig
+   * 或 video.sizeConfig 解析注入，供工作流 submit 消费，如 MiniMax ratio / 档位判断）。
+   */
+  sizeConfig?: WorkflowSizeConfig;
   /** Provider 客户端（引擎按工作流声明的 provider 解析配置后注入；工作流用它提交任务） */
   provider: ProviderClient;
   /**
@@ -193,14 +198,49 @@ export interface VideoCapabilities {
 }
 
 /**
+ * 统一尺寸配置（用户选择的原始完整尺寸）。
+ *
+ * 用户在前端统一尺寸组件中选定比例/尺寸档（可为 "auto"），并可选指定自定义宽高；
+ * 经顶层 `params.sizeConfig`（或 `video.sizeConfig`）传递并持久化到任务 params，
+ * 引擎注入 `ctx.sizeConfig` 供工作流 submit 消费。工作流不支持指定任意高宽时
+ * （capabilities.size.supportCustomSize === false）不携带 width/height。
+ */
+export interface WorkflowSizeConfig {
+  /** 比例档（如 "16:9" / "auto"；MiniMax 场景可为 "adaptive"） */
+  ratio?: string;
+  /** 尺寸档（如 "1K" / "auto"） */
+  size?: string;
+  /** 自定义宽度（像素；仅支持指定任意高宽的工作流携带） */
+  width?: number;
+  /** 自定义高度（像素；仅支持指定任意高宽的工作流携带） */
+  height?: number;
+}
+
+/**
  * 工作流能力声明（注册时声明，经 /api/workflows 透传前端）。
  *
- * 前端据此展示能力入口（导演台模式、外部音频导入、参考模式等），
+ * 前端据此展示能力入口（导演台模式、外部音频导入、参考模式、统一尺寸组件等），
  * 引擎据此决定是否注入对应负载（如 video 自包含提交数据）。
  */
 export interface WorkflowCapabilities {
   /** 视频工作流能力（导演台/首尾帧/参考模式与限制） */
   video?: VideoCapabilities;
+  /**
+   * 输出尺寸能力声明（前端统一尺寸组件据此渲染可选比例/尺寸按钮组与自定义宽高）。
+   *
+   * - ratio：支持的比例档清单；未声明时默认 ["16:9","4:3","1:1","3:4","9:16","auto"]；
+   *   含 "auto"（自适应）时组件首位展示「自动」按钮
+   * - size：支持的尺寸档清单；未声明时默认 ["360P","720P","1080P","2K","4K","auto"]
+   * - supportCustomSize：是否允许指定任意宽高；未声明时默认 true
+   */
+  size?: {
+    /** 支持的比例（如 "16:9"、"auto"） */
+    ratio?: string[];
+    /** 支持的尺寸（如 "1K"、"2K"、"auto"） */
+    size?: string[];
+    /** 是否支持自定义指定任意高宽（默认 true） */
+    supportCustomSize?: boolean;
+  };
   /** 是否支持传入外部音频（如导演台混音产物） */
   audio?: boolean;
   /** 是否支持中断（所有 Bridge 工作流声明 true） */
@@ -257,6 +297,8 @@ export interface VideoWorkflowSubmitParams<T = Record<string, unknown>> {
   director?: VideoDirectorWire;
   /** 参考素材（mode=reference 时使用） */
   references?: VideoReferenceWire[];
+  /** 统一尺寸配置（用户选择的原始完整尺寸；画布节点随 video wire 携带，引擎合并进 ctx.sizeConfig） */
+  sizeConfig?: WorkflowSizeConfig;
   /** 传递给具体工作流实现的额外参数 */
   extraParams: T;
 }
@@ -297,6 +339,8 @@ export interface VideoWorkflowSubmitData<T = Record<string, unknown>> {
   director?: VideoDirectorData;
   /** 参考素材（mode=reference 时使用） */
   references?: VideoReference[];
+  /** 统一尺寸配置（用户选择的原始完整尺寸；画布节点随 video wire 携带） */
+  sizeConfig?: WorkflowSizeConfig;
   /** 传递给具体工作流实现的额外参数 */
   extraParams: T;
 }

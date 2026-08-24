@@ -110,6 +110,109 @@ describe('syncCustomInstance', () => {
     expect(await arg.readFileToBase64?.('assert/a.png', true)).toBe('data:image/png;base64,b64:assert/a.png');
   });
 
+  it('生图/生视频类型注册尺寸能力（未配置条目 = 默认全量），TTS 类型不声明', async () => {
+    await syncCustomInstance(makeInstance([
+      entry('wf-size-default', ['text-to-image']),
+      entry('wf-size-tts', ['tts-voice-design']),
+    ]));
+    const t2i = getImpl('text-to-image', 'custom-wf-size-default-' + INSTANCE_ID);
+    expect(t2i?.capabilities?.size).toEqual({
+      ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
+      size: ['360P', '720P', '1080P', '2K', '4K', 'auto'],
+      supportCustomSize: true,
+    });
+    const tts = getImpl('tts-voice-design', 'custom-wf-size-tts-' + INSTANCE_ID);
+    expect(tts?.capabilities?.size).toBeUndefined();
+  });
+
+  it('条目配置的尺寸能力按声明注册（含空清单回退默认）', async () => {
+    await syncCustomInstance(makeInstance([
+      entry('wf-size-cfg', ['image-to-video'], {
+        sizeConfig: { ratio: ['21:9', '16:9', 'adaptive'], size: ['768P', '2K'], supportCustomSize: false },
+      }),
+      entry('wf-size-empty', ['image-edit'], {
+        sizeConfig: { ratio: [], size: ['1K'], supportCustomSize: false },
+      }),
+    ]));
+    const i2v = getImpl('image-to-video', 'custom-wf-size-cfg-' + INSTANCE_ID);
+    expect(i2v?.capabilities?.size).toEqual({
+      ratio: ['21:9', '16:9', 'adaptive'],
+      size: ['768P', '2K'],
+      supportCustomSize: false,
+    });
+    const edit = getImpl('image-edit', 'custom-wf-size-empty-' + INSTANCE_ID);
+    expect(edit?.capabilities?.size).toEqual({
+      ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
+      size: ['1K'],
+      supportCustomSize: false,
+    });
+  });
+
+  it('submit 透传 ctx.params.sizeConfig（生图/生视频类型，含自定义宽高）', async () => {
+    await syncCustomInstance(makeInstance([
+      entry('wf-sc-t2i', ['text-to-image']),
+      entry('wf-sc-i2v', ['image-to-video']),
+    ]));
+    const t2i = getImpl('text-to-image', 'custom-wf-sc-t2i-' + INSTANCE_ID);
+    const i2v = getImpl('image-to-video', 'custom-wf-sc-i2v-' + INSTANCE_ID);
+    expect(t2i).toBeDefined();
+    expect(i2v).toBeDefined();
+
+    // 文生图：sizeConfig 含比例/尺寸/自定义宽高
+    const executeT2i = vi.fn(async (_p: { workflowId: string; params?: Record<string, unknown> }) => ({ taskId: 't1' }));
+    const ctxT2i = {
+      vars: { promptPath: 'prompt/a.md' },
+      projectConfig: { width: 1080, height: 1920 },
+      sizeConfig: { ratio: '1:1', size: '2K', width: 1024, height: 1024 },
+      readFile: async () => 'p',
+      readAssertFile: async () => new File([], 'x.png'),
+      provider: { execute: executeT2i },
+    } as never;
+    await t2i!.submit(ctxT2i);
+    const argT2i = executeT2i.mock.calls[0]![0] as { params?: Record<string, unknown> };
+    expect(argT2i.params?.sizeConfig).toEqual({
+      ratio: '1:1', size: '2K', width: 1024, height: 1024,
+    });
+
+    // 图生视频：sizeConfig 只带比例/尺寸（无宽高）
+    const executeI2v = vi.fn(async (_p: { workflowId: string; params?: Record<string, unknown> }) => ({ taskId: 't2' }));
+    const ctxI2v = {
+      vars: {},
+      projectConfig: { width: 1080, height: 1920 },
+      sizeConfig: { ratio: '16:9', size: '768P' },
+      video: {
+        mode: 'director',
+        resolution: { width: 0, height: 0 },
+        duration: 5,
+        prompt: 'p',
+        director: { frames: [{ file: new File([], 'f.png'), cursor: 0 }] },
+        extraParams: {},
+      },
+      readFile: async () => '',
+      readAssertFile: async () => new File([], 'x.png'),
+      provider: { execute: executeI2v },
+    } as never;
+    await i2v!.submit(ctxI2v);
+    const argI2v = executeI2v.mock.calls[0]![0] as { params?: Record<string, unknown> };
+    expect(argI2v.params?.sizeConfig).toEqual({ ratio: '16:9', size: '768P' });
+  });
+
+  it('submit 无 sizeConfig 时不携带该字段（兼容旧任务）', async () => {
+    await syncCustomInstance(makeInstance([entry('wf-sc-none', ['text-to-image'])]));
+    const impl = getImpl('text-to-image', 'custom-wf-sc-none-' + INSTANCE_ID);
+    const execute = vi.fn(async (_p: { workflowId: string; params?: Record<string, unknown> }) => ({ taskId: 't' }));
+    const ctx = {
+      vars: { promptPath: 'prompt/a.md' },
+      projectConfig: { width: 1080, height: 1920 },
+      readFile: async () => 'p',
+      readAssertFile: async () => new File([], 'x.png'),
+      provider: { execute },
+    } as never;
+    await impl!.submit(ctx);
+    const arg = execute.mock.calls[0]![0] as { params?: Record<string, unknown> };
+    expect(arg.params?.sizeConfig).toBeUndefined();
+  });
+
   it('重同步清理已删除的工作流', async () => {
     await syncCustomInstance(makeInstance([entry('wf-a', ['text-to-image']), entry('wf-b', ['text-to-image'])]));
     expect(getImpl('text-to-image', 'custom-wf-b-' + INSTANCE_ID)).toBeDefined();

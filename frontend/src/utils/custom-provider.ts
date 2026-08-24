@@ -108,6 +108,28 @@ export const USER_CONFIG_FIELD_TYPES = ['boolean', 'integer', 'float', 'string']
 /** 用户配置字段类型标识 */
 export type UserConfigFieldType = (typeof USER_CONFIG_FIELD_TYPES)[number]
 
+/** 尺寸配置候选全集：比例（与服务端 CUSTOM_SIZE_RATIO_OPTIONS 一致，亦为统一尺寸组件注册表子集；auto/adaptive 均表示自适应） */
+export const SIZE_CONFIG_RATIO_OPTIONS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', 'auto', 'adaptive'] as const
+
+/** 尺寸配置候选全集：尺寸档（与服务端 CUSTOM_SIZE_SIZE_OPTIONS 一致） */
+export const SIZE_CONFIG_SIZE_OPTIONS = ['360P', '480P', '720P', '768P', '1080P', '1K', '1.5K', '2K', '3K', '4K', '8K', 'auto'] as const
+
+/**
+ * 工作流输出尺寸配置（工作流条目内配置；适用于生图/生视频类型）。
+ *
+ * 运行表单限定统一尺寸组件的可选比例/尺寸与自定义分辨率开关；
+ * 代码中通过 ctx.params.sizeConfig（比例/尺寸档 + 可选自定义宽高）读取，
+ * 编辑器按本配置生成 CustomSizeConfig 的字面量联合类型提示。
+ */
+export interface CustomWorkflowSizeConfigDef {
+  /** 允许的比例清单（含 "auto" 表示自适应；空数组 = 使用默认全量） */
+  ratio: string[]
+  /** 允许的尺寸清单（含 "auto"；空数组 = 使用默认全量） */
+  size: string[]
+  /** 是否允许指定任意宽高（自定义分辨率） */
+  supportCustomSize: boolean
+}
+
 /**
  * 用户配置字段声明（工作流条目内配置）。
  *
@@ -137,6 +159,8 @@ const PARAM_INTERFACES: Record<string, string> = {
     '  width?: number',
     '  /** 输出高度（像素，可选） */',
     '  height?: number',
+    '  /** 输出尺寸配置（比例/尺寸档 + 可选自定义宽高；用户在工作流表单限定可选档位） */',
+    '  sizeConfig?: CustomSizeConfig',
     '  /** 随机种子（字符串） */',
     '  seed?: string',
     '  /** 其他业务变量（字符串键值） */',
@@ -153,6 +177,8 @@ const PARAM_INTERFACES: Record<string, string> = {
     '  width?: number',
     '  /** 输出高度（像素，可选） */',
     '  height?: number',
+    '  /** 输出尺寸配置（比例/尺寸档 + 可选自定义宽高；用户在工作流表单限定可选档位） */',
+    '  sizeConfig?: CustomSizeConfig',
     '  /** 随机种子（字符串） */',
     '  seed?: string',
     '  [key: string]: any',
@@ -192,6 +218,8 @@ const PARAM_INTERFACES: Record<string, string> = {
     '  duration: number',
     '  /** 输出分辨率 */',
     '  resolution: { width: number; height: number }',
+    '  /** 输出尺寸配置（比例/尺寸档 + 可选自定义宽高；用户在工作流表单限定可选档位） */',
+    '  sizeConfig?: CustomSizeConfig',
     '  /** 帧率（可选） */',
     '  fps?: number',
     '  /** 随机种子 */',
@@ -271,18 +299,64 @@ export function buildUserConfigLib(fields: UserConfigFieldDef[] | undefined): st
 }
 
 /**
+ * 生成 ctx.params.sizeConfig 的类型声明库（CustomSizeConfig）。
+ *
+ * ratio/size 按该条目配置的允许清单生成字面量联合（如 "'16:9' | '4:3' | 'auto'"）；
+ * 清单为空（= 使用默认全量）时回退全部候选全集；均未配置时回退 string 宽松提示。
+ *
+ * @param sizeConfig 工作流条目的输出尺寸配置（可选）
+ * @returns d.ts 片段（CustomSizeConfig 类型）
+ */
+export function buildSizeConfigLib(sizeConfig?: CustomWorkflowSizeConfigDef | undefined): string {
+  const ratioList = sizeConfig?.ratio?.length
+    ? sizeConfig.ratio
+    : [...SIZE_CONFIG_RATIO_OPTIONS]
+  const sizeList = sizeConfig?.size?.length
+    ? sizeConfig.size
+    : [...SIZE_CONFIG_SIZE_OPTIONS]
+  const ratioUnion =
+    ratioList
+      .filter((v) => typeof v === 'string' && v !== '')
+      .map((v) => "'" + v + "'")
+      .join(' | ') || 'string'
+  const sizeUnion =
+    sizeList
+      .filter((v) => typeof v === 'string' && v !== '')
+      .map((v) => "'" + v + "'")
+      .join(' | ') || 'string'
+  return [
+    'declare interface CustomSizeConfig {',
+    '  /** 比例档（如 "16:9"；"auto"/"adaptive" 表示自适应） */',
+    '  ratio?: ' + ratioUnion,
+    '  /** 尺寸档（如 "2K"；"auto" 表示自适应） */',
+    '  size?: ' + sizeUnion,
+    '  /** 输出宽度（像素；仅支持自定义分辨率的工作流携带） */',
+    '  width?: number',
+    '  /** 输出高度（像素；仅支持自定义分辨率的工作流携带） */',
+    '  height?: number',
+    '}',
+  ].join('\n')
+}
+
+/**
  * 构建 WorkflowCallContext 类型库。
  *
  * 按所选工作流类型动态组合 ctx.params 类型：
  * type CustomParams = TextToImageParams & ImageEditParams & ...
  * 未选类型时回退 Record<string, any>；
- * ctx.userConfig 按用户配置字段声明生成类型提示。
+ * ctx.userConfig 按用户配置字段声明生成类型提示；
+ * ctx.params.sizeConfig 按工作流条目输出尺寸配置生成字面量联合类型提示。
  *
  * @param types 该工作流支持的系统工作流类型
  * @param userConfigFields 用户配置字段声明（可选）
+ * @param sizeConfig 工作流条目输出尺寸配置（可选）
  * @returns d.ts 库文本
  */
-export function buildContextLib(types: string[], userConfigFields?: UserConfigFieldDef[]): string {
+export function buildContextLib(
+  types: string[],
+  userConfigFields?: UserConfigFieldDef[],
+  sizeConfig?: CustomWorkflowSizeConfigDef | undefined,
+): string {
   const picked = (types ?? []).filter((t) => PARAM_INTERFACES[t])
   const paramLibs = picked.map((t) => PARAM_INTERFACES[t]).join('\n\n')
   const paramsType = picked.length > 0
@@ -291,6 +365,7 @@ export function buildContextLib(types: string[], userConfigFields?: UserConfigFi
   return [
     CORE_LIB,
     paramLibs,
+    buildSizeConfigLib(sizeConfig),
     buildUserConfigLib(userConfigFields),
     // 系统支持的工作流类型联合（与 WORKFLOW_TYPE_META / FALLBACK_WORKFLOW_TYPES 保持一致）
     'type CustomWorkflowTypeId = ' + FALLBACK_WORKFLOW_TYPES.map((t) => "'" + t + "'").join(' | '),
@@ -420,6 +495,8 @@ export interface CustomWorkflowFormEntry {
   cancelCode: string
   /** 用户配置字段声明（运行工作流时由用户填写，经 ctx.userConfig 读取） */
   userConfigFields?: UserConfigFieldDef[]
+  /** 输出尺寸配置（生图/生视频类型；缺省 undefined = 使用默认全量，经 ctx.params.sizeConfig 读取） */
+  sizeConfig?: CustomWorkflowSizeConfigDef | undefined
 }
 
 /**
@@ -449,9 +526,39 @@ export function normalizeWorkflowEntries(value: unknown): CustomWorkflowFormEntr
       extractCode: typeof rec.extractCode === 'string' ? rec.extractCode : '',
       cancelCode: typeof rec.cancelCode === 'string' ? rec.cancelCode : '',
       userConfigFields: normalizeUserConfigFields(rec.userConfigFields),
+      sizeConfig: normalizeWorkflowSizeConfig(rec.sizeConfig),
     })
   }
   return out
+}
+
+/**
+ * 把外部值规范为工作流输出尺寸配置（非法项丢弃；未配置返回 undefined = 使用默认全量）。
+ *
+ * 校验依据候选全集（与服务端 CUSTOM_SIZE_*_OPTIONS 一致）：未知档位过滤，
+ * 支持向前兼容未来新增档位；supportCustomSize 按 === true 解析。
+ *
+ * @param value 原始值（条目 sizeConfig 字段）
+ * @returns 尺寸配置；未配置/非法返回 undefined
+ */
+export function normalizeWorkflowSizeConfig(value: unknown): CustomWorkflowSizeConfigDef | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const rec = value as Record<string, unknown>
+  const pick = (raw: unknown, allowed: readonly string[]): string[] => {
+    if (!Array.isArray(raw)) return []
+    const out: string[] = []
+    for (const item of raw) {
+      if (typeof item === 'string' && (allowed as readonly string[]).includes(item) && !out.includes(item)) {
+        out.push(item)
+      }
+    }
+    return out
+  }
+  return {
+    ratio: pick(rec.ratio, SIZE_CONFIG_RATIO_OPTIONS),
+    size: pick(rec.size, SIZE_CONFIG_SIZE_OPTIONS),
+    supportCustomSize: rec.supportCustomSize === true,
+  }
 }
 
 /**
@@ -535,6 +642,15 @@ export function duplicateWorkflowEntry(
     extractCode: entry.extractCode,
     cancelCode: entry.cancelCode,
     userConfigFields: (entry.userConfigFields ?? []).map((field) => ({ ...field })),
+    ...(entry.sizeConfig
+      ? {
+          sizeConfig: {
+            ratio: [...entry.sizeConfig.ratio],
+            size: [...entry.sizeConfig.size],
+            supportCustomSize: entry.sizeConfig.supportCustomSize,
+          },
+        }
+      : {}),
   }
 }
 

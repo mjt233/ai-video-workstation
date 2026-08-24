@@ -1,4 +1,5 @@
 import type {
+  WorkflowSizeConfig,
   WorkflowUserParamDeclaration,
   WorkflowUserParamValue,
 } from '../api/workflow'
@@ -6,21 +7,25 @@ import type {
 /**
  * 工作流输出尺寸换算与回显工具。
  *
- * 纯函数模块（无 Vue/DOM 依赖），供通用尺寸选择组件 `WorkflowSizePicker`
+ * 纯函数模块（无 Vue/DOM 依赖），供统一尺寸组件 `WorkflowSizePicker`
  * 与参数表单 `WorkflowParamsForm` 使用：
  * - `computePresetSize`：比例 × 分辨率档 → 具体宽高
- * - `resolveSizeMode`：根据已保存的宽高推断组件应处于的模式
+ * - `resolvePresetSize`：按任意字符串比例/尺寸档换算宽高（含不存在/自适应档返回 null）
+ * - `normalizeSizeCapabilities`：工作流 capabilities.size 声明归一化（补默认值）
+ * - `normalizeSizeConfig` / `inferSizeConfigFromWidthHeight`：组件内部状态与旧数据回显
+ * - `formatSizeConfigText`：单行显示文案（如 `16:9 / 1K`、`自动 / 自动 / 1024x1024`）
+ * - `resolveSizeMode`：根据已保存的宽高推断尺寸组件的模式
  * - `findSizeParamKeys`：约定式检测声明中是否含 width/height 用户参数
  */
 
 /** 尺寸选择模式 */
 export type SizeMode = 'preset' | 'manual' | 'project' | 'none'
 
-/** 比例档 key */
-export type SizeRatioKey = '1:1' | '16:9' | '9:16' | '4:3' | '3:4'
+/** 比例档 key（含 3:2 / 2:3 / 21:9 等横向扩展档） */
+export type SizeRatioKey = '1:1' | '16:9' | '9:16' | '4:3' | '3:4' | '3:2' | '2:3' | '21:9'
 
-/** 分辨率档 key */
-export type SizeResolutionKey = '360P' | '720P' | '1080P' | '2K' | '4K' | '8K'
+/** 分辨率档 key（含 480P / 768P / 1K / 1.5K / 3K 等扩展档） */
+export type SizeResolutionKey = '360P' | '480P' | '720P' | '768P' | '1080P' | '1K' | '1.5K' | '2K' | '3K' | '4K' | '8K'
 
 export interface SizeRatio {
   /** 比例档 key（展示用） */
@@ -32,10 +37,13 @@ export interface SizeRatio {
 /** 比例档（宽高比） */
 export const SIZE_RATIOS: SizeRatio[] = [
   { key: '1:1', ratio: 1 },
-  { key: '16:9', ratio: 16 / 9 },
-  { key: '9:16', ratio: 9 / 16 },
   { key: '4:3', ratio: 4 / 3 },
   { key: '3:4', ratio: 3 / 4 },
+  { key: '16:9', ratio: 16 / 9 },
+  { key: '9:16', ratio: 9 / 16 },
+  { key: '3:2', ratio: 3 / 2 },
+  { key: '2:3', ratio: 2 / 3 },
+  { key: '21:9', ratio: 21 / 9 },
 ]
 
 export interface SizeResolution {
@@ -49,9 +57,14 @@ export interface SizeResolution {
 /** 分辨率档（P 档按高度、K 档按宽度为基准） */
 export const SIZE_RESOLUTIONS: SizeResolution[] = [
   { key: '360P', base: 360, baseOn: 'height' },
+  { key: '480P', base: 480, baseOn: 'height' },
   { key: '720P', base: 720, baseOn: 'height' },
+  { key: '768P', base: 768, baseOn: 'height' },
   { key: '1080P', base: 1080, baseOn: 'height' },
+  { key: '1K', base: 1024, baseOn: 'width' },
+  { key: '1.5K', base: 1536, baseOn: 'width' },
   { key: '2K', base: 2560, baseOn: 'width' },
+  { key: '3K', base: 3072, baseOn: 'width' },
   { key: '4K', base: 3840, baseOn: 'width' },
   { key: '8K', base: 7680, baseOn: 'width' },
 ]
@@ -209,4 +222,205 @@ export function mergeSizeValues(
     if (allowed.has(k)) next[k] = incoming[k]
   }
   return next
+}
+
+// ── 统一尺寸配置（sizeConfig）纯函数 ────────────────────────────────────────
+
+/** 自适应比例/尺寸档的显示标签（auto / adaptive → 「自动」） */
+export const AUTO_SIZE_LABEL = '自动'
+
+/** 尺寸能力声明的默认值（与后端 WorkflowCapabilities.size 默认一致） */
+export const DEFAULT_SIZE_CAPABILITIES = {
+  ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
+  size: ['360P', '720P', '1080P', '2K', '4K', 'auto'],
+  supportCustomSize: true,
+} as const
+
+/** 工作流输出尺寸能力声明（归一化后） */
+export interface WorkflowSizeCapabilities {
+  /** 支持的比例档（含 "auto" 表示自适应） */
+  ratio: string[]
+  /** 支持的尺寸档（含 "auto" 表示自适应） */
+  size: string[]
+  /** 是否允许指定任意宽高 */
+  supportCustomSize: boolean
+}
+
+/**
+ * 归一化工作流 capabilities.size 声明：缺失的 key 补默认值。
+ *
+ * 数组为空（声明了但未提供条目）同样回退默认全量，避免渲染出空按钮组。
+ *
+ * @param raw 工作流声明的原始尺寸能力（可为 undefined）
+ * @returns 归一化后的尺寸能力（恒含有效清单与 supportCustomSize 布尔值）
+ */
+export function normalizeSizeCapabilities(
+  raw?: { ratio?: string[]; size?: string[]; supportCustomSize?: boolean },
+): WorkflowSizeCapabilities {
+  return {
+    ratio:
+      Array.isArray(raw?.ratio) && raw!.ratio.length > 0
+        ? [...raw!.ratio]
+        : [...DEFAULT_SIZE_CAPABILITIES.ratio],
+    size:
+      Array.isArray(raw?.size) && raw!.size.length > 0
+        ? [...raw!.size]
+        : [...DEFAULT_SIZE_CAPABILITIES.size],
+    supportCustomSize: raw?.supportCustomSize !== false,
+  }
+}
+
+/**
+ * 比例档显示标签：auto / adaptive 归一为「自动」，其余原样返回。
+ *
+ * @param ratio 原始比例档值（如 "16:9" / "auto" / "adaptive"）
+ * @returns 展示用文案
+ */
+export function ratioLabel(ratio: string): string {
+  return ratio === 'auto' || ratio === 'adaptive' ? AUTO_SIZE_LABEL : ratio
+}
+
+/**
+ * 尺寸档显示标签：auto 归一为「自动」，其余原样返回。
+ *
+ * @param size 原始尺寸档值（如 "1K" / "auto"）
+ * @returns 展示用文案
+ */
+export function sizeLabel(size: string): string {
+  return size === 'auto' ? AUTO_SIZE_LABEL : size
+}
+
+/**
+ * 统一尺寸组件内部状态（归一化后的尺寸配置）。
+ */
+export interface SizeConfigState {
+  /** 比例档（恒非空；缺省 "auto"） */
+  ratio: string
+  /** 尺寸档（恒非空；缺省 "auto"） */
+  size: string
+  /** 宽度（像素；未指定为 null） */
+  width: number | null
+  /** 高度（像素；未指定为 null） */
+  height: number | null
+}
+
+/** 尺寸配置外部输入（width/height 允许字符串数字，来自表单标量/持久化数据） */
+export interface SizeConfigInput {
+  /** 比例档（如 "16:9" / "auto"） */
+  ratio?: string
+  /** 尺寸档（如 "1K" / "auto"） */
+  size?: string
+  /** 宽度（像素，可为字符串数字） */
+  width?: number | string
+  /** 高度（像素，可为字符串数字） */
+  height?: number | string
+}
+
+/**
+ * 归一化外部传入的尺寸配置为组件内部状态。
+ *
+ * - ratio/size 缺失或为空串 → "auto"
+ * - width/height 非法（非正数）→ null
+ * - 合法数字四舍五入取整
+ *
+ * @param raw 外部尺寸配置（可为 null / 部分字段）
+ * @returns 归一化后的组件内部状态
+ */
+export function normalizeSizeConfig(raw?: SizeConfigInput | null): SizeConfigState {
+  const ratio = typeof raw?.ratio === 'string' && raw.ratio !== '' ? raw.ratio : 'auto'
+  const size = typeof raw?.size === 'string' && raw.size !== '' ? raw.size : 'auto'
+  const pick = (v: unknown): number | null => {
+    const n = Number(v)
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+  }
+  return { ratio, size, width: pick(raw?.width), height: pick(raw?.height) }
+}
+
+/**
+ * 按比例 × 尺寸档换算宽高；档位不存在或任一项为自适应（auto/adaptive）时返回 null。
+ *
+ * 统一尺寸组件与显示文案拼接用它判断「当前宽高是否等于所选预设」，
+ * 从而决定是否追加 `/ 宽x高` 的自定义后缀。
+ *
+ * @param ratio 比例档（可为 "auto" / "adaptive" / 未注册档）
+ * @param size 尺寸档（可为 "auto" / 未注册档）
+ * @returns 换算出的宽高；无法换算返回 null
+ */
+export function resolvePresetSize(ratio: string, size: string): SizeValue | null {
+  const r = SIZE_RATIOS.find((x) => x.key === ratio)
+  const res = SIZE_RESOLUTIONS.find((x) => x.key === size)
+  if (!r || !res) return null
+  return computePresetSize(r.key, res.key)
+}
+
+/**
+ * 由已保存/回显的宽高反推尺寸配置（旧数据兼容：仅存了 width/height 的任务或节点）。
+ *
+ * - 无效宽高 → 全部回退默认（ratio/size 为 "auto"，宽高为 null）
+ * - 宽高命中某个比例 + 尺寸档组合 → ratio/size 取该档
+ * - 否则 ratio/size 回退 "auto"，宽高原样保留（显示为自定义宽高）
+ *
+ * @param rawWidth 宽度（可为空/字符串数字/表单标量）
+ * @param rawHeight 高度（可为空/字符串数字/表单标量）
+ * @returns 反推后的配置状态
+ */
+export function inferSizeConfigFromWidthHeight(
+  rawWidth?: unknown,
+  rawHeight?: unknown,
+): SizeConfigState {
+  const w = Number(rawWidth)
+  const h = Number(rawHeight)
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return { ratio: 'auto', size: 'auto', width: null, height: null }
+  }
+  const r = SIZE_RATIOS.find((x) => Math.abs(x.ratio - w / h) < 0.01)
+  const ratio = r ? r.key : 'auto'
+  // 尺寸档以「某基准刻度命中 + 反查预设完全一致」双重确认，避免误判
+  const res = SIZE_RESOLUTIONS.find((x) => x.base === w || x.base === h)
+  let size = 'auto'
+  if (res) {
+    const preset = computePresetSize((r ?? SIZE_RATIOS[0]).key, res.key)
+    if (preset.width === Math.round(w) && preset.height === Math.round(h)) {
+      size = res.key
+    }
+  }
+  return { ratio, size, width: Math.round(w), height: Math.round(h) }
+}
+
+/**
+ * 组件输出为可提交/持久化的尺寸配置（自动省略 null 宽高）。
+ *
+ * @param state 组件内部状态
+ * @param supportCustomSize 工作流是否支持自定义宽高（false 时不输出宽高）
+ * @returns 尺寸配置对象（供 params.sizeConfig / 节点 config 持久化）
+ */
+export function toSizeConfig(state: SizeConfigState, supportCustomSize: boolean): WorkflowSizeConfig {
+  const out: WorkflowSizeConfig = { ratio: state.ratio, size: state.size }
+  if (supportCustomSize && state.width != null && state.height != null) {
+    out.width = state.width
+    out.height = state.height
+  }
+  return out
+}
+
+/**
+ * 拼接尺寸组件的单行显示文案（如 `16:9 / 1K`、`自动 / 自动`、`1:1 / 2K / 1024x1024`）。
+ *
+ * 仅当工作流支持自定义宽高、且当前宽高不等于所选比例×尺寸档换算结果时，
+ * 才追加 `/ 宽x高` 后缀（对应「手动改过宽高」的状态）。
+ *
+ * @param state 组件内部状态
+ * @param caps 工作流尺寸能力（未声明按支持自定义处理）
+ * @returns 展示用单行文案
+ */
+export function formatSizeConfigText(state: SizeConfigState, caps?: WorkflowSizeCapabilities): string {
+  const text = `${ratioLabel(state.ratio)} / ${sizeLabel(state.size)}`
+  const supportCustom = caps ? caps.supportCustomSize : true
+  if (!supportCustom) return text
+  const preset = resolvePresetSize(state.ratio, state.size)
+  const custom =
+    state.width != null &&
+    state.height != null &&
+    (!preset || preset.width !== state.width || preset.height !== state.height)
+  return custom ? `${text} / ${state.width}x${state.height}` : text
 }

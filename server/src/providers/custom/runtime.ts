@@ -69,7 +69,7 @@ export interface WorkflowCallContext {
   providerConfig: Record<string, unknown>;
   /** 发起 http 调用（axios 风格返回） */
   request(conf: WorkflowCallRequestConfig): Promise<WorkflowCallResult>;
-  /** 本次工作流调用的输入参数（按工作流支持的类型动态组合） */
+  /** 本次工作流调用的输入参数（按工作流支持的类型动态组合；生图/生视频含 sizeConfig 字段） */
   params: Record<string, unknown>;
   /** 任务级共享存储（Record<string, any>，实例化时默认赋值 {}） */
   session: Record<string, unknown>;

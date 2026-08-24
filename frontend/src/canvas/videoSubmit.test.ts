@@ -101,4 +101,42 @@ describe('buildVideoSubmitParams', () => {
     expect(params.resolution).toEqual({ width: 720, height: 1280 })
     expect(params.duration).toBe(5)
   })
+
+  it('config.sizeConfig 随 wire 携带（三种模式通用；含自定义宽高）', () => {
+    const base = {
+      mode: 'reference' as const,
+      prompt: 'p',
+      duration: 5,
+      resolution: { width: 1024, height: 1024 },
+      workflowParams: {},
+      sizeConfig: { ratio: '1:1', size: '2K', width: 1024, height: 1024 },
+    }
+    const inputs = { images: [mkInput('img1', 'assert/1.png')], videos: [], audios: [] }
+    const params = buildVideoSubmitParams(mkNode(base), inputs)
+    expect(params.sizeConfig).toEqual({ ratio: '1:1', size: '2K', width: 1024, height: 1024 })
+  })
+
+  it('config.sizeConfig 仅比例/尺寸（无宽高）时原样携带', () => {
+    const node = mkNode({
+      mode: 'first-last-frame',
+      prompt: 'p',
+      inputOrder: ['img1'],
+      duration: 5,
+      resolution: { width: 0, height: 0 },
+      workflowParams: {},
+      sizeConfig: { ratio: '16:9', size: '768P' },
+    })
+    const inputs = { images: [mkInput('img1', 'assert/1.png')], videos: [], audios: [] }
+    const params = buildVideoSubmitParams(node, inputs)
+    expect(params.sizeConfig).toEqual({ ratio: '16:9', size: '768P' })
+    // 分辨率仍按旧链路回退默认（1280x720），不受 sizeConfig 影响
+    expect(params.resolution).toEqual({ width: 1280, height: 720 })
+  })
+
+  it('config 无 sizeConfig / 缺 ratio/size / 非法宽高时不携带', () => {
+    const inputs = { images: [mkInput('img1', 'assert/1.png')], videos: [], audios: [] }
+    expect(buildVideoSubmitParams(mkNode({ mode: 'reference', prompt: 'p', resolution: {}, workflowParams: {} }), inputs).sizeConfig).toBeUndefined()
+    expect(buildVideoSubmitParams(mkNode({ mode: 'reference', prompt: 'p', resolution: {}, workflowParams: {}, sizeConfig: { ratio: 'bad' } }), inputs).sizeConfig).toBeUndefined()
+    expect(buildVideoSubmitParams(mkNode({ mode: 'reference', prompt: 'p', resolution: {}, workflowParams: {}, sizeConfig: { ratio: '16:9', size: '1K', width: 'abc', height: 0 } }), inputs).sizeConfig).toEqual({ ratio: '16:9', size: '1K' })
+  })
 })

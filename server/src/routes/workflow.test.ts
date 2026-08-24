@@ -146,6 +146,36 @@ describe('parseTaskParams', () => {
     expect(parsed.comfyuiProviderId).toBe('inst-9');
   });
 
+  it('sizeConfig 透传（含自定义宽高）', () => {
+    const parsed = parseTaskParams(JSON.stringify({
+      vars: {},
+      outputPath: 'assert/x.png',
+      sizeConfig: { ratio: '1:1', size: '2K', width: 1024, height: 1024 },
+    }));
+    expect(parsed.sizeConfig).toEqual({ ratio: '1:1', size: '2K', width: 1024, height: 1024 });
+  });
+
+  it('无 sizeConfig 时返回 undefined', () => {
+    const parsed = parseTaskParams(JSON.stringify({ vars: {}, outputPath: 'assert/x.png' }));
+    expect(parsed.sizeConfig).toBeUndefined();
+  });
+
+  it('video wire 携带 sizeConfig（画布视频节点提交）', () => {
+    const parsed = parseTaskParams(JSON.stringify({
+      vars: {},
+      outputPath: 'assert/x.mp4',
+      video: {
+        mode: 'director',
+        resolution: { width: 1080, height: 1920 },
+        duration: 5,
+        prompt: '测试',
+        sizeConfig: { ratio: '9:16', size: '2K' },
+        extraParams: {},
+      },
+    }));
+    expect(parsed.video?.sizeConfig).toEqual({ ratio: '9:16', size: '2K' });
+  });
+
   it('无 comfyuiProviderId 时返回 undefined', () => {
     const parsed = parseTaskParams(JSON.stringify({ vars: {}, outputPath: 'assert/x.mp4' }));
     expect(parsed.comfyuiProviderId).toBeUndefined();

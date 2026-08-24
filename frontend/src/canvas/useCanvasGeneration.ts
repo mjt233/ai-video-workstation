@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { writeFs } from '../api/client'
-import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow, type WorkflowUserParamValue } from '../api/workflow'
+import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow, type WorkflowSizeConfig, type WorkflowUserParamValue } from '../api/workflow'
 import {
   extractVideoFrame,
   extractVideoFrameAtTime,
@@ -365,7 +365,12 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
         project,
         workflowId,
         impl,
-        params: { vars, outputPath, userParams },
+        params: {
+          vars,
+          outputPath,
+          userParams,
+          ...(config.sizeConfig ? { sizeConfig: config.sizeConfig as WorkflowSizeConfig } : {}),
+        },
       })
       taskIdByNode.value[nodeId] = taskId
       persistRunning(nodeId, { kind: 'workflow', taskId, outputPath, startedAt: Date.now() })

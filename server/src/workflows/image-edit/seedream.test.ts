@@ -43,11 +43,16 @@ describe('image-edit/seedream', () => {
     executeMock.mockResolvedValue({ taskId: 't1' });
   });
 
-  it('注册 seedream-5-pro / seedream-5-lite，provider=volcengine-ark，能力含 deferredCancel', () => {
+  it('注册 seedream-5-pro / seedream-5-lite，provider=volcengine-ark，能力含 deferredCancel 与尺寸声明', () => {
     const pro = getImpl('image-edit', 'seedream-5-pro');
     expect(pro).toBeDefined();
     expect(pro!.provider).toBe('volcengine-ark');
     expect(pro!.capabilities).toMatchObject({ cancelable: true, deferredCancel: true });
+    expect(pro!.capabilities?.size).toEqual({
+      ratio: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+      size: ['1K', '2K'],
+      supportCustomSize: true,
+    });
     expect(getImpl('image-edit', 'seedream-5-lite')).toBeDefined();
   });
 
@@ -74,6 +79,23 @@ describe('image-edit/seedream', () => {
   it('enable_specified_size=true 但宽高无效时回退 2K', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await impl.submit(mkCtx({ userParams: { enable_specified_size: 'true', width: '', height: '' } }));
+    const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
+    expect(call.params.size).toBe('2K');
+  });
+
+  it('sizeConfig 宽高优先于旧 userParams 门控（统一尺寸配置直传宽高）', async () => {
+    const impl = getImpl('image-edit', 'seedream-5-pro')!;
+    await impl.submit(mkCtx({
+      userParams: { enable_specified_size: 'false', width: '720', height: '1280' },
+      sizeConfig: { ratio: '9:16', size: '2K', width: 1080, height: 1920 },
+    }));
+    const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
+    expect(call.params.size).toBe('1080x1920');
+  });
+
+  it('sizeConfig 仅带比例/尺寸档（无宽高）时回退模型默认档位', async () => {
+    const impl = getImpl('image-edit', 'seedream-5-pro')!;
+    await impl.submit(mkCtx({ sizeConfig: { ratio: '16:9', size: '1K' } }));
     const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
     expect(call.params.size).toBe('2K');
   });

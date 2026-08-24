@@ -7,6 +7,7 @@ import type {
   ProjectConfig,
   WorkflowDefinition,
   WorkflowRunContext,
+  WorkflowSizeConfig,
   WorkflowVarsBase,
   VideoWorkflowSubmitData,
   VideoWorkflowSubmitParams,
@@ -115,6 +116,7 @@ async function resolveVideoSubmitData(
     ...(wire.seed != null ? { seed: wire.seed } : {}),
     ...(director ? { director } : {}),
     ...(references ? { references } : {}),
+    ...(wire.sizeConfig ? { sizeConfig: wire.sizeConfig } : {}),
     extraParams: wire.extraParams ?? {},
   };
 }
@@ -586,6 +588,8 @@ export async function runTask(taskId: string): Promise<void> {
     promptPaths?: string[];
     outputPath?: string;
     video?: VideoWorkflowSubmitParams;
+    /** 统一尺寸配置（用户选择的原始完整尺寸，可选） */
+    sizeConfig?: WorkflowSizeConfig;
     /** 本次执行的 Easy Bridge 提供商实例 ID（用户选择，仅 comfyui-bridge 工作流入库） */
     comfyuiProviderId?: string;
   };
@@ -849,6 +853,9 @@ export async function runTask(taskId: string): Promise<void> {
       comfyuiProviderId: paramsObj.comfyuiProviderId || undefined,
       ...(video ? { video } : {}),
       userParams,
+      // 统一尺寸配置：顶层 params.sizeConfig 优先（表单类工作流），视频类工作流回退
+      // params.video.sizeConfig（画布节点随 video wire 携带，engine 已并入 video 数据）
+      sizeConfig: paramsObj.sizeConfig ?? video?.sizeConfig,
       readFile,
       readAssertFile,
       readFileToBase64,

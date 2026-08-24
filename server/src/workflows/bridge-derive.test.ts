@@ -75,6 +75,20 @@ describe('deriveCapabilities', () => {
     expect(caps.video).toBeUndefined();
     expect(caps.cancelable).toBe(true);
   });
+  it('文生图/图编辑/图生视频 → 声明统一尺寸能力（含自定义宽高）', () => {
+    const expected = {
+      ratio: ['16:9', '9:16', '3:2', '2:3', '21:9', '1:1', '4:3', '3:4'],
+      size: ['360P', '480P', '720P', '768P', '1080P', '2K', '4K'],
+      supportCustomSize: true,
+    };
+    expect(deriveCapabilities([group('text-to-image')], 'text-to-image').size).toEqual(expected);
+    expect(deriveCapabilities([group('image-edit')], 'image-edit').size).toEqual(expected);
+    expect(deriveCapabilities([group('image-to-video')], 'image-to-video').size).toEqual(expected);
+  });
+  it('TTS 类型不声明尺寸能力', () => {
+    expect(deriveCapabilities([group('tts-voice-design')], 'tts-voice-design').size).toBeUndefined();
+    expect(deriveCapabilities([group('tts-voice-clone')], 'tts-voice-clone').size).toBeUndefined();
+  });
 });
 
 describe('deriveParams', () => {

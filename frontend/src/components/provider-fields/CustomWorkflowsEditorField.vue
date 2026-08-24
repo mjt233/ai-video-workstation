@@ -193,6 +193,68 @@
             />
           </div>
 
+          <!-- 输出尺寸配置：仅当勾选生图/生视频类型时显示 -->
+          <template v-if="hasGraphicTypes">
+            <v-divider class="mb-2" />
+            <div class="d-flex align-center mb-1">
+              <div class="text-body-medium font-weight-medium">
+                输出尺寸配置
+              </div>
+              <v-spacer />
+              <v-btn
+                color="secondary"
+                variant="tonal"
+                size="small"
+                prepend-icon="mdi-restore"
+                @click="resetSizeConfig"
+              >
+                恢复默认
+              </v-btn>
+            </div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              限定该工作流运行时可选的比例/尺寸与自定义分辨率；用户选择随任务提交，
+              代码中通过
+              <code>ctx.params.sizeConfig</code> 读取（键名与类型按下方配置自动提示）。
+              留空 = 使用默认全量。
+            </div>
+            <div class="d-flex flex-wrap ga-6 mb-2">
+              <v-select
+                v-model="form.sizeConfig.ratio"
+                :items="ratioOptions"
+                label="允许比例"
+                hint="可多选；选择「自动」表示允许自适应"
+                persistent-hint
+                density="compact"
+                variant="outlined"
+                multiple
+                chips
+                clearable
+                style="min-width: 240px; max-width: 340px; flex-grow: 1;"
+              />
+              <v-select
+                v-model="form.sizeConfig.size"
+                :items="sizeOptions"
+                label="允许尺寸"
+                hint="可多选；选择「自动」表示允许自适应"
+                persistent-hint
+                density="compact"
+                variant="outlined"
+                multiple
+                chips
+                clearable
+                style="min-width: 240px; max-width: 340px; flex-grow: 1;"
+              />
+              <v-switch
+                v-model="form.sizeConfig.supportCustomSize"
+                label="允许指定分辨率"
+                hint="允许用户自定义输入任意宽高（像素）"
+                persistent-hint
+                color="primary"
+                density="compact"
+              />
+            </div>
+          </template>
+
           <!-- 用户配置字段：运行工作流时用户填写的自定义字段 -->
           <v-divider class="mb-2" />
           <div class="d-flex align-center mb-1">
@@ -443,11 +505,14 @@ import {
   CALL_CODE_TEMPLATE,
   CANCEL_CODE_TEMPLATE,
   EXTRACT_CODE_TEMPLATE,
+  SIZE_CONFIG_RATIO_OPTIONS,
+  SIZE_CONFIG_SIZE_OPTIONS,
   duplicateWorkflowEntry,
   insertCodeTemplate,
   normalizeWorkflowEntries,
   validateWorkflowEntry,
   type CustomWorkflowFormEntry,
+  type CustomWorkflowSizeConfigDef,
   type UserConfigFieldDef,
   type UserConfigFieldType,
 } from '../../utils/custom-provider'
@@ -492,8 +557,36 @@ const userConfigFieldTypeOptions = [
   { title: '布尔', value: 'boolean' },
 ] as Array<{ title: string; value: UserConfigFieldType }>
 
-/** 表单对象类型：userConfigFields 在表单内恒存在（数组） */
-type WorkflowFormEntry = CustomWorkflowFormEntry & { userConfigFields: UserConfigFieldDef[] }
+/** 支持输出尺寸配置的工作流类型（生图 / 生视频；TTS 无尺寸概念） */
+const GRAPHIC_TYPES = ['text-to-image', 'image-edit', 'image-to-video']
+
+/** 是否勾选了生图/生视频类型（决定是否显示「输出尺寸配置」区） */
+const hasGraphicTypes = computed(() => form.value.types.some((t) => GRAPHIC_TYPES.includes(t)))
+
+/** 比例候选选项（多选下拉；auto/adaptive 即自适应） */
+const ratioOptions = [...SIZE_CONFIG_RATIO_OPTIONS].map((v) => ({
+  title: v === 'auto' || v === 'adaptive' ? '自动（自适应）' : v,
+  value: v,
+}))
+
+/** 尺寸档候选选项（多选下拉；「自动」即自适应） */
+const sizeOptions = [...SIZE_CONFIG_SIZE_OPTIONS].map((v) => ({
+  title: v === 'auto' ? '自动（自适应）' : v,
+  value: v,
+}))
+
+/**
+ * 恢复尺寸配置为默认（空清单 = 运行时使用默认全量，支持自定义分辨率）。
+ */
+function resetSizeConfig() {
+  form.value.sizeConfig = { ratio: [], size: [], supportCustomSize: true }
+}
+
+/** 表单对象类型：userConfigFields / sizeConfig 在表单内恒存在（数组/对象） */
+type WorkflowFormEntry = CustomWorkflowFormEntry & {
+  userConfigFields: UserConfigFieldDef[]
+  sizeConfig: CustomWorkflowSizeConfigDef
+}
 
 /** 表单对话框状态 */
 const dialogOpen = ref(false)
@@ -510,12 +603,17 @@ const form = ref<WorkflowFormEntry>({
   extractCode: '',
   cancelCode: '',
   userConfigFields: [],
+  sizeConfig: { ratio: [], size: [], supportCustomSize: true },
 })
 
 /** 代码编辑器类型库：按所选类型动态组合 ctx.params 类型 + 通用代码导出全局声明 */
 const editorLibs = computed(() => {
   const libs: Array<{ content: string; filePath: string }> = [
-    { content: buildContextLib(form.value.types, form.value.userConfigFields), filePath: 'custom-context.d.ts' },
+    {
+      // sizeConfig（工作流输出尺寸配置）参与 ctx.params 的字面量联合类型提示
+      content: buildContextLib(form.value.types, form.value.userConfigFields, form.value.sizeConfig),
+      filePath: 'custom-context.d.ts',
+    },
   ]
   const common = typeof props.commonCode === 'string' ? props.commonCode : ''
   const globals = buildCommonGlobalsLib(common)
@@ -574,6 +672,7 @@ function openCreate() {
     extractCode: '',
     cancelCode: '',
     userConfigFields: [],
+    sizeConfig: { ratio: [], size: [], supportCustomSize: true },
   }
   dialogOpen.value = true
 }
@@ -610,6 +709,13 @@ function openEdit(index: number) {
     extractCode: row.extractCode,
     cancelCode: row.cancelCode,
     userConfigFields: (row.userConfigFields ?? []).map((field) => ({ ...field })),
+    sizeConfig: row.sizeConfig
+      ? {
+          ratio: [...row.sizeConfig.ratio],
+          size: [...row.sizeConfig.size],
+          supportCustomSize: row.sizeConfig.supportCustomSize,
+        }
+      : { ratio: [], size: [], supportCustomSize: true },
   }
   dialogOpen.value = true
 }

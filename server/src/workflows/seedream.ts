@@ -1,5 +1,6 @@
 import { fileToDataUrl } from '../providers/volcengine-ark/client.js';
 import type { ProviderClient } from '../providers/types.js';
+import type { WorkflowSizeConfig } from './types.js';
 
 export { fileToDataUrl };
 
@@ -88,6 +89,45 @@ export function resolveSeedreamSize(
     return limits.fallback;
   }
   return `${W}x${H}`;
+}
+
+/**
+ * 解析用户输出尺寸的生效宽高（统一尺寸配置优先，兼容旧 vars 门控）。
+ *
+ * 优先级：
+ * 1. 统一尺寸配置（ctx.sizeConfig，新交互）——宽高均有效时直接采用；
+ * 2. 旧 vars 门控（enable_specified_size === "true"）——vars.width/height 有效时采用；
+ * 3. 回退项目尺寸（projectConfig）。
+ *
+ * 返回的宽高最终经 resolveSeedreamSize 按模型约束校验/自动匹配最接近的允许尺寸。
+ *
+ * @param sizeConfig 引擎注入的统一尺寸配置（可为空）
+ * @param specified 旧 vars 门控（enable_specified_size === "true"）
+ * @param varsWidth vars.width（可为空串）
+ * @param varsHeight vars.height（可为空串）
+ * @param fallbackWidth 项目宽度（projectConfig.width）
+ * @param fallbackHeight 项目高度（projectConfig.height）
+ * @returns 生效宽高（像素，取整）
+ */
+export function resolveSeedreamOutputSize(
+  sizeConfig: WorkflowSizeConfig | undefined,
+  specified: boolean,
+  varsWidth: string | number | undefined,
+  varsHeight: string | number | undefined,
+  fallbackWidth: number,
+  fallbackHeight: number,
+): { width: number; height: number } {
+  const scWidth = sizeConfig?.width != null ? Number(sizeConfig.width) : NaN;
+  const scHeight = sizeConfig?.height != null ? Number(sizeConfig.height) : NaN;
+  if (Number.isFinite(scWidth) && scWidth > 0 && Number.isFinite(scHeight) && scHeight > 0) {
+    return { width: Math.round(scWidth), height: Math.round(scHeight) };
+  }
+  const w = Number(varsWidth);
+  const h = Number(varsHeight);
+  if (specified && Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0) {
+    return { width: Math.round(w), height: Math.round(h) };
+  }
+  return { width: fallbackWidth, height: fallbackHeight };
 }
 
 /** 文生图提交参数 */

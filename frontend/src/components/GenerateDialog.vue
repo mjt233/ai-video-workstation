@@ -27,16 +27,18 @@
           hide-details
         />
 
-        <!-- User-settable workflow params -->
+        <!-- User-settable workflow params（含尺寸能力声明的工作流也会渲染表单区） -->
         <WorkflowParamsForm
-          v-if="selectedDeclarations.length || selectedProviderType === 'comfyui-bridge'"
+          v-if="selectedDeclarations.length || selectedProviderType === 'comfyui-bridge' || selectedImplDef?.capabilities?.size"
           ref="paramsFormRef"
           v-model="userValues"
           :declarations="selectedDeclarations"
           :provider="selectedInstanceId"
           :provider-type="selectedProviderType"
-          :project="props.project"
+          :size-capabilities="selectedImplDef?.capabilities?.size"
+          :model-size-config="sizeConfig"
           class="mb-3"
+          @update:size-config="(v) => (sizeConfig = v)"
         />
 
         <!-- Existing asset info -->
@@ -147,7 +149,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, reactive } from 'vue'
-import { runWorkflow, getWorkflows, type WorkflowInfo, type WorkflowUserParamDeclaration, type WorkflowUserParamValue } from '../api/workflow'
+import { runWorkflow, getWorkflows, type WorkflowInfo, type WorkflowSizeConfig, type WorkflowUserParamDeclaration, type WorkflowUserParamValue } from '../api/workflow'
 import { useWorkflowTask } from '../composables/useWorkflowTask'
 import WorkflowParamsForm from './WorkflowParamsForm.vue'
 
@@ -185,6 +187,8 @@ const logRef = ref<HTMLElement | null>(null)
 
 /** 用户手动传入的工作流参数值（key → 值） */
 const userValues = ref<Record<string, WorkflowUserParamValue>>({})
+/** 统一尺寸配置（随任务提交 params.sizeConfig；由参数表单初始化/回显与更新） */
+const sizeConfig = ref<WorkflowSizeConfig | null>(null)
 /** 参数输入表单引用（用于打开时重置为默认值） */
 const paramsFormRef = ref<InstanceType<typeof WorkflowParamsForm> | null>(null)
 
@@ -227,14 +231,16 @@ watch(show, async (val) => {
     } catch {
       // Ignore errors
     }
-    // 打开对话框时，用户参数表单重置为默认值
+    // 打开对话框时，用户参数表单重置为默认值（同时重置统一尺寸配置）
     await nextTick()
+    sizeConfig.value = null
     paramsFormRef.value?.reset()
   } else {
     // Reset on close
     taskId.value = null
     selectedImpl.value = props.defaultImpl ?? 'default'
     userValues.value = {}
+    sizeConfig.value = null
   }
 })
 
@@ -275,6 +281,7 @@ async function submit() {
         promptPaths: props.promptPaths ?? [],
         outputPath: props.outputPath,
         userParams: userValues.value,
+        ...(sizeConfig.value ? { sizeConfig: sizeConfig.value } : {}),
       },
     })
     taskId.value = result.taskId

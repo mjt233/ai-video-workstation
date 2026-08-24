@@ -23,7 +23,7 @@ import type { ProviderConfigValue, ProviderDefinition } from '../providers/types
 import { syncInstance } from '../providers/instance-sync.js';
 import { CUSTOM_PROVIDER_ID, validateCustomProviderConfig } from '../providers/custom/index.js';
 import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
-import type { VideoWorkflowSubmitParams, WorkflowCapabilities, WorkflowDefinition } from '../workflows/types.js';
+import type { VideoWorkflowSubmitParams, WorkflowCapabilities, WorkflowDefinition, WorkflowSizeConfig } from '../workflows/types.js';
 
 export const workflowRouter = Router();
 
@@ -353,6 +353,8 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
       userParams?: Record<string, unknown>;
       /** 视频自包含提交参数（wire 形态，画布【生成视频】节点提交） */
       video?: VideoWorkflowSubmitParams;
+      /** 统一尺寸配置（用户选择的原始完整尺寸：比例/尺寸档 + 可选自定义宽高） */
+      sizeConfig?: WorkflowSizeConfig;
     };
   };
 
@@ -386,6 +388,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
       promptPaths: params.promptPaths ?? [],
       outputPath: params.outputPath,
       ...(params.video ? { video: params.video } : {}),
+      ...(params.sizeConfig ? { sizeConfig: params.sizeConfig } : {}),
       ...(comfyuiProviderId ? { comfyuiProviderId } : {}),
     },
   });
@@ -401,6 +404,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
  * @param paramsJson - 任务 params 的 JSON 字符串
  * @returns 结构化 params：vars 业务变量、promptPaths 提示词路径、outputPath 输出路径；
  *          video 为视频自包含提交参数（wire 形态，可选）；
+ *          sizeConfig 为统一尺寸配置（可选）；
  *          comfyuiProviderId 为本次执行的 Easy Bridge 提供商实例 ID（可选，仅 comfyui-bridge 工作流）；
  *          remoteTaskId 为提交成功后持久化的远端（Bridge）任务 ID（可选，供中断使用）
  */
@@ -409,6 +413,8 @@ export function parseTaskParams(paramsJson: string): {
   promptPaths: string[]
   outputPath: string
   video?: VideoWorkflowSubmitParams
+  /** 统一尺寸配置（用户选择的原始完整尺寸，可选） */
+  sizeConfig?: WorkflowSizeConfig
   /** 本次执行的 Easy Bridge 提供商实例 ID（用户在工作流表单选择，可选） */
   comfyuiProviderId?: string
   /** 提交成功后持久化的远端（Bridge）任务 ID，供中断使用 */
@@ -420,6 +426,7 @@ export function parseTaskParams(paramsJson: string): {
       promptPaths?: string[]
       outputPath?: string
       video?: VideoWorkflowSubmitParams
+      sizeConfig?: WorkflowSizeConfig
       comfyuiProviderId?: string
       remoteTaskId?: string
     };
@@ -428,6 +435,7 @@ export function parseTaskParams(paramsJson: string): {
       promptPaths: parsed.promptPaths ?? [],
       outputPath: parsed.outputPath ?? '',
       video: parsed.video,
+      sizeConfig: parsed.sizeConfig,
       comfyuiProviderId: parsed.comfyuiProviderId,
       remoteTaskId: parsed.remoteTaskId,
     };
@@ -595,7 +603,7 @@ workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: 
 
 // POST /api/workflow/batch-run — submit batch generation tasks
 workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) => {
-  const { project, assetTypes, concurrency, overwrite, implByAssetType, userParamsByAssetType } = req.body as {
+  const { project, assetTypes, concurrency, overwrite, implByAssetType, userParamsByAssetType, sizeConfigByAssetType } = req.body as {
     project: string;
     assetTypes: string[];
     concurrency?: number;
@@ -604,6 +612,8 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
     implByAssetType?: Record<string, string>;
     /** 资产类型 → 用户手动传入的工作流参数（key → 值，仅保留该资产类型所选实现声明的 key） */
     userParamsByAssetType?: Record<string, Record<string, unknown>>;
+    /** 资产类型 → 统一尺寸配置（用户选择的原始完整尺寸；随任务 params 持久化并注入 ctx.sizeConfig） */
+    sizeConfigByAssetType?: Record<string, WorkflowSizeConfig>;
   };
 
   if (!project || !Array.isArray(assetTypes) || assetTypes.length === 0) {
@@ -664,6 +674,9 @@ workflowRouter.post('/workflow/batch-run', async (req: Request, res: Response) =
           vars: { ...task.vars, ...userVars },
           promptPaths: task.promptPaths,
           outputPath: task.outputPath,
+          ...(task.assetType && sizeConfigByAssetType?.[task.assetType]
+            ? { sizeConfig: sizeConfigByAssetType[task.assetType] }
+            : {}),
           ...(comfyuiProviderId ? { comfyuiProviderId } : {}),
         },
         batch_id: batchId,
