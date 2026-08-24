@@ -119,6 +119,7 @@
       v-model="dialogOpen"
       max-width="1100"
       scrollable
+      persistent
     >
       <v-card>
         <v-card-title class="d-flex align-center">
