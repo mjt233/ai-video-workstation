@@ -3,7 +3,9 @@ import {
   buildCommonGlobalsLib,
   buildContextLib,
   buildUserConfigLib,
+  duplicateWorkflowEntry,
   insertCodeTemplate,
+  nextDuplicatedWorkflowName,
   normalizeWorkflowEntries,
   validateWorkflowEntry,
 } from './custom-provider'
@@ -131,6 +133,47 @@ describe('insertCodeTemplate', () => {
     const result = insertCodeTemplate('const a = 1', 'export default async function() {}')
     expect(result).toContain('const a = 1')
     expect(result).toContain('export default async function() {}')
+  })
+})
+
+describe('nextDuplicatedWorkflowName', () => {
+  it('首次复制追加「副本」', () => {
+    expect(nextDuplicatedWorkflowName('gpt-image-2', ['gpt-image-2'])).toBe('gpt-image-2 副本')
+  })
+
+  it('名称已被占用时追加序号', () => {
+    expect(nextDuplicatedWorkflowName('gpt-image-2', ['gpt-image-2', 'gpt-image-2 副本'])).toBe('gpt-image-2 副本 2')
+    expect(nextDuplicatedWorkflowName('gpt-image-2', ['gpt-image-2', 'gpt-image-2 副本', 'gpt-image-2 副本 2']))
+      .toBe('gpt-image-2 副本 3')
+  })
+
+  it('空名称回退为「未命名 副本」', () => {
+    expect(nextDuplicatedWorkflowName('  ', [])).toBe('未命名 副本')
+  })
+})
+
+describe('duplicateWorkflowEntry', () => {
+  it('深拷贝整行数据并换成不冲突名称', () => {
+    const source = {
+      name: 'gpt-image-2',
+      types: ['text-to-image', 'image-edit'],
+      async: true,
+      cancelable: false,
+      callCode: 'export default async function() {}',
+      extractCode: 'return { isFinish: true }',
+      cancelCode: '',
+      userConfigFields: [
+        { key: 'model', name: '模型', type: 'string' as const, defaultValue: 'gpt-image-2', description: '模型名' },
+      ],
+    }
+    const cloned = duplicateWorkflowEntry(source, [source.name])
+    expect(cloned).toEqual({
+      ...source,
+      name: 'gpt-image-2 副本',
+    })
+    expect(cloned.types).not.toBe(source.types)
+    expect(cloned.userConfigFields).not.toBe(source.userConfigFields)
+    expect(cloned.userConfigFields?.[0]).not.toBe(source.userConfigFields[0])
   })
 })
 

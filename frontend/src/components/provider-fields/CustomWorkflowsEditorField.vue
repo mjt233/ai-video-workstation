@@ -86,7 +86,14 @@
               {{ workflowTypeLabel(t) }}
             </v-chip>
           </td>
-          <td class="text-right">
+          <td class="text-right text-no-wrap">
+            <v-btn
+              icon="mdi-content-copy"
+              size="small"
+              variant="text"
+              :title="'复制工作流「' + row.name + '」'"
+              @click="onDuplicateEntry(index)"
+            />
             <v-btn
               icon="mdi-pencil"
               size="small"
@@ -436,6 +443,7 @@ import {
   CALL_CODE_TEMPLATE,
   CANCEL_CODE_TEMPLATE,
   EXTRACT_CODE_TEMPLATE,
+  duplicateWorkflowEntry,
   insertCodeTemplate,
   normalizeWorkflowEntries,
   validateWorkflowEntry,
@@ -536,6 +544,20 @@ async function loadWorkflowTypes() {
 /** 回写一份新的工作流列表（保持不可变更新） */
 function commit(next: CustomWorkflowFormEntry[]) {
   emit('update:modelValue', next)
+}
+
+/**
+ * 原地复制一条工作流：深拷贝整行数据，插入到源行正下方，名称自动加「副本」以免冲突。
+ *
+ * @param index 被复制工作流的下标
+ */
+const onDuplicateEntry = (index: number): void => {
+  const row = entries.value[index]
+  if (!row) return
+  const cloned = duplicateWorkflowEntry(row, entries.value.map((item) => item.name))
+  const next = [...entries.value]
+  next.splice(index + 1, 0, cloned)
+  commit(next)
 }
 
 /** 打开新增表单（代码留空，由用户点击「插入模板」或自行编写） */

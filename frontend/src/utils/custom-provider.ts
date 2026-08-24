@@ -497,6 +497,48 @@ export function insertCodeTemplate(current: string, template: string): string {
 }
 
 /**
+ * 为复制出的工作流生成不与现有名称冲突的新名称。
+ *
+ * 规则：空名回退为「未命名」；首次加「 副本」，已被占用则追加序号（「 副本 2」起）。
+ *
+ * @param sourceName 被复制工作流的原名称
+ * @param existingNames 当前列表中已占用的名称
+ * @returns 不冲突的新名称
+ */
+export function nextDuplicatedWorkflowName(sourceName: string, existingNames: Iterable<string>): string {
+  const taken = new Set(existingNames)
+  const base = sourceName.trim() || '未命名'
+  const first = base + ' 副本'
+  if (!taken.has(first)) return first
+  let n = 2
+  while (taken.has(base + ' 副本 ' + n)) n++
+  return base + ' 副本 ' + n
+}
+
+/**
+ * 深拷贝一条工作流，并换成不冲突的新名称（用于列表原地复制）。
+ *
+ * @param entry 被复制的工作流条目
+ * @param existingNames 当前列表中已占用的名称
+ * @returns 可直接插入列表的新条目
+ */
+export function duplicateWorkflowEntry(
+  entry: CustomWorkflowFormEntry,
+  existingNames: Iterable<string>,
+): CustomWorkflowFormEntry {
+  return {
+    name: nextDuplicatedWorkflowName(entry.name, existingNames),
+    types: [...entry.types],
+    async: entry.async,
+    cancelable: entry.cancelable,
+    callCode: entry.callCode,
+    extractCode: entry.extractCode,
+    cancelCode: entry.cancelCode,
+    userConfigFields: (entry.userConfigFields ?? []).map((field) => ({ ...field })),
+  }
+}
+
+/**
  * 校验工作流表单条目，返回错误文案（空数组 = 通过）。
  *
  * @param entry 待保存的条目
