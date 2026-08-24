@@ -19,7 +19,13 @@ const PORT = process.env.PORT || 3001;
 /** 监听所有网络接口（0.0.0.0），允许局域网内其他设备访问 */
 const HOST = '0.0.0.0';
 
-app.use(express.json());
+/**
+ * JSON body 解析。
+ * 默认 limit 仅 100kb，资产画布 canvas.json（节点/连线/长提示词/导演台配置）
+ * 经 POST /api/fs 以 `{ content }` 写入时很容易超限并抛 PayloadTooLargeError。
+ * 文本写入场景提高到 50mb；大文件二进制仍走 multipart 上传，不受此限制。
+ */
+app.use(express.json({ limit: '50mb' }));
 
 app.use('/api', fsRouter);
 app.use('/api', projectPortRouter);
