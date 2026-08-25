@@ -96,6 +96,30 @@ describe('CustomProviderClient 同步工作流', () => {
     expect(resultCalls).toHaveLength(1);
   });
 
+  it('同步工作流结果提取返回 failed：getOutput 抛错透出真实原因', async () => {
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      'https://example.com/run': () => new Response(JSON.stringify({ ok: 1 }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    }));
+    const config = makeConfig({
+      workflows: [
+        {
+          name: 'wf-sync-failed',
+          types: ['text-to-image'],
+          async: false,
+          cancelable: false,
+          callCode: 'export default async function() { return { url: "https://example.com/run" } }',
+          extractCode: 'export default async function() { return { failed: true, errorMessage: "余额不足" } }',
+          cancelCode: '',
+        },
+      ],
+    });
+    const client = createCustomProviderClient(config as never);
+    const { taskId } = await client.execute({ workflowId: 'wf-sync-failed', params: {} });
+    // 同步工作流 poll 直接完成；结果提取在 getOutput 阶段运行并判定失败 → 抛错
+    expect((await client.poll(taskId)).done).toBe(true);
+    await expect(client.getOutput(taskId)).rejects.toThrow(/余额不足/);
+  });
+
   it('未配置的工作流执行报错', async () => {
     const client = createCustomProviderClient(makeConfig() as never);
     await expect(client.execute({ workflowId: 'no-such', params: {} })).rejects.toThrow(/未配置或已删除/);
@@ -179,6 +203,63 @@ describe('CustomProviderClient 异步工作流', () => {
     const output = await client.getOutput(taskId);
     expect(output?.type).toBe('download');
     expect(output && output.type === 'download' ? output.url : undefined).toBe('https://cdn.example.com/v.mp4');
+  });
+
+  it('结果提取返回 failed：poll 立即标记失败并透出原因，getOutput 抛错', async () => {
+    const failedExtract = [
+      'export default async function(ctx: any, callResult: any) {',
+      '  if (callResult.data.error) return { failed: true, errorMessage: callResult.data.error }',
+      '  return { isFinish: false }',
+      '}',
+    ].join('\n');
+    const config = makeConfig({
+      workflows: [
+        {
+          name: 'wf-failed',
+          types: ['text-to-image'],
+          async: true,
+          cancelable: false,
+          callCode: 'export default async function() { return { url: "https://example.com/run" } }',
+          extractCode: failedExtract,
+          cancelCode: '',
+        },
+      ],
+    });
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      'https://example.com/run': () => new Response(JSON.stringify({ error: '内容违规' }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    }));
+    const client = createCustomProviderClient(config as never);
+    const { taskId } = await client.execute({ workflowId: 'wf-failed', params: {} });
+    const result = await client.poll(taskId);
+    expect(result).toMatchObject({ status: 'failed', done: true, errorMessage: '内容违规' });
+    // failed 仅轮询一次即终止；getOutput 读取缓存失败结果抛错
+    await expect(client.poll(taskId)).resolves.toMatchObject({ status: 'failed', done: true });
+    await expect(client.getOutput(taskId)).rejects.toThrow(/内容违规/);
+  });
+
+  it('结果提取返回 failed 未带原因时回退默认失败文案', async () => {
+    const config = makeConfig({
+      workflows: [
+        {
+          name: 'wf-failed-nomsg',
+          types: ['text-to-image'],
+          async: true,
+          cancelable: false,
+          callCode: 'export default async function() { return { url: "https://example.com/run" } }',
+          extractCode: 'export default async function() { return { failed: true } }',
+          cancelCode: '',
+        },
+      ],
+    });
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      'https://example.com/run': () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    }));
+    const client = createCustomProviderClient(config as never);
+    const { taskId } = await client.execute({ workflowId: 'wf-failed-nomsg', params: {} });
+    const result = await client.poll(taskId);
+    expect(result.status).toBe('failed');
+    expect(result.done).toBe(true);
+    expect(String(result.errorMessage)).toContain('未提供失败原因');
   });
 
   it('取消后 poll 抛「用户中断」', async () => {

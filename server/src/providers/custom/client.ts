@@ -4,7 +4,7 @@
  * 实现 ProviderClient 四方法：
  * - execute：按 workflowId（= 工作流名称）编译并运行【调用发起】代码，执行其返回的
  *   http 请求配置，保存调用上下文与响应到任务状态；
- * - poll：同步工作流立即返回完成；异步工作流反复运行【结果提取】直到 isFinish，
+ * - poll：同步工作流立即返回完成；异步工作流反复运行【结果提取】直到 isFinish 或 failed，
  *   连续报错或总耗时超过服务商级 timeout（秒）即抛错（引擎标记 failed）；
  * - getOutput：异步用缓存结果，同步此时运行一次【结果提取】（非异步只调用一次）；
  *   仅取 outputs[0] 下载；
@@ -51,7 +51,7 @@ interface CustomTaskState {
   lastErrorLogAt: number | null;
   /** 是否已请求取消 */
   cancelled: boolean;
-  /** 异步任务最终提取结果缓存（isFinish 时写入） */
+  /** 异步任务最终提取结果缓存（isFinish / failed 时写入） */
   extract: WorkflowResult | null;
   /** 异步轮询超时（毫秒，服务商级 timeout 字段换算） */
   timeoutMs: number;
@@ -221,6 +221,15 @@ export function createCustomProviderClient(config: ResolvedProviderConfig): Cust
         const result = normalizeWorkflowResult(raw, '结果提取');
         state.errorSince = null;
         state.lastError = null;
+        // 生成失败：failed 隐含已完成 → 立即终止轮询并标记失败，透出失败原因
+        if (result.failed) {
+          state.extract = result;
+          return {
+            status: 'failed',
+            done: true,
+            errorMessage: result.errorMessage ?? '自定义工作流生成失败（未提供失败原因）',
+          };
+        }
         if (result.isFinish) {
           state.extract = result;
           return { status: 'completed', progress: normalizeProgress(result.progress), done: true };
@@ -267,6 +276,10 @@ export function createCustomProviderClient(config: ResolvedProviderConfig): Cust
         // 同步工作流：【结果提取】只调用一次（在 getOutput 阶段）
         const module = compileEntry(state.entry, 'extract');
         extract = normalizeWorkflowResult(await module.defaultFn(state.ctx, state.callResult), '结果提取');
+      }
+      // 生成失败（异步缓存结果或同步单次提取）：抛错透出真实原因，引擎任务标记 failed
+      if (extract?.failed) {
+        throw new Error(extract.errorMessage ?? '自定义工作流生成失败（未提供失败原因）');
       }
       const outputs = extract?.outputs ?? [];
       if (outputs.length === 0) return null;

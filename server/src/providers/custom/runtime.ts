@@ -48,10 +48,18 @@ export interface WorkflowCallResult {
 
 /**
  * 【结果提取】代码的返回值。
+ *
+ * 失败语义：`failed: true` 表示任务已结束但本次生成失败（隐含已完成，
+ * 此时无需再返回 `isFinish: true`，轮询立即终止并标记任务失败）；
+ * 非失败场景仍需返回布尔 `isFinish`。
  */
 export interface WorkflowResult {
-  /** 工作流是否已执行完成 */
-  isFinish: boolean;
+  /** 工作流是否已执行完成（failed: true 时隐含已完成，可省略） */
+  isFinish?: boolean;
+  /** 本次生成是否失败：true 时任务立即判定失败并结束（隐含已完成） */
+  failed?: boolean;
+  /** 失败原因文案（failed 为 true 时透传给任务失败信息；可选） */
+  errorMessage?: string;
   /** 任务进度百分比（0~100）；小于 0 / undefined / null 表示未知 */
   progress?: number | null;
   /** 工作流执行结果产物（http url 数组） */
@@ -407,17 +415,36 @@ export function buildWorkflowCallContext(deps: WorkflowCallContextDeps): Workflo
 /**
  * 规范化【结果提取】返回值。
  *
+ * - `failed: true` 视为已完成（isFinish 可省略并强制置为 true）；
+ * - 非失败场景 isFinish 缺失/非布尔时报错；
+ * - `failed` / `errorMessage` 存在但类型非法时报错。
+ *
  * @param raw 用户代码返回值
  * @param label 标签（错误提示）
- * @returns 规范后的 WorkflowResult（isFinish 缺失/非布尔时报错）
+ * @returns 规范后的 WorkflowResult（恒定携带 failed 与 errorMessage 字段）
  */
 export function normalizeWorkflowResult(raw: unknown, label: string): WorkflowResult {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(label + '必须返回对象（WorkflowResult）');
   }
   const rec = raw as Record<string, unknown>;
-  if (typeof rec.isFinish !== 'boolean') {
+  let failed = false;
+  if (rec.failed !== undefined && rec.failed !== null) {
+    if (typeof rec.failed !== 'boolean') {
+      throw new Error(label + '返回的 failed 必须是布尔值');
+    }
+    failed = rec.failed as boolean;
+  }
+  // failed 隐含完成：为 true 时无需 isFinish；否则 isFinish 必填
+  if (!failed && typeof rec.isFinish !== 'boolean') {
     throw new Error(label + '返回缺少布尔字段 isFinish');
+  }
+  let errorMessage: string | undefined;
+  if (rec.errorMessage !== undefined && rec.errorMessage !== null) {
+    if (typeof rec.errorMessage !== 'string') {
+      throw new Error(label + '返回的 errorMessage 必须是字符串');
+    }
+    errorMessage = rec.errorMessage as string;
   }
   let progress: number | null | undefined;
   if (rec.progress === undefined || rec.progress === null || rec.progress === '') {
@@ -433,7 +460,7 @@ export function normalizeWorkflowResult(raw: unknown, label: string): WorkflowRe
     }
     outputs = rec.outputs as string[];
   }
-  return { isFinish: rec.isFinish, progress, outputs };
+  return { isFinish: failed || (rec.isFinish as boolean), failed, errorMessage, progress, outputs };
 }
 
 /**

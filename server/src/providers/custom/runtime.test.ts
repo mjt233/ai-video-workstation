@@ -130,9 +130,28 @@ describe('buildWorkflowCallContext 缺省值', () => {
 
 describe('normalizeWorkflowResult / normalizeProgress', () => {
   it('校验 isFinish 与 outputs', () => {
-    expect(normalizeWorkflowResult({ isFinish: true, outputs: ['a'] }, '提取')).toEqual({ isFinish: true, progress: null, outputs: ['a'] });
+    expect(normalizeWorkflowResult({ isFinish: true, outputs: ['a'] }, '提取')).toEqual({ isFinish: true, failed: false, progress: null, outputs: ['a'] });
     expect(() => normalizeWorkflowResult({ outputs: [] }, '提取')).toThrow(/isFinish/);
     expect(() => normalizeWorkflowResult({ isFinish: true, outputs: [1] }, '提取')).toThrow(/outputs/);
+  });
+
+  it('failed: true 隐含完成（无需 isFinish）并透出 errorMessage', () => {
+    expect(normalizeWorkflowResult({ failed: true, errorMessage: '内容违规' }, '提取'))
+      .toEqual({ isFinish: true, failed: true, errorMessage: '内容违规', progress: null, outputs: undefined });
+    expect(normalizeWorkflowResult({ failed: true }, '提取'))
+      .toEqual({ isFinish: true, failed: true, progress: null, outputs: undefined });
+  });
+
+  it('failed: true 时 isFinish 保持完成态，failed: false 仍需 isFinish', () => {
+    expect(normalizeWorkflowResult({ isFinish: false, failed: true }, '提取')).toEqual({ isFinish: true, failed: true, progress: null });
+    expect(() => normalizeWorkflowResult({ failed: false }, '提取')).toThrow(/isFinish/);
+    expect(normalizeWorkflowResult({ isFinish: false, failed: false }, '提取'))
+      .toEqual({ isFinish: false, failed: false, progress: null });
+  });
+
+  it('failed / errorMessage 类型非法时报错', () => {
+    expect(() => normalizeWorkflowResult({ failed: 'yes' }, '提取')).toThrow(/failed/);
+    expect(() => normalizeWorkflowResult({ failed: true, errorMessage: 1 }, '提取')).toThrow(/errorMessage/);
   });
 
   it('progress 钳制与未知值', () => {

@@ -106,8 +106,12 @@ export function getBaseCallConfig(ctx: WorkflowCallContext, model: string) {
 类型声明：
 ```ts
 interface WorkflowResult {
-  // 工作流是否已执行完成
-  isFinish: booelean
+  // 工作流是否已执行完成（failed: true 时隐含已完成，可省略）
+  isFinish?: boolean
+  // 本次生成是否失败：true 时任务立即判定失败并结束（隐含已完成，无需 isFinish: true）
+  failed?: boolean
+  // 失败原因文案（failed 为 true 时透传给任务失败信息；可选）
+  errorMessage?: string
   // 工作流执行进度任务百分比进度，0~100。小于0或undefined或null表示未知
   progress?: number | null
   // 工作流执行结果产物，http url。
@@ -135,8 +139,8 @@ interface WorkflowCallContext {
 }
 ```
 
-- 当工作流配置为异步请求时，【结果提取】会被多次调用，直到 `isFinish` 为 true，或报错持续时间达到设定的超时时间
-- 当工作流配置为非异步请求时，【结果提取】只会被调用一次。
+- 当工作流配置为异步请求时，【结果提取】会被多次调用，直到 `isFinish` 为 `true`、或返回 `failed: true`（生成失败，轮询立即终止并标记任务失败，`errorMessage` 透出真实原因）、或报错持续时间达到设定的超时时间
+- 当工作流配置为非异步请求时，【结果提取】只会被调用一次（在 getOutput 阶段）；若返回 `failed: true`，getOutput 抛错，任务同样以 `errorMessage` 判为失败
 
 ## 工作流用户配置字段
 
