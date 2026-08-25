@@ -221,6 +221,29 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     }
   }
 
+  /**
+   * 从节点 config.inputOrder 中移除指定来源节点 id（输入断开后的顺序清理）。
+   *
+   * 不 pushHistory：这是 disconnect 操作的配套清理（disconnect 已在结构变更前快照），
+   * 单次撤销即可同时回退「连线 + inputOrder」两个变更；节点不存在 / 无 inputOrder /
+   * 该 id 不在顺序中时不做任何修改（幂等）。
+   *
+   * @param nodeId 目标节点 id
+   * @param sourceNodeId 被断开的来源节点 id
+   */
+  function removeInputOrderEntry(nodeId: string, sourceNodeId: string): void {
+    const node = data.value.nodes.find((n) => n.id === nodeId)
+    if (!node) return
+    const order = node.config.inputOrder
+    if (!Array.isArray(order)) return
+    if (!order.includes(sourceNodeId)) return
+    node.config = {
+      ...node.config,
+      inputOrder: order.filter((id) => id !== sourceNodeId),
+    }
+    markDirty()
+  }
+
   /** 是否可撤销 */
   const canUndo = computed(() => historyPast.value.length > 0)
   /** 是否可重做 */
@@ -383,6 +406,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     removeNode,
     updateNode,
     updateDirectorAudioClipDuration,
+    removeInputOrderEntry,
     connect,
     disconnect,
     onConnectionsChanged,

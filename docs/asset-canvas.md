@@ -99,7 +99,8 @@
 - 断开连线：
   - 右键连线 → 「断开连接」（`@edge-context-menu`，需 `event.preventDefault()` 阻止浏览器默认菜单）；
   - 右键节点 → 「断开连接」（断开该节点全部连线）；
-  - 选中连线后按 `Delete`。
+  - 选中连线后按 `Delete`；
+  - **编辑器输入缩略图右上角红色 x → 快捷断开该输入**（生成图片/生成视频/拼接视频节点）：悬浮缩略图时显示，点击即断开该来源节点→本节点的连线并同步清理 `config.inputOrder` 中该来源 id（`nodeOps.disconnectInput` → `store.disconnect` + `removeInputOrderEntry`，两者合并为单次撤销，Ctrl+Z 可整体恢复；生成视频节点经 connectionSync 自动移除导演台对应素材块）。
 
 ---
 
@@ -146,7 +147,8 @@
   - `update:config(patch)` —— 合并写入节点 config（由 `useCanvasNodeOps.onUpdateConfig` 处理，AssetCanvas 接线）；
   - `generate(nodeId)` / `interrupt(nodeId)` / `open-history(nodeId)` / `set-as-scene(nodeId)`；
   - `open-picker(nodeId)` —— 打开资产选择器（加载图片编辑器使用）；
-  - `upload-file(nodeId, file, dest)` —— 加载节点上传文件（加载图片/音频/视频编辑器与节点 body 使用）：上传进度由 `useCanvasUpload` 管理并渲染在**节点卡片遮罩**上，成功回调 `onUpdateConfig(nodeId, { assetPath })` 写回（编辑器不自行显示进度）。
+  - `upload-file(nodeId, file, dest)` —— 加载节点上传文件（加载图片/音频/视频编辑器与节点 body 使用）：上传进度由 `useCanvasUpload` 管理并渲染在**节点卡片遮罩**上，成功回调 `onUpdateConfig(nodeId, { assetPath })` 写回（编辑器不自行显示进度）；
+  - `disconnect-input(sourceNodeId)` —— 输入缩略图红色 x 快捷断开（生成图片/生成视频/拼接视频编辑器使用，见 §4/§7）。
 - 新增编辑器时需在 `registry.ts` 为原型挂 `editorComponent`；若用到资产选择器，`AssetCanvas` 的编辑器面板接线（`CanvasEditorPanel`）需给 `@open-picker="openAssetPicker"`。
 
 ---
@@ -154,7 +156,8 @@
 ## 7. 输入图（生成图片节点编辑器）
 
 - 展示：配置面板顶部「输入图」区，每张输入图显示为**缩略图 + 「图像N」标签**（N 为顺序号，随拖拽排序变化；文件名在 title 提示）。
-- 悬浮放大：`v-tooltip location="top"` 显示放大图（最大 280px），悬浮在输入图**上方**。
+- 悬浮放大：`v-tooltip location="top"` 显示放大图（最大 280px），悬浮在输入图**上方**；tooltip 必须带 `interactive`（非交互态内容 `pointer-events: none`，鼠标悬停其上会穿透关闭、无法交互）并配 `close-delay`（宽限指针从缩略图移入内容的时间；进入后由 Vuetify open-on-hover 保持打开，视频/音频可点击播放、拖进度条）。生成视频/拼接视频的输入分组（`VideoRefInputGroup`）共用同一套悬浮预览行为。
+- 悬浮快捷断开：输入缩略图右上角悬浮显示红色 x，点击断开该输入连接（见 §4；生成视频/拼接视频分组与生成图片输入图一致）。
 - 拖拽排序：HTML5 DnD，容器 `dragover` 按鼠标水平位置计算插入下标，`--insert-left/--insert-right` 高亮插入位置；drop 后重排并 `emit('update:config', { inputOrder: [sourceNodeId...] })` 持久化。
 - 顺序生效点：`generate.ts: collectInputs / collectInputPaths` 遵循 `config.inputOrder`（未记录的节点按连接顺序排末尾）；生成节点发起生成时也会把该顺序的输入图传给 `image-edit` 工作流。
 

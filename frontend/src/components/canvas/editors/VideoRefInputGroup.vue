@@ -14,6 +14,9 @@
         v-for="(input, i) in inputs"
         :key="input.nodeId"
         location="top"
+        interactive
+        open-delay="150"
+        close-delay="350"
       >
         <template #activator="{ props: tp }">
           <div
@@ -27,10 +30,24 @@
             draggable="true"
             @dragstart="onDragStart($event, i)"
             @dragend="onDragEnd"
+            @mouseenter="hoveredId = input.nodeId"
+            @mouseleave="hoveredId = null"
           >
             <slot
               name="thumb"
               :input="input"
+            />
+            <!-- 悬浮时右上角红色 x：点击快捷断开该输入连接（不弹确认，Ctrl+Z 可恢复） -->
+            <v-btn
+              v-if="hoveredId === input.nodeId && draggingIndex !== i"
+              class="canvas-input-item__remove"
+              icon="mdi-close"
+              size="x-small"
+              density="compact"
+              color="error"
+              variant="flat"
+              :title="`断开「${labelOf(i)}」输入连接`"
+              @click.stop="emit('remove', input)"
             />
             <span
               class="canvas-input-item__label"
@@ -60,7 +77,12 @@ import type { CanvasInputInfo } from '../../../canvas/generate'
 /**
  * 参考模式输入分组：按类型（图片/视频/音频）展示参考素材并支持组内拖拽排序。
  * 缩略图与悬浮放大内容通过插槽（thumb/zoom）由父组件提供，
- * 排序结果通过 reorder 事件（新的 nodeId 顺序数组）上报。
+ * 排序结果通过 reorder 事件（新的 nodeId 顺序数组）上报；
+ * 悬浮输入项时右上角显示红色 x（remove 事件），供父级快捷断开该输入连接。
+ * 悬浮预览使用 v-tooltip 且必须带 interactive：Vuetify 非交互态 tooltip 内容
+ * pointer-events: none（鼠标悬停其上会穿透、事件不达，预览会随 close-delay 关闭且
+ * 无法点击控件）；interactive 使内容可交互——加上 close-delay 宽限（指针从缩略图
+ * 移入内容的时间）后，悬停内容可保持打开，视频/音频可点击播放。
  */
 const props = defineProps<{
   /** 组标题（如「图片」） */
@@ -76,9 +98,11 @@ const props = defineProps<{
 /**
  * 组件事件：
  * - reorder：组内拖拽排序完成，参数为新顺序的 nodeId 数组
+ * - remove：点击输入项右上角红色 x，请求断开该输入连接（参数为该输入项）
  */
 const emit = defineEmits<{
   (e: 'reorder', nodeIds: string[]): void
+  (e: 'remove', input: CanvasInputInfo): void
 }>()
 
 /** 正在拖拽的输入项下标（null 表示未在拖拽） */
@@ -87,6 +111,8 @@ const draggingIndex = ref<number | null>(null)
 const dropIndex = ref<number | null>(null)
 /** 输入列表容器 DOM（dragover 计算插入位置用） */
 const listEl = ref<HTMLElement | null>(null)
+/** 当前悬浮的输入项 nodeId（null 表示未悬浮；驱动红色 x 显隐） */
+const hoveredId = ref<string | null>(null)
 
 /**
  * 显示名：前缀 + 组内序号（如图1、图2）。
@@ -199,6 +225,20 @@ function onDrop() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 悬浮快捷断开按钮：缩略图右上角紧凑红色 x（v-btn 尺寸覆盖为小圆按钮） */
+.canvas-input-item__remove {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .canvas-input-item--dragging {

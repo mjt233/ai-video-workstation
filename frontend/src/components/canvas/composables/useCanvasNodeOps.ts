@@ -280,6 +280,27 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     store.updateNode(nodeId, { config: { ...node.config, ...patch } })
   }
 
+  /**
+   * 快捷断开某个输入：删除该来源节点到目标节点的全部连线，并清理 config.inputOrder。
+   *
+   * 由编辑器输入项右上角红色 x 触发（不弹确认，与右键「断开连接」一致）。
+   * store.disconnect 单独压撤销栈；removeInputOrderEntry 不重复入栈（结构变更已在
+   * disconnect 前快照），一次 Ctrl+Z 同时回退「连线 + inputOrder」。
+   * 生成视频节点联动：disconnect 触发 connectionSync，自动移除导演台对应素材块。
+   *
+   * @param nodeId 目标节点（生成图片/生成视频等）id
+   * @param sourceNodeId 被断开的输入来源节点 id
+   */
+  function disconnectInput(nodeId: string, sourceNodeId: string): void {
+    const incoming = store.connections.value.filter(
+      (c) => c.toNodeId === nodeId && c.fromNodeId === sourceNodeId,
+    )
+    for (const c of incoming) {
+      store.disconnect(c.id)
+    }
+    store.removeInputOrderEntry(nodeId, sourceNodeId)
+  }
+
   return {
     generateNode,
     onInterrupt,
@@ -292,5 +313,6 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     videoInputGroups,
     isUpstreamUpdated,
     onUpdateConfig,
+    disconnectInput,
   }
 }

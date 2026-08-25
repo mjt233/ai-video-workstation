@@ -27,6 +27,7 @@
         @extract="(nodeId: string) => emit('extract', nodeId)"
         @set-as-video="(nodeId: string) => emit('set-as-video', nodeId)"
         @upload-file="(payload: CanvasUploadFilePayload) => emit('upload-file', payload)"
+        @disconnect-input="(sourceNodeId: string) => emit('disconnect-input', sourceNodeId)"
       />
     </div>
   </Transition>
@@ -96,6 +97,8 @@ const emit = defineEmits<{
   (e: 'set-as-video', nodeId: string): void
   /** 加载节点上传文件（进度显示在节点卡片遮罩上） */
   (e: 'upload-file', payload: CanvasUploadFilePayload): void
+  /** 输入项右上角红色 x：请求断开该输入来源节点与当前节点的连线 */
+  (e: 'disconnect-input', sourceNodeId: string): void
 }>()
 
 /** 配置面板固定宽度（像素，屏幕坐标，不随缩放变化） */

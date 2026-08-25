@@ -20,7 +20,9 @@
         v-for="(input, i) in inputs"
         :key="input.nodeId"
         location="top"
+        interactive
         open-delay="250"
+        close-delay="350"
       >
         <template #activator="{ props: tp }">
           <div
@@ -34,6 +36,8 @@
             draggable="true"
             @dragstart="onDragStart($event, i)"
             @dragend="onDragEnd"
+            @mouseenter="hoveredId = input.nodeId"
+            @mouseleave="hoveredId = null"
           >
             <img
               class="canvas-input-item__thumb"
@@ -41,6 +45,18 @@
               :alt="input.label"
               draggable="false"
             >
+            <!-- 悬浮时右上角红色 x：点击快捷断开该输入连接（不弹确认，Ctrl+Z 可恢复） -->
+            <v-btn
+              v-if="hoveredId === input.nodeId && draggingIndex !== i"
+              class="canvas-input-item__remove"
+              icon="mdi-close"
+              size="x-small"
+              density="compact"
+              color="error"
+              variant="flat"
+              :title="`断开「图像${i + 1}」输入连接`"
+              @click.stop="emit('disconnect-input', input.nodeId)"
+            />
             <span
               class="canvas-input-item__label"
               :title="input.label"
@@ -195,6 +211,7 @@ const emit = defineEmits<{
   (e: 'interrupt', nodeId: string): void
   (e: 'open-history', nodeId: string): void
   (e: 'set-as-scene', nodeId: string): void
+  (e: 'disconnect-input', sourceNodeId: string): void
 }>()
 
 const workflows = ref<WorkflowInfo[]>([])
@@ -231,6 +248,8 @@ const draggingIndex = ref<number | null>(null)
 const dropIndex = ref<number | null>(null)
 /** 输入图列表容器 DOM */
 const listEl = ref<HTMLElement | null>(null)
+/** 当前悬浮的输入项 nodeId（null 表示未悬浮；驱动红色 x 显隐） */
+const hoveredId = ref<string | null>(null)
 
 /**
  * 拖拽开始：记录源下标并初始化插入位置。
@@ -449,6 +468,7 @@ getWorkflows()
 }
 
 .canvas-input-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -498,5 +518,19 @@ getWorkflows()
   border-radius: 6px;
   background: #fff;
   padding: 4px;
+}
+
+/* 悬浮快捷断开按钮：缩略图右上角紧凑红色 x（v-btn 尺寸覆盖为小圆按钮） */
+.canvas-input-item__remove {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 </style>

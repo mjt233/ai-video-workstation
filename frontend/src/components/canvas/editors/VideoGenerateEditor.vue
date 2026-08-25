@@ -125,6 +125,7 @@
           :inputs="imagesInputs"
           :max="flfMaxFrames"
           @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+          @remove="onRemoveInput"
         >
           <template #thumb="{ input }">
             <img
@@ -150,6 +151,7 @@
           prefix="音"
           :inputs="audiosInputs"
           @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+          @remove="onRemoveInput"
         >
           <template #thumb>
             <div class="canvas-input-item__audio">
@@ -173,6 +175,7 @@
             :inputs="imagesInputs"
             :max="refImageMax"
             @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+            @remove="onRemoveInput"
           >
             <template #thumb="{ input }">
               <img
@@ -197,6 +200,7 @@
             :inputs="videosInputs"
             :max="refVideoMax"
             @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+            @remove="onRemoveInput"
           >
             <template #thumb="{ input }">
               <video
@@ -222,6 +226,7 @@
             :inputs="audiosInputs"
             :max="refAudioMax"
             @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+            @remove="onRemoveInput"
           >
             <template #thumb>
               <div class="canvas-input-item__audio">
@@ -360,6 +365,7 @@ const props = defineProps<{
  * - set-as-scene / open-picker / extract / set-as-video：父级（AssetCanvas）对所有
  *   编辑器统一传入的监听，本组件暂不使用，但需显式声明（Teleport 根节点无法自动
  *   继承外部监听，避免「Extraneous non-emits event listeners」警告）
+ * - disconnect-input：点击输入项右上角红色 x，请求断开该输入来源节点与本节点的连线
  */
 const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
@@ -371,6 +377,7 @@ const emit = defineEmits<{
   (e: 'extract', nodeId: string): void
   (e: 'set-as-video', nodeId: string): void
   (e: 'upload-file', payload: CanvasUploadFilePayload): void
+  (e: 'disconnect-input', sourceNodeId: string): void
 }>()
 
 // ── 全屏显示 ─────────────────────────────────────────────
@@ -668,6 +675,16 @@ const inputOrder = computed<string[]>(() =>
  */
 function mergeInputOrder(orderedIds: string[]): string[] {
   return mergeGlobalInputOrder(inputOrder.value, orderedIds)
+}
+
+/**
+ * 点击输入项右上角红色 x：请求断开该输入来源节点与本节点的连线。
+ * 快捷断开不弹确认（与右键「断开连接」一致）；由父级经 store.disconnect 入撤销栈，Ctrl+Z 可恢复。
+ *
+ * @param input 被请求断开的输入项（含来源节点 id）
+ */
+function onRemoveInput(input: CanvasInputInfo): void {
+  emit('disconnect-input', input.nodeId)
 }
 
 /** 当前输出时长（秒）：导演台存 config.director.duration；首尾帧/参考存 config.duration，缺省 5 */

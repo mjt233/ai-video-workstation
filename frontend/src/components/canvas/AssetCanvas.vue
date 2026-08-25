@@ -103,6 +103,7 @@
           @extract="extractNodeFrame"
           @set-as-video="openSetAsShotVideo"
           @upload-file="onUploadFile"
+          @disconnect-input="disconnectEditorInput"
         />
 
         <!-- 右键菜单（节点 + 连线） -->
@@ -499,11 +500,24 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 // 组合式导出解构（模板绑定用）
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, suppressEditor, suppressPanelOnSelect, onEdgeClick, onNodeDragStart } = selection
-const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig } = nodeOps
+const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
+
+/**
+ * 编辑器输入项右上角红色 x：快捷断开当前选中节点与某来源节点的连线（不弹确认）。
+ * 具体断开与 inputOrder 清理在 nodeOps.disconnectInput（store.disconnect 已入撤销栈，
+ * Ctrl+Z 可恢复）；无选中节点时忽略。
+ *
+ * @param sourceNodeId 被断开的输入来源节点 id（编辑器已按输入分组透传）
+ */
+function disconnectEditorInput(sourceNodeId: string): void {
+  const id = editorPanel.value?.node?.id
+  if (!id) return
+  disconnectInput(id, sourceNodeId)
+}
 
 /** 配置面板可见性：选中且未被拖拽/程序化选中抑制 */
 const editorPanelVisible = computed(

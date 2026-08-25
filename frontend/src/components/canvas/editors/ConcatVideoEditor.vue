@@ -10,6 +10,7 @@
       prefix="视"
       :inputs="videosInputs"
       @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
+      @remove="onRemoveInput"
     >
       <template #thumb="{ input }">
         <video
@@ -97,10 +98,12 @@ const props = defineProps<{
  * 组件事件：
  * - update:config：配置补丁（直接写回节点 config）
  * - generate：触发拼接（参数为节点 id；复用父级 @generate，由 generateNode 按原型路由）
+ * - disconnect-input：点击输入项右上角红色 x，请求断开该输入来源节点与本节点的连线
  */
 const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
   (e: 'generate', nodeId: string): void
+  (e: 'disconnect-input', sourceNodeId: string): void
 }>()
 
 /** 全部视频输入的预览 URL（nodeId → URL；输入或项目变化时重建） */
@@ -132,6 +135,16 @@ const currentVideo = computed(() => {
 function mergeInputOrder(orderedIds: string[]): string[] {
   const inputOrder = Array.isArray(props.node.config.inputOrder) ? (props.node.config.inputOrder as string[]) : []
   return mergeGlobalInputOrder(inputOrder, orderedIds)
+}
+
+/**
+ * 点击输入项右上角红色 x：请求断开该输入来源节点与本节点的连线。
+ * 快捷断开不弹确认（与右键「断开连接」一致）；由父级经 store.disconnect 入撤销栈，Ctrl+Z 可恢复。
+ *
+ * @param input 被请求断开的输入项（含来源节点 id）
+ */
+function onRemoveInput(input: CanvasInputInfo): void {
+  emit('disconnect-input', input.nodeId)
 }
 </script>
 

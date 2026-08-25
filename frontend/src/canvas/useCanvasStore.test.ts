@@ -253,4 +253,50 @@ describe('useCanvasStore', () => {
     store.updateDirectorAudioClipDuration(img.id, 'aud1', 5)
     expect(store.nodes.value).toHaveLength(1)
   })
+
+  it('removeInputOrderEntry：从 inputOrder 移除指定来源 id 并置脏', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 0, 0)
+    store.updateNode(b.id, { config: { inputOrder: [a.id, 'other'] } })
+    store.removeInputOrderEntry(b.id, a.id)
+    expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toEqual(['other'])
+    expect(store.dirty.value).toBe(true)
+  })
+
+  it('removeInputOrderEntry：无 inputOrder / 不含该 id 时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 0, 0)
+    store.removeInputOrderEntry(b.id, a.id)
+    expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toBeUndefined()
+    store.updateNode(b.id, { config: { inputOrder: ['x'] } })
+    store.removeInputOrderEntry(b.id, a.id)
+    expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toEqual(['x'])
+    store.removeInputOrderEntry('missing', a.id)
+    expect(store.dirty.value).toBe(true)
+  })
+
+  it('removeInputOrderEntry：节点不存在时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.removeInputOrderEntry('ghost', 'src')
+    expect(store.nodes.value).toHaveLength(0)
+  })
+
+  it('disconnect + removeInputOrderEntry：单次撤销同时回退连线与 inputOrder', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 0, 0)
+    store.updateNode(b.id, { config: { inputOrder: [a.id] } })
+    expect(store.connect(a.id, b.id)).toBe(true)
+    // 快捷断开链路的两个动作：断开连线 + 清理 inputOrder（后者不重复压撤销栈）
+    store.disconnect(store.connections.value[0].id)
+    store.removeInputOrderEntry(b.id, a.id)
+    expect(store.connections.value).toHaveLength(0)
+    expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toEqual([])
+    // 一次撤销同时恢复连线与 inputOrder
+    store.undo()
+    expect(store.connections.value).toHaveLength(1)
+    expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toEqual([a.id])
+  })
 })
