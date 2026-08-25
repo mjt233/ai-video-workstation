@@ -441,7 +441,12 @@ const nodeOps = useCanvasNodeOps({
 /** 加载节点上传组合式：节点级上传进度状态（上传进度/失败遮罩由节点卡片渲染） */
 const upload = useCanvasUpload({
   project: props.project,
-  onSuccess: (nodeId, path) => onUpdateConfig(nodeId, { assetPath: path }),
+  onSuccess: (nodeId, path) => {
+    onUpdateConfig(nodeId, { assetPath: path })
+    // 上传落盘后刷新该节点产物信息（mtime）：输入预览 URL 以源资产 mtime 作缓存键，
+    // 同路径覆盖上传（文件名不变）时若不复刷 mtime，下游编辑器会命中旧的缓存 URL
+    void refreshNodeOutput(nodeId)
+  },
   showSnackbar,
 })
 

@@ -321,6 +321,7 @@ frontend/src/
 - **产物固定文件名**：节点产物统一 `output.{ext}`（原型 `outputExt`），**勿再引入版本号文件名**；历史由服务端 history 目录管理，前端不要读写 `config.current`/`config.history`（旧字段仅兼容读取）。
 - **节点展示用 `output` prop**：AssetCanvas 按固定路径 + node-info mtime 推导并下发给节点主体/编辑器（`outputOf`）；组件内优先 `props.output`，`config.current` 仅作旧数据回落。
 - **预览 watch 需同时监听 path 与 token**：固定路径产物每次重新生成路径不变，预览 URL 只由 token（产物 mtime）区分；节点主体若只 `watch(currentPath)`，新产物覆盖后不会刷新 URL、浏览器命中旧缓存——必须 `watch([currentPath, currentToken])`（实测踩坑，4 个节点主体均已按此实现）。
+- **输入预览 URL 必须以源资产 mtime 作缓存键**：编辑器内对连接输入（图片/视频/音频）构建预览 URL 时，必须 `buildPreviewUrl(project, path, version)`——`version` 为来源节点的产物 mtime（`useCanvasNodeOps` 的 `withVersions` 已把 mtime 附到 `CanvasInputInfo.version`）。**不要漏传 version**：漏传时 `buildPreviewUrl` 回退 `?t=Date.now()`，每次配置修改（如编辑提示词）引发的重渲染都会重建缓存键，浏览器会把全部输入媒体当作新资源重新下载（浪费带宽），且 `<img>/<video>/<audio>` 因 src 变化被重建导致配置组件闪烁。
 - **配置双向同步**：editor 内 `config.workflowParams ↔ 本地 ref` 双 watch 必须加 JSON 相等性守卫，否则无限循环。
 - **`readFs` 对 `.json` 返回反序列化对象**：加载 `canvas.json` 需同时兼容 string 与 object 两种形态。
 - **eslint computed 副作用**：`vue/no-side-effects-in-computed-properties` 禁止在 computed 内写缓存/状态，改用 `watch`。

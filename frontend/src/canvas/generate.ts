@@ -18,6 +18,13 @@ export interface CanvasInputInfo {
   path: string
   /** 展示名（文件名） */
   label: string
+  /**
+   * 源资产版本号（来源节点产物的 mtime；也用于预览 URL 缓存键）。
+   * 仅当源资产实际变化（mtime 更新）时预览 URL 才变化，从而避免编辑器
+   * 因配置修改等无关重渲染高频重建 Date.now() 缓存键导致图片/视频/音频反复重新加载。
+   * 无 mtime 信息（如加载中/来源无产物）时为 undefined。
+   */
+  version?: number
 }
 
 /**

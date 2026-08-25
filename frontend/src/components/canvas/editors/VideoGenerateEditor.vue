@@ -600,7 +600,9 @@ watch(mode, (m) => {
 /** 全部输入的预览 URL（nodeId → URL；输入或项目变化时重建） */
 const previewUrls = computed<Record<string, string>>(() => {
   const m: Record<string, string> = {}
-  for (const inp of props.inputs) m[inp.nodeId] = buildPreviewUrl(props.project, inp.path)
+  // 用源资产 mtime 作缓存键：只有源资产实际变化才刷新 URL，避免配置修改等
+  // 重渲染每次重建 Date.now() 缓存键导致图片/视频/音频反复重新加载（浪费带宽+闪烁）
+  for (const inp of props.inputs) m[inp.nodeId] = buildPreviewUrl(props.project, inp.path, inp.version)
   return m
 })
 

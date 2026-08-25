@@ -191,10 +191,25 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     return gen.statusByNode.value[nodeId]?.status === 'running'
   }
 
+  /**
+   * 给收集到的输入资产信息附上来源节点产物的版本号（mtime）。
+   *
+   * 用途：输入预览 URL 的缓存键。只把「来源资产实际变化（mtime 更新）」作为刷新信号，
+   * 否则编辑器因配置修改等重渲染时每次用 new Date.now() 作缓存键，会把所有输入图片/
+   * 视频/音频当作新资源反复下载（浪费带宽 + 配置组件闪烁）。无 mtime 时保持 undefined。
+   *
+   * @param list 收集到的输入资产信息
+   * @returns 附带版本号的输入资产信息（原对象不可变，返回新引用）
+   */
+  function withVersions(list: CanvasInputInfo[]): CanvasInputInfo[] {
+    if (!getOutputMtime) return list
+    return list.map((i) => ({ ...i, version: getOutputMtime(i.nodeId) ?? undefined }))
+  }
+
   /** 节点当前输入资产信息（含来源节点，供编辑器预览/拖拽排序；生成类来源按固定产物路径推导） */
   function inputsOf(nodeId: string): CanvasInputInfo[] {
     const node = nodeMap.value[nodeId]
-    return collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope())
+    return withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope()))
   }
 
   /**
@@ -209,7 +224,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
    */
   function videoInputsOf(nodeId: string, type: 'image' | 'video' | 'audio'): CanvasInputInfo[] {
     const node = nodeMap.value[nodeId]
-    const all = collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope())
+    const all = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope()))
     return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === type)
   }
 
