@@ -28,9 +28,10 @@ describe('buildContextLib', () => {
     expect(lib).not.toContain('TtsVoiceDesignParams')
   })
 
-  it('ctx 含 readFileToBase64 与 userConfig（无字段时宽松索引签名）', () => {
+  it('ctx 含 readFileToBase64 / readFileAsBase64Object 与 userConfig（无字段时宽松索引签名）', () => {
     const lib = buildContextLib([])
     expect(lib).toContain('readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>')
+    expect(lib).toContain('readFileAsBase64Object?(relPath: string): Promise<{ mimeType: string; data: string }>')
     expect(lib).toContain('workflowType?: CustomWorkflowTypeId')
     expect(lib).toContain('userConfig: CustomUserConfig')
     expect(lib).toContain('type CustomUserConfig = Record<string, boolean | number | string>')

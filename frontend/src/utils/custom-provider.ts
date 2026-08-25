@@ -398,6 +398,8 @@ export function buildContextLib(
     '  readAssertFile?(relPath: string): Promise<File>',
     '  /** 读取项目内任意文件并转为 Base64；withDataPrefix 为 true 时自动添加 data:<mime>;base64, 前缀（MIME 按扩展名推断） */',
     '  readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>',
+    '  /** 读取项目内任意文件并转为 { mimeType, data }（data 为不带 data: 前缀的纯 Base64，可直接填入 Gemini inlineData） */',
+    '  readFileAsBase64Object?(relPath: string): Promise<{ mimeType: string; data: string }>',
     '  /** 本次调用的工作流类型（系统支持的类型之一） */',
     '  workflowType?: CustomWorkflowTypeId',
     '  /** 用户配置字段值（按声明类型自动提示；未填写时用声明默认值） */',

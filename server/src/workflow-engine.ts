@@ -63,6 +63,20 @@ export function toBase64Output(base64: string, filename: string, withDataPrefix:
   return 'data:' + mimeTypeForFile(filename) + ';base64,' + base64;
 }
 
+/**
+ * 把 Base64 内容组装为 `{ mimeType, data }` 结构体。
+ *
+ * MIME 按文件扩展名推断（未知扩展名默认 image/jpeg）；
+ * `data` 始终为不带 `data:` 前缀的纯 Base64，可直接填入 Gemini inlineData。
+ *
+ * @param base64 Base64 内容
+ * @param filename 文件名（推断 MIME 用）
+ * @returns `{ mimeType, data }` 结构体
+ */
+export function toBase64Object(base64: string, filename: string): { mimeType: string; data: string } {
+  return { mimeType: mimeTypeForFile(filename), data: base64 };
+}
+
 async function loadProjectConfig(project: string): Promise<ProjectConfig> {
   const configPath = path.resolve(DESIGN_DIR, project, 'project.json');
   try {
@@ -727,6 +741,24 @@ export async function runTask(taskId: string): Promise<void> {
     return toBase64Output(buf.toString('base64'), path.basename(full), withDataPrefix === true);
   };
 
+  /**
+   * 读取项目内任意文件并转为 `{ mimeType, data }` 结构体。
+   *
+   * `data` 为不带 `data:` 前缀的纯 Base64（MIME 按扩展名推断），可直接填入 Gemini inlineData。
+   * 路径相对 design/{project}/；越界（路径穿越）时抛错。
+   *
+   * @param relPath 项目内相对路径
+   * @returns `{ mimeType, data }` 结构体
+   */
+  const readFileAsBase64Object = async (relPath: string): Promise<{ mimeType: string; data: string }> => {
+    const full = path.resolve(DESIGN_DIR, task.project, relPath);
+    if (!full.startsWith(projectRoot)) {
+      throw new Error(`Path traversal denied: ${relPath}`);
+    }
+    const buf = await fs.readFile(full);
+    return toBase64Object(buf.toString('base64'), path.basename(full));
+  };
+
   try {
     db.addLog(taskId, 'info', `Starting workflow: ${wf.name} (impl: ${wf.impl})`);
     db.updateTaskStatus(taskId, 'running');
@@ -859,6 +891,7 @@ export async function runTask(taskId: string): Promise<void> {
       readFile,
       readAssertFile,
       readFileToBase64,
+      readFileAsBase64Object,
     };
 
     // Step 1: Submit

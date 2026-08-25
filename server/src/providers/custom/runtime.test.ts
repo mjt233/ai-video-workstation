@@ -96,6 +96,7 @@ describe('buildWorkflowCallContext', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: 1 }), { status: 200, headers: { 'content-type': 'application/json' } })));
     const readFileToBase64 = async (p: string, withDataPrefix?: boolean) =>
       (withDataPrefix ? 'data:image/png;base64,' : '') + 'base64:' + p;
+    const readFileAsBase64Object = async (p: string) => ({ mimeType: 'image/png', data: 'obj:' + p });
     const ctx = buildWorkflowCallContext({
       providerConfig: { baseUrl: 'https://example.com', apiKey: 'sk-x' },
       params: { prompt: 'hello' },
@@ -103,6 +104,7 @@ describe('buildWorkflowCallContext', () => {
       readFile: async (p) => 'content:' + p,
       readAssertFile: async (p) => new File([new Uint8Array([1])], p),
       readFileToBase64,
+      readFileAsBase64Object,
       workflowType: 'text-to-image',
       userConfig: { model: 'gpt-image-2', steps: 20, enhance: true },
     });
@@ -113,6 +115,8 @@ describe('buildWorkflowCallContext', () => {
     expect(ctx.readFileToBase64).toBe(readFileToBase64);
     expect(await ctx.readFileToBase64?.('assert/a.png')).toBe('base64:assert/a.png');
     expect(await ctx.readFileToBase64?.('assert/a.png', true)).toBe('data:image/png;base64,base64:assert/a.png');
+    expect(ctx.readFileAsBase64Object).toBe(readFileAsBase64Object);
+    expect(await ctx.readFileAsBase64Object?.('assert/a.png')).toEqual({ mimeType: 'image/png', data: 'obj:assert/a.png' });
     expect(ctx.workflowType).toBe('text-to-image');
     expect(ctx.userConfig).toEqual({ model: 'gpt-image-2', steps: 20, enhance: true });
     const res = await ctx.request({ url: 'https://example.com/t' });
@@ -121,10 +125,11 @@ describe('buildWorkflowCallContext', () => {
 });
 
 describe('buildWorkflowCallContext 缺省值', () => {
-  it('未传 userConfig / readFileToBase64 时分别回退空对象与 undefined', () => {
+  it('未传 userConfig / readFileToBase64 / readFileAsBase64Object 时分别回退空对象与 undefined', () => {
     const ctx = buildWorkflowCallContext({ providerConfig: {}, params: {} });
     expect(ctx.userConfig).toEqual({});
     expect(ctx.readFileToBase64).toBeUndefined();
+    expect(ctx.readFileAsBase64Object).toBeUndefined();
   });
 });
 

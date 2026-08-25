@@ -67,7 +67,8 @@ const taskStates = new Map<string, CustomTaskState>();
  *
  * 相比 ProviderClient.execute 额外携带项目配置、读文件回调、
  * 用户配置字段值与 Base64 读取回调，分别注入 ctx.projectConfig /
- * ctx.readFile / ctx.readAssertFile / ctx.readFileToBase64 / ctx.userConfig。
+ * ctx.readFile / ctx.readAssertFile / ctx.readFileToBase64 /
+ * ctx.readFileAsBase64Object / ctx.userConfig。
  */
 export interface CustomExecuteParams {
   /** 工作流名称（与工作流配置条目 name 一致，作为 workflowId） */
@@ -86,6 +87,8 @@ export interface CustomExecuteParams {
   readAssertFile?: (relPath: string) => Promise<File>;
   /** 读取项目内文件为 Base64（注入 ctx.readFileToBase64；withDataPrefix 控制是否加 data: 前缀） */
   readFileToBase64?: (relPath: string, withDataPrefix?: boolean) => Promise<string>;
+  /** 读取项目内文件为 `{ mimeType, data }`（注入 ctx.readFileAsBase64Object） */
+  readFileAsBase64Object?: (relPath: string) => Promise<{ mimeType: string; data: string }>;
   /** 本次调用的工作流类型（注入 ctx.workflowType，系统支持的类型之一） */
   workflowType?: WorkflowTypeId;
   /** 用户配置字段值（注入 ctx.userConfig；由同步器按声明类型转换） */
@@ -165,6 +168,7 @@ export function createCustomProviderClient(config: ResolvedProviderConfig): Cust
         readFile: p.readFile,
         readAssertFile: p.readAssertFile,
         readFileToBase64: p.readFileToBase64,
+        readFileAsBase64Object: p.readFileAsBase64Object,
         workflowType: p.workflowType,
         userConfig: p.userConfig ?? {},
       });

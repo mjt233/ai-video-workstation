@@ -89,6 +89,13 @@ export interface WorkflowCallContext {
   readAssertFile?(relPath: string): Promise<File>;
   /** 读取项目内任意文件并转为 Base64 字符串；withDataPrefix 为 true 时自动添加 data:<mime>;base64, 前缀（MIME 按扩展名推断）；未注入时为 undefined */
   readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>;
+  /**
+   * 读取项目内任意文件并转为 `{ mimeType, data }` 结构体。
+   *
+   * `data` 为不带 `data:` 前缀的纯 Base64（MIME 按扩展名推断），可直接填入 Gemini inlineData；
+   * 未注入时为 undefined。
+   */
+  readFileAsBase64Object?(relPath: string): Promise<{ mimeType: string; data: string }>;
   /** 本次调用的工作流类型（系统支持的类型之一）；测试连接等非工作流场景不存在 */
   workflowType?: WorkflowTypeId;
   /** 用户配置字段值（按声明类型转换为原生值；未填写时用声明默认值） */
@@ -378,6 +385,8 @@ export interface WorkflowCallContextDeps {
   readAssertFile?: (relPath: string) => Promise<File>;
   /** 读取项目内文件为 Base64（可选，注入 ctx.readFileToBase64） */
   readFileToBase64?: (relPath: string, withDataPrefix?: boolean) => Promise<string>;
+  /** 读取项目内文件为 `{ mimeType, data }`（可选，注入 ctx.readFileAsBase64Object） */
+  readFileAsBase64Object?: (relPath: string) => Promise<{ mimeType: string; data: string }>;
   /** 本次调用的工作流类型（可选，注入 ctx.workflowType） */
   workflowType?: WorkflowTypeId;
   /** 用户配置字段值（可选，注入 ctx.userConfig；缺省空对象） */
@@ -405,6 +414,7 @@ export function buildWorkflowCallContext(deps: WorkflowCallContextDeps): Workflo
     readFile: deps.readFile,
     readAssertFile: deps.readAssertFile,
     readFileToBase64: deps.readFileToBase64,
+    readFileAsBase64Object: deps.readFileAsBase64Object,
     workflowType: deps.workflowType,
     userConfig: deps.userConfig ?? {},
     request: (conf: WorkflowCallRequestConfig) => performCustomRequest(conf, requestTimeoutMs),

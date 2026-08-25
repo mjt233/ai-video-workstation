@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mimeTypeForFile, runTask, toBase64Output } from './workflow-engine.js';
+import { mimeTypeForFile, runTask, toBase64Object, toBase64Output } from './workflow-engine.js';
 import type { TaskRecord } from './db.js';
 import type { WorkflowDefinition } from './workflows/types.js';
 import type { ProviderInstance } from './providers/types.js';
@@ -164,7 +164,7 @@ describe('runTask provider 解析（按实例）', () => {
   });
 });
 
-describe('mimeTypeForFile / toBase64Output', () => {
+describe('mimeTypeForFile / toBase64Output / toBase64Object', () => {
   it('按扩展名推断 MIME 类型，未知扩展名默认 image/jpeg', () => {
     expect(mimeTypeForFile('a.png')).toBe('image/png');
     expect(mimeTypeForFile('a.webp')).toBe('image/webp');
@@ -178,5 +178,11 @@ describe('mimeTypeForFile / toBase64Output', () => {
     expect(toBase64Output('QUJD', 'a.png', false)).toBe('QUJD');
     expect(toBase64Output('QUJD', 'a.png', true)).toBe('data:image/png;base64,QUJD');
     expect(toBase64Output('QUJD', 'a.mp4', true)).toBe('data:video/mp4;base64,QUJD');
+  });
+
+  it('toBase64Object 返回 { mimeType, data }（data 为不带 data: 前缀的纯 Base64）', () => {
+    expect(toBase64Object('QUJD', 'a.png')).toEqual({ mimeType: 'image/png', data: 'QUJD' });
+    expect(toBase64Object('QUJD', 'a.mp4')).toEqual({ mimeType: 'video/mp4', data: 'QUJD' });
+    expect(toBase64Object('QUJD', 'a.bin')).toEqual({ mimeType: 'image/jpeg', data: 'QUJD' });
   });
 });

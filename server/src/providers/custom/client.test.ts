@@ -125,13 +125,14 @@ describe('CustomProviderClient 同步工作流', () => {
     await expect(client.execute({ workflowId: 'no-such', params: {} })).rejects.toThrow(/未配置或已删除/);
   });
 
-  it('execute 透传 userConfig 与 readFileToBase64 到 ctx（调用发起代码可读取）', async () => {
-    // 调用发起代码把 ctx.userConfig 与 ctx.readFileToBase64 的结果放进请求体，
-    // 通过 fetch mock 断言用户配置字段确实注入 ctx
+  it('execute 透传 userConfig 与 Base64 读取回调到 ctx（调用发起代码可读取）', async () => {
+    // 调用发起代码把 ctx.userConfig / readFileToBase64 / readFileAsBase64Object
+    // 的结果放进请求体，通过 fetch mock 断言用户配置字段确实注入 ctx
     const callCode = [
       'export default async function(ctx: any) {',
       '  const b64 = await ctx.readFileToBase64("assert/a.png")',
       '  const b64Data = await ctx.readFileToBase64("assert/a.png", true)',
+      '  const b64Obj = await ctx.readFileAsBase64Object("assert/a.png")',
       '  return {',
       '    url: "https://example.com/run",',
       '    data: {',
@@ -141,7 +142,8 @@ describe('CustomProviderClient 同步工作流', () => {
       '      missing: ctx.userConfig.missing,',
       '      workflowType: ctx.workflowType,',
       '      b64,',
-      '      b64Data',
+      '      b64Data,',
+      '      b64Obj',
       '    }',
       '  }',
       '}',
@@ -174,6 +176,7 @@ describe('CustomProviderClient 同步工作流', () => {
       userConfig: { model: 'gpt-image-2', steps: 20, enhance: true },
       readFileToBase64: async (p: string, withDataPrefix?: boolean) =>
         (withDataPrefix ? 'data:image/png;base64,' : '') + 'b64:' + p,
+      readFileAsBase64Object: async (p: string) => ({ mimeType: 'image/png', data: 'obj:' + p }),
     });
     expect(requestBody).toEqual({
       model: 'gpt-image-2',
@@ -183,6 +186,7 @@ describe('CustomProviderClient 同步工作流', () => {
       workflowType: 'text-to-image',
       b64: 'b64:assert/a.png',
       b64Data: 'data:image/png;base64,b64:assert/a.png',
+      b64Obj: { mimeType: 'image/png', data: 'obj:assert/a.png' },
     });
   });
 });

@@ -256,6 +256,7 @@ function buildSubmit(entry: CustomWorkflowEntry, type: CustomWorkflowType): Work
       readFile: ctx.readFile,
       readAssertFile: ctx.readAssertFile,
       readFileToBase64: ctx.readFileToBase64,
+      readFileAsBase64Object: ctx.readFileAsBase64Object,
       workflowType: type,
       userConfig: buildUserConfig(entry, ctx),
     });

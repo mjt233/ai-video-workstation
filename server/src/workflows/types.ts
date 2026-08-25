@@ -112,6 +112,13 @@ export interface WorkflowRunContext<TVars extends WorkflowVarsBase = WorkflowVar
   readAssertFile(relPath: string): Promise<File>;
   /** 读取项目内任意文件并转为 Base64 字符串；withDataPrefix 为 true 时自动添加 data:<mime>;base64, 前缀（MIME 按扩展名推断）；引擎未注入时为 undefined */
   readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>;
+  /**
+   * 读取项目内任意文件并转为 `{ mimeType, data }` 结构体。
+   *
+   * `data` 为不带 `data:` 前缀的纯 Base64（MIME 按扩展名推断），可直接填入 Gemini inlineData；
+   * 引擎未注入时为 undefined。
+   */
+  readFileAsBase64Object?(relPath: string): Promise<{ mimeType: string; data: string }>;
 }
 
 /** 工作流用户可手动传入的参数类型 */

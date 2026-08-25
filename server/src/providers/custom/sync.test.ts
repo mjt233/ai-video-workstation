@@ -69,7 +69,7 @@ describe('syncCustomInstance', () => {
     ]);
   });
 
-  it('submit 组装 userConfig（默认值回退 + 按类型转换）并透传 readFileToBase64', async () => {
+  it('submit 组装 userConfig（默认值回退 + 按类型转换）并透传 Base64 读取回调', async () => {
     await syncCustomInstance(makeInstance([entry('wf-uc2', ['text-to-image'], {
       userConfigFields: [
         { key: 'model', name: '模型', type: 'string', defaultValue: 'gpt-image-2' },
@@ -84,16 +84,19 @@ describe('syncCustomInstance', () => {
       workflowType?: string;
       userConfig?: Record<string, boolean | number | string>;
       readFileToBase64?: (p: string, withDataPrefix?: boolean) => Promise<string>;
+      readFileAsBase64Object?: (p: string) => Promise<{ mimeType: string; data: string }>;
     }) => ({ taskId: 'task-1' }));
     const fakeProvider = { execute } as unknown as CustomProviderClient;
     const readFileToBase64 = async (p: string, withDataPrefix?: boolean) =>
       (withDataPrefix ? 'data:image/png;base64,' : '') + 'b64:' + p;
+    const readFileAsBase64Object = async (p: string) => ({ mimeType: 'image/png', data: 'obj:' + p });
     const ctx = {
       vars: { promptPath: 'prompt/a.md', model: 'gpt-4o', steps: '30' },
       projectConfig: { width: 1080, height: 1920, fps: 24 },
       readFile: async (p: string) => '提示词:' + p,
       readAssertFile: async () => new File([], 'x.png'),
       readFileToBase64,
+      readFileAsBase64Object,
       provider: fakeProvider,
     } as never;
     await impl!.submit(ctx);
@@ -102,12 +105,14 @@ describe('syncCustomInstance', () => {
       workflowType?: string;
       userConfig?: Record<string, unknown>;
       readFileToBase64?: (p: string, withDataPrefix?: boolean) => Promise<string>;
+      readFileAsBase64Object?: (p: string) => Promise<{ mimeType: string; data: string }>;
     };
     // vars 有值优先；enhance 未填写回退默认值 false；steps 字符串转数字
     expect(arg.workflowType).toBe('text-to-image');
     expect(arg.userConfig).toEqual({ model: 'gpt-4o', steps: 30, enhance: false });
     expect(await arg.readFileToBase64?.('assert/a.png')).toBe('b64:assert/a.png');
     expect(await arg.readFileToBase64?.('assert/a.png', true)).toBe('data:image/png;base64,b64:assert/a.png');
+    expect(await arg.readFileAsBase64Object?.('assert/a.png')).toEqual({ mimeType: 'image/png', data: 'obj:assert/a.png' });
   });
 
   it('生图/生视频类型注册尺寸能力（未配置条目 = 默认全量），TTS 类型不声明', async () => {
