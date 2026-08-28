@@ -27,6 +27,14 @@ export interface BridgeWorkflowDetail {
   tags: BridgeTagGroup[];
 }
 
+/** Bridge 参数下拉候选项（远端 wire 原始结构；label 为展示名，value 为提交值，映射时缺省项容错） */
+export interface BridgeCandidate {
+  /** 选项展示名（表单中可见文本）；缺省/为空时工作站回退为 value */
+  label?: string | null;
+  /** 选项提交值（实际提交到执行接口的值）；缺省/为空时该候选项被忽略 */
+  value?: string | null;
+}
+
 /** 详情接口 declaredParams 元素 */
 export interface BridgeDeclaredParam {
   alias: string;
@@ -34,6 +42,16 @@ export interface BridgeDeclaredParam {
   paramType: 'text' | 'number' | 'boolean' | 'image' | 'video' | 'audio';
   defaultValue?: string | null;
   nodeRawValue?: string
+  /**
+   * 下拉候选项数组（元素为 { label: 展示名, value: 提交值 }）；
+   * 仅 paramType = "text" 的字段生效，空数组/缺省表示未配置（按普通文本框渲染）
+   */
+  candidates?: BridgeCandidate[];
+  /**
+   * 是否多选（仅 text 且配置了候选项时为 true）；多选时各候选项 value
+   * 以英文逗号 "," 拼接为一个字符串提交
+   */
+  multiple?: boolean;
 }
 
 /** Bridge 标签分组（父/子嵌套；metadata 为合并默认值后的完整元数据） */

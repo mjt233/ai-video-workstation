@@ -179,6 +179,10 @@ async function buildCustomParams(
 /**
  * 把条目的用户配置字段声明转为工作流用户参数声明（前端运行表单据此渲染）。
  *
+ * 下拉候选项（仅 string 类型字段存在）映射为 candidates；multiple 仅在配置了
+ * 候选项且为 true 时携带；allowCustom 仅在配置了候选项且显式为 false 时携带
+ * （未声明默认允许自由输入，与运行表单的默认行为一致）。
+ *
  * @param entry 工作流条目
  * @returns 用户参数声明列表
  */
@@ -190,6 +194,14 @@ function toUserParamDeclarations(entry: CustomWorkflowEntry): WorkflowUserParamD
     // 默认值按声明类型转为原生值（boolean 开关 / number 输入框需要，避免字符串默认值导致 UI 异常）
     defaultValue: coerceDefaultValue(f.type, f.defaultValue),
     ...(f.description !== undefined ? { description: f.description } : {}),
+    ...(f.options?.length
+      ? {
+          // 下拉候选项：label 展示 / value 提交
+          candidates: f.options.map((o) => ({ label: o.label, value: o.value })),
+          ...(f.multiple ? { multiple: true } : {}),
+          ...(f.allowCustom === false ? { allowCustom: false } : {}),
+        }
+      : {}),
   }));
 }
 

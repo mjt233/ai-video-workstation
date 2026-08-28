@@ -6,8 +6,20 @@ export type WorkflowUserParamType = 'boolean' | 'integer' | 'float' | 'string'
 /** 工作流用户参数的值类型（表单提交时保持原生类型） */
 export type WorkflowUserParamValue = boolean | number | string
 
+/** 下拉候选项（label 用于界面展示，value 为实际提交值） */
+export interface WorkflowUserParamCandidate {
+  /** 选项展示名（表单中可见文本）；缺省时回退为 value */
+  label: string
+  /** 选项提交值（写入 vars / 传给工作流的实际值） */
+  value: string
+}
+
 /**
  * 工作流用户参数声明（注册工作流时声明，前端据此渲染输入表单）。
+ *
+ * 下拉候选项仅对 string 类型生效：candidates 非空时表单渲染下拉控件，
+ * multiple 声明单选/多选（多选时各选中项 value 以英文逗号 "," 拼接为一个字符串提交），
+ * allowCustom 声明是否允许自由输入候选项之外的值（未声明默认允许）。
  */
 export interface WorkflowUserParamDeclaration {
   /** 参数名称（供阅读），如 "图片宽度" */
@@ -16,10 +28,16 @@ export interface WorkflowUserParamDeclaration {
   key: string
   /** 参数类型：boolean / integer / float / string */
   type: WorkflowUserParamType
-  /** 默认值（表单初始值）；空字符串表示"不传"，由工作流/项目配置决定 */
+  /** 默认值（表单初始值）；空字符串表示"不传"，由工作流/项目配置决定；多选字段可为逗号拼接串（如 "a,b"） */
   defaultValue: WorkflowUserParamValue
   /** 可选说明文案（表单 hint） */
   description?: string
+  /** 下拉候选项（仅 string 类型生效；非空时表单渲染下拉控件，空/缺省按普通文本框渲染） */
+  candidates?: WorkflowUserParamCandidate[]
+  /** 是否多选（仅配置了候选项时生效）；true 时各选中项 value 以英文逗号 "," 拼接为一个字符串提交 */
+  multiple?: boolean
+  /** 是否允许自由输入候选项之外的值（仅配置了候选项时生效）；未声明默认允许，显式 false 时为严格下拉 */
+  allowCustom?: boolean
 }
 
 /**

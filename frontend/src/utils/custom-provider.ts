@@ -6,6 +6,7 @@
  * 以及按工作流类型组合的 ctx.params 类型提示。
  */
 import { FALLBACK_WORKFLOW_TYPES, normalizeWorkflowType } from './workflow-types'
+import { normalizeCandidates } from './userParamOptions'
 
 /** 通用代码块默认模板（新增自定义服务商时的起始代码） */
 export const COMMON_CODE_TEMPLATE = [
@@ -137,11 +138,23 @@ export interface CustomWorkflowSizeConfigDef {
   supportCustomSize: boolean
 }
 
+/** 用户配置字段下拉候选项（label 为展示名，value 为提交值；label 缺省时回退为 value） */
+export interface UserConfigFieldOption {
+  /** 选项展示名（运行表单中可见文本） */
+  label: string
+  /** 选项提交值（写入 ctx.userConfig 的实际值） */
+  value: string
+}
+
 /**
  * 用户配置字段声明（工作流条目内配置）。
  *
  * 运行工作流时前端按声明渲染输入表单；代码编辑器中按声明生成
  * ctx.userConfig 的类型提示（boolean → boolean，integer/float → number，string → string）。
+ *
+ * 下拉候选项仅对 string 类型生效：options 非空时运行表单渲染下拉控件，
+ * multiple 声明单选/多选（多选时各选中项 value 以英文逗号 "," 拼接为一个字符串提交），
+ * allowCustom 声明是否允许自由输入候选项之外的值（未声明默认允许）。
  */
 export interface UserConfigFieldDef {
   /** 字段 key（条目内唯一；ctx.userConfig 的键名） */
@@ -150,10 +163,16 @@ export interface UserConfigFieldDef {
   name: string
   /** 字段类型 */
   type: UserConfigFieldType
-  /** 默认值（字符串形式） */
+  /** 默认值（字符串形式；多选字段可为逗号拼接串，如 "a,b"） */
   defaultValue: string
   /** 可选说明文案（表单 hint） */
   description?: string
+  /** 下拉候选项（仅 string 类型生效；非空时运行表单渲染下拉控件，空/缺省按普通文本框渲染） */
+  options?: UserConfigFieldOption[]
+  /** 是否多选（仅配置了候选项时生效）；true 时各选中项 value 以英文逗号 "," 拼接为一个字符串提交 */
+  multiple?: boolean
+  /** 是否允许自由输入候选项之外的值（仅配置了候选项时生效）；未声明默认允许，显式 false 时为严格下拉 */
+  allowCustom?: boolean
 }
 
 /** 各工作流类型 params 接口（按需包含进上下文库） */
@@ -283,6 +302,9 @@ const CORE_LIB = [
  *
  * 有字段时生成带可选键的 interface（按字段类型映射：boolean → boolean，
  * integer/float → number，string → string）；无字段时回退宽松索引签名。
+ * string 字段配置了下拉候选项时生成 value 字面量联合提示：
+ * 单选且不允许自定义 → 纯字面量联合；单选允许自定义 → 联合附加 (string & {})
+ * （保留候选补全的同时允许自由输入）；多选 → string（逗号拼接串）。
  *
  * @param fields 用户配置字段声明
  * @returns d.ts 片段（CustomUserConfig 类型）
@@ -297,11 +319,25 @@ export function buildUserConfigLib(fields: UserConfigFieldDef[] | undefined): st
     if (!field.key?.trim()) continue
     // 单引号包裹 key（转义其中的单引号与反斜杠），保证非法标识符也能作属性名
     const key = "'" + field.key.trim().replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"
-    const jsType = field.type === 'boolean'
+    let jsType = field.type === 'boolean'
       ? 'boolean'
       : field.type === 'integer' || field.type === 'float'
         ? 'number'
         : 'string'
+    // 下拉候选项字面量联合提示（仅 string 类型生效）
+    const options = normalizeCandidates(field.options)
+    if (field.type === 'string' && options.length > 0) {
+      const union = options
+        .map((o) => "'" + o.value.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'")
+        .join(' | ')
+      if (field.multiple === true) {
+        jsType = 'string' // 多选为逗号拼接串，字面量联合无法表达组合
+      } else if (field.allowCustom !== false) {
+        jsType = union + ' | (string & {})'
+      } else {
+        jsType = union
+      }
+    }
     const doc = [field.name, field.description].filter(Boolean).join('：').replace(/\*\//g, '＊/').replace(/\n/g, ' ')
     if (doc) lines.push('  /** ' + doc + ' */')
     lines.push('  ' + key + '?: ' + jsType)
@@ -577,6 +613,9 @@ export function normalizeWorkflowSizeConfig(value: unknown): CustomWorkflowSizeC
 /**
  * 把外部值规范为用户配置字段声明数组（非法项丢弃，type 非法回退 'string'）。
  *
+ * 下拉候选项经 normalizeCandidates 规范化（非法项丢弃、label 缺省回退 value）；
+ * multiple / allowCustom 仅在配置了有效候选项时携带（allowCustom 仅显式 false 时保留）。
+ *
  * @param value 原始值（条目 userConfigFields 字段）
  * @returns 用户配置字段声明数组（可为空）
  */
@@ -591,6 +630,9 @@ export function normalizeUserConfigFields(value: unknown): UserConfigFieldDef[] 
     const type = USER_CONFIG_FIELD_TYPES.includes(rec.type as UserConfigFieldType)
       ? (rec.type as UserConfigFieldType)
       : 'string'
+    // 下拉候选项相关字段：无有效候选项时不携带（= 普通文本框渲染）
+    const options = normalizeCandidates(rec.options)
+    const hasOptions = type === 'string' && options.length > 0
     out.push({
       key,
       name: typeof rec.name === 'string' && rec.name.trim() ? rec.name.trim() : key,
@@ -598,6 +640,13 @@ export function normalizeUserConfigFields(value: unknown): UserConfigFieldDef[] 
       defaultValue: typeof rec.defaultValue === 'string' ? rec.defaultValue : '',
       ...(typeof rec.description === 'string' && rec.description.trim()
         ? { description: rec.description.trim() }
+        : {}),
+      ...(hasOptions
+        ? {
+            options,
+            ...(rec.multiple === true ? { multiple: true } : {}),
+            ...(rec.allowCustom === false ? { allowCustom: false } : {}),
+          }
         : {}),
     })
   }
@@ -654,7 +703,11 @@ export function duplicateWorkflowEntry(
     callCode: entry.callCode,
     extractCode: entry.extractCode,
     cancelCode: entry.cancelCode,
-    userConfigFields: (entry.userConfigFields ?? []).map((field) => ({ ...field })),
+    userConfigFields: (entry.userConfigFields ?? []).map((field) => ({
+      ...field,
+      // 下拉候选项深拷贝（避免副本与源条目共享选项数组引用）
+      ...(field.options ? { options: field.options.map((o) => ({ ...o })) } : {}),
+    })),
     ...(entry.sizeConfig
       ? {
           sizeConfig: {
@@ -670,6 +723,9 @@ export function duplicateWorkflowEntry(
 /**
  * 校验工作流表单条目，返回错误文案（空数组 = 通过）。
  *
+ * 除基础字段外，逐项校验用户配置字段的下拉候选项（仅 string 类型可配置）：
+ * value 必填、不允许包含英文逗号（多选拼接分隔符）、同字段内不重复。
+ *
  * @param entry 待保存的条目
  * @returns 错误文案列表
  */
@@ -684,6 +740,24 @@ export function validateWorkflowEntry(entry: CustomWorkflowFormEntry): string[] 
   for (const field of fields) {
     if (!field.key.trim()) errors.push('用户配置字段存在空的 key')
     if (!USER_CONFIG_FIELD_TYPES.includes(field.type)) errors.push('用户配置字段「' + (field.key || '未命名') + '」类型非法')
+    // 下拉候选项校验（仅 string 类型支持配置）
+    const opts = field.options ?? []
+    if (opts.length > 0 && field.type !== 'string') {
+      errors.push('用户配置字段「' + (field.key || '未命名') + '」仅字符串类型支持配置候选项')
+    }
+    const seenValues = new Set<string>()
+    for (let i = 0; i < opts.length; i++) {
+      const o = opts[i]
+      const where = '用户配置字段「' + (field.key || '未命名') + '」候选项第 ' + (i + 1) + ' 项'
+      const value = typeof o?.value === 'string' ? o.value.trim() : ''
+      if (!value) {
+        errors.push(where + '缺少 value（提交值）')
+        continue
+      }
+      if (value.includes(',')) errors.push(where + 'value 不能包含英文逗号')
+      if (seenValues.has(value)) errors.push(where + 'value 重复: ' + value)
+      seenValues.add(value)
+    }
   }
   const keys = fields.map((field) => field.key.trim()).filter(Boolean)
   if (new Set(keys).size !== keys.length) errors.push('用户配置字段 key 不能重复')

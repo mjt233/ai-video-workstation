@@ -69,6 +69,56 @@ describe('syncCustomInstance', () => {
     ]);
   });
 
+  it('下拉字段注册为 params 声明（candidates/multiple/allowCustom 映射）', async () => {
+    await syncCustomInstance(makeInstance([entry('wf-cand', ['text-to-image'], {
+      userConfigFields: [
+        {
+          key: 'style',
+          name: '画风',
+          type: 'string',
+          defaultValue: 'realism,anime',
+          options: [
+            { label: '写实风格', value: 'realism' },
+            { label: '动漫风格', value: 'anime' },
+          ],
+          multiple: true,
+        },
+        {
+          key: 'mode',
+          name: '模式',
+          type: 'string',
+          defaultValue: 'fast',
+          options: [{ label: '快速', value: 'fast' }],
+          allowCustom: false, // 严格下拉
+        },
+        { key: 'plain', name: '普通字段', type: 'string', defaultValue: '', multiple: true }, // 无候选项 → 不携带下拉字段
+      ],
+    })]));
+    const impl = getImpl('text-to-image', 'custom-wf-cand-' + INSTANCE_ID);
+    expect(impl?.params).toEqual([
+      {
+        name: '画风',
+        key: 'style',
+        type: 'string',
+        defaultValue: 'realism,anime',
+        candidates: [
+          { label: '写实风格', value: 'realism' },
+          { label: '动漫风格', value: 'anime' },
+        ],
+        multiple: true,
+      },
+      {
+        name: '模式',
+        key: 'mode',
+        type: 'string',
+        defaultValue: 'fast',
+        candidates: [{ label: '快速', value: 'fast' }],
+        allowCustom: false,
+      },
+      { name: '普通字段', key: 'plain', type: 'string', defaultValue: '' },
+    ]);
+  });
+
   it('submit 组装 userConfig（默认值回退 + 按类型转换）并透传 Base64 读取回调', async () => {
     await syncCustomInstance(makeInstance([entry('wf-uc2', ['text-to-image'], {
       userConfigFields: [

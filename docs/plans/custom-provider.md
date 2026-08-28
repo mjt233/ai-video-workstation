@@ -144,7 +144,7 @@ interface WorkflowCallContext {
 
 ## 工作流用户配置字段
 
-工作流条目可配置「用户配置字段」列表（key / 显示名 / 类型 / 默认值 / 说明）：
+工作流条目可配置「用户配置字段」列表（key / 显示名 / 类型 / 选项 / 默认值 / 说明）：
 
 - 类型支持：string（字符串）、integer（整数）、float（小数）、boolean（布尔）
 - 运行工作流时，前端按声明渲染输入表单（默认值回填），用户填写后经 vars 注入自定义工作流
@@ -152,6 +152,19 @@ interface WorkflowCallContext {
   未填写时回退声明默认值，保证每个声明字段都存在）
 - 编辑器按当前表单中的字段声明生成 `ctx.userConfig` 类型提示（boolean → boolean，
   integer/float → number，string → string），新增/删除/修改字段后实时刷新
+
+### 下拉选项（候选项 / 多选 / 自定义输入）
+
+仅 **string** 类型字段支持下拉选项声明（点击字段行的「配置」按钮编辑）：
+
+- **候选项**（options）：`{ label, value }` 数组，`label` 为界面展示名（缺省回退 value）、
+  `value` 为实际写入 `ctx.userConfig` 的提交值；value 不能包含英文逗号且同字段内不重复
+- **多选**（multiple）：勾选后运行表单渲染多选下拉，**各选中项 value 以英文逗号 `","`
+  拼接为一个字符串提交**（如 `"realism,anime"`）；默认值同样可填逗号拼接串用于回显
+- **允许自定义输入**（allowCustom）：默认允许（未声明视为允许），可输入候选项之外的值并原样
+  提交；关闭后为严格下拉，只能从候选项中选择
+- 编辑器类型提示联动：单选且不允许自定义 → value 字面量联合（如 `'realism' | 'anime'`）；
+  单选允许自定义 → 联合附加 `(string & {})`；多选 → `string`（逗号拼接串）
 
 ## ctx.readFileToBase64
 

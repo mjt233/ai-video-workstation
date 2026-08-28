@@ -29,12 +29,24 @@ export const CUSTOM_USER_CONFIG_FIELD_TYPES = [
 /** 用户配置字段类型标识 */
 export type CustomUserConfigFieldType = (typeof CUSTOM_USER_CONFIG_FIELD_TYPES)[number];
 
+/** 用户配置字段下拉候选项（label 为展示名，value 为提交值；label 缺省时回退为 value） */
+export interface CustomUserConfigFieldOption {
+  /** 选项展示名（运行表单中可见文本） */
+  label: string;
+  /** 选项提交值（写入 ctx.userConfig 的实际值） */
+  value: string;
+}
+
 /**
  * 用户配置字段声明。
  *
  * 运行工作流时，前端按声明渲染输入表单（默认值回填），用户填写后经 vars
  * 进入自定义工作流 ctx.userConfig（按类型转换为原生值）。编辑器据此生成
  * ctx.userConfig 的类型提示。
+ *
+ * 下拉候选项仅对 string 类型生效：options 非空时运行表单渲染下拉控件，
+ * multiple 声明单选/多选（多选时各选中项 value 以英文逗号 "," 拼接为一个字符串提交），
+ * allowCustom 声明是否允许自由输入候选项之外的值（未声明默认允许）。
  */
 export interface CustomUserConfigField {
   /** 字段 key（在工作流条目内唯一；运行时 ctx.userConfig 的键名） */
@@ -43,10 +55,16 @@ export interface CustomUserConfigField {
   name: string;
   /** 字段类型（决定表单控件与 ctx.userConfig 的原生值类型） */
   type: CustomUserConfigFieldType;
-  /** 默认值（字符串形式；用户未填写时使用） */
+  /** 默认值（字符串形式；用户未填写时使用；多选字段可为逗号拼接串，如 "a,b"） */
   defaultValue: string;
   /** 可选说明文案（表单 hint） */
   description?: string;
+  /** 下拉候选项（仅 string 类型生效；非空时运行表单渲染下拉控件，空/缺省按普通文本框渲染） */
+  options?: CustomUserConfigFieldOption[];
+  /** 是否多选（仅配置了候选项时生效）；true 时各选中项 value 以英文逗号 "," 拼接为一个字符串提交 */
+  multiple?: boolean;
+  /** 是否允许自由输入候选项之外的值（仅配置了候选项时生效）；未声明默认允许，显式 false 时为严格下拉 */
+  allowCustom?: boolean;
 }
 
 /** 尺寸配置候选全集：比例（与前端 custom-provider.ts 的 SIZE_CONFIG_*_OPTIONS 一致，亦为统一尺寸组件注册表子集；auto/adaptive 均表示自适应） */
@@ -233,10 +251,56 @@ export function parseCustomWorkflowEntry(raw: unknown, index: number): CustomWor
 }
 
 /**
+ * 解析用户配置字段的下拉候选项（原始 JSON 值）。
+ *
+ * 缺失 / null / 空串视为未配置，返回空数组；每项必须是对象且 value 为非空字符串，
+ * value 不允许包含英文逗号（多选拼接分隔符）、不允许重复；label 缺省回退 value；
+ * label 与 value 均去除首尾空白。
+ *
+ * @param raw 原始值（字段 options 字段）
+ * @param where 错误提示前缀（条目位置 + 字段 key）
+ * @returns 候选项数组（可为空数组 = 未配置）
+ */
+function parseUserConfigFieldOptions(
+  raw: unknown,
+  where: string,
+): CustomUserConfigFieldOption[] {
+  if (raw === undefined || raw === null || raw === '') return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(where + '的候选项需要是数组');
+  }
+  const out: CustomUserConfigFieldOption[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(where + '候选项第 ' + (i + 1) + ' 项需要是对象');
+    }
+    const rec = item as Record<string, unknown>;
+    const value = typeof rec.value === 'string' ? rec.value.trim() : '';
+    if (!value) {
+      throw new Error(where + '候选项第 ' + (i + 1) + ' 项缺少 value（提交值）');
+    }
+    if (value.includes(',')) {
+      throw new Error(where + '候选项 value 不能包含英文逗号: ' + value);
+    }
+    if (seen.has(value)) {
+      throw new Error(where + '候选项 value 重复: ' + value);
+    }
+    seen.add(value);
+    const label = typeof rec.label === 'string' && rec.label.trim() !== '' ? rec.label.trim() : value;
+    out.push({ label, value });
+  }
+  return out;
+}
+
+/**
  * 解析用户配置字段声明（原始 JSON 值）。
  *
  * 缺失 / null / 空串视为未配置，返回空数组；每项必须是对象，
- * key 非空且不重复，type 非法时回退为 'string'。
+ * key 非空且不重复，type 非法时回退为 'string'；候选项仅 string 类型
+ * 字段可配置（其余类型抛中文错误）；multiple 仅配置候选项时按 === true 解析；
+ * allowCustom 未声明默认允许，仅显式 false 时关闭。
  *
  * @param raw 原始值（条目 userConfigFields 字段）
  * @param where 错误提示前缀（条目位置 + 名称）
@@ -277,12 +341,19 @@ export function parseUserConfigFields(
     const description = typeof rec.description === 'string' && rec.description.trim() !== ''
       ? rec.description.trim()
       : undefined;
+    const options = parseUserConfigFieldOptions(rec.options, where + '用户配置字段「' + key + '」');
+    if (options.length > 0 && type !== 'string') {
+      throw new Error(where + '用户配置字段「' + key + '」仅字符串类型支持配置候选项');
+    }
     out.push({
       key,
       name,
       type,
       defaultValue,
       ...(description !== undefined ? { description } : {}),
+      ...(options.length > 0 ? { options } : {}),
+      ...(options.length > 0 && rec.multiple === true ? { multiple: true } : {}),
+      ...(options.length > 0 && rec.allowCustom === false ? { allowCustom: false } : {}),
     });
   }
   return out;

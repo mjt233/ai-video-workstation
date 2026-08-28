@@ -1,9 +1,10 @@
-import type { BridgeDeclaredParam, BridgeTagGroup } from '../providers/comfyui-bridge/client.js';
+import type { BridgeCandidate, BridgeDeclaredParam, BridgeTagGroup } from '../providers/comfyui-bridge/client.js';
 import type {
   VideoCapabilities,
   VideoGenerateMode,
   VideoReferenceCapability,
   WorkflowCapabilities,
+  WorkflowUserParamCandidate,
   WorkflowUserParamDeclaration,
 } from './types.js';
 
@@ -174,11 +175,34 @@ function coerceDefaultValue(
 }
 
 /**
+ * 规范化 Bridge 下拉候选项为系统候选项结构。
+ *
+ * 过滤非法项（value 为空串/非字符串）；label 缺省或为空时回退为 value；
+ * label 与 value 均去除首尾空白。
+ *
+ * @param candidates Bridge 详情接口返回的原始候选项数组
+ * @returns 规范化后的候选项数组（可为空数组 = 未配置有效候选项）
+ */
+function normalizeCandidates(candidates: BridgeCandidate[]): WorkflowUserParamCandidate[] {
+  const out: WorkflowUserParamCandidate[] = [];
+  for (const c of candidates ?? []) {
+    if (!c || typeof c !== 'object') continue;
+    const value = typeof c.value === 'string' ? c.value.trim() : '';
+    if (!value) continue;
+    const label = typeof c.label === 'string' && c.label.trim() !== '' ? c.label.trim() : value;
+    out.push({ label, value });
+  }
+  return out;
+}
+
+/**
  * 按 expose_field（逗号分隔别名）过滤工作流参数字段映射为用户参数声明。
  *
  * 字段信息来源：params 优先（工作流本身固定参数字段），declaredParams（额外声明的
  * 动态构建字段）兜底——同一别名以 params 为准，仅存在于 declaredParams 的别名仍可用。
  * 默认值：defaultValue 非 null 优先；为 null 时取 nodeRawValue；number/boolean 做类型转换。
+ * 下拉候选项：仅 string 类型（Bridge paramType = text）字段生效，候选项非空时映射
+ * candidates 与 multiple；allowCustom 恒为 true（Bridge 语义：自由输入的值原样提交）。
  *
  * @param exposeField 自动注册标签元数据 expose_field（可为 undefined；空串/缺省返回空数组）
  * @param params 工作流本身固定参数字段（BridgeWorkflowDetail.params，优先）
@@ -207,12 +231,23 @@ export function deriveParams(
     if (!names.has(p.alias)) continue;
     const type = mapParamType(p.paramType);
     if (!type) continue;
-    out.push({
+    const decl: WorkflowUserParamDeclaration = {
       key: p.alias,
       name: p.label ?? p.alias,
       type,
       defaultValue: coerceDefaultValue(type, p.defaultValue ?? p.nodeRawValue),
-    });
+    };
+    // 下拉候选项仅 string 类型生效；候选项全非法时不按下拉渲染
+    if (type === 'string' && Array.isArray(p.candidates) && p.candidates.length > 0) {
+      const candidates = normalizeCandidates(p.candidates);
+      if (candidates.length > 0) {
+        decl.candidates = candidates;
+        decl.multiple = p.multiple === true;
+        // Bridge 候选项仅用于表单交互引导，自由输入的值原样提交
+        decl.allowCustom = true;
+      }
+    }
+    out.push(decl);
   }
   return out;
 }

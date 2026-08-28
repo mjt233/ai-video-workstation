@@ -293,6 +293,9 @@
                   类型
                 </th>
                 <th class="text-left">
+                  选项
+                </th>
+                <th class="text-left">
                   默认值
                 </th>
                 <th class="text-left">
@@ -335,10 +338,37 @@
                     hide-details
                   />
                 </td>
+                <td style="min-width: 150px">
+                  <div
+                    v-if="field.type === 'string'"
+                    class="d-flex align-center"
+                  >
+                    <span
+                      class="text-caption text-medium-emphasis mr-1"
+                      :title="optionsSummary(field)"
+                    >
+                      {{ optionsSummary(field) }}
+                    </span>
+                    <v-btn
+                      icon="mdi-cog-outline"
+                      size="x-small"
+                      variant="text"
+                      color="primary"
+                      title="配置下拉选项（候选项 / 多选 / 自定义输入）"
+                      @click="openOptionsEditor(i)"
+                    />
+                  </div>
+                  <span
+                    v-else
+                    class="text-caption text-medium-emphasis"
+                  >
+                    —
+                  </span>
+                </td>
                 <td style="min-width: 110px">
                   <v-text-field
                     v-model="field.defaultValue"
-                    placeholder="如 gpt-image-2"
+                    :placeholder="field.options?.length ? '如 realism,anime' : '如 gpt-image-2'"
                     density="compact"
                     variant="outlined"
                     hide-details
@@ -491,6 +521,105 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 下拉选项编辑弹窗：行式编辑 label/value + 多选/自定义输入开关 -->
+    <v-dialog
+      v-model="optionsDialogOpen"
+      width="640"
+    >
+      <v-card>
+        <v-card-title class="text-h6">
+          配置下拉选项 — {{ optionsEditFieldLabel }}
+        </v-card-title>
+        <v-card-text>
+          <div class="d-flex align-center mb-2">
+            <v-switch
+              v-model="optionsForm.multiple"
+              label="允许多选"
+              hint="多选时各选中项的提交值以英文逗号 , 拼接为一个字符串"
+              persistent-hint
+              density="compact"
+              color="primary"
+              hide-details
+            />
+            <v-switch
+              v-model="optionsForm.allowCustom"
+              label="允许自定义输入"
+              hint="允许输入候选项之外的值（原样提交）"
+              persistent-hint
+              density="compact"
+              color="primary"
+              hide-details
+              class="ml-6"
+            />
+          </div>
+          <div class="text-caption text-medium-emphasis mb-1">
+            提交值（value）为实际写入
+            <code>ctx.userConfig</code> 的值；显示名（label）缺省时使用提交值；value 不能包含英文逗号。
+          </div>
+          <div
+            v-for="(opt, i) in optionsForm.options"
+            :key="i"
+            class="d-flex align-center mb-2"
+          >
+            <v-text-field
+              v-model="opt.value"
+              placeholder="提交值，如 realism"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="mr-2"
+            />
+            <v-text-field
+              v-model="opt.label"
+              placeholder="显示名（可选，如 写实风格）"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="mr-2"
+            />
+            <v-btn
+              icon="mdi-delete"
+              size="small"
+              variant="text"
+              color="error"
+              :title="'删除选项第 ' + (i + 1) + ' 项'"
+              @click="removeOptionRow(i)"
+            />
+          </div>
+          <div
+            v-if="optionsForm.options.length === 0"
+            class="text-caption text-medium-emphasis mb-2"
+          >
+            尚未配置选项，保存后该字段按普通文本框渲染。
+          </div>
+          <v-btn
+            color="secondary"
+            variant="tonal"
+            size="small"
+            prepend-icon="mdi-plus"
+            @click="addOptionRow"
+          >
+            新增选项
+          </v-btn>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="optionsDialogOpen = false"
+          >
+            取消
+          </v-btn>
+          <v-btn
+            color="primary"
+            @click="confirmOptionsEditor"
+          >
+            确定
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -515,6 +644,7 @@ import {
   type CustomWorkflowFormEntry,
   type CustomWorkflowSizeConfigDef,
   type UserConfigFieldDef,
+  type UserConfigFieldOption,
   type UserConfigFieldType,
 } from '../../utils/custom-provider'
 
@@ -732,6 +862,90 @@ function addUserConfigField() {
 /** 删除指定下标的用户配置字段 */
 function removeUserConfigField(index: number) {
   form.value.userConfigFields = (form.value.userConfigFields ?? []).filter((_, i) => i !== index)
+}
+
+/** 下拉选项编辑弹窗开关 */
+const optionsDialogOpen = ref(false)
+/** 正在编辑选项的字段下标（form.userConfigFields 内） */
+const optionsEditIndex = ref<number | null>(null)
+/** 选项编辑表单：行式候选项 + 多选/自定义输入开关 */
+const optionsForm = ref<{ options: UserConfigFieldOption[]; multiple: boolean; allowCustom: boolean }>({
+  options: [],
+  multiple: false,
+  allowCustom: true,
+})
+
+/** 选项弹窗标题中的字段名（显示名优先，缺省回退 key） */
+const optionsEditFieldLabel = computed(() => {
+  const field = optionsEditIndex.value != null ? form.value.userConfigFields[optionsEditIndex.value] : undefined
+  if (!field) return ''
+  return field.name || field.key || '未命名字段'
+})
+
+/**
+ * 字段的选项摘要文案（表格「选项」列展示）。
+ *
+ * @param field 用户配置字段
+ * @returns 如 "3 项 · 多选 · 可自定义" / "2 项 · 严格下拉" / "无"
+ */
+function optionsSummary(field: UserConfigFieldDef): string {
+  const count = field.options?.length ?? 0
+  if (count === 0) return '无'
+  const parts: string[] = [count + ' 项']
+  if (field.multiple) parts.push('多选')
+  parts.push(field.allowCustom === false ? '严格下拉' : '可自定义')
+  return parts.join(' · ')
+}
+
+/**
+ * 打开指定字段的下拉选项编辑弹窗（回填候选项与多选/自定义开关）。
+ *
+ * @param index 字段在 form.userConfigFields 中的下标
+ */
+function openOptionsEditor(index: number) {
+  const field = form.value.userConfigFields[index]
+  if (!field) return
+  optionsEditIndex.value = index
+  optionsForm.value = {
+    options: (field.options ?? []).map((o) => ({ label: o.label ?? '', value: o.value ?? '' })),
+    multiple: field.multiple === true,
+    allowCustom: field.allowCustom !== false,
+  }
+  optionsDialogOpen.value = true
+}
+
+/** 新增一行空选项（value/label 留空由用户填写） */
+function addOptionRow() {
+  optionsForm.value.options = [...optionsForm.value.options, { label: '', value: '' }]
+}
+
+/**
+ * 删除指定下标的选项行。
+ * @param index 选项行下标
+ */
+function removeOptionRow(index: number) {
+  optionsForm.value.options = optionsForm.value.options.filter((_, i) => i !== index)
+}
+
+/**
+ * 确认选项编辑：清洗候选项（去首尾空白、过滤空 value 行、label 缺省回退 value）后
+ * 写回目标字段；候选项清空时同时移除该字段的 multiple/allowCustom（= 恢复普通文本框渲染）。
+ * 直接原地修改字段对象（与表格内 v-model 直接改字段一致，保持引用稳定）。
+ */
+function confirmOptionsEditor() {
+  const index = optionsEditIndex.value
+  if (index == null) return
+  const field = form.value.userConfigFields[index]
+  if (!field) return
+  const options: UserConfigFieldOption[] = optionsForm.value.options
+    .map((o) => ({ label: (o.label ?? '').trim(), value: (o.value ?? '').trim() }))
+    .filter((o) => o.value !== '')
+    .map((o) => ({ label: o.label !== '' ? o.label : o.value, value: o.value }))
+  const hasOptions = options.length > 0
+  field.options = hasOptions ? options : undefined
+  field.multiple = hasOptions && optionsForm.value.multiple ? true : undefined
+  field.allowCustom = hasOptions && !optionsForm.value.allowCustom ? false : undefined
+  optionsDialogOpen.value = false
 }
 
 /** 保存表单：校验后新增或更新条目 */

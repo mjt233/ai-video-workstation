@@ -60,6 +60,27 @@ describe('buildContextLib', () => {
     expect(buildUserConfigLib(undefined)).toContain('Record<string, boolean | number | string>')
   })
 
+  it('string 字段配置候选项时生成 value 字面量联合提示（按多选/自定义区分）', () => {
+    const options = [
+      { label: '写实风格', value: 'realism' },
+      { label: '动漫风格', value: 'anime' },
+    ]
+    // 单选 + 不允许自定义 → 纯字面量联合
+    expect(buildUserConfigLib([{ key: 'mode', name: '模式', type: 'string', defaultValue: 'fast', options, allowCustom: false }]))
+      .toContain("'mode'?: 'realism' | 'anime'")
+    // 单选 + 允许自定义（含未声明默认允许）→ 联合附加 (string & {})
+    expect(buildUserConfigLib([{ key: 'mode', name: '模式', type: 'string', defaultValue: 'fast', options, allowCustom: true }]))
+      .toContain("'mode'?: 'realism' | 'anime' | (string & {})")
+    expect(buildUserConfigLib([{ key: 'mode', name: '模式', type: 'string', defaultValue: 'fast', options }]))
+      .toContain("'mode'?: 'realism' | 'anime' | (string & {})")
+    // 多选 → string（逗号拼接串）
+    expect(buildUserConfigLib([{ key: 'style', name: '画风', type: 'string', defaultValue: '', options, multiple: true }]))
+      .toContain("'style'?: string")
+    // 非 string 类型配置候选项 → 不生成联合
+    expect(buildUserConfigLib([{ key: 'n', name: '数', type: 'integer', defaultValue: '', options }]))
+      .toContain("'n'?: number")
+  })
+
   it('生图/生视频 params 含 sizeConfig 字段（带类型提示）', () => {
     expect(buildContextLib(['text-to-image'])).toContain('sizeConfig?: CustomSizeConfig')
     expect(buildContextLib(['image-to-video'])).toContain('sizeConfig?: CustomSizeConfig')
@@ -156,6 +177,61 @@ describe('normalizeWorkflowEntries', () => {
       { key: 'broken', name: 'b', type: 'string', defaultValue: '' },
     ])
   })
+
+  it('用户配置字段下拉选项规范化：label 缺省回退 value、非法项丢弃、multiple/allowCustom 按声明保留', () => {
+    const rows = normalizeWorkflowEntries([
+      {
+        name: 'wf',
+        types: ['text-to-image'],
+        userConfigFields: [
+          {
+            key: 'style',
+            name: '画风',
+            type: 'string',
+            defaultValue: 'realism,anime',
+            options: [
+              { label: '写实风格', value: 'realism' },
+              { value: 'anime' }, // label 缺省回退 value
+              { label: '空值', value: '  ' }, // 非法项丢弃
+              'fast', // 非对象丢弃
+            ],
+            multiple: true,
+          },
+          {
+            key: 'mode',
+            name: '模式',
+            type: 'string',
+            defaultValue: 'fast',
+            options: [{ label: '快速', value: 'fast' }],
+            allowCustom: false, // 严格下拉
+          },
+          { key: 'plain', name: '普通', type: 'string', defaultValue: '', multiple: true, allowCustom: false }, // 无候选项 → 不携带下拉字段
+        ],
+      },
+    ])
+    expect(rows[0].userConfigFields).toEqual([
+      {
+        key: 'style',
+        name: '画风',
+        type: 'string',
+        defaultValue: 'realism,anime',
+        options: [
+          { label: '写实风格', value: 'realism' },
+          { label: 'anime', value: 'anime' },
+        ],
+        multiple: true,
+      },
+      {
+        key: 'mode',
+        name: '模式',
+        type: 'string',
+        defaultValue: 'fast',
+        options: [{ label: '快速', value: 'fast' }],
+        allowCustom: false,
+      },
+      { key: 'plain', name: '普通', type: 'string', defaultValue: '' },
+    ])
+  })
 })
 
 describe('insertCodeTemplate', () => {
@@ -209,6 +285,35 @@ describe('duplicateWorkflowEntry', () => {
     expect(cloned.userConfigFields).not.toBe(source.userConfigFields)
     expect(cloned.userConfigFields?.[0]).not.toBe(source.userConfigFields[0])
   })
+
+  it('深拷贝用户配置字段的下拉候选项（副本与源不共享选项引用）', () => {
+    const source = {
+      name: 'wf',
+      types: ['text-to-image'],
+      async: false,
+      cancelable: false,
+      callCode: 'x',
+      extractCode: 'y',
+      cancelCode: '',
+      userConfigFields: [
+        {
+          key: 'style',
+          name: '画风',
+          type: 'string' as const,
+          defaultValue: '',
+          options: [
+            { label: '写实风格', value: 'realism' },
+            { label: '动漫风格', value: 'anime' },
+          ],
+          multiple: true,
+        },
+      ],
+    }
+    const cloned = duplicateWorkflowEntry(source, [source.name])
+    expect(cloned.userConfigFields?.[0]?.options).toEqual(source.userConfigFields[0].options)
+    expect(cloned.userConfigFields?.[0]?.options).not.toBe(source.userConfigFields[0].options)
+    expect(cloned.userConfigFields?.[0]?.options?.[0]).not.toBe(source.userConfigFields[0].options[0])
+  })
 })
 
 describe('validateWorkflowEntry', () => {
@@ -250,6 +355,60 @@ describe('validateWorkflowEntry', () => {
     })
     expect(errors.join('')).toContain('空的 key')
     expect(errors.join('')).toContain('不能重复')
+  })
+
+  it('下拉候选项：非 string 类型配置选项报错', () => {
+    const errors = validateWorkflowEntry({
+      ...base,
+      userConfigFields: [
+        { key: 'steps', name: '步数', type: 'integer', defaultValue: '', options: [{ label: '20', value: '20' }] },
+      ],
+    })
+    expect(errors.join('')).toContain('仅字符串类型支持配置候选项')
+  })
+
+  it('下拉候选项：空 value / 含英文逗号 / value 重复报错', () => {
+    const errors = validateWorkflowEntry({
+      ...base,
+      userConfigFields: [
+        {
+          key: 'style',
+          name: '画风',
+          type: 'string',
+          defaultValue: '',
+          options: [
+            { label: '空值', value: '  ' },
+            { label: '含逗号', value: 'a,b' },
+            { label: '重复', value: 'realism' },
+            { label: '重复2', value: 'realism' },
+          ],
+        },
+      ],
+    })
+    const joined = errors.join('')
+    expect(joined).toContain('缺少 value（提交值）')
+    expect(joined).toContain('不能包含英文逗号')
+    expect(joined).toContain('value 重复: realism')
+  })
+
+  it('下拉候选项合法时无错误', () => {
+    const errors = validateWorkflowEntry({
+      ...base,
+      userConfigFields: [
+        {
+          key: 'style',
+          name: '画风',
+          type: 'string',
+          defaultValue: 'realism,anime',
+          options: [
+            { label: '写实风格', value: 'realism' },
+            { label: '动漫风格', value: 'anime' },
+          ],
+          multiple: true,
+        },
+      ],
+    })
+    expect(errors).toEqual([])
   })
 })
 

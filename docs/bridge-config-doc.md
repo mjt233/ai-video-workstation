@@ -164,6 +164,16 @@ Bridge 工作流 id：`tts_voice_design`
 
 自动注册标签的元数据 `expose_field`（逗号分隔的字段别名列表）用于声明哪些字段作为**前端用户可配置参数**暴露。结构字段（`prompt` / `width` / `height` / `duration` / `fps` / `seed` / 文件 key 等）由工作站固定组装，无需列出；如需开放额外的可调参数（如 `enable_multiple_angles_lora`），将其别名加入 `expose_field` 即可。
 
+## 附：字段候选项与多选（下拉表单）
+
+Bridge 详情接口（`GET /api/workflows/:id`）的 `params[]` / `declaredParams[]` 元素可携带 `candidates`（候选项数组，元素为 `{ label: 展示名, value: 提交值 }`）与 `multiple`（是否多选，仅 `text` 类型且配置了候选项时生效），完整语义见 Bridge 的 [workflow-detail-api.md](../../../../comfyui-easy-bridge/docs/workflow-detail-api.md) §3。
+
+工作站的映射行为：
+
+- 仅 `paramType = "text"` 的字段映射为下拉；候选项按声明顺序渲染（选项显示 `label`，选中后取 `value` 提交）；
+- `multiple = true` 渲染多选下拉，**各选中项 value 以英文逗号 `","` 拼接为一个字符串提交**（如 `"realism,anime"`），与单选结构一致；
+- 候选项仅用于表单交互引导：下拉允许自由输入候选项之外的值，原样提交（Bridge 不做候选项校验）。
+
 ## 附：ComfyUI 提供商选择
 
 Easy Bridge 支持多个「执行提供商」实例（ComfyUI 原生 / RunningHub），并允许每次执行通过保留键 `providerId` 显式指定实例（见 Easy Bridge 的 `docs/workflow-api.md` §1/§2）。

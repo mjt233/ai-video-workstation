@@ -66,6 +66,62 @@
         @update:model-value="(v) => setValue(d.key, v)"
       />
 
+      <!-- 下拉候选参数（string 类型且候选项非空）—— 多选：combobox 多选，选中项 value 以英文逗号拼接提交 -->
+      <v-combobox
+        v-else-if="isCandidateField(d) && isMultipleCandidate(d)"
+        :model-value="candidateValues(d)"
+        :items="candidateItems(d)"
+        item-title="label"
+        item-value="value"
+        :return-object="true"
+        multiple
+        chips
+        closable-chips
+        :label="d.name"
+        :hint="d.description"
+        persistent-hint
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="mb-2"
+        @update:model-value="(v) => setCandidateValue(d, v)"
+      />
+
+      <!-- 下拉候选参数 —— 单选且允许自定义输入：combobox（可输入候选项之外的值，原样提交） -->
+      <v-combobox
+        v-else-if="isCandidateField(d) && allowCustomInput(d)"
+        :model-value="candidateSingleValue(d)"
+        :items="candidateItems(d)"
+        item-title="label"
+        item-value="value"
+        :return-object="true"
+        :label="d.name"
+        :hint="d.description"
+        persistent-hint
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="mb-2"
+        @update:model-value="(v) => setCandidateValue(d, v)"
+      />
+
+      <!-- 下拉候选参数 —— 单选严格下拉（不允许自定义输入）：select -->
+      <v-select
+        v-else-if="isCandidateField(d)"
+        :model-value="candidateSingleValue(d)"
+        :items="candidateItems(d)"
+        item-title="label"
+        item-value="value"
+        :label="d.name"
+        :hint="d.description"
+        persistent-hint
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="mb-2"
+        @update:model-value="(v) => setCandidateValue(d, v)"
+      />
+
       <!-- 字符串参数：文本输入框 -->
       <v-text-field
         v-else
@@ -87,10 +143,20 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import WorkflowSizePicker from './WorkflowSizePicker.vue'
 import { findSizeParamKeys, inferSizeConfigFromWidthHeight, mergeSizeValues } from '../utils/workflowSize'
+import {
+  allowCustomInput,
+  candidateSubmitValue,
+  cleanCandidateSavedValue,
+  hasCandidates,
+  joinMultiValue,
+  normalizeCandidates,
+  splitMultiValue,
+} from '../utils/userParamOptions'
 import { getComfyuiBridgeProviders, type ComfyuiBridgeProviderInfo } from '../api/providers'
 import { buildComfyuiProviderOptions, type ComfyuiProviderOption } from '../utils/comfyuiProviderOptions'
 import type {
   WorkflowSizeConfig,
+  WorkflowUserParamCandidate,
   WorkflowUserParamDeclaration,
   WorkflowUserParamValue,
 } from '../api/workflow'
@@ -279,7 +345,15 @@ function initFromDefaults(decls: WorkflowUserParamDeclaration[]) {
   if (saved && typeof saved === 'object') {
     for (const d of decls) {
       const v = saved[d.key]
-      if (v !== undefined && v !== null) next[d.key] = v
+      if (v === undefined || v === null) continue
+      // 下拉字段清洗历史脏值：早期版本把 v-combobox 选中的候选对象直接持久化，
+      // 产生对象值或 "[object Object]" 串（单值/拼接段），无法与候选项对应 → 回退声明默认值
+      if (hasCandidates(d)) {
+        const cleaned = cleanCandidateSavedValue(v, d.multiple === true)
+        if (cleaned !== null) next[d.key] = cleaned
+        continue
+      }
+      next[d.key] = v
     }
   }
   if (isBridgeProvider.value) {
@@ -308,6 +382,104 @@ watch(
 function setValue(key: string, val: unknown) {
   values.value = { ...values.value, [key]: val as WorkflowUserParamValue }
   emit('update:modelValue', { ...values.value })
+}
+
+// ── 下拉候选参数（string 类型且候选项非空） ─────────────────────────────────
+
+/**
+ * 判断声明是否按下拉控件渲染（string 类型且存在有效候选项）。
+ * @param d 参数声明
+ */
+function isCandidateField(d: WorkflowUserParamDeclaration): boolean {
+  return hasCandidates(d)
+}
+
+/**
+ * 判断下拉声明是否为多选（多选时选中项 value 以英文逗号拼接为一个字符串提交）。
+ * @param d 参数声明
+ */
+function isMultipleCandidate(d: WorkflowUserParamDeclaration): boolean {
+  return d.multiple === true
+}
+
+/**
+ * 取规范化后的下拉候选项（过滤非法项、label 缺省回退 value）。
+ * @param d 参数声明
+ * @returns 候选项数组（label 展示 / value 提交）
+ */
+function candidateItems(d: WorkflowUserParamDeclaration) {
+  return normalizeCandidates(d.candidates)
+}
+
+/**
+ * 取字段的当前生效值（未填写时回退声明默认值）。
+ * @param d 参数声明
+ * @returns 字符串形式的当前值
+ */
+function candidateRawValue(d: WorkflowUserParamDeclaration): string {
+  const v = values.value[d.key]
+  return v !== undefined && v !== null && v !== '' ? String(v) : String(d.defaultValue ?? '')
+}
+
+/**
+ * 把已存的提交值字符串映射为下拉 model：命中候选项时传候选对象
+ * （combobox returnObject 模式按 itemTitle 显示 label），未命中按自由输入字符串原样显示。
+ *
+ * @param d 参数声明
+ * @param raw 已存的提交值字符串
+ * @returns 候选对象或原始字符串
+ */
+function candidateModelValue(d: WorkflowUserParamDeclaration, raw: string): string | WorkflowUserParamCandidate {
+  return candidateItems(d).find((o) => o.value === raw) ?? raw
+}
+
+/**
+ * 多选下拉的当前 model：逗号拼接串 → 值数组，并反查为候选对象（显示 label）。
+ * @param d 参数声明
+ */
+function candidateValues(d: WorkflowUserParamDeclaration): Array<string | WorkflowUserParamCandidate> {
+  return splitMultiValue(candidateRawValue(d)).map((v) => candidateModelValue(d, v))
+}
+
+/**
+ * 单选下拉的当前 model：已存值反查候选对象（显示 label），自由输入值原样字符串显示。
+ * @param d 参数声明
+ */
+function candidateSingleValue(d: WorkflowUserParamDeclaration): string | WorkflowUserParamCandidate {
+  return candidateModelValue(d, candidateRawValue(d))
+}
+
+/**
+ * 把下拉的单个更新值解析为提交值：先经 candidateSubmitValue 还原（对象/字符串），
+ * 再反查候选项——命中 value 直接用；恰好等于某候选项 label（用户手打展示名）时
+ * 解析为该候选项的 value；都不是则按自由输入原样保留。
+ *
+ * @param d 参数声明
+ * @param v 下拉更新值（候选对象 / 字符串）
+ * @returns 提交值字符串
+ */
+function resolveCandidateValue(d: WorkflowUserParamDeclaration, v: unknown): string {
+  const s = candidateSubmitValue(v)
+  if (s === '') return ''
+  const items = candidateItems(d)
+  return (items.find((o) => o.value === s) ?? items.find((o) => o.label === s))?.value ?? s
+}
+
+/**
+ * 下拉值变化时写回表单：v-combobox 默认 returnObject，更新值可能是候选对象
+ * （选中项）或字符串（自由输入），统一解析为提交值——多选用英文逗号拼接为一个
+ * 字符串，单选直存（清空时空串 = 不提交）；随后通知父组件。
+ *
+ * @param d 参数声明
+ * @param v combobox / select 的 model 值（多选为数组，单选为单个值）
+ */
+function setCandidateValue(d: WorkflowUserParamDeclaration, v: unknown) {
+  if (isMultipleCandidate(d)) {
+    const arr = (Array.isArray(v) ? v : [v]).map((x) => resolveCandidateValue(d, x))
+    setValue(d.key, joinMultiValue(arr))
+  } else {
+    setValue(d.key, resolveCandidateValue(d, v))
+  }
 }
 
 /**

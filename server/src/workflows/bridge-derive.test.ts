@@ -186,4 +186,102 @@ describe('deriveParams', () => {
       { key: 'prompt', name: '提示词', type: 'string', defaultValue: '' },
     ]);
   });
+
+  it('text 字段候选项映射为 candidates + multiple + allowCustom=true（多选）', () => {
+    const fields: BridgeDeclaredParam[] = [
+      {
+        alias: 'style',
+        label: '画风',
+        paramType: 'text',
+        candidates: [
+          { label: '写实风格', value: 'realism' },
+          { label: '动漫风格', value: 'anime' },
+          { label: '水墨', value: 'ink' },
+        ],
+        multiple: true,
+      },
+    ];
+    expect(deriveParams('style', fields, [])).toEqual([
+      {
+        key: 'style',
+        name: '画风',
+        type: 'string',
+        defaultValue: '',
+        candidates: [
+          { label: '写实风格', value: 'realism' },
+          { label: '动漫风格', value: 'anime' },
+          { label: '水墨', value: 'ink' },
+        ],
+        multiple: true,
+        allowCustom: true, // Bridge 语义：自由输入的值原样提交
+      },
+    ]);
+  });
+
+  it('候选项单选（multiple 缺省/false）→ multiple=false；label 缺省回退 value', () => {
+    const fields: BridgeDeclaredParam[] = [
+      {
+        alias: 'mode',
+        label: '模式',
+        paramType: 'text',
+        candidates: [{ value: 'fast' }, { label: '高质量', value: 'quality' }],
+      },
+    ];
+    expect(deriveParams('mode', fields, [])).toEqual([
+      {
+        key: 'mode',
+        name: '模式',
+        type: 'string',
+        defaultValue: '',
+        candidates: [
+          { label: 'fast', value: 'fast' }, // label 缺省回退 value
+          { label: '高质量', value: 'quality' },
+        ],
+        multiple: false,
+        allowCustom: true,
+      },
+    ]);
+  });
+
+  it('候选项非法项过滤（value 空串/非字符串）；全部非法时不携带下拉字段', () => {
+    const fields: BridgeDeclaredParam[] = [
+      {
+        alias: 'style',
+        label: '画风',
+        paramType: 'text',
+        candidates: [
+          { label: '写实', value: 'realism' },
+          { label: '空值', value: '  ' },
+          { label: '无值' },
+          null as unknown as { label: string; value: string },
+        ],
+      },
+      {
+        alias: 'empty',
+        label: '全非法',
+        paramType: 'text',
+        candidates: [{ label: '空值', value: '' }],
+      },
+    ];
+    const params = deriveParams('style,empty', fields, []);
+    expect(params[0].candidates).toEqual([{ label: '写实', value: 'realism' }]);
+    expect(params[1].candidates).toBeUndefined();
+    expect(params[1].multiple).toBeUndefined();
+    expect(params[1].allowCustom).toBeUndefined();
+  });
+
+  it('非 text 类型携带候选项时不映射（仅 string 类型支持下拉）', () => {
+    const fields: BridgeDeclaredParam[] = [
+      {
+        alias: 'steps',
+        label: '步数',
+        paramType: 'number',
+        candidates: [{ label: '20 步', value: '20' }],
+        multiple: true,
+      },
+    ];
+    expect(deriveParams('steps', fields, [])).toEqual([
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: '' },
+    ]);
+  });
 });
