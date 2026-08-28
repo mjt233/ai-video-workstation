@@ -30,7 +30,7 @@ export interface TextToImageVars extends WorkflowVarsBase {
   /**
    * 提示词文件相对路径（相对 design/{project}/）。
    * 例：`prompt/character/陈书文/appearance.md`
-   * 例：`prompt/stage/现代商场/现代商场-白天-平视-正门入口.md`
+   * 例：`prompt/stage/现代商场/正门入口.md`
    */
   promptPath: string;
   /**

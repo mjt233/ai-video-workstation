@@ -117,7 +117,7 @@ assetsRouter.post('/assets/:project/subscene', async (req: Request, res: Respons
   try {
     const project = req.params.project as string;
     const body = req.body as {
-      stage?: string; label?: string; time?: string; angle?: string; weather?: string; description?: string;
+      stage?: string; label?: string; description?: string;
     };
     if (!body.stage || !body.label) throw Object.assign(new Error('stage 与 label 必填'), { code: 'INVALID' });
     const stage = body.stage;
@@ -130,9 +130,6 @@ assetsRouter.post('/assets/:project/subscene', async (req: Request, res: Respons
     if (await pathExists(file)) throw Object.assign(new Error('子场景已存在'), { code: 'EXISTS' });
     await fs.writeFile(file, subsceneMd({
       label,
-      time: body.time,
-      angle: body.angle,
-      weather: body.weather,
       description: body.description,
     }), 'utf-8');
     res.json({ success: true, path: `prompt/stage/${stage}/${label}.md` });

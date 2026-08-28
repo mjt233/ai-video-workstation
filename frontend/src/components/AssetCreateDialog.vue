@@ -52,22 +52,10 @@
           />
           <v-text-field
             v-model="form.label"
-            label="完整标签"
+            label="子场景标签"
             required
-            hint="如 现代商场-白天-平视-晴-正门入口"
+            hint="如 正门入口、走廊通道"
             persistent-hint
-          />
-          <v-text-field
-            v-model="form.time"
-            label="时间"
-          />
-          <v-text-field
-            v-model="form.angle"
-            label="角度"
-          />
-          <v-text-field
-            v-model="form.weather"
-            label="天气"
           />
           <v-textarea
             v-model="form.description"
@@ -173,9 +161,6 @@ const form = reactive({
   personality: '',
   stage: '',
   label: '',
-  time: '',
-  angle: '',
-  weather: '',
   description: '',
   episode: '',
   shot: '',
@@ -199,9 +184,6 @@ watch(() => props.modelValue, (open) => {
   form.personality = ''
   form.stage = props.defaults?.stage ?? ''
   form.label = ''
-  form.time = ''
-  form.angle = ''
-  form.weather = ''
   form.description = ''
   form.episode = props.defaults?.episode ?? ''
   form.shot = ''
@@ -227,9 +209,6 @@ async function submit() {
       await createSubscene(props.project, {
         stage: form.stage.trim(),
         label: form.label.trim(),
-        time: form.time,
-        angle: form.angle,
-        weather: form.weather,
         description: form.description,
       })
       emit('created', { type: 'subscene', stage: form.stage.trim(), label: form.label.trim() })

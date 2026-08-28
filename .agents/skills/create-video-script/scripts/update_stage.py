@@ -9,14 +9,14 @@
 参数:
     分镜序号        - 整数，从 1 开始
     索引            - 要更新的条目索引（从 0 开始）
-    --stage-ref     - 可选，新的基础场景完整标签，或关键字 prev（仅直接引用）
+    --stage-ref     - 可选，新的基础场景引用（如 现代商场/中央扶梯），或关键字 prev（仅直接引用）
     --characters    - 可选，新的登场角色名（逗号分隔，最多2个；传空字符串表示无角色）
     --prompt        - 可选，新的组合提示词（与角色同时为空表示直接引用基础场景；prev 时必须为空）
     -e, --episode   - 集数（默认: 1）
 
 示例:
     python scripts/update_stage.py -e 1 1 0 --prompt "图像1为背景：中央扶梯；图像2站在扶梯右侧，身体朝向扶梯，面部微侧向镜头。"
-    python scripts/update_stage.py -e 1 1 0 --characters "陈书文" --stage-ref "现代商场/现代商场-白天-平视-晴-中央扶梯"
+    python scripts/update_stage.py -e 1 1 0 --characters "陈书文" --stage-ref "现代商场/中央扶梯"
     python scripts/update_stage.py -e 1 1 0 --characters "" --prompt ""
     python scripts/update_stage.py -e 1 2 0 --stage-ref prev --characters "" --prompt ""
 """

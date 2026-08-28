@@ -42,7 +42,7 @@ prompt/
 │   ├── appearance.md    # 外观文生图提示词
 │   └── voice.md         # 声线描述
 ├── stage/{场景名}/
-│   └── {完整场景标签}.md # 子场景画面描述
+│   └── {子场景标签}.md  # 子场景画面描述
 └── scene/{集数}/{分镜}/
     ├── overview.json    # 分镜叙事总览（title/beat/visual/camera/duration/mood）
     ├── stage.json       # 关键帧定义（引用场景/角色）
@@ -90,29 +90,29 @@ assert/character/{角色名}/voice-variants/{变体id}.flac
 ### 2.2 场景 `prompt/stage/{场景名}/`
 
 - 场景目录：`prompt/stage/{场景名}/`（可先建空目录）
-- 子场景文件：`prompt/stage/{场景名}/{完整场景标签}.md`
+- 子场景文件：`prompt/stage/{场景名}/{子场景标签}.md`
 
-**完整场景标签**建议格式：
+**子场景标签**建议格式：
 
 ```text
-{场景名}-{时间}-{角度}-{天气/光线}-{子区域}
+{子区域}
 ```
 
-示例：`便利店内部-夜晚-平视-冷白霓虹-收银台`
+示例：`正门入口`、`走廊通道`。分镜引用为 `{场景名}/{子场景标签}`，如 `现代商场/正门入口`。标签不编码视角、天气、时间。
 
-子场景 Markdown 通常包含：时间、角度、天气/光线、画面描述、主色调。  
+子场景 Markdown 通常包含：画面描述、主色调。  
 该文件供 `text-to-image`（场景图）使用。
 
 #### 衍生变体（场景）
 
 ```
-prompt/stage/{场景名}/variants/{完整场景标签}/{变体id}.json
-assert/stage/{场景名}/variants/{完整场景标签}/{变体id}.jpg
+prompt/stage/{场景名}/variants/{子场景标签}/{变体id}.json
+assert/stage/{场景名}/variants/{子场景标签}/{变体id}.jpg
 ```
 
 - 不出现在资产浏览器树中，仅在子场景详情中管理
 - 创建时填写衍生描述（图片编辑提示词）；图片需手动/批量生成
-- 分镜引用：`{场景名}/{完整场景标签}@{变体id}`
+- 分镜引用：`{场景名}/{子场景标签}@{变体id}`
 
 
 ### 2.3 分镜 `prompt/scene/{集数}/{分镜}/`
@@ -156,7 +156,7 @@ assert/stage/{场景名}/variants/{完整场景标签}/{变体id}.jpg
 ```json
 [
   {
-    "基础场景": "{场景名}/{完整场景标签}",
+    "基础场景": "{场景名}/{子场景标签}",
     "登场角色": ["{角色名}"],
     "prompt": "图像1为背景：...；图像2在场景中..."
   }
@@ -224,7 +224,7 @@ assert/
 │   ├── appearance.jpg   # 角色外观图
 │   └── voice.flac       # 角色声线样本
 ├── stage/{场景名}/
-│   └── {完整场景标签}.jpg
+│   └── {子场景标签}.jpg
 └── scene/{集数}/{分镜}/
     ├── stage/{index}.jpg
     ├── voice/{index}-{角色名}.flac

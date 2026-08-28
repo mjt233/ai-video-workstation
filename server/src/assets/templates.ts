@@ -55,21 +55,9 @@ export function characterVoiceMd(): string {
 
 export function subsceneMd(opts: {
   label: string;
-  time?: string;
-  angle?: string;
-  weather?: string;
   description?: string;
 }): string {
   return `# ${opts.label}
-
-## 时间
-${opts.time || '待定'}
-
-## 角度
-${opts.angle || '待定'}
-
-## 天气/光线
-${opts.weather || '待定'}
 
 ## 画面描述
 ${opts.description || '待补充场景画面描述。'}

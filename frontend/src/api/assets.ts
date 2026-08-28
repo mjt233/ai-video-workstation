@@ -51,7 +51,7 @@ export async function createStage(project: string, body: { name: string }) {
 
 export async function createSubscene(
   project: string,
-  body: { stage: string; label: string; time?: string; angle?: string; weather?: string; description?: string },
+  body: { stage: string; label: string; description?: string },
 ) {
   try {
     const { data } = await client.post(`/assets/${project}/subscene`, body)

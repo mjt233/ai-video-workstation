@@ -137,8 +137,8 @@ def is_prev_stage_ref(stage_ref: str) -> bool:
 
 def get_stage_asset_path(stage_ref: str, project_name: str, project_root: Optional[str] = None) -> Path:
     """
-    根据 stage_ref（如 "现代商场/现代商场-白天-平视-晴-中央扶梯"
-    或衍生变体 "现代商场/现代商场-白天-平视-正门入口@门已打开"）
+    根据 stage_ref（如 "现代商场/中央扶梯"
+    或衍生变体 "现代商场/正门入口@门已打开"）
     解析对应的场景资产路径。
 
     - 基础场景：design/{project}/prompt/stage/{场景名}/{标签}.md
