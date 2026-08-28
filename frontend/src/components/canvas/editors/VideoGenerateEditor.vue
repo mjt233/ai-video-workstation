@@ -7,102 +7,95 @@
     <div
       :class="['video-generate-editor', { 'video-generate-editor--fullscreen': isFullscreen }]"
     >
-      <!-- 工作流 + 生成模式 + 全屏切换（同一行显示；全屏按钮位于组件右上角） -->
-      <div class="d-flex ga-2 mb-2 align-center">
-        <v-select
-          :model-value="workflowImpl"
-          :items="workflowItems"
-          item-title="label"
-          item-value="value"
-          label="工作流"
-          placeholder="请选择工作流实现"
-          density="compact"
-          variant="outlined"
-          :disabled="workflowsLoaded && impls.length === 0"
-          :error="!!implError"
-          :error-messages="implError ? [implError] : []"
-          class="flex-grow-1"
-          @update:model-value="onWorkflowChange"
-        >
-          <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
-          <template #item="{ item, props: itemProps }">
-            <v-list-item v-bind="itemProps">
-              <template #append>
-                <v-chip
-                  v-if="providerLabel(item)"
-                  size="x-small"
-                  label
-                  variant="tonal"
-                  color="secondary"
-                  class="ml-1"
-                >
-                  {{ providerLabel(item) }}
-                </v-chip>
-              </template>
-            </v-list-item>
-          </template>
-        </v-select>
-
-        <!-- 模式切换（所选实现声明多种模式时显示） -->
-        <v-select
-          v-if="currentModes.length > 1"
-          :model-value="mode"
-          :items="modeItems"
-          item-title="label"
-          item-value="value"
-          label="生成模式"
-          density="compact"
-          variant="outlined"
-          hide-details
-          class="flex-grow-1"
-          @update:model-value="onModeChange"
-        />
-
-        <!-- 全屏切换按钮（组件右上角；全屏时变为退出） -->
-        <v-btn
-          class="video-generate-editor__fullscreen-btn"
-          :icon="isFullscreen ? 'mdi-fullscreen-exit' : 'mdi-fullscreen'"
-          size="small"
-          variant="text"
-          :title="isFullscreen ? '退出全屏' : '全屏显示'"
-          @click="toggleFullscreen"
-        />
-      </div>
-
-      <!-- 输出规格：时长 + 尺寸（统一放在生成模式下方，所有模式共用） -->
-      <div class="d-flex ga-2 mb-1">
-        <v-text-field
-          :model-value="String(duration)"
-          label="时长(秒)"
-          type="number"
-          min="1"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="height: 32px;max-width: 120px;"
-          @update:model-value="onDurationChange"
-        />
-
-        <WorkflowSizePicker
-          :size-capabilities="currentImpl?.capabilities?.size"
-          :model-value="sizeConfigState"
-          class="flex-grow-1"
-          @update:model-value="onSizeConfigChange"
-        />
-      </div>
-
-      <!-- 自定义工作流参数：所选实现声明 params 时展示（尺寸类参数已剔除，由上方 WorkflowSizePicker 处理） -->
-      <WorkflowParamsForm
-        v-model="workflowParams"
-        :declarations="currentDeclarations"
-        :provider="currentImpl?.providerInstanceId"
-        :provider-type="currentImpl?.provider"
-        :project="props.project"
-        class="mb-2"
-      />
-
-      <!-- 导演台模式：嵌入导演台（仅导演台加载 VideoDirector，内含 prompt 输入） -->
+      <!-- 导演台模式：保持既有布局（首行工作流+模式+全屏 → 输出规格 → 参数表单 → 导演台） -->
       <template v-if="mode === 'director'">
+        <!-- 工作流 + 生成模式 + 全屏切换（同一行显示；全屏按钮位于组件右上角） -->
+        <div class="d-flex ga-2 mb-2 align-center">
+          <v-select
+            :model-value="workflowImpl"
+            :items="workflowItems"
+            item-title="label"
+            item-value="value"
+            label="工作流"
+            placeholder="请选择工作流实现"
+            density="compact"
+            variant="outlined"
+            :disabled="workflowsLoaded && impls.length === 0"
+            :error="!!implError"
+            :error-messages="implError ? [implError] : []"
+            class="flex-grow-1"
+            @update:model-value="onWorkflowChange"
+          >
+            <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
+            <template #item="{ item, props: itemProps }">
+              <v-list-item v-bind="itemProps">
+                <template #append>
+                  <v-chip
+                    v-if="providerLabel(item)"
+                    size="x-small"
+                    label
+                    variant="tonal"
+                    color="secondary"
+                    class="ml-1"
+                  >
+                    {{ providerLabel(item) }}
+                  </v-chip>
+                </template>
+              </v-list-item>
+            </template>
+          </v-select>
+
+          <!-- 模式切换（所选实现声明多种模式时显示） -->
+          <v-select
+            v-if="currentModes.length > 1"
+            :model-value="mode"
+            :items="modeItems"
+            item-title="label"
+            item-value="value"
+            label="生成模式"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="flex-grow-1"
+            @update:model-value="onModeChange"
+          />
+
+          <!-- 全屏切换按钮（组件右上角；全屏时变为退出） -->
+          <v-btn
+            class="video-generate-editor__fullscreen-btn"
+            :icon="isFullscreen ? 'mdi-fullscreen-exit' : 'mdi-fullscreen'"
+            size="small"
+            variant="text"
+            :title="isFullscreen ? '退出全屏' : '全屏显示'"
+            @click="toggleFullscreen"
+          />
+        </div>
+
+        <!-- 输出规格：时长（菜单式）+ 输出尺寸（菜单式） -->
+        <div class="d-flex ga-2 mb-1">
+          <DurationPicker
+            :model-value="duration"
+            @update:model-value="onDurationChange"
+          />
+          <WorkflowSizePicker
+            :size-capabilities="currentImpl?.capabilities?.size"
+            :model-value="sizeConfigState"
+            class="flex-grow-1"
+            @update:model-value="onSizeConfigChange"
+          />
+        </div>
+
+        <!-- 自定义工作流参数：所选实现声明 params 时展示（尺寸类参数已剔除，由上方 WorkflowSizePicker 处理） -->
+        <WorkflowParamsForm
+          v-model="workflowParams"
+          :declarations="currentDeclarations"
+          :provider="currentImpl?.providerInstanceId"
+          :provider-type="currentImpl?.provider"
+          :project="props.project"
+          class="mb-2"
+        />
+
+        <!-- 导演台（内含 prompt 输入） -->
         <VideoDirector
           :project="props.project"
           :director="directorProject"
@@ -115,134 +108,25 @@
         />
       </template>
 
-      <!-- 首尾帧 / 参考模式：输入分组 + 输出规格 + 提示词 -->
+      <!-- 首尾帧 / 参考模式：统一布局（输入预览 → 提示词 → 参数行） -->
       <template v-else>
-        <!-- 首尾帧模式：按顺序排列帧图片（首帧 0、尾帧 1，中间均匀分布；上限由实现能力决定） -->
-        <VideoRefInputGroup
-          v-if="mode === 'first-last-frame'"
-          title="帧图片"
-          prefix="帧"
-          :inputs="imagesInputs"
-          :max="flfMaxFrames"
+        <!-- 输入预览（统一组件）：图片/视频/音频按类型分组，无对应的输入不显示该组 -->
+        <CanvasInputPreview
+          :project="props.project"
+          :images-inputs="imagesInputs"
+          :videos-inputs="mode === 'reference' ? videosInputs : []"
+          :audios-inputs="mode === 'reference' || audioEnabled ? audiosInputs : []"
+          :images-title="mode === 'first-last-frame' ? '帧图片' : '图片'"
+          :images-prefix="mode === 'first-last-frame' ? '帧' : '图'"
+          :images-max="mode === 'first-last-frame' ? flfMaxFrames : refImageMax"
+          :videos-max="refVideoMax"
+          :audios-max="refAudioMax"
+          :empty-text="mode === 'first-last-frame' ? '暂无帧图片输入' : '暂无参考素材输入'"
           @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
           @remove="onRemoveInput"
-        >
-          <template #thumb="{ input }">
-            <img
-              class="canvas-input-item__thumb"
-              :src="previewUrls[input.nodeId]"
-              :alt="input.label"
-              draggable="false"
-            >
-          </template>
-          <template #zoom="{ input }">
-            <img
-              class="canvas-input-zoom"
-              :src="previewUrls[input.nodeId]"
-              :alt="input.label"
-            >
-          </template>
-        </VideoRefInputGroup>
+        />
 
-        <!-- 首尾帧模式：音频输入（仅所选实现支持音频输入时显示；提交时取第一条音频） -->
-        <VideoRefInputGroup
-          v-if="mode === 'first-last-frame' && audioEnabled"
-          title="音频"
-          prefix="音"
-          :inputs="audiosInputs"
-          @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
-          @remove="onRemoveInput"
-        >
-          <template #thumb>
-            <div class="canvas-input-item__audio">
-              <v-icon icon="mdi-music-note" />
-            </div>
-          </template>
-          <template #zoom="{ input }">
-            <audio
-              class="canvas-input-zoom"
-              :src="previewUrls[input.nodeId]"
-              controls
-            />
-          </template>
-        </VideoRefInputGroup>
-
-        <!-- 参考模式：图片 / 视频 / 音频分组预览 -->
-        <template v-if="mode === 'reference'">
-          <VideoRefInputGroup
-            title="图片"
-            prefix="图"
-            :inputs="imagesInputs"
-            :max="refImageMax"
-            @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
-            @remove="onRemoveInput"
-          >
-            <template #thumb="{ input }">
-              <img
-                class="canvas-input-item__thumb"
-                :src="previewUrls[input.nodeId]"
-                :alt="input.label"
-                draggable="false"
-              >
-            </template>
-            <template #zoom="{ input }">
-              <img
-                class="canvas-input-zoom"
-                :src="previewUrls[input.nodeId]"
-                :alt="input.label"
-              >
-            </template>
-          </VideoRefInputGroup>
-
-          <VideoRefInputGroup
-            title="视频"
-            prefix="视"
-            :inputs="videosInputs"
-            :max="refVideoMax"
-            @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
-            @remove="onRemoveInput"
-          >
-            <template #thumb="{ input }">
-              <video
-                class="canvas-input-item__thumb"
-                :src="previewUrls[input.nodeId]"
-                muted
-                draggable="false"
-              />
-            </template>
-            <template #zoom="{ input }">
-              <video
-                class="canvas-input-zoom"
-                :src="previewUrls[input.nodeId]"
-                controls
-                muted
-              />
-            </template>
-          </VideoRefInputGroup>
-
-          <VideoRefInputGroup
-            title="音频"
-            prefix="音"
-            :inputs="audiosInputs"
-            :max="refAudioMax"
-            @reorder="(ids) => emit('update:config', { inputOrder: mergeInputOrder(ids) })"
-            @remove="onRemoveInput"
-          >
-            <template #thumb>
-              <div class="canvas-input-item__audio">
-                <v-icon icon="mdi-music-note" />
-              </div>
-            </template>
-            <template #zoom="{ input }">
-              <audio
-                class="canvas-input-zoom"
-                :src="previewUrls[input.nodeId]"
-                controls
-              />
-            </template>
-          </VideoRefInputGroup>
-        </template>
-
+        <!-- 参考模式限制提示 -->
         <div
           v-if="refLimitHint"
           class="text-body-small text-warning mb-2"
@@ -250,20 +134,103 @@
           {{ refLimitHint }}
         </div>
 
-        <!-- 提示词（导演台模式由导演台内 prompt 输入承载） -->
+        <!-- 提示词 Prompt -->
         <v-textarea
           :model-value="prompt"
           label="提示词 Prompt"
-          rows="3"
+          rows="5"
           density="compact"
           variant="outlined"
           hide-details
           class="mb-2"
           @update:model-value="(v) => emit('update:config', { prompt: v })"
         />
+
+        <!-- 参数行：生成模式 + 工作流 + 时长 + 输出尺寸 + 工作流参数 + 全屏 -->
+        <div class="generation-params-row mb-2">
+          <v-select
+            v-if="currentModes.length > 1"
+            :model-value="mode"
+            :items="modeItems"
+            item-title="label"
+            item-value="value"
+            label="生成模式"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="generation-params-row__mode"
+            @update:model-value="onModeChange"
+          />
+
+          <v-select
+            :model-value="workflowImpl"
+            :items="workflowItems"
+            item-title="label"
+            item-value="value"
+            label="工作流"
+            placeholder="请选择工作流实现"
+            density="compact"
+            variant="outlined"
+            hide-details
+            :disabled="workflowsLoaded && impls.length === 0"
+            :error="!!implError"
+            :error-messages="implError ? [implError] : []"
+            class="generation-params-row__workflow"
+            @update:model-value="onWorkflowChange"
+          >
+            <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
+            <template #item="{ item, props: itemProps }">
+              <v-list-item v-bind="itemProps">
+                <template #append>
+                  <v-chip
+                    v-if="providerLabel(item)"
+                    size="x-small"
+                    label
+                    variant="tonal"
+                    color="secondary"
+                    class="ml-1"
+                  >
+                    {{ providerLabel(item) }}
+                  </v-chip>
+                </template>
+              </v-list-item>
+            </template>
+          </v-select>
+
+          <!-- 时长：点击弹出菜单（1~15 秒快捷选择 + 手动输入） -->
+          <DurationPicker
+            :model-value="duration"
+            @update:model-value="onDurationChange"
+          />
+
+          <!-- 输出尺寸：点击弹出菜单配置 -->
+          <WorkflowSizePicker
+            :size-capabilities="currentImpl?.capabilities?.size"
+            :model-value="sizeConfigState"
+            @update:model-value="onSizeConfigChange"
+          />
+
+          <!-- 工作流参数：点击弹出菜单配置 -->
+          <WorkflowParamsTrigger
+            v-model="workflowParams"
+            :declarations="currentDeclarations"
+            :provider="currentImpl?.providerInstanceId"
+            :provider-type="currentImpl?.provider"
+            :project="props.project"
+          />
+
+          <v-btn
+            class="generation-params-row__fullscreen"
+            :icon="isFullscreen ? 'mdi-fullscreen-exit' : 'mdi-fullscreen'"
+            size="small"
+            variant="text"
+            :title="isFullscreen ? '退出全屏' : '全屏显示'"
+            @click="toggleFullscreen"
+          />
+        </div>
       </template>
 
-      <!-- 生成 / 中断 / 历史 -->
+      <!-- 生成 / 中断 / 历史 / 设为分镜视频 -->
       <div class="d-flex align-center ga-2">
         <v-btn
           color="primary"
@@ -307,31 +274,37 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { getWorkflows, type WorkflowInfo } from '../../../api/workflow'
+import {
+  getWorkflows,
+  type WorkflowInfo,
+  type WorkflowSizeConfig,
+  type WorkflowUserParamDeclaration,
+  type WorkflowUserParamValue,
+} from '../../../api/workflow'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
-import type { CanvasInputInfo } from '../../../canvas/generate'
-import { buildPreviewUrl } from '../../../canvas/preview'
-import { mergeInputOrder as mergeGlobalInputOrder } from '../../../canvas/generate'
+import { mergeInputOrder as mergeGlobalInputOrder, type CanvasInputInfo } from '../../../canvas/generate'
 import { canvasDirectorToProject, projectToCanvasDirector } from '../../../canvas/videoDirectorBridge'
 import type { CanvasDirectorConfig, VideoGenerateMode } from '../../../canvas/videoTypes'
-import type { WorkflowUserParamDeclaration, WorkflowUserParamValue, WorkflowSizeConfig } from '../../../api/workflow'
 import { findSizeParamKeys, inferSizeConfigFromWidthHeight } from '../../../utils/workflowSize'
 import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
+import WorkflowParamsTrigger from '../../WorkflowParamsTrigger.vue'
 import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
+import DurationPicker from '../../DurationPicker.vue'
 import VideoDirector from '../../video-director/VideoDirector.vue'
-import VideoRefInputGroup from './VideoRefInputGroup.vue'
+import CanvasInputPreview from './CanvasInputPreview.vue'
 import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 
 /**
  * 视频生成节点配置组件。
  *
  * 支持三种生成模式（由所选工作流实现的能力声明决定）：
- * - director：仅此模式加载 VideoDirector 导演台（编辑结果实时写回 config.director，内含 prompt 输入）
- * - first-last-frame：按 config.inputOrder 排列帧图片（首帧 0、尾帧 1，中间均匀分布），
- *   编辑输出规格（时长/尺寸）与提示词；所选实现支持音频输入（video.audio）时额外显示
- *   音频分组（提交时取第一条音频输入）
- * - reference：参考模式，按图片/视频/音频三组展示输入并支持组内拖拽排序，
- *   可编辑输出规格（时长/尺寸）并校验参考素材数量上限
+ * - director：保持既有布局——首行（工作流/模式/全屏）、输出规格（时长/尺寸菜单）、
+ *   参数表单、内嵌 VideoDirector 导演台（编辑结果实时写回 config.director，内含 prompt 输入）
+ * - first-last-frame / reference：统一布局——输入预览（CanvasInputPreview 按图片/视频/音频
+ *   分组）→ 提示词 → 参数行（生成模式 + 工作流 + 时长 + 输出尺寸 + 工作流参数 + 全屏）。
+ *   首尾帧按 config.inputOrder 排列帧图片（首帧 0、尾帧 1，中间均匀分布），所选实现支持
+ *   音频输入（video.audio）时额外显示音频分组；参考模式按图片/视频/音频三组展示输入并
+ *   支持组内拖拽排序，校验参考素材数量上限。
  */
 const props = defineProps<{
   /** 项目名（用于资产预览 URL 与导演台素材） */
@@ -501,8 +474,8 @@ function providerLabel(raw: { providerName?: string; provider?: string }): strin
 const workflowParams = ref<Record<string, WorkflowUserParamValue>>({})
 
 /**
- * 当前实现的自定义参数声明（剔除尺寸相关 key：本编辑器尺寸由上方专用 WorkflowSizePicker 处理，
- * 避免与 WorkflowParamsForm 内置的尺寸组件重复展示）。
+ * 当前实现的自定义参数声明（剔除尺寸相关 key：本编辑器尺寸由参数行内
+ * 专用 WorkflowSizePicker 处理，避免与 WorkflowParamsForm 内置尺寸组件重复展示）。
  */
 const currentDeclarations = computed<WorkflowUserParamDeclaration[]>(() => {
   const params = currentImpl.value?.params ?? []
@@ -592,7 +565,7 @@ watch(
 /**
  * 切入导演台模式时初始化时长：config.director.duration 为 0/缺失时，
  * 继承其它模式设定的 config.duration（>0 用其值，否则回退 5），保持导演台
- * 「总长」与「时长(秒)」输入框一致。不 immediate——节点直接以导演台模式
+ * 「总长」与「时长」控件一致。不 immediate——节点直接以导演台模式
  * 新建/加载时只靠显示层回退，不自动写盘；用户编辑导演台后才持久化。
  */
 watch(mode, (m) => {
@@ -602,15 +575,6 @@ watch(mode, (m) => {
   const inherit = Number(props.node.config.duration)
   const target = Number.isFinite(inherit) && inherit > 0 ? inherit : 5
   emit('update:config', { director: { ...directorConfig.value, duration: target } })
-})
-
-/** 全部输入的预览 URL（nodeId → URL；输入或项目变化时重建） */
-const previewUrls = computed<Record<string, string>>(() => {
-  const m: Record<string, string> = {}
-  // 用源资产 mtime 作缓存键：只有源资产实际变化才刷新 URL，避免配置修改等
-  // 重渲染每次重建 Date.now() 缓存键导致图片/视频/音频反复重新加载（浪费带宽+闪烁）
-  for (const inp of props.inputs) m[inp.nodeId] = buildPreviewUrl(props.project, inp.path, inp.version)
-  return m
 })
 
 // ── 导演台数据桥 ─────────────────────────────────────────────
@@ -631,8 +595,8 @@ const pathToSource = computed<Record<string, string>>(() => {
 
 /**
  * 导演台项目数据（供 VideoDirector 渲染；素材路径由 sourceToPath 解析，缺失时为空串）。
- * 时长缺省回退 5：与「时长(秒)」输入框（同为 || 5 回退）保持一致，避免
- * config.director.duration 为 0 时导演台「总长」显示 0.0s 而输入框显示 5s 的割裂。
+ * 时长缺省回退 5：与「时长」控件（同为 || 5 回退）保持一致，避免
+ * config.director.duration 为 0 时导演台「总长」显示 0.0s 而控件显示 5s 的割裂。
  */
 const directorProject = computed(() =>
   canvasDirectorToProject(
@@ -770,11 +734,10 @@ function onSizeConfigChange(v: WorkflowSizeConfig) {
  * - director：config.director.duration
  * - first-last-frame / reference：config.duration
  *
- * @param v 输入值（数字字符串或空串）
+ * @param v 新时长（秒；菜单控件保证为合法正数）
  */
-function onDurationChange(v: unknown) {
-  const n = v === '' || v === null || v === undefined ? 0 : Number(v)
-  const value = Number.isFinite(n) ? n : 0
+function onDurationChange(v: number) {
+  const value = Number.isFinite(v) ? v : 0
   if (mode.value === 'director') {
     emit('update:config', {
       director: { ...directorConfig.value, duration: value },
@@ -821,7 +784,31 @@ getWorkflows()
 </script>
 
 <style scoped>
-/* 全屏切换按钮：位于首行最右侧（组件右上角），垂直居中 */
+/* 参数行：紧凑横排，空间不足时换行（工作流下拉优先占满剩余宽度） */
+.generation-params-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.generation-params-row__mode {
+  flex: 0 0 auto;
+  width: 100px;
+}
+
+.generation-params-row__workflow {
+  flex: 1 1 180px;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.generation-params-row__fullscreen {
+  align-self: center;
+  flex: 0 0 auto;
+}
+
+/* 导演台首行全屏切换按钮：垂直居中 */
 .video-generate-editor__fullscreen-btn {
   align-self: center;
   flex: 0 0 auto;
@@ -837,33 +824,5 @@ getWorkflows()
   padding: 16px 20px 24px;
   overflow-y: auto;
   background: rgb(var(--v-theme-surface));
-}
-
-/* 参考素材缩略样式（供 VideoRefInputGroup 插槽内容使用；插槽内容带本组件 scope，
-   因此用本组件 scoped 规则即可命中缩略图/放大内容类名） */
-.canvas-input-item__thumb {
-  width: 64px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  background: rgba(0, 0, 0, 0.04);
-}
-
-/* 参考音频缩略：图标占位（悬浮时由 tooltip 提供 audio 播放器） */
-.canvas-input-item__audio {
-  width: 64px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  background: rgba(0, 0, 0, 0.04);
-}
-
-.canvas-input-zoom {
-  max-width: 320px;
-  max-height: 240px;
 }
 </style>

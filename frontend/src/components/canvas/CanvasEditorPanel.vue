@@ -102,11 +102,11 @@ const emit = defineEmits<{
 }>()
 
 /** 配置面板固定宽度（像素，屏幕坐标，不随缩放变化） */
-const EDITOR_PANEL_WIDTH = 400
+const EDITOR_PANEL_WIDTH = 440
 /** 生成图片节点配置面板固定宽度（更宽，屏幕坐标，不随缩放变化） */
-const EDITOR_PANEL_WIDTH_GENERATE = 500
-/** 生成视频节点配置面板固定宽度（导演台嵌入需要，屏幕坐标，不随缩放变化） */
-const EDITOR_PANEL_WIDTH_VIDEO = 640
+const EDITOR_PANEL_WIDTH_GENERATE = 560
+/** 生成视频节点配置面板固定宽度（导演台嵌入与参数行需要，屏幕坐标，不随缩放变化） */
+const EDITOR_PANEL_WIDTH_VIDEO = 720
 /** 配置面板与节点底部之间的垂直间距（像素，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_GAP = 12
 
@@ -183,7 +183,7 @@ onUnmounted(() => {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
   padding: 8px;
   box-sizing: border-box;
-  max-height: 45vh;
+  max-height: 65vh;
   overflow-y: auto;
 }
 

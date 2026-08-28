@@ -2,6 +2,10 @@
   <div class="video-ref-group">
     <div class="text-body-small text-medium-emphasis mb-1">
       {{ title }}（{{ inputs.length }}{{ max != null ? `/${max}` : '' }}）
+      <span
+        v-if="headerHint"
+        class="text-grey"
+      >· {{ headerHint }}</span>
     </div>
     <div
       v-if="inputs.length"
@@ -93,6 +97,8 @@ const props = defineProps<{
   max?: number
   /** 显示名前缀（如「图」） */
   prefix: string
+  /** 标题右侧的灰色提示文案（如「拖拽调整顺序」；未传不显示） */
+  headerHint?: string
 }>()
 
 /**

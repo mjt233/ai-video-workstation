@@ -1,5 +1,6 @@
 <template>
   <div class="tts-generate-editor">
+    <!-- 生成模式：音色克隆 / 音色设计 -->
     <v-radio-group
       :model-value="mode"
       inline
@@ -18,25 +19,21 @@
       />
     </v-radio-group>
 
-    <div class="text-body-small text-medium-emphasis mb-2">
-      <template v-if="mode === 'clone'">
-        参考音频（{{ inputs.length }}）：
-        <span v-if="inputs.length">已连接，将作为克隆音色参考</span>
-        <span
-          v-else
-          class="text-error"
-        >需先连接「加载音频」节点</span>
-      </template>
-      <template v-else>
-        音色设计无需参考音频
-      </template>
-    </div>
+    <!-- 输入预览（统一组件）：参考音频（TTS 无时长/输出尺寸，仅音频输入） -->
+    <CanvasInputPreview
+      :project="props.project"
+      :audios-inputs="inputs"
+      audios-title="参考音频"
+      audios-prefix="音"
+      :empty-text="mode === 'clone' ? '需先连接「加载音频」节点' : '音色设计无需参考音频'"
+      @remove="(input) => emit('disconnect-input', input.nodeId)"
+    />
 
     <template v-if="mode === 'clone'">
       <v-textarea
         :model-value="text"
         label="朗读文本 Text"
-        rows="3"
+        rows="4"
         density="compact"
         variant="outlined"
         hide-details
@@ -58,7 +55,7 @@
       <v-textarea
         :model-value="prompt"
         label="声线描述 Prompt"
-        rows="2"
+        rows="3"
         density="compact"
         variant="outlined"
         hide-details
@@ -68,7 +65,7 @@
       <v-textarea
         :model-value="text"
         label="朗读文本 Text"
-        rows="3"
+        rows="4"
         density="compact"
         variant="outlined"
         hide-details
@@ -77,47 +74,52 @@
       />
     </template>
 
-    <v-select
-      :model-value="currentImplId"
-      :items="implItems"
-      item-title="label"
-      item-value="value"
-      :label="mode === 'clone' ? '克隆工作流实现' : '设计工作流实现'"
-      placeholder="请选择工作流实现"
-      density="compact"
-      variant="outlined"
-      :disabled="workflowsLoaded && implItems.length === 0"
-      :error="!!implError"
-      :error-messages="implError ? [implError] : []"
-      class="mb-2"
-      @update:model-value="onImplChange"
-    >
-      <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
-      <template #item="{ item, props: itemProps }">
-        <v-list-item v-bind="itemProps">
-          <template #append>
-            <v-chip
-              v-if="providerLabel(item)"
-              size="x-small"
-              label
-              variant="tonal"
-              color="secondary"
-              class="ml-1"
-            >
-              {{ providerLabel(item) }}
-            </v-chip>
-          </template>
-        </v-list-item>
-      </template>
-    </v-select>
+    <!-- 参数行：工作流实现 + 工作流参数（TTS 不显示时长与输出尺寸） -->
+    <div class="generation-params-row">
+      <v-select
+        :model-value="currentImplId"
+        :items="implItems"
+        item-title="label"
+        item-value="value"
+        :label="mode === 'clone' ? '克隆工作流实现' : '设计工作流实现'"
+        placeholder="请选择工作流实现"
+        density="compact"
+        variant="outlined"
+        hide-details
+        :disabled="workflowsLoaded && implItems.length === 0"
+        :error="!!implError"
+        :error-messages="implError ? [implError] : []"
+        class="generation-params-row__impl"
+        @update:model-value="onImplChange"
+      >
+        <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
+        <template #item="{ item, props: itemProps }">
+          <v-list-item v-bind="itemProps">
+            <template #append>
+              <v-chip
+                v-if="providerLabel(item)"
+                size="x-small"
+                label
+                variant="tonal"
+                color="secondary"
+                class="ml-1"
+              >
+                {{ providerLabel(item) }}
+              </v-chip>
+            </template>
+          </v-list-item>
+        </template>
+      </v-select>
 
-    <WorkflowParamsForm
-      v-model="workflowParams"
-      :declarations="currentDeclarations"
-      :provider="currentImpl?.providerInstanceId"
-      :provider-type="currentImpl?.provider"
-      :project="props.project"
-    />
+      <!-- 工作流参数：点击弹出菜单配置 -->
+      <WorkflowParamsTrigger
+        v-model="workflowParams"
+        :declarations="currentDeclarations"
+        :provider="currentImpl?.providerInstanceId"
+        :provider-type="currentImpl?.provider"
+        :project="props.project"
+      />
+    </div>
 
     <div class="d-flex align-center ga-2">
       <v-btn
@@ -155,7 +157,8 @@ import { computed, ref, watch } from 'vue'
 import { getWorkflows, type WorkflowInfo, type WorkflowUserParamValue } from '../../../api/workflow'
 import type { CanvasNodeData } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
-import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
+import WorkflowParamsTrigger from '../../WorkflowParamsTrigger.vue'
+import CanvasInputPreview from './CanvasInputPreview.vue'
 
 const props = defineProps<{
   project: string
@@ -171,6 +174,7 @@ const emit = defineEmits<{
   (e: 'generate', nodeId: string): void
   (e: 'interrupt', nodeId: string): void
   (e: 'open-history', nodeId: string): void
+  (e: 'disconnect-input', sourceNodeId: string): void
 }>()
 
 const workflows = ref<WorkflowInfo[]>([])
@@ -287,3 +291,19 @@ getWorkflows()
   .catch(() => { workflows.value = [] })
   .finally(() => { workflowsLoaded.value = true })
 </script>
+
+<style scoped>
+/* 参数行：紧凑横排（工作流实现下拉优先占满剩余宽度） */
+.generation-params-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.generation-params-row__impl {
+  flex: 1 1 180px;
+  min-width: 180px;
+}
+</style>

@@ -83,8 +83,9 @@
 - **加载图片**：`config.assetPath` 绑定一张既有资产（上传到 `assert/custom/canvas/` 或从资产选择器选择）；点击节点出现的配置组件可预览当前图并「上传图片 / 选择资产」。
 - **加载音频**：`config.assetPath` 绑定一段音频（上传到 `assert/custom/canvas/` 或从资产选择器选择）。该节点打开的资产选择器额外提供「音频」页签（台词音频/分镜自定义/全局自定义），且「角色」页签在选择角色后会展示**音色**分区（`assert/character/{角色}/voice.flac` 由 character-voice 任务生成；`assert/character/{角色}/voice-variants/{变体id}.flac` 为角色**声音变体**，见 `docs/asset-layout.md`，均已生成才列出），与外观图一起可选；图片类节点（image-loader）的选择器不显示音色与音频页签（`AssetCanvas.openAssetPicker` 按 `prototypeId === 'audio-loader'` 决定 `showVoice` 与页签列表）。
 - **加载视频**：`config.assetPath` 绑定一段视频（上传到 `assert/custom/canvas/` 或从资产选择器选择）。该节点打开的资产选择器额外提供「分镜视频」页签（`VideoPicker`）：列出 `assert/scene/{集}/{分镜}/video/` 目录下的全部视频（`{index}.mp4`），目录为空时兼容回退旧版 `video.mp4`；分镜画布（`kind === 'scene'`）下编辑器提供「设为分镜视频」，把当前视频复制为 `assert/scene/{集}/{分镜}/video/0.mp4`（服务端批量生成 `discovery.ts` 也输出到该路径）。
-- **生成图片**：`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（有输入图用 `image-edit`，否则 `text-to-image`；`workflowImpl` **须显式选择**，未选择时生成被前端校验拦截，后端也不再兜底）、`workflowParams`（用户参数）、`inputOrder`（输入图顺序，见 §7）。产物固定 `output.jpg`。
-- **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`（**须显式选择**，未选择时生成被前端校验拦截）、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`workflowParams`、`inputOrder`。单一 `media` 输入口，素材类型由来源节点自动归类；编辑器内嵌导演台（仅 director 模式）或参考素材分组；分镜画布下提供「设为分镜视频」（把当前产物复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。产物固定 `output.mp4`。
+- **生成图片**：配置组件采用统一生成节点布局——`CanvasInputPreview` 输入预览（图片类型；无输入时显示「无输入图，默认使用文生图工作流」）+ 提示词字段 + 参数行（工作流类型/工作流实现两个紧凑下拉、输出尺寸 `WorkflowSizePicker`、工作流参数 `WorkflowParamsTrigger`，后两者均为点击弹出菜单式配置，见 §6.1）。`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（有输入图用 `image-edit`，否则 `text-to-image`；`workflowImpl` **须显式选择**，未选择时生成被前端校验拦截，后端也不再兜底）、`workflowParams`（用户参数）、`sizeConfig`（输出尺寸）、`inputOrder`（输入图顺序，见 §7）。产物固定 `output.jpg`。
+- **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`（**须显式选择**，未选择时生成被前端校验拦截）、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`duration`（首尾帧/参考模式时长，秒）、`resolution` / `sizeConfig`（输出尺寸）、`workflowParams`、`inputOrder`。单一 `media` 输入口，素材类型由来源节点自动归类。**非导演台模式（首尾帧/参考）采用统一布局**（见 §6.1）：`CanvasInputPreview` 输入预览（图片/视频/音频分组，无对应输入不显示）+ 提示词 + 参数行（生成模式**位于工作流之前**、工作流、时长 `DurationPicker`、输出尺寸、工作流参数、全屏按钮）。`director` 模式保持内嵌导演台布局（首行工作流/模式/全屏 + 输出规格 + 参数表单 + `VideoDirector`），仅把时长输入框换成 `DurationPicker`；分镜画布下提供「设为分镜视频」（把当前产物复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。产物固定 `output.mp4`。
+- **TTS声音生成**：`config` 含 `mode`（`clone` 音色克隆 / `design` 音色设计）、`text`（朗读文本）、`refText`（克隆参考文字）/ `prompt`（设计声线描述）、`workflowImpl`（**须显式选择**）、`workflowParams`。配置组件同样采用统一布局——`CanvasInputPreview` 输入预览（音频类型，克隆模式需连接「加载音频」节点）+ 文本字段 + 参数行（工作流实现 + 工作流参数；**TTS 不显示时长与输出尺寸**）。
 - **拼接视频**：`config` 含 `inputOrder`（拼接顺序，编辑器内 `VideoRefInputGroup` 拖拽排序）。单一 `video` 输入口，同一端口可连多段视频（无输入上限校验）；编辑器「拼接」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/concat-video`（本地 ffmpeg，concat demuxer + `-c copy` 无损拼接，各段编码/分辨率/帧率/音轨结构须一致，不一致返回清晰中文错误）；产物固定 `output.mp4`，重复拼接旧产物自动归档进历史目录。
 - **裁剪视频**：`config` 含 `startMode`（`time` / `frame`）、`startValue`（秒可小数，或帧索引整数 ≥ 0）、`duration`（秒，> 0 可小数）。单一 `video` 输入口（多路只取第一路）；编辑器「裁剪」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/trim-video`（本地 ffmpeg **重编码**，不用 `-c copy`，保证帧索引 / 小数秒切口准确：`libx264 veryfast crf=18`，有音轨则 `aac`）。起点 + 时长超出片尾时截到剩余时长。产物固定覆盖 `output.mp4`，重复裁剪旧产物自动归档（**裁剪也有历史**，与其余节点一致）。节点卡片与配置面板均可预览裁剪结果。
 - **文本**：`config.text`，可编辑纯文本；当前仅作为 text 类型数据流锚点。文本域带 Vue Flow 约定类 `nodrag` / `nowheel`：在文本域内拖拽是选择文本（不移动节点），滚轮滚动是滚动文本内容（不缩放画布）。
@@ -133,7 +134,7 @@
 ## 6. 配置面板（`CanvasEditorPanel.vue` 实现，由 AssetCanvas 编排）
 
 - 独立悬浮于节点下方的面板（不随节点尺寸撑大），渲染选中节点的 `editorComponent`；组件常驻挂载，显隐由 `visible` prop 驱动，`<Transition>` 与定位逻辑在组件内部。
-- **固定大小不随缩放**：宽度为固定屏幕像素（普通节点 400px、生成图片节点 500px、生成视频节点 640px，见组件内常量 `EDITOR_PANEL_WIDTH[_GENERATE/_VIDEO]`），间距 12px（`EDITOR_PANEL_GAP`）；仅**位置**随节点/视图联动（水平中心与节点中心对齐），视口与画布可视区尺寸由 AssetCanvas 以 props 传入（`viewport`/`flowWidth`/`flowHeight`）。
+- **固定大小不随缩放**：宽度为固定屏幕像素（普通节点 440px、生成图片节点 560px、生成视频节点 720px，见组件内常量 `EDITOR_PANEL_WIDTH[_GENERATE/_VIDEO]`），上限高度 65vh（超出滚动），间距 12px（`EDITOR_PANEL_GAP`）；仅**位置**随节点/视图联动（水平中心与节点中心对齐），视口与画布可视区尺寸由 AssetCanvas 以 props 传入（`viewport`/`flowWidth`/`flowHeight`）。
 - **边界钳制**：优先放节点下方；放不下且上方有空间则翻转到节点上方；仍放不下则把面板底部钳到画布可视区内（必要时与节点重叠）。钳制用 `flowEl.clientHeight/Width`（AssetCanvas 的 ResizeObserver 监听 `flowEl`）+ 面板自身高度（面板组件 ResizeObserver 监听 `panelEl`）测量，勿用 Vue Flow `dimensions`（不可靠）。
 - **淡入淡出**：`<Transition name="editor-panel">` + CSS（opacity 0.18s + `translateY(6px)`）；关闭淡出期间用 `lastPanelStyle` 缓存保持原位不跳位（缓存写在 `watch(editorPanelStyle)`，勿在 computed 内写副作用，会触发 eslint `vue/no-side-effects-in-computed-properties`）。
 - 拖拽节点时 `suppressEditor=true` 隐藏面板，仅点击节点才显示。
@@ -148,17 +149,30 @@
   - `generate(nodeId)` / `interrupt(nodeId)` / `open-history(nodeId)` / `set-as-scene(nodeId)`；
   - `open-picker(nodeId)` —— 打开资产选择器（加载图片编辑器使用）；
   - `upload-file(nodeId, file, dest)` —— 加载节点上传文件（加载图片/音频/视频编辑器与节点 body 使用）：上传进度由 `useCanvasUpload` 管理并渲染在**节点卡片遮罩**上，成功回调 `onUpdateConfig(nodeId, { assetPath })` 写回（编辑器不自行显示进度）；
-  - `disconnect-input(sourceNodeId)` —— 输入缩略图红色 x 快捷断开（生成图片/生成视频/拼接视频编辑器使用，见 §4/§7）。
+  - `disconnect-input(sourceNodeId)` —— 输入缩略图红色 x 快捷断开（生成图片/生成视频/拼接视频/TTS 编辑器使用，见 §4/§7）。
 - 新增编辑器时需在 `registry.ts` 为原型挂 `editorComponent`；若用到资产选择器，`AssetCanvas` 的编辑器面板接线（`CanvasEditorPanel`）需给 `@open-picker="openAssetPicker"`。
+
+### 6.1 生成节点统一布局
+
+生成图片 / 生成视频（非导演台模式）/ TTS 三个生成节点的配置组件采用统一骨架：**输入预览 → 提示词/文本字段 → 参数行**，让用户聚焦 prompt 编写与输入资源，其余细节参数收纳进可开关的菜单中调整。
+
+- **输入预览**（`editors/CanvasInputPreview.vue`）：按图片/视频/音频三组展示连接到的输入资源（内部复用 `editors/VideoRefInputGroup.vue`），**仅该类型存在输入时渲染对应组**（无输入不显示条目），全部为空时显示占位文案；组内拖拽排序（`reorder` 事件上报本组新顺序，编辑器经 `mergeInputOrder` 合并回全局 `config.inputOrder`）+ 悬浮放大 tooltip（图片/视频/音频可播放）+ 缩略图右上角红色 x 快捷断开（`disconnect-input`）。
+- **参数行**（各编辑器内 `.generation-params-row` 紧凑横排，空间不足自动换行）：
+  - 工作流：生成图片 = 工作流类型 + 工作流实现两个紧凑下拉；生成视频 = 单个工作流下拉（模式放其前）；TTS = 单个工作流实现下拉；
+  - `DurationPicker`（`components/DurationPicker.vue`，时长）：**仅生成视频节点显示**；点击触发行弹出菜单——1~15 秒按钮组（点击即选即关）+ 手动输入（支持小数秒，回车/「应用」确认，非法忽略）；写回按生成模式走 `config.director.duration` / `config.duration`；
+  - `WorkflowSizePicker`（输出尺寸）：**仅生成图片/视频节点显示**，点击弹出菜单（比例/分辨率/自定义宽高），图片节点直接绑 `config.sizeConfig`；
+  - `WorkflowParamsTrigger`（`components/WorkflowParamsTrigger.vue`，工作流参数）：点击触发行弹出菜单，菜单内嵌 `WorkflowParamsForm`；触发行显示「工作流参数」+ 已配置非默认参数数量徽标。
+- **导演台模式例外**：生成视频的 `director` 模式保持内嵌导演台布局（首行工作流/模式/全屏、输出规格、内嵌参数表单、`VideoDirector`），仅把「时长(秒)」输入框换成 `DurationPicker`。
 
 ---
 
-## 7. 输入图（生成图片节点编辑器）
+## 7. 输入预览（`CanvasInputPreview.vue`，生成节点统一输入区）
 
-- 展示：配置面板顶部「输入图」区，每张输入图显示为**缩略图 + 「图像N」标签**（N 为顺序号，随拖拽排序变化；文件名在 title 提示）。
-- 悬浮放大：`v-tooltip location="top"` 显示放大图（最大 280px），悬浮在输入图**上方**；tooltip 必须带 `interactive`（非交互态内容 `pointer-events: none`，鼠标悬停其上会穿透关闭、无法交互）并配 `close-delay`（宽限指针从缩略图移入内容的时间；进入后由 Vuetify open-on-hover 保持打开，视频/音频可点击播放、拖进度条）。生成视频/拼接视频的输入分组（`VideoRefInputGroup`）共用同一套悬浮预览行为。
-- 悬浮快捷断开：输入缩略图右上角悬浮显示红色 x，点击断开该输入连接（见 §4；生成视频/拼接视频分组与生成图片输入图一致）。
-- 拖拽排序：HTML5 DnD，容器 `dragover` 按鼠标水平位置计算插入下标，`--insert-left/--insert-right` 高亮插入位置；drop 后重排并 `emit('update:config', { inputOrder: [sourceNodeId...] })` 持久化。
+- 生成图片/生成视频（首尾帧、参考）/TTS 三个生成节点的配置组件顶部统一由 `CanvasInputPreview` 渲染输入预览：按**图片/视频/音频**三种类型分组（每组复用 `editors/VideoRefInputGroup.vue`，标题形如「图片（2/4）」，前缀 图/视/音，或按模式定制如 帧、图像），**仅存在对应输入的组才渲染**（如生成图片节点只有图片组、TTS 只有音频组、首尾帧只渲染帧图片+可选音频）；全部为空时显示编排编辑器传入的占位文案（如生成图片的「无输入图，默认使用文生图工作流」、TTS 克隆模式的「需先连接加载音频节点」）。
+- 悬浮放大：`v-tooltip location="top"` 显示放大内容（图片最大 320px、视频/音频可播放），悬浮在输入**上方**；tooltip 必须带 `interactive`（非交互态内容 `pointer-events: none`，鼠标悬停其上会穿透关闭、无法交互）并配 `close-delay`（宽限指针从缩略图移入内容的时间；进入后由 Vuetify open-on-hover 保持打开，视频/音频可点击播放、拖进度条）。
+- 悬浮快捷断开：输入缩略图右上角悬浮显示红色 x，点击断开该输入连接（见 §4；`remove` 事件 → `disconnect-input`）。
+- 拖拽排序：组内 HTML5 DnD，容器 `dragover` 按鼠标水平位置计算插入下标并高亮插入位置；drop 后 `reorder` 事件上报本组新 nodeId 顺序，编辑器经 `mergeInputOrder` 合并回全局 `config.inputOrder` 持久化（只影响本组相对顺序，其他组保持不动）。
+- 顺序生效点：`generate.ts: collectInputs / collectInputPaths` 遵循 `config.inputOrder`（未记录的节点按连接顺序排末尾）；生成节点发起生成时也会把该顺序的输入图传给 `image-edit` 工作流。
 - 顺序生效点：`generate.ts: collectInputs / collectInputPaths` 遵循 `config.inputOrder`（未记录的节点按连接顺序排末尾）；生成节点发起生成时也会把该顺序的输入图传给 `image-edit` 工作流。
 
 ---
@@ -274,7 +288,10 @@ frontend/src/
     │   ├── useCanvasDialogs.ts   # 历史/保存资产/场景图/分镜视频/资产选择器状态
     │   └── useCanvasAutobuild.ts # 自动搭画布（引用收集 + 幂等应用）
     ├── nodes/                    # 节点卡片主体（ImageLoaderNode / ImageGenerateNode / TextNode 等）
-    └── editors/                  # 配置组件（ImageLoaderEditor / ImageGenerateEditor 等）
+    └── editors/                  # 配置组件（ImageLoaderEditor / ImageGenerateEditor 等
+                                   #  + CanvasInputPreview 统一输入预览；
+                                   #  components/ 根级另有 DurationPicker（时长菜单）
+                                   # 与 WorkflowParamsTrigger（工作流参数菜单））
 ```
 
 > 组合式注入约定：只有 `AssetCanvas.vue` 调用 `useVueFlow()`（工具栏/面板/菜单是 VueFlow 的兄弟节点，不能依赖其 inject），`viewport`/`screenToFlowCoordinate`/`findNode`/`addSelectedNodes` 等工具以函数参数注入各组合式；`useVueFlow` 状态始终经 props 传给 `CanvasEditorPanel`。

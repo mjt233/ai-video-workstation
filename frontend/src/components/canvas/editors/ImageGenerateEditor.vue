@@ -1,86 +1,22 @@
 <template>
   <div class="image-generate-editor">
-    <div class="text-body-small text-medium-emphasis mb-1">
-      输入图（{{ inputs.length }}）
-      <span
-        v-if="inputs.length"
-        class="text-grey"
-      >
-        · 拖拽调整顺序
-      </span>
-    </div>
-    <div
-      v-if="inputs.length"
-      ref="listEl"
-      class="canvas-input-list mb-2"
-      @dragover.prevent="onListDragOver"
-      @drop.prevent="onDrop"
-    >
-      <v-tooltip
-        v-for="(input, i) in inputs"
-        :key="input.nodeId"
-        location="top"
-        interactive
-        open-delay="250"
-        close-delay="350"
-      >
-        <template #activator="{ props: tp }">
-          <div
-            class="canvas-input-item"
-            :class="[
-              draggingIndex === i ? 'canvas-input-item--dragging' : '',
-              dropSide(i) === 'left' ? 'canvas-input-item--insert-left' : '',
-              dropSide(i) === 'right' ? 'canvas-input-item--insert-right' : '',
-            ]"
-            v-bind="tp"
-            draggable="true"
-            @dragstart="onDragStart($event, i)"
-            @dragend="onDragEnd"
-            @mouseenter="hoveredId = input.nodeId"
-            @mouseleave="hoveredId = null"
-          >
-            <img
-              class="canvas-input-item__thumb"
-              :src="previewUrls[input.nodeId]"
-              :alt="input.label"
-              draggable="false"
-            >
-            <!-- 悬浮时右上角红色 x：点击快捷断开该输入连接（不弹确认，Ctrl+Z 可恢复） -->
-            <v-btn
-              v-if="hoveredId === input.nodeId && draggingIndex !== i"
-              class="canvas-input-item__remove"
-              icon="mdi-close"
-              size="x-small"
-              density="compact"
-              color="error"
-              variant="flat"
-              :title="`断开「图像${i + 1}」输入连接`"
-              @click.stop="emit('disconnect-input', input.nodeId)"
-            />
-            <span
-              class="canvas-input-item__label"
-              :title="input.label"
-            >图像{{ i + 1 }}</span>
-          </div>
-        </template>
-        <img
-          class="canvas-input-zoom"
-          :src="previewUrls[input.nodeId]"
-          :alt="input.label"
-        >
-      </v-tooltip>
-    </div>
-    <div
-      v-else
-      class="text-body-small text-grey mb-2"
-    >
-      无输入图，默认使用文生图工作流
-    </div>
+    <!-- 输入预览（统一组件）：图片类型输入，无输入时显示占位提示 -->
+    <CanvasInputPreview
+      :project="props.project"
+      :images-inputs="inputs"
+      images-title="输入图"
+      images-prefix="图像"
+      drag-hint="拖拽调整顺序"
+      empty-text="无输入图，默认使用文生图工作流"
+      @reorder="(ids) => emit('update:config', { inputOrder: ids })"
+      @remove="(input) => emit('disconnect-input', input.nodeId)"
+    />
 
+    <!-- 提示词 Prompt -->
     <v-textarea
       :model-value="prompt"
       label="提示词 Prompt"
-      rows="3"
+      rows="5"
       density="compact"
       variant="outlined"
       hide-details
@@ -88,63 +24,72 @@
       @update:model-value="(v) => emit('update:config', { prompt: v })"
     />
 
-    <v-select
-      :model-value="workflowId"
-      :items="workflowTypeItems"
-      item-title="label"
-      item-value="value"
-      label="工作流类型"
-      density="compact"
-      variant="outlined"
-      hide-details
-      class="mb-2"
-      @update:model-value="onTypeChange"
-    />
+    <!-- 参数行：工作流类型/实现 + 输出尺寸 + 工作流参数（细节参数收纳进可开关菜单） -->
+    <div class="generation-params-row">
+      <v-select
+        :model-value="workflowId"
+        :items="workflowTypeItems"
+        item-title="label"
+        item-value="value"
+        label="工作流类型"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="generation-params-row__type"
+        @update:model-value="onTypeChange"
+      />
 
-    <v-select
-      :model-value="currentImplId"
-      :items="implItems"
-      item-title="label"
-      item-value="value"
-      label="工作流实现"
-      placeholder="请选择工作流实现"
-      density="compact"
-      variant="outlined"
-      :disabled="workflowsLoaded && implItems.length === 0"
-      :error="!!implError"
-      :error-messages="implError ? [implError] : []"
-      class="mb-2"
-      @update:model-value="onImplChange"
-    >
-      <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
-      <template #item="{ item, props: itemProps }">
-        <v-list-item v-bind="itemProps">
-          <template #append>
-            <v-chip
-              v-if="providerLabel(item)"
-              size="x-small"
-              label
-              variant="tonal"
-              color="secondary"
-              class="ml-1"
-            >
-              {{ providerLabel(item) }}
-            </v-chip>
-          </template>
-        </v-list-item>
-      </template>
-    </v-select>
+      <v-select
+        :model-value="currentImplId"
+        :items="implItems"
+        item-title="label"
+        item-value="value"
+        label="工作流实现"
+        placeholder="请选择工作流实现"
+        density="compact"
+        variant="outlined"
+        hide-details
+        :disabled="workflowsLoaded && implItems.length === 0"
+        :error="!!implError"
+        :error-messages="implError ? [implError] : []"
+        class="generation-params-row__impl"
+        @update:model-value="onImplChange"
+      >
+        <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
+        <template #item="{ item, props: itemProps }">
+          <v-list-item v-bind="itemProps">
+            <template #append>
+              <v-chip
+                v-if="providerLabel(item)"
+                size="x-small"
+                label
+                variant="tonal"
+                color="secondary"
+                class="ml-1"
+              >
+                {{ providerLabel(item) }}
+              </v-chip>
+            </template>
+          </v-list-item>
+        </template>
+      </v-select>
 
-    <WorkflowParamsForm
-      v-model="workflowParams"
-      :declarations="currentDeclarations"
-      :provider="currentImpl?.providerInstanceId"
-      :provider-type="currentImpl?.provider"
-      :size-capabilities="currentImpl?.capabilities?.size"
-      :model-size-config="sizeConfig"
-      :project="props.project"
-      @update:size-config="(v) => onSizeConfigChange(v)"
-    />
+      <!-- 输出尺寸：点击弹出菜单配置（仅生成图片/视频节点显示） -->
+      <WorkflowSizePicker
+        :size-capabilities="currentImpl?.capabilities?.size"
+        :model-value="sizeConfig"
+        @update:model-value="onSizeConfigChange"
+      />
+
+      <!-- 工作流参数：点击弹出菜单配置 -->
+      <WorkflowParamsTrigger
+        v-model="workflowParams"
+        :declarations="currentDeclarations"
+        :provider="currentImpl?.providerInstanceId"
+        :provider-type="currentImpl?.provider"
+        :project="props.project"
+      />
+    </div>
 
     <div class="d-flex align-center ga-2 mb-2">
       <v-btn
@@ -187,12 +132,19 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { getWorkflows, type WorkflowInfo } from '../../../api/workflow'
+import {
+  getWorkflows,
+  type WorkflowInfo,
+  type WorkflowSizeConfig,
+  type WorkflowUserParamDeclaration,
+  type WorkflowUserParamValue,
+} from '../../../api/workflow'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
-import { buildPreviewUrl } from '../../../canvas/preview'
-import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
-import type { WorkflowSizeConfig, WorkflowUserParamValue } from '../../../api/workflow'
+import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
+import WorkflowParamsTrigger from '../../WorkflowParamsTrigger.vue'
+import { findSizeParamKeys } from '../../../utils/workflowSize'
+import CanvasInputPreview from './CanvasInputPreview.vue'
 
 const props = defineProps<{
   project: string
@@ -230,95 +182,6 @@ const workflowId = computed(() => {
   return props.inputs.length > 0 ? 'image-edit' : 'text-to-image'
 })
 const workflowParams = ref<Record<string, WorkflowUserParamValue>>({})
-
-/** 输入图缩略图/放大预览 URL（按来源节点缓存，输入变化时重建） */
-const previewUrls = computed<Record<string, string>>(() => {
-  const m: Record<string, string> = {}
-  // 用源资产 mtime 作缓存键：只有源资产实际变化才刷新 URL，避免配置修改等
-  // 重渲染每次重建 Date.now() 缓存键导致输入图反复重新加载（浪费带宽+闪烁）
-  for (const inp of props.inputs) m[inp.nodeId] = buildPreviewUrl(props.project, inp.path, inp.version)
-  return m
-})
-
-// ── 输入图拖拽排序 ────────────────────────────────────────
-
-/** 正在拖拽的输入项下标 */
-const draggingIndex = ref<number | null>(null)
-/** 拖拽插入位置（0..inputs.length，表示插入到该下标之前） */
-const dropIndex = ref<number | null>(null)
-/** 输入图列表容器 DOM */
-const listEl = ref<HTMLElement | null>(null)
-/** 当前悬浮的输入项 nodeId（null 表示未悬浮；驱动红色 x 显隐） */
-const hoveredId = ref<string | null>(null)
-
-/**
- * 拖拽开始：记录源下标并初始化插入位置。
- *
- * @param e 拖拽事件
- * @param i 源下标
- */
-function onDragStart(e: DragEvent, i: number) {
-  draggingIndex.value = i
-  dropIndex.value = i
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', String(i))
-  }
-}
-
-/** 拖拽结束（含放下后）：清空拖拽状态 */
-function onDragEnd() {
-  draggingIndex.value = null
-  dropIndex.value = null
-}
-
-/**
- * 列表 dragover：按鼠标水平位置计算插入下标（前半插到该项前，后半插到该项后）。
- *
- * @param e 拖拽事件
- */
-function onListDragOver(e: DragEvent) {
-  if (draggingIndex.value === null) return
-  e.preventDefault()
-  const items = Array.from(listEl.value?.querySelectorAll('.canvas-input-item') ?? [])
-  let idx = items.length
-  for (let i = 0; i < items.length; i++) {
-    const r = items[i].getBoundingClientRect()
-    if (e.clientX < r.left + r.width / 2) {
-      idx = i
-      break
-    }
-  }
-  dropIndex.value = idx
-}
-
-/**
- * 当前项左右侧的插入高亮（用于显示插入位置）。
- *
- * @param i 下标
- * @returns 插入到该项左侧/右侧，或 null
- */
-function dropSide(i: number): 'left' | 'right' | null {
-  if (dropIndex.value === null) return null
-  if (dropIndex.value === i) return 'left'
-  if (dropIndex.value === i + 1) return 'right'
-  return null
-}
-
-/** 放下：按插入位置重排并持久化 inputOrder 到节点配置 */
-function onDrop() {
-  const from = draggingIndex.value
-  const to = dropIndex.value
-  draggingIndex.value = null
-  dropIndex.value = null
-  if (from === null || to === null) return
-  if (from === to || from === to - 1) return
-  const arr = [...props.inputs]
-  const [moved] = arr.splice(from, 1)
-  const target = to > from ? to - 1 : to
-  arr.splice(target, 0, moved)
-  emit('update:config', { inputOrder: arr.map((x) => x.nodeId) })
-}
 
 const currentWorkflow = computed(() => workflows.value.find((w) => w.type === workflowId.value))
 
@@ -394,7 +257,18 @@ const currentImpl = computed(() =>
   (currentWorkflow.value?.implementations ?? []).find((i) => i.impl === currentImplId.value),
 )
 
-const currentDeclarations = computed(() => currentImpl.value?.params ?? [])
+/**
+ * 当前实现的自定义参数声明（剔除尺寸相关 key：本编辑器尺寸由参数行内
+ * 专用 WorkflowSizePicker 处理，避免与 WorkflowParamsForm 内置尺寸组件重复展示）。
+ */
+const currentDeclarations = computed<WorkflowUserParamDeclaration[]>(() => {
+  const params = currentImpl.value?.params ?? []
+  const sizeKeys = findSizeParamKeys(params)
+  if (!sizeKeys) return params
+  const excluded = new Set([sizeKeys.widthKey, sizeKeys.heightKey])
+  if (sizeKeys.enableKey) excluded.add(sizeKeys.enableKey)
+  return params.filter((d) => !excluded.has(d.key))
+})
 
 watch(
   () => props.node.config.workflowParams,
@@ -435,7 +309,7 @@ watch(
 )
 
 /**
- * 统一尺寸配置变化（WorkflowParamsForm 输出）回写节点持久化配置。
+ * 统一尺寸配置变化（WorkflowSizePicker 输出）回写节点持久化配置。
  * 相等性守卫避免「本地 → emit → config → 本地」循环；画布图片节点提交时
  * 由 useCanvasGeneration 读取 config.sizeConfig 并入 params.sizeConfig。
  *
@@ -456,81 +330,22 @@ getWorkflows()
 </script>
 
 <style scoped>
-.canvas-input-list {
+/* 参数行：紧凑横排，空间不足时换行（工作流实现下拉优先占满剩余宽度） */
+.generation-params-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 4px;
-  min-height: 58px;
-  border: 1px dashed rgba(0, 0, 0, 0.16);
-  border-radius: 6px;
-}
-
-.canvas-input-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  width: 58px;
-  padding: 2px;
-  border-radius: 4px;
-  cursor: grab;
-  user-select: none;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.canvas-input-item--dragging {
-  opacity: 0.4;
+.generation-params-row__type {
+  flex: 0 0 auto;
+  width: 110px;
 }
 
-.canvas-input-item--insert-left {
-  box-shadow: inset 2px 0 0 rgb(25, 118, 210);
-}
-
-.canvas-input-item--insert-right {
-  box-shadow: inset -2px 0 0 rgb(25, 118, 210);
-}
-
-.canvas-input-item__thumb {
-  width: 48px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  background: rgba(0, 0, 0, 0.04);
-}
-
-.canvas-input-item__label {
-  font-size: 10px;
-  line-height: 1.2;
-  color: rgba(0, 0, 0, 0.6);
-  max-width: 58px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.canvas-input-zoom {
-  display: block;
-  max-width: 280px;
-  max-height: 280px;
-  border-radius: 6px;
-  background: #fff;
-  padding: 4px;
-}
-
-/* 悬浮快捷断开按钮：缩略图右上角紧凑红色 x（v-btn 尺寸覆盖为小圆按钮） */
-.canvas-input-item__remove {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  z-index: 2;
-  width: 18px;
-  height: 18px;
-  min-width: 18px;
-  padding: 0;
-  border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+.generation-params-row__impl {
+  flex: 1 1 160px;
+  min-width: 160px;
 }
 </style>
