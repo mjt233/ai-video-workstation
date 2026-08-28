@@ -240,6 +240,7 @@ prompt/script/
 - 分集创建：`POST /api/assets/:project/script/episode`（body `{ episode? }`，编号为空 = 自动追加末尾；指定编号仅允许 `max+1`，保证不跳号）
 - 分集删除：`DELETE /api/assets/:project/script/episode/{n}`，删除后后续编号整体前移保持连续；被前移文件首行若精确匹配默认标题 `# 第{旧号}集`，会同步改写为新编号（用户自定义标题不受影响）
 - 无对应 `assert/` 产物（纯文本原型，不参与生成流水线）
+- Agent 侧的读取与写入约定由独立技能 `script-manager` 管理（`.agents/skills/script-manager/SKILL.md`）：默认只读、写入前先读最新内容、发现问题先与用户确认、新建分集取当前最大编号 + 1
 
 ---
 

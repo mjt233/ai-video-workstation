@@ -121,6 +121,8 @@ design/{project}/
 
 分镜管理 Python 脚本位于 `.agents/skills/create-video-script/scripts/`。
 
+剧本（大纲/分集）资产的读取与写入管理见 `script-manager` 技能（`.agents/skills/script-manager/SKILL.md`）。
+
 ## 相关文档
 
 - [ComfyUI Easy Bridge 对接配置说明](./docs/bridge-config-doc.md) — 在 ComfyUI Easy Bridge 中配置自动注册标签、标记工作流类型与对接字段

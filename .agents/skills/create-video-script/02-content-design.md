@@ -83,7 +83,7 @@
 
 > 分镜原则确认后，实际落地资产时按 [`03-asset-output.md`](./03-asset-output.md) 输出；其中 `overview.json` / `stage.json` / `script.json` 须用 [`04-script-tools.md`](./04-script-tools.md) 中的脚本写入，禁止手写 JSON。
 
-> **剧本优先：** 若项目存在剧本（`prompt/script/outline.md` 大纲与 `prompt/script/episodes/{集数}.md` 分集正文），设计某集分镜前**必须先读取该集剧本正文**，叙事节拍、事件顺序与对白以剧本为准；剧本与集数分镜相互独立、可能不存在，读取约定详见 [`03-asset-output.md`](./03-asset-output.md#剧本资产大纲与分集)。
+> **剧本优先：** 若项目存在剧本（`prompt/script/outline.md` 大纲与 `prompt/script/episodes/{集数}.md` 分集正文），设计某集分镜前**必须先读取该集剧本正文**，叙事节拍、事件顺序与对白以剧本为准；剧本与集数分镜相互独立、可能不存在，读取约定与写入规则见 `script-manager` 技能（[`../script-manager/SKILL.md`](../script-manager/SKILL.md)）。
 
 **分镜设计原则：**
 
