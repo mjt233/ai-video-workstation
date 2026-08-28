@@ -91,3 +91,21 @@ export function shotPromptMd(): string {
   return `待补充图生视频提示词（LTX-2.3）。运镜与动作描述写在此处；不要重复描述已由参考图提供的背景与人物外貌。
 `;
 }
+
+/**
+ * 剧本分集 Markdown 模板（创建分集时写入 prompt/script/episodes/{n}.md）。
+ * 首行一级标题「# 第{n}集」被删除重排逻辑识别：分集编号前移时若首行
+ * 精确匹配该格式，会自动同步改写为新编号（见 script-episodes.ts）。
+ * @param n 分集编号（正整数字符串或数字）
+ * @returns 分集 Markdown 初始内容
+ */
+export function scriptEpisodeMd(n: string | number): string {
+  return `# 第${n}集
+
+## 剧情梗概
+待补充本集剧情梗概。
+
+## 正文
+待补充本集剧本正文。
+`;
+}

@@ -106,6 +106,12 @@
         :episode
         :shot
       />
+      <ScriptPanel
+        v-else-if="type === 'script'"
+        :project
+        :section
+        :episode
+      />
       <CustomAssetPanel
         v-else-if="type === 'custom'"
         :project
@@ -178,6 +184,7 @@ import ProjectPanel from '../components/ProjectPanel.vue'
 import CharacterPanel from '../components/CharacterPanel.vue'
 import StagePanel from '../components/StagePanel.vue'
 import ScenePanel from '../components/ScenePanel.vue'
+import ScriptPanel from '../components/ScriptPanel.vue'
 import CustomAssetPanel from '../components/CustomAssetPanel.vue'
 import BatchGenerateDialog from '../components/BatchGenerateDialog.vue'
 import { useBatchTask } from '../composables/useBatchTask'
@@ -189,6 +196,7 @@ const name = computed(() => route.query.name as string)
 const subscene = computed(() => route.query.subscene as string | undefined)
 const episode = computed(() => route.query.episode as string)
 const shot = computed(() => route.query.shot as string)
+const section = computed(() => route.query.section as string | undefined)
 
 const showBatchDialog = ref(false)
 const treeKey = ref(0)

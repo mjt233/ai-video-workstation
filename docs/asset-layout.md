@@ -28,6 +28,7 @@ design/{project}/
 - 角色名、场景名目录优先使用中文（外国人名/外国地名除外）
 - 名称不能为空、不能有首尾空白，不能包含 `\ / : * ? " < > |`
 - 集数、分镜目录名必须是正整数，且同一集内分镜编号连续为 `1..N`
+- 剧本分集文件名必须是正整数 `.md`，同一项目内编号连续为 `1..N`
 
 **API 写入范围：** 允许写入 `prompt/`、`assert/` 前缀，以及项目根级 `overview.md`、`project.json`；路径不得越出 `design/{project}/`。
 
@@ -43,11 +44,14 @@ prompt/
 │   └── voice.md         # 声线描述
 ├── stage/{场景名}/
 │   └── {子场景标签}.md  # 子场景画面描述
-└── scene/{集数}/{分镜}/
-    ├── overview.json    # 分镜叙事总览（title/beat/visual/camera/duration/mood）
-    ├── stage.json       # 关键帧定义（引用场景/角色）
-    ├── script.json      # 台词列表
-    └── prompt.md        # 图生视频提示词
+├── scene/{集数}/{分镜}/
+│   ├── overview.json    # 分镜叙事总览（title/beat/visual/camera/duration/mood）
+│   ├── stage.json       # 关键帧定义（引用场景/角色）
+│   ├── script.json      # 台词列表
+│   └── prompt.md        # 图生视频提示词
+└── script/
+    ├── outline.md       # 剧本大纲
+    └── episodes/{集数}.md  # 分集剧本
 ```
 
 ### 2.1 角色 `prompt/character/{角色名}/`
@@ -214,6 +218,29 @@ assert/stage/{场景名}/variants/{子场景标签}/{变体id}.jpg
 - 仅正向提示词；运镜写在此处
 - 有台词时，应把台词原文嵌入动作描述以引导嘴型
 
+### 2.4 剧本 `prompt/script/`
+
+剧本（大纲 + 分集）与「集数分镜」**相互独立**，编号互不影响、各自增删：
+
+```
+prompt/script/
+├── outline.md             # 剧本大纲（Markdown）
+└── episodes/
+    ├── 1.md               # 第 1 集剧本（Markdown）
+    ├── 2.md               # 第 2 集剧本
+    └── ...                # 编号连续 1..N
+```
+
+| 路径 | 用途 |
+|------|------|
+| `outline.md` | 剧本大纲：主题立意、人物弧线、分集梗概等；首次保存时创建 |
+| `episodes/{n}.md` | 第 n 集完整剧本正文；创建分集时按模板生成（默认标题 `# 第n集`） |
+
+- 资产管理器「剧本」节点（与「集数分镜」同级）下提供「大纲」「分集」两栏，均支持在线编辑（Markdown 预览 + 编辑弹窗），单集视图附带上一集/下一集快捷切换
+- 分集创建：`POST /api/assets/:project/script/episode`（body `{ episode? }`，编号为空 = 自动追加末尾；指定编号仅允许 `max+1`，保证不跳号）
+- 分集删除：`DELETE /api/assets/:project/script/episode/{n}`，删除后后续编号整体前移保持连续；被前移文件首行若精确匹配默认标题 `# 第{旧号}集`，会同步改写为新编号（用户自定义标题不受影响）
+- 无对应 `assert/` 产物（纯文本原型，不参与生成流水线）
+
 ---
 
 ## 3. `assert/` — 生成产物
@@ -369,6 +396,8 @@ assert/scene/{ep}/{shot}/voice/
 | 分镜关键帧定义 | `prompt/scene/{ep}/{shot}/stage.json` | `assert/scene/{ep}/{shot}/stage/{i}.jpg` |
 | 分镜台词 | `prompt/scene/{ep}/{shot}/script.json` | `assert/scene/{ep}/{shot}/voice/{i}-{角色}.flac` |
 | 分镜视频提示词 | `prompt/scene/{ep}/{shot}/prompt.md` | `assert/scene/{ep}/{shot}/video/{i}.mp4` |
+| 剧本大纲 | `prompt/script/outline.md` | （无对应产物） |
+| 分集剧本 | `prompt/script/episodes/{n}.md` | （无对应产物） |
 
 原则：
 
@@ -390,6 +419,8 @@ assert/scene/{ep}/{shot}/voice/
 | 子场景 | 仅 `prompt/stage/{stage}/{label}.md` |
 | 集数 | 仅 `prompt/scene/{ep}/` |
 | 分镜 | `prompt/scene/{ep}/{shot}/` 四文件；assert 不预建 |
+| 剧本大纲 | 首次在线保存时创建 `prompt/script/outline.md` |
+| 剧本分集 | 仅 `prompt/script/episodes/{n}.md`（按模板生成） |
 
 ### 5.2 删除（成对清理）
 
@@ -400,6 +431,7 @@ assert/scene/{ep}/{shot}/voice/
 | 子场景 | `{label}.md` | `{label}.jpg`（若存在） |
 | 分镜 | `prompt/scene/{ep}/{shot}/` | `assert/scene/{ep}/{shot}/` |
 | 集数 | `prompt/scene/{ep}/` | `assert/scene/{ep}/` |
+| 剧本分集 | `prompt/script/episodes/{n}.md`（后续编号前移 1，无跳号） | （无） |
 
 引用保护：
 

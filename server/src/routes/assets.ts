@@ -22,6 +22,7 @@ import {
 } from '../assets/templates.js';
 import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/refs.js';
 import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
+import { createScriptEpisode, deleteScriptEpisode } from '../assets/script-episodes.js';
 import { reorderStageFrames } from '../assets/stage-reorder.js';
 import { reorderScriptEntries, deleteScriptEntry, updateScriptEntry } from '../assets/script-reorder.js';
 import { mergeSceneAudio, deleteMergedAudio } from '../assets/audio-merge.js';
@@ -317,6 +318,30 @@ assetsRouter.delete('/assets/:project/shot/:episode/:shot', async (req: Request,
     // 避免后续 -1 移动时与被删号目录冲突（历史数据可能残留）。
     await removeDirIfExists(resolveProjectPath(project, `assert/custom/scene/${episode}/${shot}`));
     const renames = await shiftShotsDownAfterDelete(project, episode, shot);
+    res.json({ success: true, renames });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST /api/assets/:project/script/episode — 创建剧本分集（编号为空=自动追加末尾）
+assetsRouter.post('/assets/:project/script/episode', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const { episode } = req.body as { episode?: string };
+    const r = await createScriptEpisode(project, episode);
+    res.json({ success: true, ...r });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE /api/assets/:project/script/episode/:episode — 删除剧本分集并前移重排编号
+assetsRouter.delete('/assets/:project/script/episode/:episode', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const renames = await deleteScriptEpisode(project, episode);
     res.json({ success: true, renames });
   } catch (err) {
     httpError(res, err);

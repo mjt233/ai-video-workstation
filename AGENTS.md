@@ -32,12 +32,13 @@ prompt/
   character/{name}/{overview,appearance,voice}.md
   stage/{stage}/{stage}-{subscene}.md
   scene/{episode}/{shot}/{overview,stage,script}.json + prompt.md
+  script/outline.md + script/episodes/{episode}.md   # 剧本大纲与分集剧本（可在线编辑）
 assert/  (图片, 音频)
 overview.md
 ```
 - API：`GET /api/projects`、`GET /api/fs/:project/*`（目录列表或文件读取）、`POST /api/fs/:project/*`（写入）
 - 写入限于 `prompt/`、`assert/` 前缀，以及根级 `overview.md`、`project.json`
-- 前端状态完全由 URL 查询参数驱动：`project`、`type`、`name`、`episode`、`shot`
+- 前端状态完全由 URL 查询参数驱动：`project`、`type`、`name`、`episode`、`shot`、`section`（剧本 `type=script` 时区分 `outline`/`episodes`）
 
 ## 约定
 - 所有 UI 文字、文档、资产和提交信息使用**中文**

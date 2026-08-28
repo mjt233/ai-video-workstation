@@ -115,6 +115,35 @@ export async function deleteShot(project: string, episode: string, shot: string)
   } catch (e) { rethrow(e) }
 }
 
+/**
+ * 创建剧本分集（prompt/script/episodes/{n}.md）。
+ * 编号为空时服务端自动追加末尾（当前最大编号 + 1）。
+ * @param project 项目名
+ * @param body.episode 指定分集编号（可空 = 自动追加末尾）
+ * @returns episode 为实际创建的编号，path 为落盘相对路径
+ */
+export async function createScriptEpisode(project: string, body: { episode?: string } = {}) {
+  try {
+    const { data } = await client.post(`/assets/${project}/script/episode`, body)
+    return data as { success: boolean; path: string; episode: string }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 删除剧本分集并触发后续编号整体前移（保持 1..N 连续）。
+ * @param project 项目名
+ * @param episode 待删除的分集编号
+ * @returns renames 为前移重命名映射（from → to），调用方用于修正当前打开的集数
+ */
+export async function deleteScriptEpisode(project: string, episode: string) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/script/episode/${encodeURIComponent(episode)}`,
+    )
+    return data as { success: boolean; renames: RenamePair[] }
+  } catch (e) { rethrow(e) }
+}
+
 export async function mergeSceneAudio(
   project: string,
   episode: string,

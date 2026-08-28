@@ -92,6 +92,13 @@
             required
           />
         </template>
+
+        <template v-else-if="type === 'script-episode'">
+          <v-text-field
+            v-model="form.episode"
+            label="集数编号（可空 = 自动追加末尾）"
+          />
+        </template>
       </v-card-text>
       <v-card-actions>
         <v-spacer />
@@ -119,6 +126,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import {
   createCharacter,
   createEpisode,
+  createScriptEpisode,
   createShot,
   createStage,
   createSubscene,
@@ -126,7 +134,7 @@ import {
   type RenamePair,
 } from '../api/assets'
 
-export type CreateAssetType = 'character' | 'stage' | 'subscene' | 'episode' | 'shot'
+export type CreateAssetType = 'character' | 'stage' | 'subscene' | 'episode' | 'shot' | 'script-episode'
 
 const props = defineProps<{
   modelValue: boolean
@@ -173,6 +181,7 @@ const typeLabel = computed(() => ({
   subscene: '子场景',
   episode: '集数',
   shot: '分镜',
+  'script-episode': '剧本分集',
 }[props.type]))
 
 watch(() => props.modelValue, (open) => {
@@ -217,6 +226,11 @@ async function submit() {
         episode: form.episode.trim() || undefined,
       })
       emit('created', { type: 'episode', episode: r.episode })
+    } else if (props.type === 'script-episode') {
+      const r = await createScriptEpisode(props.project, {
+        episode: form.episode.trim() || undefined,
+      })
+      emit('created', { type: 'script-episode', episode: r.episode })
     } else {
       const r = await createShot(props.project, {
         episode: form.episode.trim(),

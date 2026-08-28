@@ -104,6 +104,7 @@ import {
   AssetApiError,
   deleteCharacter,
   deleteEpisode,
+  deleteScriptEpisode,
   deleteShot,
   deleteStage,
   deleteSubscene,
@@ -123,6 +124,10 @@ type TreeKind =
   | 'root-scene'
   | 'episode'
   | 'shot'
+  | 'root-script'
+  | 'script-outline'
+  | 'script-episodes'
+  | 'script-episode'
   | 'root-custom'
 
 interface TreeItem {
@@ -181,15 +186,18 @@ function iconColor(item: TreeItem): string {
   if (item.kind === 'root-custom') {
     return 'cyan-darken-1'
   }
+  if (item.kind === 'root-script' || item.kind === 'script-outline' || item.kind === 'script-episodes' || item.kind === 'script-episode') {
+    return 'indigo'
+  }
   return 'primary'
 }
 
 function canCreate(item: TreeItem): boolean {
-  return ['root-character', 'root-stage', 'stage', 'root-scene', 'episode'].includes(item.kind)
+  return ['root-character', 'root-stage', 'stage', 'root-scene', 'episode', 'script-episodes'].includes(item.kind)
 }
 
 function canDelete(item: TreeItem): boolean {
-  return ['character', 'stage', 'subscene', 'episode', 'shot'].includes(item.kind)
+  return ['character', 'stage', 'subscene', 'episode', 'shot', 'script-episode'].includes(item.kind)
 }
 
 interface DirEntrySafe {
@@ -281,6 +289,21 @@ async function buildTree() {
     })
   }
 
+  // 剧本分集：prompt/script/episodes/{n}.md（数字编号 .md 文件，连续 1..N）
+  const scriptFiles = await safeDir('prompt/script/episodes/')
+  const scriptEpisodeNames = sortNumericNames(
+    scriptFiles
+      .filter(f => f.type === 'file' && /^[1-9]\d*\.md$/.test(f.name))
+      .map(f => f.name.replace(/\.md$/, '')),
+  )
+  const scriptEpisodeItems: TreeItem[] = scriptEpisodeNames.map(n => ({
+    name: `第${n}集`,
+    path: `script-episode-${n}`,
+    icon: 'mdi-file-document-outline',
+    kind: 'script-episode',
+    episode: n,
+  }))
+
   treeItems.value = [
     {
       name: '项目信息',
@@ -309,6 +332,27 @@ async function buildTree() {
       icon: 'mdi-filmstrip',
       kind: 'root-scene',
       children: episodeItems,
+    },
+    {
+      name: '剧本',
+      path: 'root-script',
+      icon: 'mdi-book-open-variant',
+      kind: 'root-script',
+      children: [
+        {
+          name: '大纲',
+          path: 'script-outline',
+          icon: 'mdi-file-document-edit-outline',
+          kind: 'script-outline',
+        },
+        {
+          name: '分集',
+          path: 'script-episodes',
+          icon: 'mdi-format-list-numbered',
+          kind: 'script-episodes',
+          children: scriptEpisodeItems,
+        },
+      ],
     },
     {
       name: '自定义资产',
@@ -348,6 +392,16 @@ function applyShotRenames(renames?: RenamePair[]) {
   }
 }
 
+/** 剧本分集删除重排后，按重命名映射修正当前 URL 的集数参数 */
+function applyScriptEpisodeRenames(renames: RenamePair[]) {
+  const current = router.currentRoute.value.query.episode as string | undefined
+  if (!current) return
+  const pair = renames.find(r => r.from === current)
+  if (pair) {
+    patchQuery({ episode: pair.to })
+  }
+}
+
 function findItemByPath(items: TreeItem[], path: string): TreeItem | null {
   for (const item of items) {
     if (item.path === path) return item
@@ -366,6 +420,7 @@ function resolveSelectionFromRoute(): { activePath: string | null; openPaths: st
   const subscene = route.query.subscene as string | undefined
   const episode = route.query.episode as string | undefined
   const shot = route.query.shot as string | undefined
+  const section = route.query.section as string | undefined
 
   if (type === 'project') {
     return { activePath: 'project-info', openPaths: [] }
@@ -403,6 +458,22 @@ function resolveSelectionFromRoute(): { activePath: string | null; openPaths: st
       activePath: `episode-${episode}`,
       openPaths: ['root-scene'],
     }
+  }
+
+  if (type === 'script') {
+    if (section === 'outline') {
+      return { activePath: 'script-outline', openPaths: ['root-script'] }
+    }
+    if (section === 'episodes' && episode) {
+      return {
+        activePath: `script-episode-${episode}`,
+        openPaths: ['root-script', 'script-episodes'],
+      }
+    }
+    if (section === 'episodes') {
+      return { activePath: 'script-episodes', openPaths: ['root-script'] }
+    }
+    return { activePath: 'root-script', openPaths: [] }
   }
 
   if (type === 'custom') {
@@ -491,6 +562,55 @@ function onSelect(items: unknown) {
       episode: item.episode,
       shot: item.shot,
     })
+    return
+  }
+
+  if (item.kind === 'root-script') {
+    patchQuery({
+      type: 'script',
+      name: undefined,
+      subscene: undefined,
+      section: undefined,
+      episode: undefined,
+      shot: undefined,
+    })
+    return
+  }
+
+  if (item.kind === 'script-outline') {
+    patchQuery({
+      type: 'script',
+      name: undefined,
+      subscene: undefined,
+      section: 'outline',
+      episode: undefined,
+      shot: undefined,
+    })
+    return
+  }
+
+  if (item.kind === 'script-episodes') {
+    patchQuery({
+      type: 'script',
+      name: undefined,
+      subscene: undefined,
+      section: 'episodes',
+      episode: undefined,
+      shot: undefined,
+    })
+    return
+  }
+
+  if (item.kind === 'script-episode') {
+    patchQuery({
+      type: 'script',
+      name: undefined,
+      subscene: undefined,
+      section: 'episodes',
+      episode: item.episode,
+      shot: undefined,
+    })
+    return
   }
 
   if (item.kind === 'root-custom') {
@@ -521,6 +641,9 @@ function openCreate(item: TreeItem) {
   } else if (item.kind === 'episode') {
     createDialog.type = 'shot'
     createDialog.defaults = { episode: item.episode }
+  } else if (item.kind === 'script-episodes') {
+    createDialog.type = 'script-episode'
+    createDialog.defaults = {}
   } else {
     return
   }
@@ -535,6 +658,8 @@ async function openDelete(item: TreeItem) {
     label = `第${item.episode}集 分镜${item.shot}`
   } else if (item.kind === 'episode') {
     label = `第${item.episode}集`
+  } else if (item.kind === 'script-episode') {
+    label = `剧本 第${item.episode}集`
   }
   const ok = await confirm({
     title: '确认删除',
@@ -590,6 +715,15 @@ async function onCreated(payload: {
       episode: payload.episode,
       shot: payload.shot,
     })
+  } else if (payload.type === 'script-episode' && payload.episode) {
+    patchQuery({
+      type: 'script',
+      name: undefined,
+      subscene: undefined,
+      section: 'episodes',
+      episode: payload.episode,
+      shot: undefined,
+    })
   }
 }
 
@@ -619,6 +753,10 @@ function clearSelectionIfDeleted(item: TreeItem) {
   }
   if (item.kind === 'shot' && type === 'scene' && episode === item.episode && shot === item.shot) {
     patchQuery({ type: undefined, name: undefined, subscene: undefined, episode: undefined, shot: undefined })
+    return
+  }
+  if (item.kind === 'script-episode' && type === 'script' && episode === item.episode) {
+    patchQuery({ type: 'script', section: 'episodes', episode: undefined })
   }
 }
 
@@ -637,6 +775,9 @@ async function doDelete(item: TreeItem) {
     } else if (item.kind === 'shot') {
       const r = await deleteShot(props.project, item.episode!, item.shot!)
       renames = r.renames
+    } else if (item.kind === 'script-episode') {
+      const r = await deleteScriptEpisode(props.project, item.episode!)
+      renames = r.renames
     }
 
     clearSelectionIfDeleted(item)
@@ -644,6 +785,9 @@ async function doDelete(item: TreeItem) {
       const q = router.currentRoute.value.query
       if (q.type === 'scene' && q.episode === item.episode) {
         applyShotRenames(renames)
+      }
+      if (q.type === 'script' && q.section === 'episodes') {
+        applyScriptEpisodeRenames(renames)
       }
     }
     await rebuildAndRefresh()
@@ -674,6 +818,7 @@ watch(
     route.query.type,
     route.query.name,
     route.query.subscene,
+    route.query.section,
     route.query.episode,
     route.query.shot,
   ],
