@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clampSizeConfigState,
   computePresetSize,
   findSizeParamKeys,
   formatSizeConfigText,
@@ -297,5 +298,83 @@ describe('formatSizeConfigText', () => {
 
   it('adaptive 显示为 自动', () => {
     expect(formatSizeConfigText({ ratio: 'adaptive', size: '768P', width: null, height: null })).toBe('自动 / 768P')
+  })
+})
+
+describe('clampSizeConfigState', () => {
+  /** Seedream 文生图的真实声明（无 auto 档，尺寸只允许 1K/2K） */
+  const seedream = normalizeSizeCapabilities({
+    ratio: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+    size: ['1K', '2K'],
+    supportCustomSize: true,
+  })
+
+  it('合法档位原样保留（含宽高）', () => {
+    expect(clampSizeConfigState({ ratio: '3:2', size: '2K', width: 2560, height: 1707 }, seedream)).toEqual({
+      ratio: '3:2', size: '2K', width: 2560, height: 1707,
+    })
+  })
+
+  it('越界档位回退到声明清单首项', () => {
+    expect(clampSizeConfigState({ ratio: '16:9', size: '360P', width: 640, height: 360 }, seedream)).toEqual({
+      ratio: '16:9', size: '1K', width: 640, height: 360,
+    })
+    expect(clampSizeConfigState({ ratio: '5:4', size: '1K', width: null, height: null }, seedream)).toEqual({
+      ratio: '1:1', size: '1K', width: null, height: null,
+    })
+  })
+
+  it('auto / adaptive 视为未选择，不参与钳制（声明清单不含 auto 时也保持自动）', () => {
+    expect(clampSizeConfigState({ ratio: 'auto', size: 'auto', width: null, height: null }, seedream)).toEqual({
+      ratio: 'auto', size: 'auto', width: null, height: null,
+    })
+    expect(clampSizeConfigState({ ratio: 'adaptive', size: 'auto', width: null, height: null }, seedream)).toEqual({
+      ratio: 'adaptive', size: 'auto', width: null, height: null,
+    })
+  })
+
+  it('宽高不参与钳制（自定义宽高恒原样保留）', () => {
+    const caps = normalizeSizeCapabilities({ ratio: ['16:9'], size: ['1K'], supportCustomSize: false })
+    expect(clampSizeConfigState({ ratio: '21:9', size: '4K', width: 1234, height: 567 }, caps)).toEqual({
+      ratio: '16:9', size: '1K', width: 1234, height: 567,
+    })
+  })
+
+  it('不修改入参', () => {
+    const state = { ratio: '21:9', size: '4K', width: null, height: null }
+    clampSizeConfigState(state, seedream)
+    expect(state).toEqual({ ratio: '21:9', size: '4K', width: null, height: null })
+  })
+})
+
+describe('回归：能力声明异步到达前后的档位回显', () => {
+  /** Seedream 文生图的真实声明（工作流列表拉取完成后才可得） */
+  const seedream = normalizeSizeCapabilities({
+    ratio: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+    size: ['1K', '2K'],
+    supportCustomSize: true,
+  })
+  /** 已保存的节点配置（用户上次选择 3:2 / 2K） */
+  const saved = { ratio: '3:2', size: '2K', width: 2560, height: 1707 }
+
+  it('能力未知时不得钳制：默认全量清单会把 3:2 改成 16:9', () => {
+    // 反证：用未加载完成时的默认清单钳制，正是「比例被改错、宽高仍正确」的根因
+    const wrong = clampSizeConfigState(normalizeSizeConfig(saved), normalizeSizeCapabilities(undefined))
+    expect(wrong.ratio).toBe('16:9')
+    expect(wrong.width).toBe(2560)
+  })
+
+  it('始终以回显原值重新推导：能力到达后仍还原为 3:2 / 2K', () => {
+    // 组件行为：echoState 保存未钳制原值，能力到达后据此重新推导（而非在钳制结果上二次钳制）
+    const echo = normalizeSizeConfig(saved)
+    expect(clampSizeConfigState(echo, seedream)).toEqual({
+      ratio: '3:2', size: '2K', width: 2560, height: 1707,
+    })
+  })
+
+  it('若在已钳制结果上二次钳制则错值被固化（旧实现缺陷）', () => {
+    const once = clampSizeConfigState(normalizeSizeConfig(saved), normalizeSizeCapabilities(undefined))
+    // 16:9 在 Seedream 清单内 → 二次钳制不会纠正，错误比例就此固化
+    expect(clampSizeConfigState(once, seedream).ratio).toBe('16:9')
   })
 })

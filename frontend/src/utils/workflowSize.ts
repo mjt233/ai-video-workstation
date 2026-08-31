@@ -13,6 +13,7 @@ import type {
  * - `resolvePresetSize`：按任意字符串比例/尺寸档换算宽高（含不存在/自适应档返回 null）
  * - `normalizeSizeCapabilities`：工作流 capabilities.size 声明归一化（补默认值）
  * - `normalizeSizeConfig` / `inferSizeConfigFromWidthHeight`：组件内部状态与旧数据回显
+ * - `clampSizeConfigState`：按工作流能力声明钳制档位（仅能力真实加载后调用）
  * - `formatSizeConfigText`：单行显示文案（如 `16:9 / 1K`、`自动 / 自动 / 1024x1024`）
  * - `resolveSizeMode`：根据已保存的宽高推断尺寸组件的模式
  * - `findSizeParamKeys`：约定式检测声明中是否含 width/height 用户参数
@@ -334,6 +335,48 @@ export function normalizeSizeConfig(raw?: SizeConfigInput | null): SizeConfigSta
     return Number.isFinite(n) && n > 0 ? Math.round(n) : null
   }
   return { ratio, size, width: pick(raw?.width), height: pick(raw?.height) }
+}
+
+/**
+ * 把尺寸配置状态钳制到工作流能力声明的合法档位（宽高不参与钳制，原样保留）。
+ *
+ * 持久化值可能来自旧数据或另一个工作流实现（如 "1.5K" 而当前声明只允许 1K/2K），
+ * 越界档位回退到声明清单的第一项，保证按钮组恒有选中项。
+ *
+ * 注意：
+ * - 「auto」/「adaptive」（自适应）视为「未选择」状态，不参与钳制——部分工作流
+ *   （如 Seedream、ComfyUI Bridge）声明清单不含 auto，未选择时仍应保持 自动/自动 默认；
+ * - 声明清单为空时该维度不钳制（`normalizeSizeCapabilities` 已保证非空，此处为防御）。
+ *
+ * **调用前提：能力声明必须已真实加载**。工作流列表是异步拉取的，未加载完成时
+ * `normalizeSizeCapabilities(undefined)` 返回的是默认全量清单而非该工作流的真实清单，
+ * 此时钳制会把合法的已保存档位改成错值（见 `WorkflowSizePicker` 的 `capsKnown`）。
+ *
+ * @param state 待钳制的尺寸配置状态
+ * @param caps 归一化后的工作流尺寸能力声明
+ * @returns 钳制后的新状态（不修改入参）
+ */
+export function clampSizeConfigState(
+  state: SizeConfigState,
+  caps: WorkflowSizeCapabilities,
+): SizeConfigState {
+  const next = { ...state }
+  if (
+    next.ratio !== 'auto' &&
+    next.ratio !== 'adaptive' &&
+    caps.ratio.length > 0 &&
+    !caps.ratio.includes(next.ratio)
+  ) {
+    next.ratio = caps.ratio[0]
+  }
+  if (
+    next.size !== 'auto' &&
+    caps.size.length > 0 &&
+    !caps.size.includes(next.size)
+  ) {
+    next.size = caps.size[0]
+  }
+  return next
 }
 
 /**

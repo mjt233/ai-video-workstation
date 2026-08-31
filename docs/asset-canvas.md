@@ -343,6 +343,8 @@ frontend/src/
 - **预览 watch 需同时监听 path 与 token**：固定路径产物每次重新生成路径不变，预览 URL 只由 token（产物 mtime）区分；节点主体若只 `watch(currentPath)`，新产物覆盖后不会刷新 URL、浏览器命中旧缓存——必须 `watch([currentPath, currentToken])`（实测踩坑，4 个节点主体均已按此实现）。
 - **输入预览 URL 必须以源资产 mtime 作缓存键**：编辑器内对连接输入（图片/视频/音频）构建预览 URL 时，必须 `buildPreviewUrl(project, path, version)`——`version` 为来源节点的产物 mtime（`useCanvasNodeOps` 的 `withVersions` 已把 mtime 附到 `CanvasInputInfo.version`）。**不要漏传 version**：漏传时 `buildPreviewUrl` 回退 `?t=Date.now()`，每次配置修改（如编辑提示词）引发的重渲染都会重建缓存键，浏览器会把全部输入媒体当作新资源重新下载（浪费带宽），且 `<img>/<video>/<audio>` 因 src 变化被重建导致配置组件闪烁。
 - **配置双向同步**：editor 内 `config.workflowParams ↔ 本地 ref` 双 watch 必须加 JSON 相等性守卫，否则无限循环。
+- **尺寸组件回显禁止用未加载完成的能力清单钳制**：`WorkflowSizePicker` 的 `sizeCapabilities` 来自 `currentImpl?.capabilities?.size`，而工作流列表是 `getWorkflows()` **异步**拉取的；拉取完成前该 prop 为 `undefined`，`normalizeSizeCapabilities` 会回退成**默认全量清单**（`16:9/4:3/1:1/3:4/9:16/auto` + `360P/720P/1080P/2K/4K/auto`），此时若把已保存的 `config.sizeConfig` 钳制到该清单，合法档位会被改错（如 Seedream 的 `3:2` → `16:9`、`1K` → `360P`，而宽高不参与钳制所以数值仍正确——正是「刷新后比例/尺寸档与保存值不符、分辨率数值却对」的成因）。组件内以 `echoState` 保存**未钳制的回显原值**，能力声明变化时**始终从原值重新推导**（勿在已钳制结果上二次钳制，否则错值被固化）；能力未知（`sizeCapabilities == null`）时一律不钳制、原样回显，当前值不在选项内时补进按钮组末尾。
+- **钳制结果不自动写回配置**：能力声明变化只更新展示，**不得 `emit` 持久化**——静默改写用户已保存的 `sizeConfig` 会把上一步的错值固化进 `canvas.json`；只有用户主动点选档位/改宽高时才写入（画布两个生成编辑器切换工作流类型或实现时本就会 `sizeConfig: undefined` 重置，不会提交越界档位）。
 - **`readFs` 对 `.json` 返回反序列化对象**：加载 `canvas.json` 需同时兼容 string 与 object 两种形态。
 - **eslint computed 副作用**：`vue/no-side-effects-in-computed-properties` 禁止在 computed 内写缓存/状态，改用 `watch`。
 - **面板钳制**：用 `flowEl.clientHeight/Width` 实测尺寸，勿依赖 Vue Flow `dimensions`。
