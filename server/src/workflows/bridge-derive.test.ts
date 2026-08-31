@@ -284,4 +284,61 @@ describe('deriveParams', () => {
       { key: 'steps', name: '步数', type: 'integer', defaultValue: '' },
     ]);
   });
+
+  it('工作流定义含 seed 时即使未列入 expose_field 也暴露，默认空串', () => {
+    const fields: BridgeDeclaredParam[] = [
+      { alias: 'prompt', label: '提示词', paramType: 'text' },
+      { alias: 'seed', label: '随机种子', paramType: 'number', defaultValue: '123' },
+      { alias: 'steps', label: '步数', paramType: 'number' },
+    ];
+    expect(deriveParams(undefined, fields, [])).toEqual([
+      {
+        key: 'seed',
+        name: '随机种子',
+        type: 'integer',
+        defaultValue: '',
+        description: '留空由系统自动生成',
+      },
+    ]);
+    expect(deriveParams('steps', fields, [])).toEqual([
+      {
+        key: 'seed',
+        name: '随机种子',
+        type: 'integer',
+        defaultValue: '',
+        description: '留空由系统自动生成',
+      },
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: '' },
+    ]);
+  });
+
+  it('expose_field 已含 seed 时不重复，仍强制默认空串', () => {
+    const fields: BridgeDeclaredParam[] = [
+      { alias: 'seed', label: '种子', paramType: 'number', defaultValue: '7', nodeRawValue: '9' },
+      { alias: 'steps', label: '步数', paramType: 'number' },
+    ];
+    expect(deriveParams('seed,steps', fields, [])).toEqual([
+      {
+        key: 'seed',
+        name: '种子',
+        type: 'integer',
+        defaultValue: '',
+        description: '留空由系统自动生成',
+      },
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: '' },
+    ]);
+  });
+
+  it('seed 无 label 时回退「随机种子」；文件类型 seed 不暴露', () => {
+    expect(deriveParams('', [{ alias: 'seed', paramType: 'number' }], [])).toEqual([
+      {
+        key: 'seed',
+        name: '随机种子',
+        type: 'integer',
+        defaultValue: '',
+        description: '留空由系统自动生成',
+      },
+    ]);
+    expect(deriveParams('', [{ alias: 'seed', paramType: 'image' }], [])).toEqual([]);
+  });
 });

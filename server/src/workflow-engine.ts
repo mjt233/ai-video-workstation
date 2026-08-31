@@ -862,6 +862,11 @@ export async function runTask(taskId: string): Promise<void> {
           sceneDeps,
         );
       }
+      // 视频 seed 未填时回退引擎注入的 vars.seed（用户空值 → Date.now()）
+      if (video && video.seed == null) {
+        const n = Number(vars.seed);
+        if (Number.isFinite(n)) video = { ...video, seed: n };
+      }
     }
 
     // 用户手动传入的工作流参数：任务创建时已由路由（normalizeUserParams）合并进 vars，

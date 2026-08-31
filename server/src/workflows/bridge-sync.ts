@@ -272,7 +272,9 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
     if (!video) throw new Error('image-to-video 需要引擎注入 ctx.video');
     const modes = caps.video?.modes ?? [];
     if (!modes.includes(video.mode)) throw new Error(`工作流 ${workflowId} 不支持生成模式: ${video.mode}`);
-    const seed = video.seed != null ? Number(video.seed) : undefined;
+    // 优先 video.seed；缺省回退引擎注入的 vars.seed（用户空值 → Date.now()）
+    const seedRaw = video.seed != null ? video.seed : ctx.vars.seed;
+    const seed = seedRaw != null && seedRaw !== '' ? Number(seedRaw) : undefined;
     if (video.mode === 'director') {
       const frames = video.director?.frames ?? [];
       if (frames.length < 1) throw new Error('导演台模式需要 director.frames');
@@ -390,6 +392,7 @@ function buildAndRegister(
   const caps = deriveCapabilities(detail.tags, type);
   const expose = exposeFieldOf(detail.tags, tagId);
   // expose_field 字段信息：params 优先（工作流固定参数字段），declaredParams 兜底；
+  // 工作流定义含 seed 时 deriveParams 会额外暴露（默认空，空值由引擎注入）；
   // providerId 为 Bridge 执行接口保留键（本次执行提供商），不作为用户参数暴露，
   // 防止 expose_field 声明同名字段时与系统「ComfyUI 提供商」选择语义冲突
   const params = deriveParams(expose, detail.params, detail.declaredParams)

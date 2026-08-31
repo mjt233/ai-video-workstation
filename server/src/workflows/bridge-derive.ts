@@ -195,28 +195,25 @@ function normalizeCandidates(candidates: BridgeCandidate[]): WorkflowUserParamCa
   return out;
 }
 
+/** seed 用户参数的缺省展示名（Bridge 未给 label 时使用） */
+const SEED_PARAM_NAME = '随机种子';
+
+/** seed 用户参数的表单说明：空值由引擎注入时间戳 */
+const SEED_PARAM_DESCRIPTION = '留空由系统自动生成';
+
 /**
- * 按 expose_field（逗号分隔别名）过滤工作流参数字段映射为用户参数声明。
+ * 合并 Bridge 固定参数与动态声明参数。
  *
- * 字段信息来源：params 优先（工作流本身固定参数字段），declaredParams（额外声明的
- * 动态构建字段）兜底——同一别名以 params 为准，仅存在于 declaredParams 的别名仍可用。
- * 默认值：defaultValue 非 null 优先；为 null 时取 nodeRawValue；number/boolean 做类型转换。
- * 下拉候选项：仅 string 类型（Bridge paramType = text）字段生效，候选项非空时映射
- * candidates 与 multiple；allowCustom 恒为 true（Bridge 语义：自由输入的值原样提交）。
+ * params 优先：同一别名以 params 为准，declaredParams 仅补充缺失别名。
  *
- * @param exposeField 自动注册标签元数据 expose_field（可为 undefined；空串/缺省返回空数组）
- * @param params 工作流本身固定参数字段（BridgeWorkflowDetail.params，优先）
- * @param declaredParams 额外声明的动态构建字段（BridgeWorkflowDetail.declaredParams，兜底）
- * @returns 用户参数声明数组（仅含 expose_field 命中的非文件类型参数）
+ * @param params 工作流本身固定参数字段
+ * @param declaredParams 额外声明的动态构建字段
+ * @returns 去重后的参数列表
  */
-export function deriveParams(
-  exposeField: string | undefined,
+function mergeBridgeParams(
   params: BridgeDeclaredParam[],
   declaredParams: BridgeDeclaredParam[],
-): WorkflowUserParamDeclaration[] {
-  const names = new Set((exposeField ?? '').split(',').map((s) => s.trim()).filter(Boolean));
-  if (names.size === 0) return [];
-  // params 优先合并：同一别名 params 在前，declaredParams 仅补充缺失别名
+): BridgeDeclaredParam[] {
   const seen = new Set<string>();
   const merged: BridgeDeclaredParam[] = [];
   for (const src of [params, declaredParams]) {
@@ -226,28 +223,82 @@ export function deriveParams(
       merged.push(p);
     }
   }
-  const out: WorkflowUserParamDeclaration[] = [];
-  for (const p of merged) {
-    if (!names.has(p.alias)) continue;
-    const type = mapParamType(p.paramType);
-    if (!type) continue;
-    const decl: WorkflowUserParamDeclaration = {
-      key: p.alias,
-      name: p.label ?? p.alias,
-      type,
-      defaultValue: coerceDefaultValue(type, p.defaultValue ?? p.nodeRawValue),
-    };
-    // 下拉候选项仅 string 类型生效；候选项全非法时不按下拉渲染
-    if (type === 'string' && Array.isArray(p.candidates) && p.candidates.length > 0) {
-      const candidates = normalizeCandidates(p.candidates);
-      if (candidates.length > 0) {
-        decl.candidates = candidates;
-        decl.multiple = p.multiple === true;
-        // Bridge 候选项仅用于表单交互引导，自由输入的值原样提交
-        decl.allowCustom = true;
-      }
+  return merged;
+}
+
+/**
+ * 将单个 Bridge 参数字段映射为系统用户参数声明。
+ *
+ * 文件类型（image/video/audio）返回 null。seed 字段强制默认空串，
+ * 空值由引擎注入时间戳，不采用 Bridge 节点默认值。
+ *
+ * @param p Bridge 参数字段
+ * @returns 用户参数声明；文件类型返回 null
+ */
+function toUserParamDeclaration(p: BridgeDeclaredParam): WorkflowUserParamDeclaration | null {
+  const mapped = mapParamType(p.paramType);
+  if (!mapped) return null;
+  const isSeed = p.alias === 'seed';
+  // seed 作为用户可填的整数种子暴露（即使 Bridge 声明为 text/number）
+  const type = isSeed ? 'integer' : mapped;
+  const decl: WorkflowUserParamDeclaration = {
+    key: p.alias,
+    name: (p.label && p.label.trim() !== '' ? p.label : undefined) ?? (isSeed ? SEED_PARAM_NAME : p.alias),
+    type,
+    // seed 默认为空：用户未填时由引擎注入 Date.now()，不覆盖为节点默认值
+    defaultValue: isSeed ? '' : coerceDefaultValue(type, p.defaultValue ?? p.nodeRawValue),
+  };
+  if (isSeed) {
+    decl.description = SEED_PARAM_DESCRIPTION;
+  }
+  // 下拉候选项仅 string 类型生效；候选项全非法时不按下拉渲染
+  if (type === 'string' && Array.isArray(p.candidates) && p.candidates.length > 0) {
+    const candidates = normalizeCandidates(p.candidates);
+    if (candidates.length > 0) {
+      decl.candidates = candidates;
+      decl.multiple = p.multiple === true;
+      // Bridge 候选项仅用于表单交互引导，自由输入的值原样提交
+      decl.allowCustom = true;
     }
+  }
+  return decl;
+}
+
+/**
+ * 按 expose_field（逗号分隔别名）过滤工作流参数字段映射为用户参数声明。
+ *
+ * 字段信息来源：params 优先（工作流本身固定参数字段），declaredParams（额外声明的
+ * 动态构建字段）兜底——同一别名以 params 为准，仅存在于 declaredParams 的别名仍可用。
+ * 默认值：defaultValue 非 null 优先；为 null 时取 nodeRawValue；number/boolean 做类型转换。
+ * 下拉候选项：仅 string 类型（Bridge paramType = text）字段生效，候选项非空时映射
+ * candidates 与 multiple；allowCustom 恒为 true（Bridge 语义：自由输入的值原样提交）。
+ *
+ * seed 是例外：只要工作流定义（params / declaredParams）存在非文件类型的 seed 字段，
+ * 即使未列入 expose_field 也暴露为用户可配置参数，且默认空串（空值由引擎自动注入）。
+ *
+ * @param exposeField 自动注册标签元数据 expose_field（可为 undefined；空串/缺省返回空数组）
+ * @param params 工作流本身固定参数字段（BridgeWorkflowDetail.params，优先）
+ * @param declaredParams 额外声明的动态构建字段（BridgeWorkflowDetail.declaredParams，兜底）
+ * @returns 用户参数声明数组（expose_field 命中的非文件类型参数 + 工作流定义中的 seed）
+ */
+export function deriveParams(
+  exposeField: string | undefined,
+  params: BridgeDeclaredParam[],
+  declaredParams: BridgeDeclaredParam[],
+): WorkflowUserParamDeclaration[] {
+  const names = new Set((exposeField ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+  const merged = mergeBridgeParams(params, declaredParams);
+  const out: WorkflowUserParamDeclaration[] = [];
+  let hasSeed = false;
+  for (const p of merged) {
+    const isSeed = p.alias === 'seed';
+    if (!names.has(p.alias) && !isSeed) continue;
+    const decl = toUserParamDeclaration(p);
+    if (!decl) continue;
+    if (isSeed) hasSeed = true;
     out.push(decl);
   }
+  // 无 expose_field 且无 seed 时保持空数组（与旧行为一致）
+  if (names.size === 0 && !hasSeed) return [];
   return out;
 }

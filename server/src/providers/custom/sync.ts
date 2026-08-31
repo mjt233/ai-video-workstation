@@ -148,6 +148,8 @@ async function buildCustomParams(
   if (type === 'image-to-video') {
     const video = ctx.video as VideoWorkflowSubmitData | undefined;
     if (video) {
+      const seedRaw = video.seed !== undefined ? video.seed : seed;
+      const seedNum = seedRaw !== undefined && seedRaw !== '' ? Number(seedRaw) : undefined;
       return {
         ...base,
         prompt: video.prompt,
@@ -155,7 +157,7 @@ async function buildCustomParams(
         duration: video.duration,
         resolution: video.resolution,
         ...(video.fps !== undefined ? { fps: video.fps } : {}),
-        ...(video.seed !== undefined ? { seed: video.seed } : {}),
+        ...(seedNum != null && Number.isFinite(seedNum) ? { seed: seedNum } : {}),
         ...(sizeConfig ? { sizeConfig } : {}),
         ...(video.director
           ? {
@@ -182,27 +184,37 @@ async function buildCustomParams(
  * 下拉候选项（仅 string 类型字段存在）映射为 candidates；multiple 仅在配置了
  * 候选项且为 true 时携带；allowCustom 仅在配置了候选项且显式为 false 时携带
  * （未声明默认允许自由输入，与运行表单的默认行为一致）。
+ * seed 字段强制默认空串（空值由引擎注入 Date.now()），未声明 description 时
+ * 使用「留空由系统自动生成」。
  *
  * @param entry 工作流条目
  * @returns 用户参数声明列表
  */
 function toUserParamDeclarations(entry: CustomWorkflowEntry): WorkflowUserParamDeclaration[] {
-  return entry.userConfigFields.map((f) => ({
-    name: f.name,
-    key: f.key,
-    type: f.type,
-    // 默认值按声明类型转为原生值（boolean 开关 / number 输入框需要，避免字符串默认值导致 UI 异常）
-    defaultValue: coerceDefaultValue(f.type, f.defaultValue),
-    ...(f.description !== undefined ? { description: f.description } : {}),
-    ...(f.options?.length
-      ? {
-          // 下拉候选项：label 展示 / value 提交
-          candidates: f.options.map((o) => ({ label: o.label, value: o.value })),
-          ...(f.multiple ? { multiple: true } : {}),
-          ...(f.allowCustom === false ? { allowCustom: false } : {}),
-        }
-      : {}),
-  }));
+  return entry.userConfigFields.map((f) => {
+    const isSeed = f.key === 'seed';
+    return {
+      name: f.name,
+      key: f.key,
+      type: f.type,
+      // 默认值按声明类型转为原生值（boolean 开关 / number 输入框需要，避免字符串默认值导致 UI 异常）
+      // seed 强制默认为空：用户未填时由引擎注入 Date.now()
+      defaultValue: isSeed ? '' : coerceDefaultValue(f.type, f.defaultValue),
+      ...(isSeed
+        ? { description: f.description !== undefined && f.description !== '' ? f.description : '留空由系统自动生成' }
+        : f.description !== undefined
+          ? { description: f.description }
+          : {}),
+      ...(f.options?.length
+        ? {
+            // 下拉候选项：label 展示 / value 提交
+            candidates: f.options.map((o) => ({ label: o.label, value: o.value })),
+            ...(f.multiple ? { multiple: true } : {}),
+            ...(f.allowCustom === false ? { allowCustom: false } : {}),
+          }
+        : {}),
+    };
+  });
 }
 
 /**

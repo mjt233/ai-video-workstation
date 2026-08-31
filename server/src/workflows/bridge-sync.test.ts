@@ -188,6 +188,48 @@ describe('syncBridgeInstance', () => {
     expect(w!.params).toEqual([{ key: 'steps', name: '步数V2', type: 'integer', defaultValue: '' }]);
   });
 
+  it('工作流定义含 seed 时即使未列入 expose_field 也暴露，默认空串', async () => {
+    const d = detail({
+      params: [
+        { alias: 'seed', label: '随机种子', paramType: 'number', defaultValue: '42' },
+        { alias: 'steps', label: '步数', paramType: 'number' },
+      ],
+      tags: [
+        { id: 'auto', metadata: { expose_field: 'steps' }, tags: [] },
+        { id: 'text-to-image', metadata: {}, tags: [] },
+      ],
+    });
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(d);
+    await syncBridgeInstance(mkInstance());
+    const w = getImpl('text-to-image', 'ceb-inst-1-text_to_image');
+    expect(w!.params).toEqual([
+      {
+        key: 'seed',
+        name: '随机种子',
+        type: 'integer',
+        defaultValue: '',
+        description: '留空由系统自动生成',
+      },
+      { key: 'steps', name: '步数', type: 'integer', defaultValue: '' },
+    ]);
+  });
+
+  it('工作流定义无 seed 时不暴露 seed 参数', async () => {
+    const d = detail({
+      params: [{ alias: 'steps', label: '步数', paramType: 'number' }],
+      tags: [
+        { id: 'auto', metadata: { expose_field: 'steps' }, tags: [] },
+        { id: 'text-to-image', metadata: {}, tags: [] },
+      ],
+    });
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('text_to_image', 'text-to-image')]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(d);
+    await syncBridgeInstance(mkInstance());
+    const w = getImpl('text-to-image', 'ceb-inst-1-text_to_image');
+    expect(w!.params?.some((p) => p.key === 'seed')).toBe(false);
+  });
+
   it('expose_field 含 providerId 时被过滤（Bridge 执行保留键不作为用户参数）', async () => {
     const d = detail({
       params: [
@@ -316,13 +358,39 @@ describe('buildSubmit（image-to-video 模式分发）', () => {
    * @param video ctx.video 自包含提交数据
    * @returns 最小上下文对象（提交时强转，无需完整 WorkflowRunContext）
    */
-  const mkVideoCtx = (execute: ReturnType<typeof vi.fn>, video: Record<string, unknown>) => ({
-    vars: {},
+  const mkVideoCtx = (
+    execute: ReturnType<typeof vi.fn>,
+    video: Record<string, unknown>,
+    vars: Record<string, string | undefined> = {},
+  ) => ({
+    vars,
     projectConfig: { width: 1080, height: 1920 },
     readFile: async () => '',
     readAssertFile: async () => new File([], 'f.png'),
     provider: { execute },
     video,
+  });
+
+  it('video.seed 优先于 ctx.vars.seed；缺省时回退 vars.seed', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('x', 'image-to-video', { cancelable: true, video: { modes: ['director'] } });
+    const baseVideo = {
+      mode: 'director',
+      resolution: { width: 1080, height: 1920 },
+      duration: 10,
+      prompt: 'p',
+      fps: 24,
+      director: { frames: [{ file: new File([], 'a.png'), cursor: 0 }] },
+      extraParams: {},
+    };
+    await submit(mkVideoCtx(execute, { ...baseVideo, seed: 42 }, { seed: '1700000000000' }) as never);
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
+      params: expect.objectContaining({ seed: 42 }),
+    }));
+    await submit(mkVideoCtx(execute, baseVideo, { seed: '1700000000000' }) as never);
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
+      params: expect.objectContaining({ seed: 1700000000000 }),
+    }));
   });
 
   it('director 模式：buildDirectorPayload 形状载荷（workflowId 透传原始 Bridge id + frame_define）', async () => {

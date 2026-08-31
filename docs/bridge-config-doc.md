@@ -47,7 +47,7 @@
 
 - 提示词字段统一为 `prompt`
 - 文件 key 序号统一 **0-based**：图片 `image_{n}`、视频 `video_{n}`、音频 `audio_{n}`；单音频用 `audio`
-- 可选参数（`seed` 等）省略时不上送，由 Bridge / 引擎取默认
+- 可选参数（`seed` 等）用户留空时由工作站引擎注入时间戳（`Date.now()`）再上送；工作流定义中存在 `seed` 字段时，前端工作流参数表单会显示该项（默认空）
 
 ### 文生图 text-to-image
 
@@ -162,7 +162,9 @@ Bridge 工作流 id：`tts_voice_design`
 
 ## 附：expose_field 用户参数暴露
 
-自动注册标签的元数据 `expose_field`（逗号分隔的字段别名列表）用于声明哪些字段作为**前端用户可配置参数**暴露。结构字段（`prompt` / `width` / `height` / `duration` / `fps` / `seed` / 文件 key 等）由工作站固定组装，无需列出；如需开放额外的可调参数（如 `enable_multiple_angles_lora`），将其别名加入 `expose_field` 即可。
+自动注册标签的元数据 `expose_field`（逗号分隔的字段别名列表）用于声明哪些字段作为**前端用户可配置参数**暴露。结构字段（`prompt` / `width` / `height` / `duration` / `fps` / 文件 key 等）由工作站固定组装，无需列出；如需开放额外的可调参数（如 `enable_multiple_angles_lora`），将其别名加入 `expose_field` 即可。
+
+`seed` 例外：只要工作流定义（`params` / `declaredParams`）存在 `seed` 字段，即使未列入 `expose_field` 也会在前端工作流参数表单中显示（默认空）。用户填写则使用该值；留空由引擎注入时间戳（`Date.now()`）。工作流定义中没有 `seed` 字段时不显示。
 
 ## 附：字段候选项与多选（下拉表单）
 

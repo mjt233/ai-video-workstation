@@ -69,6 +69,26 @@ describe('syncCustomInstance', () => {
     ]);
   });
 
+  it('自定义工作流声明 seed 时默认空串（空值由引擎注入）', async () => {
+    await syncCustomInstance(makeInstance([entry('wf-seed', ['text-to-image'], {
+      userConfigFields: [
+        { key: 'seed', name: '随机种子', type: 'integer', defaultValue: '42' },
+        { key: 'steps', name: '步数', type: 'integer', defaultValue: '20' },
+      ],
+    })]));
+    const impl = getImpl('text-to-image', 'custom-wf-seed-' + INSTANCE_ID);
+    expect(impl?.params).toEqual([
+      {
+        name: '随机种子',
+        key: 'seed',
+        type: 'integer',
+        defaultValue: '',
+        description: '留空由系统自动生成',
+      },
+      { name: '步数', key: 'steps', type: 'integer', defaultValue: 20 },
+    ]);
+  });
+
   it('下拉字段注册为 params 声明（candidates/multiple/allowCustom 映射）', async () => {
     await syncCustomInstance(makeInstance([entry('wf-cand', ['text-to-image'], {
       userConfigFields: [
