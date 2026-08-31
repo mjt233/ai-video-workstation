@@ -19,7 +19,7 @@
         :auto-building="autoBuilding"
         :saving="saving"
         :dirty="dirty"
-        @fit="fitView"
+        @fit="onFitView"
         @zoom-in="zoomIn"
         @zoom-out="zoomOut"
         @undo="undo"
@@ -35,7 +35,7 @@
         <VueFlow
           :nodes="flowNodes"
           :edges="flowEdges"
-          :fit-view-on-init="true"
+          :fit-view-on-init="false"
           :min-zoom="0.2"
           :max-zoom="3"
           :nodes-draggable="true"
@@ -235,7 +235,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { VueFlow, useVueFlow, type EdgeMouseEvent, type NodeMouseEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
@@ -378,7 +378,90 @@ function getOutputMtime(nodeId: string): number | null | undefined {
 }
 
 /** Vue Flow 视图控制：适应/缩放/屏幕坐标换算/程序化选中 */
-const { fitView, zoomIn, zoomOut, screenToFlowCoordinate, viewport, findNode, addSelectedNodes } = useVueFlow()
+const { fitView, zoomIn, zoomOut, setViewport, getNodes, screenToFlowCoordinate, viewport, findNode, addSelectedNodes, onNodesInitialized } = useVueFlow()
+
+/**
+ * 适应视图参数：把全部节点包围盒放进可视区并居中。
+ * maxZoom=1 避免节点很少时被放到超过 100%；padding 留出边缘空隙。
+ */
+const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1, duration: 0 } as const
+
+/** 组件是否已卸载（异步 load / fitView 完成后不再改视口或恢复任务） */
+let disposed = false
+/** 待执行的适应视图世代号（快速切换分镜时丢弃过期请求） */
+let fitViewSeq = 0
+/** 是否仍需在节点尺寸就绪 / 画布变为可见后重试适应视图 */
+let pendingFitView = false
+/** 串行化 fitView，避免过期请求在新画布对准之后又把视口改回旧包围盒 */
+let fitViewChain: Promise<void> = Promise.resolve()
+
+/**
+ * 工具栏「适应视图」：立即按当前节点包围盒对准视口。
+ */
+function onFitView(): void {
+  void fitView({ ...FIT_VIEW_OPTIONS })
+}
+
+/**
+ * Vue Flow 内部节点是否已切到当前画布且测出宽高。
+ * 切换分镜后 store 已是新节点，但 Vue Flow 可能仍持有旧节点尺寸；此时 fitView 会对准旧包围盒。
+ *
+ * @returns 空画布视为就绪；否则要求内部节点集合与 store 一致且均已测量
+ */
+function vueFlowMatchesStore(): boolean {
+  const expected = store.nodes.value
+  if (expected.length === 0) return true
+  const current = getNodes.value
+  if (current.length !== expected.length) return false
+  const ids = new Set(expected.map((n) => n.id))
+  for (const n of current) {
+    if (!ids.has(n.id)) return false
+    if (!n.dimensions.width || !n.dimensions.height) return false
+  }
+  return true
+}
+
+/**
+ * 将画布视口对准当前全部资产节点（居中 + 缩放落入可视区）。
+ * Vue Flow 的 fitView 要求节点已测出宽高；测量未完成、节点尚未切到当前画布、或容器尺寸为 0 时保持 pending，
+ * 由 onNodesInitialized / 容器 ResizeObserver 再试。快速切换分镜时以世代号丢弃过期请求。
+ *
+ * @param seq scheduleFitCanvas 分配的世代号
+ */
+function fitCanvasToNodes(seq: number): Promise<void> {
+  const task = async (): Promise<void> => {
+    if (!pendingFitView || disposed || seq !== fitViewSeq) return
+    if (store.nodes.value.length === 0) {
+      pendingFitView = false
+      await setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 })
+      return
+    }
+    if ((flowEl.value?.clientWidth ?? 0) <= 0 || (flowEl.value?.clientHeight ?? 0) <= 0) return
+    await nextTick()
+    if (!pendingFitView || disposed || seq !== fitViewSeq) return
+    if (!vueFlowMatchesStore()) return
+    const ok = await fitView({ ...FIT_VIEW_OPTIONS })
+    if (ok && seq === fitViewSeq && !disposed) pendingFitView = false
+  }
+  fitViewChain = fitViewChain.then(task).catch((e: unknown) => {
+    console.error('[asset-canvas] 适应视图失败', e)
+  })
+  return fitViewChain
+}
+
+/**
+ * 在画布数据加载完成后请求适应视图（首次进入与切换分镜/场景）。
+ * 节点尚未渲染完时不会丢请求，等尺寸就绪后再对准。
+ */
+function scheduleFitCanvas(): void {
+  pendingFitView = true
+  const seq = ++fitViewSeq
+  void fitCanvasToNodes(seq)
+}
+
+onNodesInitialized(() => {
+  if (pendingFitView) void fitCanvasToNodes(fitViewSeq)
+})
 
 /** 画布根节点 DOM（用于自动计算高度铺满页面） */
 const canvasRef = ref<HTMLElement | null>(null)
@@ -573,6 +656,8 @@ async function onAutoBuild(): Promise<void> {
 
 /** 切换分镜/场景时：重置各组合式状态，并让 store/生成组合式切换到新目标加载 */
 watch(target, async (newTarget) => {
+  const seq = ++fitViewSeq
+  pendingFitView = false
   selection.reset()
   rename.reset()
   menus.reset()
@@ -581,19 +666,22 @@ watch(target, async (newTarget) => {
   dialogs.resetAll()
   upload.reset()
   await gen.switchTarget(newTarget)
+  if (disposed || seq !== fitViewSeq) return
   await store.switchTarget(newTarget)
+  if (disposed || seq !== fitViewSeq) return
+  // 切分镜/场景后视口仍停在旧坐标，需重新对准新画布全部节点（不等产物信息，节点坐标已就绪）
+  scheduleFitCanvas()
   // 新画布加载后刷新全部节点产物信息（固定路径 + mtime；异步任务已由服务端落盘的结果直接可见）
   await refreshNodeOutputs()
 })
-
-/** 组件是否已卸载（异步 load 完成后不再恢复任务，避免卸载后残留轮询定时器） */
-let disposed = false
 
 onMounted(() => {
   window.addEventListener('keydown', keyboard.onKeydown)
   window.addEventListener('paste', paste.onPaste)
   window.addEventListener('resize', updateHeight)
   void store.load().then(() => {
+    // 首次加载后把视口对准全部节点（fitViewOnInit 只在 Vue Flow 首次初始化时跑一次，这里统一走显式适应）
+    scheduleFitCanvas()
     void refreshNodeOutputs()
     // 恢复持久化的运行中任务：离开画布/刷新前未完成的任务继续显示 loading 并跟踪到终态
     if (!disposed) void gen.restore()
@@ -602,6 +690,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   disposed = true
+  pendingFitView = false
   window.removeEventListener('keydown', keyboard.onKeydown)
   window.removeEventListener('paste', paste.onPaste)
   window.removeEventListener('resize', updateHeight)
@@ -621,6 +710,10 @@ watch(flowEl, (flow) => {
     flowResizeObserver ??= new ResizeObserver(() => {
       flowHeight.value = flowEl.value?.clientHeight ?? 0
       flowWidth.value = flowEl.value?.clientWidth ?? 0
+      // 画布 Tab 隐藏时容器尺寸为 0，fitView 会失败；显示后按 pending 重试，不在每次 resize 时抢用户视口
+      if (pendingFitView && flowWidth.value > 0 && flowHeight.value > 0) {
+        void fitCanvasToNodes(fitViewSeq)
+      }
     })
     flowResizeObserver.observe(flow)
   }

@@ -117,7 +117,7 @@
 | 右键连线 | 菜单：断开连接 |
 | 单击空白 | 取消选中、关闭菜单 |
 | 双击空白 | 在鼠标双击处弹出「添加节点」VMenu（选择节点原型后在该处添加节点） |
-| 适应视图 / 放大 / 缩小 | 工具栏按钮（`fitView` / `zoomIn` / `zoomOut`） |
+| 适应视图 / 放大 / 缩小 | 工具栏按钮（`fitView` / `zoomIn` / `zoomOut`）；适应视图按全部节点包围盒居中并缩放落入可视区（padding 0.2、maxZoom 1，不放大超过 100%） |
 | 滚轮 | 空白/节点上滚动 = 缩放画布；文本节点文本域上滚动 = 滚动文本（`nowheel` 类豁免缩放） |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | 撤销 / 重做（输入框聚焦时跳过） |
 | `Ctrl+C` / `Ctrl+D` | 复制选中节点到画布内部剪贴板，并同步把「节点复制标记 + JSON」写入系统剪贴板（覆盖剪贴板旧内容，与主流节点编辑器复制语义一致；无剪贴板 API 时静默降级为仅内部剪贴板） / 复制粘贴（重复节点） |
@@ -243,6 +243,7 @@
   - store：先清防抖 timer + 落盘未保存修改（仍用旧目标）→ 重置 data / 撤销重做 / 剪贴板 → 重新 `load()`；
   - gen：更新目标 + `reset()`（清轮询与全部展示态；**localStorage 记录不清**——结果由服务端落盘，切回时按固定路径直接可见，运行中任务由 `restore()` 恢复 loading 展示与跟踪）。
 - `AssetCanvas` 用 `watch(target, ...)` 在切目标时清空选中/菜单/内联重命名状态并调用两个 `switchTarget`，随后刷新全部节点产物信息（`refreshNodeOutputs`，node-info 批量查询）——异步任务已完成的结果立即显示。
+- **加载后视口对准节点**：首次 `load()` 与 `switchTarget` 完成后调用 `scheduleFitCanvas`，把视口居中到全部资产节点并缩放使包围盒落入可视区（与工具栏「适应视图」同一套参数）。Vue Flow 的 `fitViewOnInit` 只在组件首次初始化时生效、切换分镜不会自动 fit，因此必须显式调用。`fitView` 要求节点已测出宽高且容器尺寸 > 0：测量未完成或画布 Tab 隐藏时保持 pending，由 `onNodesInitialized` / 容器 `ResizeObserver` 再试；快速切换分镜以世代号丢弃过期请求。空画布则重置为默认视口 `{ x: 0, y: 0, zoom: 1 }`。
 
 ---
 
@@ -348,6 +349,7 @@ frontend/src/
 - **`readFs` 对 `.json` 返回反序列化对象**：加载 `canvas.json` 需同时兼容 string 与 object 两种形态。
 - **eslint computed 副作用**：`vue/no-side-effects-in-computed-properties` 禁止在 computed 内写缓存/状态，改用 `watch`。
 - **面板钳制**：用 `flowEl.clientHeight/Width` 实测尺寸，勿依赖 Vue Flow `dimensions`。
+- **切换画布必须显式 fitView**：`fitViewOnInit` 只在 Vue Flow 首次初始化时跑一次，切换分镜/场景节点换了但视口仍停在旧坐标。`fitView` 在节点尚未测出宽高或容器尺寸为 0（画布 Tab 隐藏）时返回 `false`，必须 pending 后由 `onNodesInitialized` / ResizeObserver 再试，且用世代号丢弃过期请求；不要在每次 resize 时无条件 fit，会抢用户手动平移/缩放。
 - **loading 持久化分键**：运行中任务记录按 `项目 + 画布定义文件路径` 分键（`dsh.asset-canvas.tasks.*`），切换画布/项目互不串扰；`reset()` 只清内存不清记录，任务终态（成功/失败/中断）必须 `clearPersistedTask`，否则刷新后会出现幽灵 loading。
 - **连线右键**：`@edge-context-menu` 需手动 `event.preventDefault()` 阻止浏览器默认菜单叠加。
 - **节点缩放**：核心包不含缩放组件，控制点由独立包 `@vue-flow/node-resizer` 提供；缩放中的实时尺寸只写在 Vue Flow 内部节点样式上，业务 `width/height`（及左侧/上侧缩放时的 `x/y`）在 `resizeEnd` 事件统一回写 store——勿在 `resize` 事件里回写，会高频压入撤销栈并反复触发保存。
