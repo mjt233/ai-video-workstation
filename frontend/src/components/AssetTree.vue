@@ -75,7 +75,13 @@
                 v-for="(refItem, i) in errorDialog.refs"
                 :key="i"
               >
-                第{{ refItem.episode }}集 分镜{{ refItem.shot }} {{ refItem.file }}
+                <template v-if="refItem.canvasPath">
+                  {{ refItem.canvasPath.startsWith('prompt/scene') ? '分镜画布' : '场景画布' }}：{{ refItem.canvasPath }}
+                  <span v-if="refItem.nodeName">（节点「{{ refItem.nodeName }}」）</span>
+                </template>
+                <template v-else>
+                  第{{ refItem.episode }}集 分镜{{ refItem.shot }} {{ refItem.file }}
+                </template>
                 <span v-if="refItem.detail">（{{ refItem.detail }}）</span>
               </li>
             </ul>
@@ -104,6 +110,8 @@ import {
   AssetApiError,
   deleteCharacter,
   deleteEpisode,
+  deleteProp,
+  deletePropCategory,
   deleteScriptEpisode,
   deleteShot,
   deleteStage,
@@ -121,6 +129,9 @@ type TreeKind =
   | 'root-stage'
   | 'stage'
   | 'subscene'
+  | 'root-prop'
+  | 'prop-category'
+  | 'prop'
   | 'root-scene'
   | 'episode'
   | 'shot'
@@ -140,6 +151,8 @@ interface TreeItem {
   shot?: string
   stageName?: string
   label?: string
+  /** 道具分类名（道具节点所属分类） */
+  category?: string
   children?: TreeItem[]
 }
 
@@ -156,7 +169,7 @@ const deleting = ref(false)
 const createDialog = reactive({
   show: false,
   type: 'character' as CreateAssetType,
-  defaults: {} as Partial<{ name: string; stage: string; episode: string }>,
+  defaults: {} as Partial<{ name: string; stage: string; category: string; episode: string }>,
 })
 
 const errorDialog = reactive({
@@ -183,6 +196,9 @@ function iconColor(item: TreeItem): string {
   if (item.type === 'stage' || item.kind === 'stage' || item.kind === 'subscene' || item.kind === 'root-stage') {
     return 'green-darken-1'
   }
+  if (item.kind === 'root-prop' || item.kind === 'prop-category' || item.kind === 'prop') {
+    return 'orange-darken-2'
+  }
   if (item.kind === 'root-custom') {
     return 'cyan-darken-1'
   }
@@ -193,11 +209,11 @@ function iconColor(item: TreeItem): string {
 }
 
 function canCreate(item: TreeItem): boolean {
-  return ['root-character', 'root-stage', 'stage', 'root-scene', 'episode', 'script-episodes'].includes(item.kind)
+  return ['root-character', 'root-stage', 'root-prop', 'prop-category', 'root-scene', 'episode', 'script-episodes'].includes(item.kind)
 }
 
 function canDelete(item: TreeItem): boolean {
-  return ['character', 'stage', 'subscene', 'episode', 'shot', 'script-episode'].includes(item.kind)
+  return ['character', 'stage', 'subscene', 'prop-category', 'prop', 'episode', 'shot', 'script-episode'].includes(item.kind)
 }
 
 interface DirEntrySafe {
@@ -215,9 +231,10 @@ async function safeDir(path: string): Promise<DirEntrySafe[]> {
 }
 
 async function buildTree() {
-  const [characters, stages, episodes] = await Promise.all([
+  const [characters, stages, props, episodes] = await Promise.all([
     safeDir('prompt/character/'),
     safeDir('prompt/stage/'),
+    safeDir('prompt/prop/'),
     safeDir('prompt/scene/'),
   ])
 
@@ -259,6 +276,34 @@ async function buildTree() {
         stageName: s.name,
         label: sub.name,
       })),
+    })
+  }
+
+  // 道具：一级=分类（目录），二级=道具本身
+  const propDirs = sortByNameZh(
+    props.filter(p => p.type === 'dir').map(p => ({ name: p.name })),
+  )
+  const propItems: TreeItem[] = []
+  for (const cat of propDirs) {
+    const propNames = await safeDir(`prompt/prop/${cat.name}/`)
+    const children = sortByNameZh(
+      propNames.filter(p => p.type === 'dir').map(p => ({ name: p.name })),
+    ).map(p => ({
+      name: p.name,
+      path: `prop-${cat.name}-${p.name}`,
+      icon: 'mdi-package-variant',
+      type: 'prop',
+      kind: 'prop' as const,
+      category: cat.name,
+    }))
+    propItems.push({
+      name: cat.name,
+      path: `prop-category-${cat.name}`,
+      icon: 'mdi-folder-outline',
+      type: 'prop',
+      kind: 'prop-category',
+      category: cat.name,
+      children,
     })
   }
 
@@ -325,6 +370,13 @@ async function buildTree() {
       icon: 'mdi-city',
       kind: 'root-stage',
       children: stageItems,
+    },
+    {
+      name: '道具',
+      path: 'root-prop',
+      icon: 'mdi-package-variant',
+      kind: 'root-prop',
+      children: propItems,
     },
     {
       name: '集数分镜',
@@ -418,6 +470,7 @@ function resolveSelectionFromRoute(): { activePath: string | null; openPaths: st
   const type = route.query.type as string | undefined
   const name = route.query.name as string | undefined
   const subscene = route.query.subscene as string | undefined
+  const category = route.query.category as string | undefined
   const episode = route.query.episode as string | undefined
   const shot = route.query.shot as string | undefined
   const section = route.query.section as string | undefined
@@ -443,6 +496,19 @@ function resolveSelectionFromRoute(): { activePath: string | null; openPaths: st
     return {
       activePath: `stage-${name}`,
       openPaths: ['root-stage'],
+    }
+  }
+
+  if (type === 'prop' && category) {
+    if (name) {
+      return {
+        activePath: `prop-${category}-${name}`,
+        openPaths: ['root-prop', `prop-category-${category}`],
+      }
+    }
+    return {
+      activePath: `prop-category-${category}`,
+      openPaths: ['root-prop'],
     }
   }
 
@@ -554,6 +620,31 @@ function onSelect(items: unknown) {
     return
   }
 
+  if (item.kind === 'prop-category') {
+    // 仅选中分类节点时不指定道具，详情区提示从树中选择道具
+    patchQuery({
+      type: 'prop',
+      name: undefined,
+      category: item.category,
+      subscene: undefined,
+      episode: undefined,
+      shot: undefined,
+    })
+    return
+  }
+
+  if (item.kind === 'prop') {
+    patchQuery({
+      type: 'prop',
+      name: item.name,
+      category: item.category,
+      subscene: undefined,
+      episode: undefined,
+      shot: undefined,
+    })
+    return
+  }
+
   if (item.kind === 'shot') {
     patchQuery({
       type: 'scene',
@@ -635,6 +726,12 @@ function openCreate(item: TreeItem) {
   } else if (item.kind === 'stage') {
     createDialog.type = 'subscene'
     createDialog.defaults = { stage: item.stageName ?? item.name }
+  } else if (item.kind === 'root-prop') {
+    createDialog.type = 'prop-category'
+    createDialog.defaults = {}
+  } else if (item.kind === 'prop-category') {
+    createDialog.type = 'prop'
+    createDialog.defaults = { category: item.category ?? '' }
   } else if (item.kind === 'root-scene') {
     createDialog.type = 'episode'
     createDialog.defaults = {}
@@ -654,6 +751,10 @@ async function openDelete(item: TreeItem) {
   let label = item.name
   if (item.kind === 'subscene') {
     label = `${item.stageName}/${item.label}`
+  } else if (item.kind === 'prop-category') {
+    label = `道具分类「${item.name}」（含其下全部道具）`
+  } else if (item.kind === 'prop') {
+    label = `道具「${item.category}/${item.name}」`
   } else if (item.kind === 'shot') {
     label = `第${item.episode}集 分镜${item.shot}`
   } else if (item.kind === 'episode') {
@@ -676,6 +777,7 @@ async function onCreated(payload: {
   name?: string
   stage?: string
   label?: string
+  category?: string
   episode?: string
   shot?: string
   renames?: RenamePair[]
@@ -706,6 +808,24 @@ async function onCreated(payload: {
       episode: undefined,
       shot: undefined,
     })
+  } else if (payload.type === 'prop-category' && payload.name) {
+    patchQuery({
+      type: 'prop',
+      name: undefined,
+      category: payload.name,
+      subscene: undefined,
+      episode: undefined,
+      shot: undefined,
+    })
+  } else if (payload.type === 'prop' && payload.category && payload.name) {
+    patchQuery({
+      type: 'prop',
+      name: payload.name,
+      category: payload.category,
+      subscene: undefined,
+      episode: undefined,
+      shot: undefined,
+    })
   } else if (payload.type === 'shot' && payload.episode && payload.shot) {
     applyShotRenames(payload.renames)
     patchQuery({
@@ -732,6 +852,7 @@ function clearSelectionIfDeleted(item: TreeItem) {
   const type = q.type as string | undefined
   const name = q.name as string | undefined
   const subscene = q.subscene as string | undefined
+  const category = q.category as string | undefined
   const episode = q.episode as string | undefined
   const shot = q.shot as string | undefined
 
@@ -745,6 +866,14 @@ function clearSelectionIfDeleted(item: TreeItem) {
   }
   if (item.kind === 'subscene' && type === 'stage' && name === item.stageName && subscene === item.label) {
     patchQuery({ type: 'stage', name: item.stageName, subscene: undefined })
+    return
+  }
+  if (item.kind === 'prop-category' && type === 'prop' && category === item.category) {
+    patchQuery({ type: undefined, name: undefined, category: undefined })
+    return
+  }
+  if (item.kind === 'prop' && type === 'prop' && category === item.category && name === item.name) {
+    patchQuery({ type: undefined, name: undefined, category: undefined })
     return
   }
   if (item.kind === 'episode' && episode === item.episode) {
@@ -770,6 +899,10 @@ async function doDelete(item: TreeItem) {
       await deleteStage(props.project, item.stageName ?? item.name)
     } else if (item.kind === 'subscene') {
       await deleteSubscene(props.project, item.stageName!, item.label!)
+    } else if (item.kind === 'prop-category') {
+      await deletePropCategory(props.project, item.category ?? item.name)
+    } else if (item.kind === 'prop') {
+      await deleteProp(props.project, item.category!, item.name)
     } else if (item.kind === 'episode') {
       await deleteEpisode(props.project, item.episode!)
     } else if (item.kind === 'shot') {
@@ -818,6 +951,7 @@ watch(
     route.query.type,
     route.query.name,
     route.query.subscene,
+    route.query.category,
     route.query.section,
     route.query.episode,
     route.query.shot,

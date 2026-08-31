@@ -6,7 +6,14 @@
  */
 
 /** 资产分类标签 */
-export type AssetTab = 'character' | 'stage' | 'custom' | 'audio' | 'scene-stage' | 'video'
+export type AssetTab = 'character' | 'stage' | 'prop' | 'custom' | 'audio' | 'scene-stage' | 'video'
+
+/**
+ * 道具页签媒体过滤类型：
+ * 加载图片节点 → image（只列道具图片产物）、加载视频 → video、加载音频 → audio；
+ * 道具详情页关联资产选择 → image（图生视频输入为图片）。
+ */
+export type PropMediaFilter = 'image' | 'video' | 'audio'
 
 /** 树形资产条目（角色/场景树、自定义资产网格、分镜场景图等通用条目） */
 export interface AssetItem {

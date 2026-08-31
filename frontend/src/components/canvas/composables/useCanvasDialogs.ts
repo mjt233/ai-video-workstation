@@ -159,26 +159,32 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
 
   // ── 资产选择器（加载图片/音频/视频节点绑定资产）────────
 
-  /** 资产选择器状态（nodeId 记录绑定目标加载节点） */
-  const picker = reactive({ show: false, nodeId: '', showVoice: false })
+  /** 资产选择器状态（nodeId 记录绑定目标加载节点；mediaKind 记录道具页签媒体过滤） */
+  const picker = reactive({ show: false, nodeId: '', showVoice: false, mediaKind: 'image' as 'image' | 'video' | 'audio' })
 
   /**
    * 资产选择器页签：按节点类型定制——
-   * 音频加载节点提供「音频」页签（台词音频/自定义音频）；
-   * 视频加载节点提供「分镜视频」页签（分镜视频/自定义视频）。
+   * 音频加载节点提供「音频」页签（台词音频/自定义音频）与道具音频；
+   * 视频加载节点提供「分镜视频」页签（分镜视频/自定义视频）与道具视频；
+   * 图片加载节点提供道具图片。道具页签内按媒体类型过滤（PropPicker 的 mediaFilter）。
    */
   const pickerTabs = computed<AssetTab[]>(() => {
     const node = picker.nodeId ? nodeMap.value[picker.nodeId] : undefined
-    if (node?.prototypeId === 'audio-loader') return ['character', 'stage', 'custom', 'audio', 'scene-stage']
-    if (node?.prototypeId === 'video-loader') return ['stage', 'character', 'custom', 'video', 'scene-stage']
-    return ['stage', 'character', 'custom', 'scene-stage']
+    if (node?.prototypeId === 'audio-loader') return ['character', 'stage', 'prop', 'custom', 'audio', 'scene-stage']
+    if (node?.prototypeId === 'video-loader') return ['stage', 'character', 'prop', 'custom', 'video', 'scene-stage']
+    return ['stage', 'character', 'prop', 'custom', 'scene-stage']
   })
 
-  /** 打开资产选择器（绑定到某加载节点；音频节点启用角色音色与音频页签） */
+  /** 打开资产选择器（绑定到某加载节点；音频节点启用角色音色与音频页签；道具页签按节点类型过滤媒体） */
   function openAssetPicker(nodeId: string): void {
     const node = nodeMap.value[nodeId]
     picker.nodeId = nodeId
     picker.showVoice = node?.prototypeId === 'audio-loader'
+    picker.mediaKind = node?.prototypeId === 'video-loader'
+      ? 'video'
+      : node?.prototypeId === 'audio-loader'
+        ? 'audio'
+        : 'image'
     picker.show = true
   }
 

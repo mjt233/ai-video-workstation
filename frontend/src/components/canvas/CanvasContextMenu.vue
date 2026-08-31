@@ -31,7 +31,7 @@
       </v-icon>
       历史
     </div>
-    <!-- 保存为（hover 展开子菜单：角色设计/角色设计-衍生变体/场景图/场景图-衍生变体/自定义资产） -->
+    <!-- 保存为（hover 展开子菜单：按节点输出类型提供目标——图片=角色/场景/道具图片/自定义；视频=道具视频；音频=道具音频） -->
     <div
       v-if="canSave"
       class="canvas-context-menu__item canvas-context-menu__item--submenu"
@@ -51,34 +51,12 @@
       </v-icon>
       <div class="canvas-context-menu__submenu">
         <div
+          v-for="t in saveTargets"
+          :key="t"
           class="canvas-context-menu__item"
-          @click="emit('save-as-character')"
+          @click="emit('save-as', t)"
         >
-          角色设计
-        </div>
-        <div
-          class="canvas-context-menu__item"
-          @click="emit('save-as-character-variant')"
-        >
-          角色设计-衍生变体
-        </div>
-        <div
-          class="canvas-context-menu__item"
-          @click="emit('save-as-stage')"
-        >
-          场景图
-        </div>
-        <div
-          class="canvas-context-menu__item"
-          @click="emit('save-as-stage-variant')"
-        >
-          场景图-衍生变体
-        </div>
-        <div
-          class="canvas-context-menu__item"
-          @click="emit('save-as-custom')"
-        >
-          自定义资产
+          {{ saveTargetLabel(t) }}
         </div>
       </div>
     </div>
@@ -155,9 +133,12 @@
 </template>
 
 <script setup lang="ts">
+import type { SaveAsType } from './composables/types'
+
 /**
  * 画布右键菜单：节点菜单与连线菜单的纯展示组件。
- * 节点菜单含「保存为」hover 子菜单（5 个保存目标类型），仅输出类型为图片且有产物的节点显示。
+ * 节点菜单含「保存为」hover 子菜单（按节点输出类型提供目标：图片=角色/场景/道具图片/自定义资产；
+ * 视频=道具视频；音频=道具音频），仅节点有当前产物时显示。
  * 菜单状态与动作逻辑由 useCanvasMenus / useCanvasFlow 组合式持有，动作通过事件上抛。
  */
 defineProps<{
@@ -167,8 +148,10 @@ defineProps<{
   canGenerate: boolean
   /** 节点是否有版本历史（原型能力标志） */
   hasHistory: boolean
-  /** 节点是否显示「保存为」菜单（输出类型为图片且有当前产物） */
+  /** 节点是否显示「保存为」菜单（有当前产物即可） */
   canSave: boolean
+  /** 节点可用的保存目标类型列表（按节点输出类型推导） */
+  saveTargets: SaveAsType[]
   /** 节点是否关联了连线（「断开连接」显隐） */
   hasConnections: boolean
   /** 连线右键菜单状态（x/y 相对画布容器） */
@@ -180,16 +163,8 @@ const emit = defineEmits<{
   (e: 'generate'): void
   /** 查看历史 */
   (e: 'history'): void
-  /** 保存为：角色设计（覆盖 assert/character/{角色}/appearance.jpg） */
-  (e: 'save-as-character'): void
-  /** 保存为：角色设计-衍生变体（assert/character/{角色}/variants/{变体id}.jpg） */
-  (e: 'save-as-character-variant'): void
-  /** 保存为：场景图（assert/stage/{场景}/{子场景}.jpg） */
-  (e: 'save-as-stage'): void
-  /** 保存为：场景图-衍生变体（assert/stage/{场景}/variants/{子场景}/{变体id}.jpg） */
-  (e: 'save-as-stage-variant'): void
-  /** 保存为：自定义资产（assert/custom/...，SaveAssetDialog） */
-  (e: 'save-as-custom'): void
+  /** 保存为：按目标类型分派（角色设计/场景图/道具图片/道具视频/道具音频/自定义资产等） */
+  (e: 'save-as', type: SaveAsType): void
   /** 断开节点全部连接 */
   (e: 'disconnect'): void
   /** 重命名 */
@@ -201,6 +176,26 @@ const emit = defineEmits<{
   /** 断开选中连线 */
   (e: 'disconnect-edge'): void
 }>()
+
+/**
+ * 保存目标类型 → 菜单显示名。
+ *
+ * @param type 保存目标类型
+ * @returns 显示名
+ */
+function saveTargetLabel(type: SaveAsType): string {
+  switch (type) {
+    case 'character': return '角色设计'
+    case 'character-variant': return '角色设计-衍生变体'
+    case 'stage': return '场景图'
+    case 'stage-variant': return '场景图-衍生变体'
+    case 'prop-image': return '道具图片'
+    case 'prop-video': return '道具视频'
+    case 'prop-audio': return '道具音频'
+    case 'custom': return '自定义资产'
+    default: return '保存为'
+  }
+}
 </script>
 
 <style scoped>

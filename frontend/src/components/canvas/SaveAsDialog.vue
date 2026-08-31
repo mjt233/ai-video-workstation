@@ -54,7 +54,41 @@
             density="comfortable"
             class="mb-2"
           />
-          <!-- 场景图：combobox 可选已有子场景，或输入新场景图名称（保存时自动创建子场景） -->
+          <!-- 道具图片/视频/音频：分类 + 道具两个 combobox（可选已有，或输入新名称保存时自动创建） -->
+          <template v-else-if="isPropType">
+            <v-combobox
+              v-model="selectedCategory"
+              :items="categories"
+              label="道具分类"
+              variant="outlined"
+              density="comfortable"
+              class="mb-2"
+              menu-icon="mdi-chevron-down"
+              :error="categoryError !== ''"
+              :error-messages="categoryError"
+              :hint="categoryError === '' ? '点击下拉箭头选择已有分类，或输入新分类名（保存时自动创建）' : ''"
+              persistent-hint
+              placeholder="选择已有分类或输入新分类名"
+              @update:model-value="onCategoryChange"
+              @keyup.enter="save"
+            />
+            <v-combobox
+              v-model="selectedProp"
+              :items="propNames"
+              label="道具"
+              variant="outlined"
+              density="comfortable"
+              class="mb-2"
+              menu-icon="mdi-chevron-down"
+              :error="propError !== ''"
+              :error-messages="propError"
+              :hint="propError === '' ? '点击下拉箭头选择已有道具，或输入新道具名（保存时自动创建）' : ''"
+              persistent-hint
+              placeholder="选择已有道具或输入新道具名"
+              @keyup.enter="save"
+            />
+          </template>
+          <!-- 场景图 / 场景图-衍生变体 -->
           <template v-else>
             <v-select
               v-model="selectedStage"
@@ -161,6 +195,8 @@ import {
   archiveAssetHistory,
   createCharacter,
   createCharacterVariant,
+  createProp,
+  createPropCategory,
   createStageVariant,
   createSubscene,
 } from '../../api/assets'
@@ -170,18 +206,22 @@ import type { SaveAsAssetType } from './composables/types'
 /**
  * 「保存为」目标选择对话框。
  *
- * 把图片节点的当前输出资产复制到指定类型的资产路径（仅复制图片文件；衍生变体在
- * 元数据 prompt/.../variants/{id}.json 不存在时自动创建，否则详情页列表不可见）：
+ * 把节点的当前输出资产（图片/视频/音频）复制到指定类型的资产路径（目标实体不存在时自动创建）：
  * - 角色设计：`assert/character/{角色}/appearance.jpg`
  * - 角色设计-衍生变体：`assert/character/{角色}/variants/{变体id}.jpg`
  * - 场景图：`assert/stage/{场景}/{子场景}.jpg`
  * - 场景图-衍生变体：`assert/stage/{场景}/variants/{子场景}/{变体id}.jpg`
+ * - 道具图片：`assert/prop/{分类}/{道具}/image.jpg`
+ * - 道具视频：`assert/prop/{分类}/{道具}/video.mp4`
+ * - 道具音频：`assert/prop/{分类}/{道具}/audio.flac`
  *
  * 目标实体用下拉选择（角色列表 = prompt/character/ 目录名；场景/子场景 = prompt/stage/ 目录与
- * 子场景 .md 文件名）；「角色设计」与「场景图」用 v-combobox——可选择已有实体覆盖，也可手动
- * 输入新角色名 / 新场景图名称，保存时自动创建对应实体（角色：prompt/character/{name}/ 三模板文件；
- * 子场景：prompt/stage/{场景}/{标签}.md 模板）。衍生变体需输入变体 id（校验非法字符）。
- * 默认定位当前画布所属实体：场景画布 → 当前场景+子场景；分镜画布 → 由 stage.json 首帧推导。
+ * 子场景 .md 文件名；道具分类/道具 = prompt/prop/ 目录与子目录名）；「角色设计」「场景图」与
+ * 道具类用 v-combobox——可选择已有实体覆盖，也可手动输入新名称，保存时自动创建对应实体
+ * （角色：prompt/character/{name}/ 三模板文件；子场景：prompt/stage/{场景}/{标签}.md 模板；
+ * 道具分类/道具：prompt/prop/ 目录与 image.md/video.md/refs.json 模板）。衍生变体需输入变体 id
+ * （校验非法字符）。默认定位当前画布所属实体：场景画布 → 当前场景+子场景；
+ * 分镜画布 → 由 stage.json 首帧推导。
  * 目标文件已存在时弹 confirm 确认后覆盖，覆盖前先把原文件归档为历史版本
  * （POST /assets/:project/history/archive）。
  */
@@ -221,6 +261,11 @@ const isCharacterType = computed(() => props.type === 'character' || props.type 
 /** 是否为衍生变体类型（需输入变体 id） */
 const isVariant = computed(() => props.type === 'character-variant' || props.type === 'stage-variant')
 
+/** 是否为道具类（道具图片 / 道具视频 / 道具音频） */
+const isPropType = computed(
+  () => props.type === 'prop-image' || props.type === 'prop-video' || props.type === 'prop-audio',
+)
+
 /** 对话框标题（按保存目标类型） */
 const titleText = computed(() => {
   switch (props.type) {
@@ -232,6 +277,12 @@ const titleText = computed(() => {
       return '保存为场景图'
     case 'stage-variant':
       return '保存为场景图-衍生变体'
+    case 'prop-image':
+      return '保存为道具图片'
+    case 'prop-video':
+      return '保存为道具视频'
+    case 'prop-audio':
+      return '保存为道具音频'
     default:
       return '保存为'
   }
@@ -243,12 +294,20 @@ const characters = ref<string[]>([])
 const stages = ref<string[]>([])
 /** 选中场景的子场景列表（prompt/stage/{场景}/*.md 文件名去扩展名） */
 const subscenes = ref<string[]>([])
+/** 项目道具分类列表（prompt/prop/ 目录名） */
+const categories = ref<string[]>([])
+/** 选中分类下的道具列表（prompt/prop/{分类}/ 子目录名） */
+const propNames = ref<string[]>([])
 /** 选中的角色 */
 const selectedCharacter = ref('')
 /** 选中的场景 */
 const selectedStage = ref('')
 /** 选中的子场景 */
 const selectedSubscene = ref('')
+/** 选中的道具分类 */
+const selectedCategory = ref('')
+/** 选中的道具 */
+const selectedProp = ref('')
 /** 变体 id 输入 */
 const variantId = ref('')
 /** 衍生描述输入（衍生变体；默认预填节点提示词） */
@@ -295,8 +354,33 @@ async function loadSubscenes(): Promise<void> {
   }
 }
 
+/** 加载选中分类下的道具列表（prompt/prop/{分类}/ 子目录名） */
+async function loadProps(): Promise<void> {
+  propNames.value = []
+  const category = valueText(selectedCategory.value)
+  if (!category) return
+  try {
+    const res = await readFs(props.project, `prompt/prop/${category}`) as DirResponse
+    propNames.value = dirNames(res)
+  } catch {
+    propNames.value = []
+  }
+}
+
+/** 用户切换道具分类：清空道具并重新加载列表 */
+async function onCategoryChange(): Promise<void> {
+  selectedProp.value = ''
+  await loadProps()
+}
+
+/** 用户切换场景：清空子场景并重新加载列表 */
+async function onStageChange(): Promise<void> {
+  selectedSubscene.value = ''
+  await loadSubscenes()
+}
+
 /**
- * 打开时初始化：加载角色/场景列表，并按画布类型预选默认实体——
+ * 打开时初始化：加载角色/场景/道具分类列表，并按画布类型预选默认实体——
  * 场景画布默认当前场景+子场景；分镜画布从 stage.json 首帧的 基础场景 推导（{场景}/{标签}[@变体]，
  * prev / custom/ 引用不预选）。
  */
@@ -305,20 +389,25 @@ async function initDefaults(): Promise<void> {
   selectedCharacter.value = ''
   selectedStage.value = ''
   selectedSubscene.value = ''
+  selectedCategory.value = ''
+  selectedProp.value = ''
   variantId.value = ''
   descInput.value = props.nodePrompt ?? ''
   try {
-    // 角色/场景目录可能不存在（新项目尚未创建角色/场景设计）：分别容错，404 视为空列表，
-    // 避免 Promise.all 整体失败导致两个下拉都加载不出（combobox 仍可手动输入新名称创建）
-    const [charRes, stageRes] = await Promise.all([
+    // 角色/场景/道具目录可能不存在（新项目尚未创建）：分别容错，404 视为空列表，
+    // 避免 Promise.all 整体失败导致下拉都加载不出（combobox 仍可手动输入新名称创建）
+    const [charRes, stageRes, propRes] = await Promise.all([
       readFs(props.project, 'prompt/character').catch(() => null),
       readFs(props.project, 'prompt/stage').catch(() => null),
+      readFs(props.project, 'prompt/prop').catch(() => null),
     ])
     characters.value = charRes ? dirNames(charRes) : []
     stages.value = stageRes ? dirNames(stageRes) : []
+    categories.value = propRes ? dirNames(propRes) : []
   } catch {
     characters.value = []
     stages.value = []
+    categories.value = []
   }
   if (props.kind === 'stage') {
     selectedStage.value = props.stage ?? ''
@@ -340,12 +429,6 @@ async function initDefaults(): Promise<void> {
   }
   await loadSubscenes()
   loading.value = false
-}
-
-/** 用户切换场景：清空子场景并重新加载列表 */
-async function onStageChange(): Promise<void> {
-  selectedSubscene.value = ''
-  await loadSubscenes()
 }
 
 /** 变体 id 校验错误信息（空/非法字符） */
@@ -375,6 +458,24 @@ const subsceneError = computed(() => {
   return ''
 })
 
+/** 道具分类名校验错误（仅非法字符红显；空值由目标路径为空阻止保存） */
+const categoryError = computed(() => {
+  if (!isPropType.value) return ''
+  const name = valueText(selectedCategory.value)
+  if (!name) return ''
+  if (/[\\/:*?"<>|]/.test(name)) return '名称包含非法字符：\\ / : * ? " < > |'
+  return ''
+})
+
+/** 道具名校验错误（仅非法字符红显；空值由目标路径为空阻止保存） */
+const propError = computed(() => {
+  if (!isPropType.value) return ''
+  const name = valueText(selectedProp.value)
+  if (!name) return ''
+  if (/[\\/:*?"<>|]/.test(name)) return '名称包含非法字符：\\ / : * ? " < > |'
+  return ''
+})
+
 /** 保存目标路径（相对项目，如 assert/character/小霓/appearance.jpg；未选齐时为空串） */
 const targetPath = computed(() => {
   switch (props.type) {
@@ -397,6 +498,21 @@ const targetPath = computed(() => {
       const l = valueText(selectedSubscene.value)
       const v = variantId.value.trim()
       return s && l && v ? `assert/stage/${s}/variants/${l}/${v}.jpg` : ''
+    }
+    case 'prop-image': {
+      const c = valueText(selectedCategory.value)
+      const p = valueText(selectedProp.value)
+      return c && p ? `assert/prop/${c}/${p}/image.jpg` : ''
+    }
+    case 'prop-video': {
+      const c = valueText(selectedCategory.value)
+      const p = valueText(selectedProp.value)
+      return c && p ? `assert/prop/${c}/${p}/video.mp4` : ''
+    }
+    case 'prop-audio': {
+      const c = valueText(selectedCategory.value)
+      const p = valueText(selectedProp.value)
+      return c && p ? `assert/prop/${c}/${p}/audio.flac` : ''
     }
     default:
       return ''
@@ -422,13 +538,14 @@ const metaPath = computed(() => {
   }
 })
 
-/** 是否可保存：有源资产、目标路径完整、变体 id 合法、角色设计角色名合法、场景图子场景名合法 */
+/** 是否可保存：有源资产、目标路径完整、变体 id 合法、角色设计角色名合法、场景图子场景名合法、道具分类/道具名合法 */
 const canSave = computed(
   () => !!props.sourcePath
     && !!targetPath.value
     && (!isVariant.value || variantIdError.value === '')
     && (props.type !== 'character' || characterError.value === '')
-    && (props.type !== 'stage' || subsceneError.value === ''),
+    && (props.type !== 'stage' || subsceneError.value === '')
+    && (!isPropType.value || (categoryError.value === '' && propError.value === '')),
 )
 
 /**
@@ -438,6 +555,8 @@ const canSave = computed(
  * （POST /assets/:project/character，生成 prompt/character/{name}/ 模板三文件），再复制外观图。
  * 场景图：输入的子场景名（v-combobox 支持手动输入）不存在时先创建子场景
  * （POST /assets/:project/subscene，生成 prompt/stage/{场景}/{标签}.md 模板），再复制场景图。
+ * 道具类：输入的分类/道具（v-combobox 支持手动输入）不存在时先创建
+ * （POST /assets/:project/prop/category + /assets/:project/prop，生成目录与模板文件），再复制产物。
  * 衍生变体在元数据（prompt/.../variants/{id}.json）不存在时自动创建（desc 用衍生描述输入，
  * 为空回退默认文案），保证角色/场景详情页的衍生变体列表能显示该变体；元数据已存在则仅覆盖图片。
  */
@@ -463,6 +582,25 @@ async function save(): Promise<void> {
       if (stage && !subscenes.value.includes(label)) {
         try {
           await createSubscene(props.project, { stage, label })
+        } catch (e) {
+          if (!(e instanceof AssetApiError && e.code === 'EXISTS')) throw e
+        }
+      }
+    }
+    // 道具类：分类/道具不存在时先创建（并发/其他途径已创建则视为已存在继续）
+    if (isPropType.value) {
+      const category = valueText(selectedCategory.value)
+      const prop = valueText(selectedProp.value)
+      if (category && !categories.value.includes(category)) {
+        try {
+          await createPropCategory(props.project, category)
+        } catch (e) {
+          if (!(e instanceof AssetApiError && e.code === 'EXISTS')) throw e
+        }
+      }
+      if (category && prop && !propNames.value.includes(prop)) {
+        try {
+          await createProp(props.project, category, prop)
         } catch (e) {
           if (!(e instanceof AssetApiError && e.code === 'EXISTS')) throw e
         }

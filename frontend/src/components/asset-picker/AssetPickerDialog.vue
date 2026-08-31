@@ -46,6 +46,12 @@
           场景
         </v-tab>
         <v-tab
+          v-if="visibleTabs.includes('prop')"
+          value="prop"
+        >
+          道具
+        </v-tab>
+        <v-tab
           v-if="visibleTabs.includes('custom')"
           value="custom"
         >
@@ -98,6 +104,18 @@
           :exclude="exclude"
           :selected-paths="selectedPaths"
           :show-voice="showVoice"
+          @select="onSelect"
+        />
+
+        <!-- 道具：分类 → 道具 → 资产 三级选择（按 mediaKind 过滤图片/视频/音频） -->
+        <PropPicker
+          v-else-if="activeTab === 'prop' && visibleTabs.includes('prop')"
+          :active="modelValue"
+          :reload-key="reloadKey"
+          :project="project"
+          :exclude="exclude"
+          :selected-paths="selectedPaths"
+          :media-filter="mediaKind ?? 'image'"
           @select="onSelect"
         />
 
@@ -184,9 +202,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { getPathLabel, thumbUrl } from './utils'
-import type { AssetItem, AssetTab } from './types'
+import type { AssetItem, AssetTab, PropMediaFilter } from './types'
 import ParentVariantGrid from './ParentVariantGrid.vue'
 import EntityAssetTree from './EntityAssetTree.vue'
+import PropPicker from './PropPicker.vue'
 import CustomAssetsGrid from './CustomAssetsGrid.vue'
 import SceneStagePicker from './SceneStagePicker.vue'
 import AudioPicker from './AudioPicker.vue'
@@ -238,6 +257,8 @@ const props = withDefaults(defineProps<{
   contextShot?: string
   /** 是否为音频选择场景：为 true 时「角色」页签额外展示角色音色（默认 false） */
   showVoice?: boolean
+  /** 道具页签媒体过滤：image / video / audio（未指定默认 image） */
+  mediaKind?: PropMediaFilter
 }>(), {
   selected: () => [],
   exclude: () => [],
@@ -252,6 +273,7 @@ const props = withDefaults(defineProps<{
   contextEpisode: undefined,
   contextShot: undefined,
   showVoice: false,
+  mediaKind: undefined,
 })
 
 const emit = defineEmits<{

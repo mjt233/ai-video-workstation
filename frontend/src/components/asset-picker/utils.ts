@@ -66,6 +66,17 @@ export function getPathLabel(path: string): string {
     const rest = path.slice('assert/stage/'.length)
     return rest.replace('/variants/', '/').replace(/\.jpg$/, '')
   }
+  if (path.startsWith('assert/prop/')) {
+    // 道具产物：assert/prop/{分类}/{道具}/{文件名} → 道具/分类/道具/文件名
+    const rest = path.slice('assert/prop/'.length)
+    const parts = rest.split('/')
+    if (parts.length >= 3) {
+      const [category, propName, file] = parts
+      const fileLabel = file === 'image.jpg' ? '图片' : file === 'video.mp4' ? '视频' : file
+      return `道具/${category}/${propName}/${fileLabel}`
+    }
+    return `道具/${rest}`
+  }
   if (path.startsWith('assert/scene/')) {
     const m = path.match(/\/stage\/(\d+)\.jpg$/)
     if (m) return `分镜场景图 ${Number(m[1]) + 1}`

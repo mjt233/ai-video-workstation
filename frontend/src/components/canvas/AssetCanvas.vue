@@ -112,15 +112,12 @@
           :can-generate="canGenerateOf(contextMenuNode)"
           :has-history="hasHistoryOf(contextMenuNode)"
           :can-save="canSaveImage(contextMenuNode)"
+          :save-targets="saveTargetsOf(contextMenuNode)"
           :has-connections="!!contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
           :edge-menu="edgeMenu"
           @generate="contextGenerate"
           @history="contextHistory"
-          @save-as-character="contextSaveAs('character')"
-          @save-as-character-variant="contextSaveAs('character-variant')"
-          @save-as-stage="contextSaveAs('stage')"
-          @save-as-stage-variant="contextSaveAs('stage-variant')"
-          @save-as-custom="contextSaveAs('custom')"
+          @save-as="contextSaveAs"
           @disconnect="contextDisconnect"
           @rename="contextRename"
           @copy="contextCopy"
@@ -209,13 +206,14 @@
         @done="(msg: string, color: 'success' | 'error') => showSnackbar(msg, color)"
       />
 
-      <!-- 资产选择器（加载图片/音频/视频节点绑定资产） -->
+      <!-- 资产选择器（加载图片/音频/视频节点绑定资产；道具页签按节点类型过滤媒体） -->
       <AssetPickerDialog
         v-model="picker.show"
         :project="props.project"
         :multiple="false"
         :tabs="pickerTabs"
         :show-voice="picker.showVoice"
+        :media-kind="picker.mediaKind"
         :context-episode="target.kind === 'scene' ? target.episode : undefined"
         :context-shot="target.kind === 'scene' ? target.shot : undefined"
         @update:selected="onPickerConfirm"
@@ -586,7 +584,7 @@ const { editorPanel, suppressEditor, suppressPanelOnSelect, onEdgeClick, onNodeD
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, openAssetPicker, onPickerConfirm, openHistory } = dialogs
-const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, addMenu, addNodeAt } = menus
+const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
 
 /**

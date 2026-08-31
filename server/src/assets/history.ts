@@ -45,6 +45,8 @@ const UPLOADABLE_IMAGE_PATHS = [
   // 场景衍生变体位于 variants/{基础场景标签}/{变体 ID}/，两个名称均允许自定义。
   /^assert\/stage\/[^/]+\/variants\/[^/]+\/[^/]+\.(?:jpg|jpeg|png|webp)$/iu,
   /^assert\/scene\/[1-9]\d*\/[1-9]\d*\/stage\/\d+\.jpg$/u,
+  // 道具图片产物：assert/prop/{分类}/{道具名}/image.jpg（分类/道具名允许自定义）
+  /^assert\/prop\/[^/]+\/[^/]+\/image\.jpg$/u,
 ];
 
 /**

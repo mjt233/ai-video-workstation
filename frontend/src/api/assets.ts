@@ -6,6 +6,10 @@ export interface AssetRef {
   shot: string
   file: string
   detail?: string
+  /** 画布引用（道具删除保护）：非空时表示引用来自资产画布节点而非分镜文件 */
+  canvasPath?: string
+  nodeName?: string
+  assetPath?: string
 }
 
 export interface RenamePair {
@@ -623,6 +627,121 @@ export async function deleteCharacterVoiceVariant(
   try {
     const { data } = await client.delete(
       `/assets/${project}/character/${encodeURIComponent(name)}/voice-variants/${encodeURIComponent(variantId)}`,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+// ── 道具（两级结构：分类 → 道具；产物为图片/视频/音频）────────────────
+
+/** 道具关联资产的媒体类型（与道具详情页签一一对应；音频页签仅上传无关联资产） */
+export type PropMediaKind = 'image' | 'video'
+
+/** 道具关联资产配置（refs.json 结构） */
+export interface PropRefs {
+  /** 图片页签关联资产：assert/ 下图片路径数组（空=文生图；非空=图片编辑输入图，按序） */
+  image: string[]
+  /** 视频页签关联资产：assert/ 下图片路径数组（1 张=首帧、2 张=首尾帧；空=提示先选图） */
+  video: string[]
+}
+
+/** 道具被资产画布引用时的引用信息（画布加载节点 config.assetPath 命中 assert/prop/...） */
+export interface PropCanvasRef {
+  /** 画布类型 */
+  kind: 'scene' | 'stage'
+  /** 画布定义文件相对路径（如 prompt/scene/1/1/canvas.json） */
+  canvasPath: string
+  /** 引用节点的名称（如 加载图片） */
+  nodeName: string
+  /** 节点 config.assetPath 的实际值 */
+  assetPath: string
+}
+
+/**
+ * 创建道具分类（仅建 prompt/prop/{分类}/ 目录）。
+ * @param project 项目名
+ * @param name 分类名
+ * @returns path 为 prompt 相对目录路径
+ */
+export async function createPropCategory(project: string, name: string) {
+  try {
+    const { data } = await client.post(`/assets/${project}/prop/category`, { name })
+    return data as { success: boolean; path: string }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 创建道具（分类不存在自动创建；生成 image.md / video.md / refs.json 模板）。
+ * @param project 项目名
+ * @param category 分类名
+ * @param name 道具名
+ * @returns path 为 prompt 相对目录路径
+ */
+export async function createProp(project: string, category: string, name: string) {
+  try {
+    const { data } = await client.post(`/assets/${project}/prop`, { category, name })
+    return data as { success: boolean; path: string }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 读取道具关联资产配置（refs.json；缺失回退空配置）。
+ * @param project 项目名
+ * @param category 分类名
+ * @param name 道具名
+ * @returns refs 为关联资产配置
+ */
+export async function getPropRefs(project: string, category: string, name: string) {
+  try {
+    const { data } = await client.get(
+      `/assets/${project}/prop/${encodeURIComponent(category)}/${encodeURIComponent(name)}/refs`,
+    )
+    return data as { refs: PropRefs }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 保存道具关联资产配置（refs.json）。
+ * @param project 项目名
+ * @param category 分类名
+ * @param name 道具名
+ * @param refs 新配置（image/video 数组）
+ * @returns 规范化后的配置
+ */
+export async function savePropRefs(project: string, category: string, name: string, refs: Partial<PropRefs>) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/prop/${encodeURIComponent(category)}/${encodeURIComponent(name)}/refs`,
+      refs,
+    )
+    return data as { success: boolean; refs: PropRefs }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 删除道具（成对清理 prompt + assert；被画布引用时抛 IN_USE）。
+ * @param project 项目名
+ * @param category 分类名
+ * @param name 道具名
+ */
+export async function deleteProp(project: string, category: string, name: string) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/prop/${encodeURIComponent(category)}/${encodeURIComponent(name)}`,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 删除道具分类（含其下全部道具；分类下存在被引用道具时抛 IN_USE）。
+ * @param project 项目名
+ * @param category 分类名
+ */
+export async function deletePropCategory(project: string, category: string) {
+  try {
+    const { data } = await client.delete(
+      `/assets/${project}/prop/category/${encodeURIComponent(category)}`,
     )
     return data as { success: boolean }
   } catch (e) { rethrow(e) }

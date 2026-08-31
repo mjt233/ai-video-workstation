@@ -64,6 +64,33 @@
           />
         </template>
 
+        <template v-else-if="type === 'prop-category'">
+          <v-text-field
+            v-model="form.name"
+            label="分类名"
+            required
+            hint="如 武器、日常用品、家具"
+            persistent-hint
+          />
+        </template>
+
+        <template v-else-if="type === 'prop'">
+          <v-text-field
+            v-model="form.category"
+            label="所属分类"
+            required
+            hint="分类不存在时会自动创建"
+            persistent-hint
+          />
+          <v-text-field
+            v-model="form.name"
+            label="道具名"
+            required
+            hint="如 武士刀、茶杯、椅子"
+            persistent-hint
+          />
+        </template>
+
         <template v-else-if="type === 'episode'">
           <v-text-field
             v-model="form.episode"
@@ -126,6 +153,8 @@ import { computed, reactive, ref, watch } from 'vue'
 import {
   createCharacter,
   createEpisode,
+  createProp,
+  createPropCategory,
   createScriptEpisode,
   createShot,
   createStage,
@@ -134,7 +163,7 @@ import {
   type RenamePair,
 } from '../api/assets'
 
-export type CreateAssetType = 'character' | 'stage' | 'subscene' | 'episode' | 'shot' | 'script-episode'
+export type CreateAssetType = 'character' | 'stage' | 'subscene' | 'prop-category' | 'prop' | 'episode' | 'shot' | 'script-episode'
 
 const props = defineProps<{
   modelValue: boolean
@@ -143,6 +172,7 @@ const props = defineProps<{
   defaults?: Partial<{
     name: string
     stage: string
+    category: string
     episode: string
   }>
 }>()
@@ -154,6 +184,7 @@ const emit = defineEmits<{
     name?: string
     stage?: string
     label?: string
+    category?: string
     episode?: string
     shot?: string
     renames?: RenamePair[]
@@ -170,6 +201,7 @@ const form = reactive({
   stage: '',
   label: '',
   description: '',
+  category: '',
   episode: '',
   shot: '',
   insertMode: 'end' as 'end' | 'insert',
@@ -179,6 +211,8 @@ const typeLabel = computed(() => ({
   character: '角色',
   stage: '场景',
   subscene: '子场景',
+  'prop-category': '道具分类',
+  prop: '道具',
   episode: '集数',
   shot: '分镜',
   'script-episode': '剧本分集',
@@ -194,6 +228,7 @@ watch(() => props.modelValue, (open) => {
   form.stage = props.defaults?.stage ?? ''
   form.label = ''
   form.description = ''
+  form.category = props.defaults?.category ?? ''
   form.episode = props.defaults?.episode ?? ''
   form.shot = ''
   form.insertMode = 'end'
@@ -221,6 +256,12 @@ async function submit() {
         description: form.description,
       })
       emit('created', { type: 'subscene', stage: form.stage.trim(), label: form.label.trim() })
+    } else if (props.type === 'prop-category') {
+      await createPropCategory(props.project, form.name.trim())
+      emit('created', { type: 'prop-category', name: form.name.trim() })
+    } else if (props.type === 'prop') {
+      await createProp(props.project, form.category.trim(), form.name.trim())
+      emit('created', { type: 'prop', category: form.category.trim(), name: form.name.trim() })
     } else if (props.type === 'episode') {
       const r = await createEpisode(props.project, {
         episode: form.episode.trim() || undefined,

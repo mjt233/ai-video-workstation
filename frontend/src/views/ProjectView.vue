@@ -100,6 +100,12 @@
         :name
         :subscene
       />
+      <PropPanel
+        v-else-if="type === 'prop'"
+        :project
+        :category
+        :name
+      />
       <ScenePanel
         v-else-if="type === 'scene'"
         :project
@@ -183,6 +189,7 @@ import AssetTree from '../components/AssetTree.vue'
 import ProjectPanel from '../components/ProjectPanel.vue'
 import CharacterPanel from '../components/CharacterPanel.vue'
 import StagePanel from '../components/StagePanel.vue'
+import PropPanel from '../components/PropPanel.vue'
 import ScenePanel from '../components/ScenePanel.vue'
 import ScriptPanel from '../components/ScriptPanel.vue'
 import CustomAssetPanel from '../components/CustomAssetPanel.vue'
@@ -194,6 +201,7 @@ const project = computed(() => route.query.project as string)
 const type = computed(() => route.query.type as string)
 const name = computed(() => route.query.name as string)
 const subscene = computed(() => route.query.subscene as string | undefined)
+const category = computed(() => route.query.category as string | undefined)
 const episode = computed(() => route.query.episode as string)
 const shot = computed(() => route.query.shot as string)
 const section = computed(() => route.query.section as string | undefined)

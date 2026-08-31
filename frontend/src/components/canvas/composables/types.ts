@@ -25,8 +25,21 @@ export type NodeMap = ComputedRef<Record<string, CanvasNodeData>>
 /** 操作反馈提示函数（snackbar 状态由 AssetCanvas 持有） */
 export type ShowSnackbar = (text: string, color?: 'success' | 'error' | 'primary') => void
 
-/** 「保存为」目标类型（图片节点右键菜单「保存为」子菜单的 5 个选项） */
-export type SaveAsType = 'character' | 'character-variant' | 'stage' | 'stage-variant' | 'custom'
+/**
+ * 「保存为」目标类型（节点右键菜单「保存为」子菜单选项）：
+ * - 图片输出节点：角色设计 / 角色设计-衍生变体 / 场景图 / 场景图-衍生变体 / 道具图片 / 自定义资产
+ * - 视频输出节点：道具视频
+ * - 音频输出节点：道具音频
+ */
+export type SaveAsType =
+  | 'character'
+  | 'character-variant'
+  | 'stage'
+  | 'stage-variant'
+  | 'prop-image'
+  | 'prop-video'
+  | 'prop-audio'
+  | 'custom'
 
 /** 非自定义资产的「保存为」类型（走 SaveAsDialog 目标选择对话框） */
 export type SaveAsAssetType = Exclude<SaveAsType, 'custom'>

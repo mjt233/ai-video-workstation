@@ -44,6 +44,10 @@ prompt/
 │   └── voice.md         # 声线描述
 ├── stage/{场景名}/
 │   └── {子场景标签}.md  # 子场景画面描述
+├── prop/{分类}/{道具名}/
+│   ├── image.md         # 道具图片描述文案（文生图/图片编辑提示词）
+│   ├── video.md         # 道具视频描述文案（图生视频提示词）
+│   └── refs.json        # 关联资产 { image: string[], video: string[] }
 ├── scene/{集数}/{分镜}/
 │   ├── overview.json    # 分镜叙事总览（title/beat/visual/camera/duration/mood）
 │   ├── stage.json       # 关键帧定义（引用场景/角色）
@@ -119,7 +123,46 @@ assert/stage/{场景名}/variants/{子场景标签}/{变体id}.jpg
 - 分镜引用：`{场景名}/{子场景标签}@{变体id}`
 
 
-### 2.3 分镜 `prompt/scene/{集数}/{分镜}/`
+### 2.3 道具 `prompt/prop/{分类}/{道具名}/`
+
+道具是与「角色」「场景」同级的资产类型，**两级结构：一级为分类（目录），二级才是道具本身**。道具拥有图片 / 视频 / 音频三类产物（三个页签）：
+
+| 文件 | 用途 |
+|------|------|
+| `image.md` | 图片描述文案：无关联资产时作文生图（text-to-image）提示词；有关联资产时作图片编辑（image-edit）提示词 |
+| `video.md` | 视频描述文案：图生视频（image-to-video）提示词 |
+| `refs.json` | 关联资产配置 `{ "image": [路径...], "video": [路径...] }`，路径为 assert/ 下图片相对路径 |
+| `gen.json` | 生成参数（纯前端数据，与 canvas.json 同机制）：`{ image: { impl, workflowParams, sizeConfig }, video: { impl, workflowParams, sizeConfig, duration } }`；工作流实现/用户参数/输出尺寸/时长在切换道具与刷新后回显 |
+
+产物（`assert/prop/{分类}/{道具名}/` 下）：
+
+| 文件 | 来源 |
+|------|------|
+| `image.jpg` | 图片页签生成（text-to-image / image-edit）或上传覆盖；画布「保存为道具图片」目标 |
+| `video.mp4` | 视频页签生成（image-to-video 首帧/首尾帧）或上传；画布「保存为道具视频」目标 |
+| `audio.flac` | 画布「保存为道具音频」固定目标（TTS/加载音频节点产物） |
+| 其它音频/视频文件 | 音频/视频页签上传（保留原文件名，可多个） |
+
+生成规则：
+
+- **图片页签**：无关联资产 → 文生图（text-to-image，`vars.promptPath` 指向 `image.md`）；有关联资产（多张图片按序）→ 图片编辑（image-edit，`vars.imagePaths`）。`purpose='prop-image'`
+- **视频页签**：无关联资产 → 提示先选择关联图片（系统无纯文生视频工作流）；有关联资产（1 张=首帧、2 张=首尾帧）→ 图生视频（image-to-video，`mode='first-last-frame'`，`director.frames` 按 cursor 0~1 均匀分布）
+- 工作流实现列表经 `getWorkflows()` 动态获取（含 comfyui-bridge 等动态注册实现），须显式选择；**用户参数与输出尺寸复用画布生成节点同款组件**（`WorkflowParamsTrigger` / `WorkflowSizePicker`，尺寸类参数从声明中剔除），提交时随任务携带 `userParams` / `sizeConfig`（视频经 `video.sizeConfig`）
+- 重复生成时服务端引擎自动把旧产物归档进 `history/`（与角色外观/场景图同一套机制）
+
+API：
+
+- `POST /api/assets/:project/prop/category`（建分类）、`POST /api/assets/:project/prop`（建道具，分类不存在自动建）
+- `DELETE /api/assets/:project/prop/category/:category`、`DELETE /api/assets/:project/prop/:category/:name`（成对清理 prompt+assert）
+- `GET/PUT /api/assets/:project/prop/:category/:name/refs`（读写关联资产）
+- 删除引用保护：扫描全项目画布定义（`prompt/scene/*/*/canvas.json`、`prompt/stage/*/canvas/*.json`）加载节点 `config.assetPath`，命中 `assert/prop/...` 时拒绝删除（IN_USE）
+
+资产画布集成：
+
+- 加载图片/视频/音频节点的资产选择器新增「道具」页签，按节点类型过滤（图片→道具图片、视频→道具视频、音频→道具音频）
+- 节点右键「保存为」新增道具目标：图片节点→道具图片（`assert/prop/{分类}/{道具}/image.jpg`）、视频节点→道具视频（`video.mp4`）、音频节点→道具音频（`audio.flac`）；分类/道具不存在时自动创建
+
+### 2.4 分镜 `prompt/scene/{集数}/{分镜}/`
 
 - 集数从 `1` 起；每集分镜独立从 `1` 起，且保持连续无跳号
 - 新建分镜时固定生成四个文件：
@@ -218,7 +261,7 @@ assert/stage/{场景名}/variants/{子场景标签}/{变体id}.jpg
 - 仅正向提示词；运镜写在此处
 - 有台词时，应把台词原文嵌入动作描述以引导嘴型
 
-### 2.4 剧本 `prompt/script/`
+### 2.5 剧本 `prompt/script/`
 
 剧本（大纲 + 分集）与「集数分镜」**相互独立**，编号互不影响、各自增删：
 
@@ -253,6 +296,11 @@ assert/
 │   └── voice.flac       # 角色声线样本
 ├── stage/{场景名}/
 │   └── {子场景标签}.jpg
+├── prop/{分类}/{道具名}/
+│   ├── image.jpg        # 道具图片产物
+│   ├── video.mp4        # 道具视频产物
+│   ├── audio.flac       # 道具音频产物（画布保存为目标）
+│   └── {上传的音频/视频文件}
 └── scene/{集数}/{分镜}/
     ├── stage/{index}.jpg
     ├── voice/{index}-{角色名}.flac
@@ -418,6 +466,8 @@ assert/scene/{ep}/{shot}/voice/
 | 角色 | 仅 `prompt/character/{name}/` 三文件 |
 | 场景 | 仅 `prompt/stage/{name}/` 目录 |
 | 子场景 | 仅 `prompt/stage/{stage}/{label}.md` |
+| 道具分类 | 仅 `prompt/prop/{分类}/` 目录 |
+| 道具 | `prompt/prop/{分类}/{name}/` 三文件（image.md / video.md / refs.json）；assert 不预建 |
 | 集数 | 仅 `prompt/scene/{ep}/` |
 | 分镜 | `prompt/scene/{ep}/{shot}/` 四文件；assert 不预建 |
 | 剧本大纲 | 首次在线保存时创建 `prompt/script/outline.md` |
@@ -430,6 +480,8 @@ assert/scene/{ep}/{shot}/voice/
 | 角色 | `prompt/character/{name}/` | `assert/character/{name}/` |
 | 场景 | `prompt/stage/{name}/` | `assert/stage/{name}/` |
 | 子场景 | `{label}.md` | `{label}.jpg`（若存在） |
+| 道具分类 | `prompt/prop/{分类}/` | `assert/prop/{分类}/` |
+| 道具 | `prompt/prop/{分类}/{name}/` | `assert/prop/{分类}/{name}/` |
 | 分镜 | `prompt/scene/{ep}/{shot}/` | `assert/scene/{ep}/{shot}/` |
 | 集数 | `prompt/scene/{ep}/` | `assert/scene/{ep}/` |
 | 剧本分集 | `prompt/script/episodes/{n}.md`（后续编号前移 1，无跳号） | （无） |
@@ -438,6 +490,7 @@ assert/scene/{ep}/{shot}/voice/
 
 - 删除角色：扫描全项目 `stage.json` / `script.json` 是否引用
 - 删除场景/子场景：扫描 `stage.json` 的 `基础场景`
+- 删除道具/分类：扫描全项目画布定义（`canvas.json`）加载节点的 `config.assetPath`
 - 有引用则拒绝删除（`IN_USE`）
 
 ### 5.3 分镜编号 rename

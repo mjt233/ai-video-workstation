@@ -83,6 +83,7 @@
 - **加载图片**：`config.assetPath` 绑定一张既有资产（上传到 `assert/custom/canvas/` 或从资产选择器选择）；点击节点出现的配置组件可预览当前图并「上传图片 / 选择资产」。
 - **加载音频**：`config.assetPath` 绑定一段音频（上传到 `assert/custom/canvas/` 或从资产选择器选择）。该节点打开的资产选择器额外提供「音频」页签（台词音频/分镜自定义/全局自定义），且「角色」页签在选择角色后会展示**音色**分区（`assert/character/{角色}/voice.flac` 由 character-voice 任务生成；`assert/character/{角色}/voice-variants/{变体id}.flac` 为角色**声音变体**，见 `docs/asset-layout.md`，均已生成才列出），与外观图一起可选；图片类节点（image-loader）的选择器不显示音色与音频页签（`AssetCanvas.openAssetPicker` 按 `prototypeId === 'audio-loader'` 决定 `showVoice` 与页签列表）。
 - **加载视频**：`config.assetPath` 绑定一段视频（上传到 `assert/custom/canvas/` 或从资产选择器选择）。该节点打开的资产选择器额外提供「分镜视频」页签（`VideoPicker`）：列出 `assert/scene/{集}/{分镜}/video/` 目录下的全部视频（`{index}.mp4`），目录为空时兼容回退旧版 `video.mp4`；分镜画布（`kind === 'scene'`）下编辑器提供「设为分镜视频」，把当前视频复制为 `assert/scene/{集}/{分镜}/video/0.mp4`（服务端批量生成 `discovery.ts` 也输出到该路径）。
+- **三种加载节点均可选道具**：资产选择器新增「道具」页签（`PropPicker.vue`：分类 → 道具 → 资产三级选择），按节点类型过滤媒体——加载图片只列道具图片产物（`assert/prop/{分类}/{道具}/` 下图片）、加载视频只列视频产物、加载音频只列音频产物（见 `docs/asset-layout.md` 2.3 道具）。道具页签媒体过滤由 `useCanvasDialogs.openAssetPicker` 记录的 `picker.mediaKind` 驱动，经 `AssetPickerDialog` 的 `media-kind` prop 透传。
 - **生成图片**：配置组件采用统一生成节点布局——`CanvasInputPreview` 输入预览（图片类型；无输入时显示「无输入图，默认使用文生图工作流」）+ 提示词字段 + 参数行（工作流类型/工作流实现两个紧凑下拉、输出尺寸 `WorkflowSizePicker`、工作流参数 `WorkflowParamsTrigger`，后两者均为点击弹出菜单式配置，见 §6.1）。`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（有输入图用 `image-edit`，否则 `text-to-image`；`workflowImpl` **须显式选择**，未选择时生成被前端校验拦截，后端也不再兜底）、`workflowParams`（用户参数）、`sizeConfig`（输出尺寸）、`inputOrder`（输入图顺序，见 §7）。产物固定 `output.jpg`。
 - **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`（**须显式选择**，未选择时生成被前端校验拦截）、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`duration`（首尾帧/参考模式时长，秒）、`resolution` / `sizeConfig`（输出尺寸）、`workflowParams`、`inputOrder`。单一 `media` 输入口，素材类型由来源节点自动归类。**非导演台模式（首尾帧/参考）采用统一布局**（见 §6.1）：`CanvasInputPreview` 输入预览（图片/视频/音频分组，无对应输入不显示）+ 提示词 + 参数行（生成模式**位于工作流之前**、工作流、时长 `DurationPicker`、输出尺寸、工作流参数、全屏按钮）。`director` 模式保持内嵌导演台布局（首行工作流/模式/全屏 + 输出规格 + 参数表单 + `VideoDirector`），仅把时长输入框换成 `DurationPicker`；分镜画布下提供「设为分镜视频」（把当前产物复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。产物固定 `output.mp4`。
 - **TTS声音生成**：`config` 含 `mode`（`clone` 音色克隆 / `design` 音色设计）、`text`（朗读文本）、`refText`（克隆参考文字）/ `prompt`（设计声线描述）、`workflowImpl`（**须显式选择**）、`workflowParams`。配置组件同样采用统一布局——`CanvasInputPreview` 输入预览（音频类型，克隆模式需连接「加载音频」节点）+ 文本字段 + 参数行（工作流实现 + 工作流参数；**TTS 不显示时长与输出尺寸**）。
@@ -217,22 +218,26 @@
   - 无基础场景时复用现有帧第一个的 `基础场景`，仍无则禁用「新增」并提示。
 - 服务端 `addStageFrame` 约束：`基础场景` 必填（`场景名/标签` 或 `prev`）；有登场角色时必须填 prompt。
 
-### 10.1 保存为（图片节点右键菜单）
+### 10.1 保存为（节点右键菜单）
 
-输出类型为图片且有当前产物的节点（加载图片 / 生成图片 / 获取视频帧），右键菜单显示「保存为」hover 子菜单，5 个目标类型（自定义资产走 `SaveAssetDialog`，其余四类走 `SaveAsDialog` 目标选择对话框）：
+有当前产物的节点（图片/视频/音频输出）右键菜单显示「保存为」hover 子菜单，按**节点输出类型**提供目标：
 
-| 类型 | 目标路径 | 对话框交互 |
-|------|----------|------------|
-| 角色设计 | `assert/character/{角色}/appearance.jpg` | SaveAsDialog：角色 v-combobox（选已有角色覆盖，或输入新角色名自动创建角色） |
-| 角色设计-衍生变体 | `assert/character/{角色}/variants/{变体id}.jpg` | SaveAsDialog：角色下拉 + 变体 id 输入 |
-| 场景图 | `assert/stage/{场景}/{子场景}.jpg` | SaveAsDialog：场景下拉 + 子场景 v-combobox（选已有子场景覆盖，或输入新场景图名称自动创建子场景） |
-| 场景图-衍生变体 | `assert/stage/{场景}/variants/{子场景}/{变体id}.jpg` | SaveAsDialog：场景 / 子场景下拉 + 变体 id 输入 |
-| 自定义资产 | `assert/custom/...` | SaveAssetDialog：双根目录导航 + 文件名可编辑 |
+| 节点输出类型 | 保存目标 | 目标路径 |
+|------|----------|----------|
+| 图片 | 角色设计 | `assert/character/{角色}/appearance.jpg` |
+| 图片 | 角色设计-衍生变体 | `assert/character/{角色}/variants/{变体id}.jpg` |
+| 图片 | 场景图 | `assert/stage/{场景}/{子场景}.jpg` |
+| 图片 | 场景图-衍生变体 | `assert/stage/{场景}/variants/{子场景}/{变体id}.jpg` |
+| 图片 | **道具图片** | `assert/prop/{分类}/{道具}/image.jpg` |
+| 图片 | 自定义资产 | `assert/custom/...`（SaveAssetDialog） |
+| 视频 | **道具视频** | `assert/prop/{分类}/{道具}/video.mp4` |
+| 音频 | **道具音频** | `assert/prop/{分类}/{道具}/audio.flac` |
 
-- SaveAsDialog 目标列表来自 `prompt/character`、`prompt/stage` 目录与子场景 `.md` 文件名；默认定位当前画布实体（场景画布 → 当前场景 + 子场景；分镜画布 → `stage.json` 首帧 `基础场景` 推导，`prev` / `custom/` 引用不预选）。变体 id 手动输入并校验非法字符。「角色设计」与「场景图」用 v-combobox（下拉箭头展开已有实体列表）：可选择已有实体覆盖其外观图/场景图，也可手动输入新名称——保存时自动创建实体（角色：`POST /assets/:project/character` 生成 `prompt/character/{name}/` 三模板文件；子场景：`POST /assets/:project/subscene` 生成 `prompt/stage/{场景}/{标签}.md`；重名则按已存在处理走覆盖流程）。衍生变体的角色/子场景仍为下拉选择（变体须挂在已存在实体下）。
-- 仅复制图片文件（`POST /fs/:project/copy`）；**衍生变体（角色/场景）在元数据 `prompt/.../variants/{id}.json` 不存在时自动创建**（调 `POST /assets/:project/.../variants` 创建接口，desc 用对话框「衍生描述」输入，默认预填节点提示词，为空回退「由画布保存的衍生变体」，baseImage 由服务端默认推导；元数据已存在时仅覆盖图片）——角色/场景详情页的衍生变体列表按元数据扫描，缺元数据会看不到已保存的图。
-- 目标文件已存在时 `confirm` 确认后覆盖，覆盖前先把原文件归档为历史版本（`POST /assets/:project/history/archive`，服务端 `copyExistingAssetToHistory` 复制归档，目录按 `historyDirForAsset` 推导，如 `assert/character/{角色}/history/appearance/`、`assert/character/{角色}/variants/history/{变体id}/`；与生成/上传覆盖的历史机制一致，可在资产历史对话框中查看/激活）。
-- SaveAssetDialog 文件名可手动编辑（默认节点名 + 源扩展名，空名回退「未命名」，非法字符校验），重名自动追加 `(1)`、`(2)`… 后缀；**音频/视频节点不再提供保存入口**（原平级菜单「保存为自定义资产」已删除）。
+- 自定义资产走 `SaveAssetDialog`，其余目标走 `SaveAsDialog` 目标选择对话框。
+- SaveAsDialog 目标列表来自 `prompt/character`、`prompt/stage`、`prompt/prop` 目录（道具类为「分类 + 道具」两个 v-combobox）与子场景 `.md` 文件名；默认定位当前画布实体（场景画布 → 当前场景 + 子场景；分镜画布 → `stage.json` 首帧 `基础场景` 推导，`prev` / `custom/` 引用不预选）。变体 id 手动输入并校验非法字符。「角色设计」「场景图」与道具类用 v-combobox（下拉箭头展开已有实体列表）：可选择已有实体覆盖其外观图/场景图/道具产物，也可手动输入新名称——保存时自动创建实体（角色：`POST /assets/:project/character` 生成 `prompt/character/{name}/` 三模板文件；子场景：`POST /assets/:project/subscene` 生成 `prompt/stage/{场景}/{标签}.md`；道具分类/道具：`POST /assets/:project/prop/category` + `/assets/:project/prop` 生成目录与 image.md/video.md/refs.json 模板；重名则按已存在处理走覆盖流程）。衍生变体的角色/子场景仍为下拉选择（变体须挂在已存在实体下）。
+- 仅复制文件（`POST /fs/:project/copy`）；**衍生变体（角色/场景）在元数据 `prompt/.../variants/{id}.json` 不存在时自动创建**（调 `POST /assets/:project/.../variants` 创建接口，desc 用对话框「衍生描述」输入，默认预填节点提示词，为空回退「由画布保存的衍生变体」，baseImage 由服务端默认推导；元数据已存在时仅覆盖图片）——角色/场景详情页的衍生变体列表按元数据扫描，缺元数据会看不到已保存的图。
+- 目标文件已存在时 `confirm` 确认后覆盖，覆盖前先把原文件归档为历史版本（`POST /assets/:project/history/archive`，服务端 `copyExistingAssetToHistory` 复制归档，目录按 `historyDirForAsset` 推导，如 `assert/character/{角色}/history/appearance/`、`assert/character/{角色}/variants/history/{变体id}/`、`assert/prop/{分类}/{道具}/history/image/`；与生成/上传覆盖的历史机制一致，可在资产历史对话框中查看/激活）。
+- SaveAssetDialog 文件名可手动编辑（默认节点名 + 源扩展名，空名回退「未命名」，非法字符校验），重名自动追加 `(1)`、`(2)`… 后缀。
 
 ---
 

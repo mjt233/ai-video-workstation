@@ -29,7 +29,7 @@ import { mergeSceneAudio, deleteMergedAudio } from '../assets/audio-merge.js';
 import { addStageFrame, deleteStageFrame, updateStageFrame, type StageFrameInput } from '../assets/stage-frames.js';
 import {
   activateHistoryVersion,
-  assertUploadableImagePath,
+  assertIsAssertPath,
   copyExistingAssetToHistory,
   deleteHistoryVersion,
   listAssetHistory,
@@ -54,6 +54,14 @@ import {
   renameCharacterVoiceVariant,
   updateCharacterVoiceVariant,
 } from '../assets/voice-variants.js';
+import {
+  createProp,
+  createPropCategory,
+  deleteProp,
+  deletePropCategory,
+  readPropRefs,
+  savePropRefs,
+} from '../assets/props.js';
 
 export const assetsRouter = Router();
 
@@ -562,7 +570,8 @@ assetsRouter.delete('/assets/:project/history', async (req: Request, res: Respon
 });
 
 // POST 归档当前资产为历史版本（copy 保留原文件，随后由调用方覆盖当前路径）
-// 用于画布「保存为」覆盖角色外观 / 场景图 / 衍生变体前保留旧版本
+// 用于画布「保存为」覆盖角色外观 / 场景图 / 衍生变体 / 道具产物前保留旧版本
+// 校验放宽到任意 assert/ 路径：道具音频/视频上传覆盖前也走本端点归档
 // body: { path: "assert/..." }
 assetsRouter.post('/assets/:project/history/archive', async (req: Request, res: Response) => {
   try {
@@ -571,7 +580,7 @@ assetsRouter.post('/assets/:project/history/archive', async (req: Request, res: 
     if (!assetPath) throw Object.assign(new Error('path 必填'), { code: 'INVALID' });
     const archived = await copyExistingAssetToHistory(
       project,
-      assertUploadableImagePath(assetPath),
+      assertIsAssertPath(assetPath),
     );
     res.json({ success: true, archived });
   } catch (err) {
@@ -624,6 +633,89 @@ assetsRouter.post(
   },
 );
 
+
+// ── 道具 API（两级结构：分类 → 道具；产物为图片/视频/音频）──────────
+
+// POST 创建道具分类（仅建 prompt/prop/{分类}/ 目录）
+assetsRouter.post('/assets/:project/prop/category', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const { name } = req.body as { name?: string };
+    if (!name) throw Object.assign(new Error('name 必填'), { code: 'INVALID' });
+    const path = await createPropCategory(project, name);
+    res.json({ success: true, path });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST 创建道具（分类不存在自动创建；生成 image.md / video.md / refs.json 模板）
+assetsRouter.post('/assets/:project/prop', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const { category, name } = req.body as { category?: string; name?: string };
+    if (!category || !name) {
+      throw Object.assign(new Error('category 与 name 必填'), { code: 'INVALID' });
+    }
+    const path = await createProp(project, category, name);
+    res.json({ success: true, path });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// GET 读取道具关联资产配置（refs.json；缺失回退空配置）
+assetsRouter.get('/assets/:project/prop/:category/:name/refs', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const category = req.params.category as string;
+    const name = req.params.name as string;
+    const refs = await readPropRefs(project, category, name);
+    res.json({ refs });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT 保存道具关联资产配置（body: { image?: string[], video?: string[] }）
+assetsRouter.put('/assets/:project/prop/:category/:name/refs', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const category = req.params.category as string;
+    const name = req.params.name as string;
+    const body = req.body as { image?: string[]; video?: string[] };
+    const refs = await savePropRefs(project, category, name, body);
+    res.json({ success: true, refs });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE 删除道具分类（含其下全部道具；分类下存在被引用道具时拒绝）
+// 注意：须注册在 /prop/:category/:name 之前，避免被该路由吞掉
+assetsRouter.delete('/assets/:project/prop/category/:category', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const category = req.params.category as string;
+    await deletePropCategory(project, category);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// DELETE 删除道具（成对清理 prompt + assert；被画布引用时拒绝）
+assetsRouter.delete('/assets/:project/prop/:category/:name', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const category = req.params.category as string;
+    const name = req.params.name as string;
+    await deleteProp(project, category, name);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
 
 // ── 衍生变体 API ────────────────────────────────────────────────────
 

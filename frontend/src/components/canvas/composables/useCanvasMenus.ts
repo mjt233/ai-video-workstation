@@ -77,16 +77,36 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
   }
 
   /**
-   * 节点是否显示「保存为」菜单：输出类型为图片且有当前产物。
-   * （音频/视频节点不再提供保存入口；「保存为」仅面向图片输出节点）
+   * 节点是否显示「保存为」菜单：有当前产物即可
+   * （图片/视频/音频输出节点均支持；各节点可保存的目标类型见 saveTargetsOf）。
    *
    * @param node 右键菜单对应节点
    * @returns 显示「保存为」返回 true
    */
   function canSaveImage(node: CanvasNodeData | undefined): boolean {
     if (!node || !contextMenu.nodeId) return false
-    if (getNodeOutputType(contextMenu.nodeId, store.nodes.value) !== 'image') return false
     return !!getNodeCurrentAssetPath(node, getScope())
+  }
+
+  /**
+   * 节点可用的「保存为」目标类型（按节点输出类型推导）：
+   * - image：角色设计 / 角色设计-衍生变体 / 场景图 / 场景图-衍生变体 / 道具图片 / 自定义资产
+   * - video：道具视频
+   * - audio：道具音频
+   *
+   * @param node 右键菜单对应节点
+   * @returns 可用保存目标类型列表（无产物时为空）
+   */
+  function saveTargetsOf(node: CanvasNodeData | undefined): SaveAsType[] {
+    if (!node || !contextMenu.nodeId) return []
+    if (!getNodeCurrentAssetPath(node, getScope())) return []
+    const outputType = getNodeOutputType(contextMenu.nodeId, store.nodes.value)
+    if (outputType === 'image') {
+      return ['character', 'character-variant', 'stage', 'stage-variant', 'prop-image', 'custom']
+    }
+    if (outputType === 'video') return ['prop-video']
+    if (outputType === 'audio') return ['prop-audio']
+    return []
   }
 
   /**
@@ -220,6 +240,7 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     canGenerateOf,
     hasHistoryOf,
     canSaveImage,
+    saveTargetsOf,
     openContextMenu,
     contextGenerate,
     contextHistory,
