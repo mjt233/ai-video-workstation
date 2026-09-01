@@ -1,4 +1,7 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs/promises';
+import os from 'os';
+import multer from 'multer';
 import {
   extractVideoFrame,
   extractVideoFrameAtTime,
@@ -10,6 +13,7 @@ import { concatVideos, ConcatError } from '../assets/concat-video.js';
 import { trimVideo, TrimError } from '../assets/trim-video.js';
 import { isUnderAssert } from './fs-path.js';
 import { copyExistingAssetToHistory } from '../assets/history.js';
+import { saveCanvasNodeUpload } from '../assets/canvas-upload.js';
 import { readCanvasNodeInfo } from '../canvas/node-info.js';
 
 /**
@@ -17,6 +21,20 @@ import { readCanvasNodeInfo } from '../canvas/node-info.js';
  * 当前提供「获取视频帧」节点所需的 ffmpeg 帧提取接口。
  */
 export const canvasRouter = Router();
+
+/**
+ * 画布产物上传 multer（diskStorage 临时落盘，避免大视频占用内存；上限 8GB）。
+ * 与 /fs/upload 的 customUpload 同一模式；产物最终由 saveCanvasNodeUpload 写入固定路径。
+ */
+const canvasOutputUpload = multer({
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (_req, _file, cb) => {
+      cb(null, `dsh-canvas-upload-${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+    },
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 * 1024 }, // 8GB
+});
 
 /**
  * 写固定路径产物前归档旧版本。
@@ -34,6 +52,71 @@ async function archiveCanvasOutput(project: string, outputPath: string): Promise
     console.warn(`归档画布节点旧产物失败（不影响本次写入）: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
+
+/**
+ * 上传产物到生成节点固定路径：POST /api/canvas/upload
+ *
+ * multipart：project + path + file
+ * - path：画布节点固定产物路径（assert/{scope}/canvas/{nodeId}/output.jpg | output.mp4），
+ *   分镜画布与场景画布均可；路径不匹配返回 400。
+ * - 图片（output.jpg）接受 jpg/png/webp；视频（output.mp4）仅接受 mp4（扩展名或 MIME 任一匹配即可）。
+ * - 目标已有产物时，先把旧产物复制归档进 history 目录（copyExistingAssetToHistory，
+ *   归档失败抛错中断上传——历史必须保留），再覆盖写入固定路径。
+ * 返回 { success, path, archived }（archived 为归档历史相对路径，无旧产物时为 null）。
+ */
+canvasRouter.post(
+  '/canvas/upload',
+  (req: Request, res: Response, next) => {
+    canvasOutputUpload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        const e = err as { code?: string; message?: string };
+        if (e?.code === 'LIMIT_FILE_SIZE') {
+          res.status(400).json({ error: '文件大小超过 8GB 限制' });
+          return;
+        }
+        if (e?.code === 'Unexpected field') {
+          // 打日志便于排查上传异常（multipart 流错位/字段不匹配）
+          console.error('[canvas-upload] 上传失败:', err);
+          res.status(400).json({ error: '上传请求格式错误（multipart 字段不匹配），请重试' });
+          return;
+        }
+        res.status(500).json({ error: e?.message || '上传失败' });
+        return;
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    try {
+      const project = String(req.body?.project ?? '');
+      const assetPath = String(req.body?.path ?? '');
+      if (!project || !assetPath) {
+        throw Object.assign(new Error('project 与 path 必填'), { code: 'INVALID' });
+      }
+      if (!file?.size) {
+        throw Object.assign(new Error('请选择要上传的文件'), { code: 'INVALID' });
+      }
+      const data = await fs.readFile(file.path);
+      const result = await saveCanvasNodeUpload(project, assetPath, data, {
+        mime: file.mimetype,
+        originalName: file.originalname,
+      });
+      res.json({ success: true, ...result });
+    } catch (err) {
+      const e = err as { code?: string; message?: string };
+      if (e?.code === 'INVALID') {
+        res.status(400).json({ error: e.message, code: 'INVALID' });
+        return;
+      }
+      console.error('Failed to upload canvas output:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    } finally {
+      // 清理临时文件（磁盘落盘模式；无论成功失败都不残留）
+      if (file?.path) await fs.unlink(file.path).catch(() => {});
+    }
+  },
+);
 
 /**
  * 提取视频帧：POST /api/canvas/extract-frame

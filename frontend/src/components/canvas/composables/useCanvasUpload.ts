@@ -11,7 +11,8 @@
  */
 
 import { reactive } from 'vue'
-import { uploadFs } from '../../../api/client'
+import { uploadFs, uploadCanvasOutput } from '../../../api/client'
+import { isCanvasNodeOutputPath } from '../../../canvas/paths'
 import type { ShowSnackbar } from './types'
 
 /** 节点上传状态（CanvasNodeCard 遮罩数据源；对象即存在，undefined = 无上传） */
@@ -173,6 +174,28 @@ export function useCanvasUpload(options: UseCanvasUploadOptions): CanvasUploadAp
   }
 
   /**
+   * 按目标路径选择上传端点：
+   * - 画布节点固定产物路径（output.jpg / output.mp4，生成图片/视频节点上传）→
+   *   /api/canvas/upload（服务端先归档旧产物进 history 目录，再覆盖固定路径）；
+   * - 其余路径（加载节点上传到 assert/custom/canvas/ 等）→ 通用 /fs/upload。
+   *
+   * @param project 项目名
+   * @param dest 目标相对路径
+   * @param file 上传文件
+   * @param opts 进度回调/中止信号
+   * @returns 服务端响应（archived 为归档历史相对路径，画布产物覆盖上传时有值）
+   */
+  async function uploadByDest(
+    project: string,
+    dest: string,
+    file: File,
+    opts: { onProgress?: (p: { percent: number | null; loaded: number; total: number | null }) => void; signal?: AbortSignal },
+  ): Promise<{ success: boolean; path: string; archived?: string | null }> {
+    if (isCanvasNodeOutputPath(dest)) return uploadCanvasOutput(project, dest, file, opts)
+    return uploadFs(project, dest, file, opts)
+  }
+
+  /**
    * 上传一个文件到指定节点。
    *
    * 注意：同一节点上传进行中时，忽略新的上传请求（不中止进行中的请求）——
@@ -210,7 +233,7 @@ export function useCanvasUpload(options: UseCanvasUploadOptions): CanvasUploadAp
     const controller = new AbortController()
     controllers.set(nodeId, controller)
     try {
-      const res = await uploadFs(project, dest, file, {
+      const res = await uploadByDest(project, dest, file, {
         onProgress: ({ percent, loaded, total }) => {
           // 经 reactive 代理写回（states[nodeId] 返回代理）：直接改原始对象不会触发响应式更新
           const s = states[nodeId]
@@ -224,6 +247,11 @@ export function useCanvasUpload(options: UseCanvasUploadOptions): CanvasUploadAp
       if (res.success && res.path) {
         deleteState(nodeId)
         onSuccess(nodeId, res.path)
+        // 成功提示（粘贴批量场景由调用方汇总，silent=true 跳过）：
+        // 画布产物覆盖上传（服务端已归档旧产物）时提示历史已保存，便于用户知道可去「历史」恢复
+        if (!opts.silent) {
+          showSnackbar(res.archived ? '上传成功，原产物已保存为历史版本' : '上传成功', 'success')
+        }
         return { ok: true, path: res.path }
       }
       console.error('[canvas-upload] 上传未成功', { nodeId, fileName: file.name, dest, response: res })

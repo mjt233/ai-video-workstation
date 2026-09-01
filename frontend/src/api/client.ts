@@ -154,6 +154,45 @@ export async function uploadFs(
 }
 
 /**
+ * 上传产物到画布节点固定产物路径（POST /api/canvas/upload）。
+ * 与 uploadFs 同结构（进度回调/中止信号），但由服务端负责：
+ * 目标已有产物时先把旧产物归档进 history 目录，再覆盖写入 output.{ext}。
+ * 目标路径必须匹配画布节点固定产物路径（output.jpg / output.mp4），否则服务端返回 400。
+ *
+ * @param project 项目名
+ * @param destPath 目标相对路径（画布节点固定产物路径）
+ * @param file 上传文件（图片 jpg/png/webp；视频 mp4）
+ * @param opts 可选参数（进度回调/中止信号）
+ * @returns 服务端响应（archived 为归档历史相对路径，无旧产物时为 null）
+ */
+export async function uploadCanvasOutput(
+  project: string,
+  destPath: string,
+  file: File,
+  opts: UploadFsOptions = {},
+): Promise<{ success: boolean; path: string; archived?: string | null }> {
+  const form = new FormData()
+  form.append('project', project)
+  form.append('path', destPath)
+  form.append('file', file)
+  const { data } = await client.post<{ success: boolean; path: string; archived?: string | null }>(
+    '/canvas/upload',
+    form,
+    {
+      onUploadProgress: (e) => {
+        opts.onProgress?.({
+          percent: e.total ? Math.round((e.loaded / e.total) * 100) : null,
+          loaded: e.loaded,
+          total: e.total ?? null,
+        })
+      },
+      signal: opts.signal,
+    },
+  )
+  return data
+}
+
+/**
  * 构建项目整体导出（zip 下载）的 URL。
  * 由浏览器直接访问该地址触发原生下载，避免大文件在内存中缓冲。
  * @param project 项目名

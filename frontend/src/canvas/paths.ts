@@ -62,3 +62,24 @@ export function canvasNodeOutputPath(scope: CanvasScope, nodeId: string, ext: st
 export function canvasNodeAssetPath(scope: CanvasScope, nodeId: string, version: number): string {
   return `${canvasAssetDir(scope)}/${nodeId}/v${version}.jpg`
 }
+
+/**
+ * 画布节点固定产物路径（生成图片 output.jpg / 生成视频 output.mp4）：
+ * - 分镜画布：assert/scene/{集数}/{分镜}/canvas/{nodeId}/output.{ext}
+ * - 场景画布：assert/stage/{场景名}/canvas/{子场景标签}/{nodeId}/output.{ext}
+ * 与服务端 routes/canvas.ts 上传端点的校验正则保持一致（两端须同步修改）。
+ */
+const CANVAS_NODE_OUTPUT_RE =
+  /^assert\/(?:scene\/[1-9]\d*\/[1-9]\d*\/canvas\/[^/]+|stage\/[^/]+\/canvas\/[^/]+\/[^/]+)\/output\.(jpg|mp4)$/
+
+/**
+ * 判断路径是否为画布节点固定产物路径（output.jpg / output.mp4）。
+ * 上传分发用：为真时走 /api/canvas/upload（服务端归档历史后覆盖固定路径），
+ * 否则走通用 /fs/upload（加载节点上传，不归档历史）。
+ *
+ * @param relPath 项目内相对路径
+ * @returns 是否为画布节点固定产物路径
+ */
+export function isCanvasNodeOutputPath(relPath: string): boolean {
+  return CANVAS_NODE_OUTPUT_RE.test(relPath.replace(/\\/g, '/'))
+}

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { canvasAssetDir, canvasNodeOutputPath, canvasNodeAssetPath, sceneCanvasRelPath, stageCanvasRelPath } from './paths'
+import {
+  canvasAssetDir,
+  canvasNodeOutputPath,
+  canvasNodeAssetPath,
+  isCanvasNodeOutputPath,
+  sceneCanvasRelPath,
+  stageCanvasRelPath,
+} from './paths'
 
 describe('stageCanvasRelPath', () => {
   it('返回场景画布定义路径（含子场景标签）', () => {
@@ -55,5 +62,37 @@ describe('canvasNodeOutputPath', () => {
     expect(canvasNodeOutputPath({ kind: 'scene', primary: '1', secondary: '2' }, 'tg', 'flac')).toBe(
       'assert/scene/1/2/canvas/tg/output.flac',
     )
+  })
+})
+
+describe('isCanvasNodeOutputPath', () => {
+  it('识别分镜/场景画布节点固定产物路径（jpg / mp4）', () => {
+    expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.jpg')).toBe(true)
+    expect(isCanvasNodeOutputPath('assert/scene/12/3/canvas/abc/output.mp4')).toBe(true)
+    expect(isCanvasNodeOutputPath('assert/stage/现代商场/canvas/正门入口/n1/output.jpg')).toBe(true)
+    expect(isCanvasNodeOutputPath('assert/stage/现代商场/canvas/正门入口/n1/output.mp4')).toBe(true)
+  })
+
+  it('统一反斜杠为斜杠后识别', () => {
+    expect(isCanvasNodeOutputPath('assert\\scene\\1\\2\\canvas\\n1\\output.jpg')).toBe(true)
+  })
+
+  it('拒绝加载节点上传目标（assert/custom/ 下）', () => {
+    expect(isCanvasNodeOutputPath('assert/custom/canvas/xxx.jpg')).toBe(false)
+  })
+
+  it('拒绝非固定产物路径（版本号/其它扩展名/其它资产）', () => {
+    expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/v2.jpg')).toBe(false)
+    expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.png')).toBe(false)
+    expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.flac')).toBe(false)
+    expect(isCanvasNodeOutputPath('assert/scene/1/2/video/0.mp4')).toBe(false)
+    expect(isCanvasNodeOutputPath('assert/character/陈书文/appearance.jpg')).toBe(false)
+  })
+
+  it('拒绝非法结构（集数/分镜非正整数、含 ..、非 assert/ 前缀）', () => {
+    expect(isCanvasNodeOutputPath('assert/scene/a/b/canvas/n1/output.jpg')).toBe(false)
+    expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/../output.jpg')).toBe(false)
+    expect(isCanvasNodeOutputPath('prompt/scene/1/2/canvas.json')).toBe(false)
+    expect(isCanvasNodeOutputPath('')).toBe(false)
   })
 })

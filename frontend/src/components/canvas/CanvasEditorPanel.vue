@@ -13,6 +13,8 @@
         :node="node"
         :inputs="inputs"
         :output="output"
+        :output-path="outputPath"
+        :uploading="isUploading"
         :images-inputs="videoInputGroups.images"
         :videos-inputs="videoInputGroups.videos"
         :audios-inputs="videoInputGroups.audios"
@@ -38,7 +40,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import type { CanvasKind, CanvasNodeData } from '../../canvas/types'
 import type { CanvasInputInfo } from '../../canvas/generate'
-import type { CanvasUploadFilePayload } from './composables/useCanvasUpload'
+import type { CanvasUploadFilePayload, CanvasUploadState } from './composables/useCanvasUpload'
 
 /**
  * 节点配置悬浮面板：独立于节点渲染在其下方（空间不足时翻转/钳制），
@@ -60,6 +62,16 @@ const props = defineProps<{
   inputs: CanvasInputInfo[]
   /** 节点当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
   output?: { path: string; token?: number } | null
+  /**
+   * 节点固定产物路径（生成类节点按 scope+nodeId+扩展名推导，文件不存在也有值）。
+   * 生成节点编辑器「上传产物」的目标路径；仅生成图片/视频编辑器使用。
+   */
+  outputPath?: string
+  /**
+   * 节点是否正在上传产物（由父级 useCanvasUpload 状态推导）。
+   * 生成节点编辑器据此给「上传产物」按钮加 loading 并禁用（上传中防重复点击）。
+   */
+  uploadState?: CanvasUploadState | null
   /** 视频节点三组输入（非视频节点为空数组） */
   videoInputGroups: {
     images: CanvasInputInfo[]
@@ -100,6 +112,9 @@ const emit = defineEmits<{
   /** 输入项右上角红色 x：请求断开该输入来源节点与当前节点的连线 */
   (e: 'disconnect-input', sourceNodeId: string): void
 }>()
+
+/** 节点是否正在上传产物（编辑器「上传产物」按钮 loading/禁用） */
+const isUploading = computed(() => props.uploadState?.status === 'uploading')
 
 /** 配置面板固定宽度（像素，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_WIDTH = 440

@@ -346,6 +346,12 @@ assert/.../history/{stem}/{YYYYMMDD-HHmmss}.ext
 - 允许 MIME：`image/jpeg`、`image/png`、`image/webp`；落盘路径扩展名固定为 `.jpg`
 - 若目标路径已有当前资产，**先归档历史**再写入上传内容
 
+**画布生成节点产物上传**（生成图片/生成视频节点配置面板「上传产物」）：目标为节点固定产物路径 `assert/{scope}/canvas/{nodeId}/output.jpg|mp4`，走 `POST /api/canvas/upload`（`multipart/form-data`：`project` + `path` + `file`）：
+
+- 图片接受 jpg/png/webp（统一落盘 `output.jpg`）；视频**仅接受 mp4**（不转码）
+- 目标已有产物时**先归档进 `history/output/` 再覆盖**（与重复生成同一套历史机制，可在节点「历史」对话框查看/激活）；归档失败中断上传
+- 详见 `docs/asset-canvas.md` §2.3 / §12
+
 ### 3.0.2 自定义资产（实体映射）
 
 角色、场景、分镜详情页均提供「自定义资产」上传与管理入口，资产**直接映射到 `assert/custom/` 下的实体目录**存储读写：

@@ -108,6 +108,15 @@
       >
         中断
       </v-btn>
+      <v-btn
+        size="small"
+        variant="tonal"
+        :loading="uploading"
+        :disabled="isRunning || uploading"
+        @click="pickUploadFile"
+      >
+        上传产物
+      </v-btn>
       <v-spacer />
       <v-btn
         v-if="hasOutput"
@@ -127,6 +136,15 @@
         设为分镜场景图
       </v-btn>
     </div>
+
+    <!-- 上传产物文件选择框（隐藏；点「上传产物」触发；类型校验由服务端完成） -->
+    <input
+      ref="uploadInputEl"
+      type="file"
+      accept="image/jpeg,image/png,image/webp"
+      class="d-none"
+      @change="onUploadFilePicked"
+    >
   </div>
 </template>
 
@@ -141,6 +159,7 @@ import {
 } from '../../../api/workflow'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
+import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
 import WorkflowParamsTrigger from '../../WorkflowParamsTrigger.vue'
 import { findSizeParamKeys } from '../../../utils/workflowSize'
@@ -155,6 +174,10 @@ const props = defineProps<{
   kind: CanvasKind
   /** 当前产物（固定路径 + 防缓存 token；由 AssetCanvas 下发，优先于 config.current 旧数据） */
   output?: { path: string; token?: number } | null
+  /** 节点固定产物路径（由 AssetCanvas 按 scope+nodeId+扩展名推导；「上传产物」的目标路径） */
+  outputPath?: string
+  /** 节点是否正在上传产物（上传中按钮 loading 并禁用，防重复点击） */
+  uploading?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -164,6 +187,8 @@ const emit = defineEmits<{
   (e: 'open-history', nodeId: string): void
   (e: 'set-as-scene', nodeId: string): void
   (e: 'disconnect-input', sourceNodeId: string): void
+  /** 上传产物文件（进度遮罩由节点卡片渲染；服务端归档旧产物后覆盖固定产物路径） */
+  (e: 'upload-file', payload: CanvasUploadFilePayload): void
 }>()
 
 const workflows = ref<WorkflowInfo[]>([])
@@ -171,6 +196,34 @@ const workflows = ref<WorkflowInfo[]>([])
 const workflowsLoaded = ref(false)
 /** 工作流实现校验错误（未选择实现时点击生成显示，选择后清除） */
 const implError = ref('')
+
+/** 上传产物文件选择框 DOM（隐藏；点「上传产物」触发 click） */
+const uploadInputEl = ref<HTMLInputElement | null>(null)
+
+/** 点击「上传产物」：打开系统文件选择框 */
+function pickUploadFile(): void {
+  uploadInputEl.value?.click()
+}
+
+/**
+ * 选择上传文件：校验节点固定产物路径可用后上抛 upload-file 事件。
+ * 上传进度/失败遮罩由父级 useCanvasUpload 渲染在节点卡片上；
+ * 服务端负责把旧产物归档进历史目录后再覆盖固定产物路径。
+ *
+ * @param event 文件输入 change 事件
+ */
+function onUploadFilePicked(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!props.outputPath) {
+    // 理论上不会发生：生成类节点产物路径由 scope+nodeId+扩展名恒等推导
+    console.error('[canvas-upload] 生成图片节点缺少产物路径，无法上传', { nodeId: props.node.id })
+    return
+  }
+  emit('upload-file', { nodeId: props.node.id, file, dest: props.outputPath })
+}
 
 /** 节点当前是否已有产物（生成按钮文案/历史/设为分镜场景图入口用；产物为固定路径文件，由服务端落盘） */
 const hasOutput = computed(() => !!(props.output || props.node.config.current))

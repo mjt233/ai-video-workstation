@@ -88,6 +88,8 @@
           :editor-component="editorPanel?.editorComponent ?? null"
           :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
           :output="editorPanel ? outputOf(editorPanel.node) : null"
+          :output-path="editorPanel ? outputPathOf(editorPanel.node) : undefined"
+          :upload-state="editorPanel ? upload.stateOf(editorPanel.node.id) ?? null : null"
           :video-input-groups="videoInputGroups"
           :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
           :kind="target.kind"
@@ -243,6 +245,7 @@ import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import type { CanvasNodeData } from '../../canvas/types'
 import { getNodeCurrentAssetPath } from '../../canvas/generate'
+import { getPrototype } from '../../canvas/registry'
 import { getCanvasNodeInfo } from '../../canvas/api'
 import type { CanvasScope } from '../../canvas/paths'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
@@ -367,6 +370,17 @@ function outputOf(node: CanvasNodeData): { path: string; token?: number } | null
   const o = nodeOutputs.value[node.id]
   if (o?.exists) return { path: o.path, token: o.mtime ?? undefined }
   return null
+}
+
+/**
+ * 节点固定产物路径（生成类节点按 scope+nodeId+扩展名恒等推导，即使文件尚不存在也有值）。
+ * 生成节点编辑器「上传产物」的目标路径（与服务端 /api/canvas/upload 校验一致）。
+ *
+ * @param node 节点数据
+ * @returns 项目内相对路径；加载类/无产物路径的节点返回 undefined
+ */
+function outputPathOf(node: CanvasNodeData): string | undefined {
+  return getNodeCurrentAssetPath(node, scope.value)
 }
 
 /** 查询节点产物 mtime（上游更新角标用） */
@@ -524,8 +538,12 @@ const nodeOps = useCanvasNodeOps({
 const upload = useCanvasUpload({
   project: props.project,
   onSuccess: (nodeId, path) => {
-    onUpdateConfig(nodeId, { assetPath: path })
-    // 上传落盘后刷新该节点产物信息（mtime）：输入预览 URL 以源资产 mtime 作缓存键，
+    const node = nodeMap.value[nodeId]
+    // 加载节点：上传到 assert/custom/canvas/，写回 config.assetPath；
+    // 生成类节点（产物为固定路径 output.{ext}）：不回写 config（"当前结果"为文件系统事实），
+    // 仅刷新产物信息即可。
+    if (node && !getPrototype(node.prototypeId)?.outputExt) onUpdateConfig(nodeId, { assetPath: path })
+    // 上传落盘后刷新该节点产物信息（mtime）：预览 URL 以源资产 mtime 作缓存键，
     // 同路径覆盖上传（文件名不变）时若不复刷 mtime，下游编辑器会命中旧的缓存 URL
     void refreshNodeOutput(nodeId)
   },
