@@ -1,10 +1,11 @@
 import { computed, ref } from 'vue'
 import { createCanvasData, newId, type CanvasConnection, type CanvasData, type CanvasNodeData, type NodeConfig } from './types'
 import { loadCanvas, saveCanvas, type CanvasTarget } from './api'
-import { canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
+import { canConnect, canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
 import { getPrototype } from './registry'
 import { applyConnectionSync } from './connectionSync'
-import { serializeNodeClipboard } from './nodeClipboard'
+import { serializeNodeClipboard, type NodeClipboardPayload } from './nodeClipboard'
+import { remapNodeConfig } from './groupSelection'
 import type { CanvasDirectorConfig } from './videoTypes'
 
 /** 自动保存防抖毫秒数 */
@@ -12,6 +13,20 @@ const SAVE_DEBOUNCE_MS = 800
 
 /** 撤销/重做历史栈容量上限 */
 const HISTORY_LIMIT = 50
+
+/** 粘贴时新节点相对原位置的偏移量（像素） */
+const PASTE_OFFSET = 30
+
+/** 群组连接忽略原因 */
+export type GroupConnectSkipReason = 'incompatible' | 'cycle' | 'in-group' | 'duplicate'
+
+/** 群组连接结果：成功连接与忽略清单 */
+export interface GroupConnectResult {
+  /** 成功建立连接的源节点 id 列表 */
+  connected: string[]
+  /** 被忽略的源节点（原因见 GroupConnectSkipReason） */
+  skipped: { nodeId: string; reason: GroupConnectSkipReason }[]
+}
 
 /**
  * 画布状态管理：加载/保存（防抖自动保存）、节点与连线的增删改查、连接校验。
@@ -267,52 +282,264 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     markDirty()
   }
 
-  /** 复制剪贴板内容（节点数据） */
-  const clipboard = ref<CanvasNodeData | null>(null)
+  /** 复制剪贴板内容（节点列表 + 组内连线） */
+  const clipboard = ref<NodeClipboardPayload | null>(null)
 
   /** 是否可粘贴 */
-  const canPaste = computed(() => clipboard.value !== null)
+  const canPaste = computed(() => clipboard.value !== null && clipboard.value.nodes.length > 0)
 
   /**
-   * 复制节点到内部剪贴板，并同步写入系统剪贴板（标记前缀 + 节点 JSON）。
+   * 复制节点到内部剪贴板，并同步写入系统剪贴板（标记前缀 + 节点与连线 JSON）。
    *
    * 写入系统剪贴板的目的：让 Ctrl+V 的全局 paste 事件能优先识别节点复制标记
    * 并粘贴节点，而不被剪贴板中残留的旧文本/文件抢占（复制节点会覆盖系统剪贴板，
    * 与主流节点编辑器的复制语义一致）。写入失败（无剪贴板 API/无权限等）静默忽略，
    * 内部剪贴板仍可用作兜底（剪贴板为空不派发 paste 事件时由 keydown 兜底粘贴）。
    *
-   * @param nodeId 节点 id
+   * @param nodeIds 复制的节点 id 列表（组内连线 = 两端都在列表中的连线）
    */
-  function copyNode(nodeId: string): void {
-    const node = data.value.nodes.find((n) => n.id === nodeId)
-    if (!node) return
-    clipboard.value = JSON.parse(JSON.stringify(node)) as CanvasNodeData
+  function copyNodes(nodeIds: string[]): void {
+    const idSet = new Set(nodeIds)
+    const nodes = data.value.nodes
+      .filter((n) => idSet.has(n.id))
+      .map((n) => JSON.parse(JSON.stringify(n)) as CanvasNodeData)
+    if (nodes.length === 0) return
+    const connections = data.value.connections
+      .filter((c) => idSet.has(c.fromNodeId) && idSet.has(c.toNodeId))
+      .map((c) => JSON.parse(JSON.stringify(c)) as CanvasConnection)
+    clipboard.value = { nodes, connections }
     try {
-      void navigator.clipboard?.writeText(serializeNodeClipboard(clipboard.value))?.catch(() => {})
+      void navigator.clipboard?.writeText(serializeNodeClipboard(nodes, connections))?.catch(() => {})
     } catch {
       // 剪贴板 API 不可用（非安全上下文等）：静默降级为仅内部剪贴板
     }
   }
 
   /**
-   * 粘贴剪贴板节点（偏移 30px），生成全新 id。
-   * 可传入外部节点源（如从系统剪贴板标记解析出的节点，支持跨画布/刷新后粘贴）：
+   * 复制单个节点（兼容旧调用方：等价 copyNodes([nodeId])）。
+   *
+   * @param nodeId 节点 id
+   */
+  function copyNode(nodeId: string): void {
+    copyNodes([nodeId])
+  }
+
+  /**
+   * 粘贴剪贴板节点（整体偏移 PASTE_OFFSET），生成全新 id 并重映射：
+   * - 节点 id 全部更换；
+   * - config 内节点引用重映射（inputOrder、导演台素材块 sourceNodeId，见 remapNodeConfig）；
+   * - 组内连线按新 id 重建，并逐条触发 connect 联动（connectionSync，与手动连线行为一致）。
+   * 可传入外部载荷（如从系统剪贴板标记解析出的，支持跨画布/刷新后粘贴）：
    * 未传入时使用内部剪贴板内容。
    *
-   * @param source 外部节点源（缺省用内部剪贴板）
+   * @param source 外部复制载荷（缺省用内部剪贴板）
+   * @returns 新节点列表（可能为空）
+   */
+  function pasteNodes(source?: NodeClipboardPayload): CanvasNodeData[] {
+    const base = source ?? clipboard.value
+    if (!base || base.nodes.length === 0) return []
+    // 先建立旧 id → 新 id 映射（两遍扫描：config 重映射需要完整映射）
+    const idMap = new Map<string, string>()
+    for (const n of base.nodes) idMap.set(n.id, newId())
+    const nodes = base.nodes.map((n) => {
+      const copy = JSON.parse(JSON.stringify(n)) as CanvasNodeData
+      copy.id = idMap.get(n.id) ?? copy.id
+      copy.x = n.x + PASTE_OFFSET
+      copy.y = n.y + PASTE_OFFSET
+      copy.config = remapNodeConfig(JSON.parse(JSON.stringify(n.config)) as NodeConfig, idMap)
+      return copy
+    })
+    const connections = base.connections.map((c) => ({
+      id: newId(),
+      fromNodeId: idMap.get(c.fromNodeId) ?? c.fromNodeId,
+      fromPortId: c.fromPortId,
+      toNodeId: idMap.get(c.toNodeId) ?? c.toNodeId,
+      toPortId: c.toPortId,
+    }))
+    pushHistory()
+    data.value.nodes.push(...nodes)
+    data.value.connections.push(...connections)
+    markDirty()
+    for (const connection of connections) {
+      emitConnectionsChanged({ type: 'connect', connection })
+    }
+    return nodes
+  }
+
+  /**
+   * 粘贴单个节点（兼容旧调用方：等价 pasteNodes(source) 的第一项）。
+   *
+   * @param source 外部节点源（缺省用内部剪贴板的第一项，均为单节点场景）
    * @returns 新节点或 undefined（无可粘贴内容）
    */
   function pasteNode(source?: CanvasNodeData): CanvasNodeData | undefined {
-    const base = source ?? clipboard.value
-    if (!base) return undefined
-    const copy = JSON.parse(JSON.stringify(base)) as CanvasNodeData
-    copy.id = newId()
-    copy.x += 30
-    copy.y += 30
+    const payload: NodeClipboardPayload | undefined = source
+      ? { nodes: [source], connections: [] }
+      : (clipboard.value ?? undefined)
+    return pasteNodes(payload)[0]
+  }
+
+  /**
+   * 批量更新节点位置（整组移动：单次撤销快照）。
+   *
+   * @param patches 节点位置补丁列表
+   */
+  function updateNodes(patches: { id: string; x: number; y: number }[]): void {
+    const valid = patches.filter((p) => data.value.nodes.some((n) => n.id === p.id))
+    if (valid.length === 0) return
     pushHistory()
-    data.value.nodes.push(copy)
+    for (const p of valid) {
+      const node = data.value.nodes.find((n) => n.id === p.id)
+      if (!node) continue
+      node.x = Math.round(p.x)
+      node.y = Math.round(p.y)
+    }
     markDirty()
-    return copy
+  }
+
+  /**
+   * 批量删除节点及其全部连线（单次撤销快照；连带断开的连线触发 disconnect 联动）。
+   *
+   * @param nodeIds 删除的节点 id 列表
+   */
+  function removeNodes(nodeIds: string[]): void {
+    const idSet = new Set(nodeIds)
+    const removed = data.value.connections.filter((c) => idSet.has(c.fromNodeId) || idSet.has(c.toNodeId))
+    pushHistory()
+    data.value.nodes = data.value.nodes.filter((n) => !idSet.has(n.id))
+    data.value.connections = data.value.connections.filter((c) => !idSet.has(c.fromNodeId) && !idSet.has(c.toNodeId))
+    markDirty()
+    for (const connection of removed) {
+      emitConnectionsChanged({ type: 'disconnect', connection })
+    }
+  }
+
+  /**
+   * 群组连接：把多个源节点的输出全部连接到目标节点输入口。
+   * 逐源校验（类型兼容/成环/目标在组内/重复连线），成功者批量建立（单次撤销快照），
+   * 失败者记录原因并忽略。
+   *
+   * @param targetNodeId 目标节点 id
+   * @param sourceIds 源节点 id 列表
+   * @returns 连接结果（成功列表 + 忽略清单）
+   */
+  function connectGroupToNode(targetNodeId: string, sourceIds: string[]): GroupConnectResult {
+    const target = data.value.nodes.find((n) => n.id === targetNodeId)
+    if (!target) {
+      return { connected: [], skipped: sourceIds.map((nodeId) => ({ nodeId, reason: 'incompatible' as const })) }
+    }
+    pushHistory()
+    const result = performGroupConnect(targetNodeId, sourceIds)
+    if (result.connected.length > 0) markDirty()
+    return result
+  }
+
+  /**
+   * 在指定位置创建节点并连接全部兼容源节点（成组连接菜单路径：单次撤销快照）。
+   * 与 connectGroupToNode 同一套校验/忽略规则；节点先加入数据再逐源校验（目标输入端口存在）。
+   *
+   * @param prototypeId 节点原型 id
+   * @param x 节点流坐标 x（左缘对齐释放点）
+   * @param y 节点流坐标 y（垂直中心对齐释放点）
+   * @param sourceIds 源节点 id 列表
+   * @returns 新节点与连接结果
+   * @throws Error 未知原型时
+   */
+  function createNodeAndConnect(
+    prototypeId: string,
+    x: number,
+    y: number,
+    sourceIds: string[],
+  ): { node: CanvasNodeData; result: GroupConnectResult } {
+    const proto = getPrototype(prototypeId)
+    if (!proto) throw new Error(`未知节点类型: ${prototypeId}`)
+    const node: CanvasNodeData = {
+      id: newId(),
+      prototypeId,
+      name: proto.name,
+      x: Math.round(x),
+      y: Math.round(y),
+      width: 240,
+      height: 160,
+      config: {
+        ...(proto.defaultConfig ? JSON.parse(JSON.stringify(proto.defaultConfig)) : {}),
+      },
+    }
+    pushHistory()
+    data.value.nodes.push(node)
+    const result = performGroupConnect(node.id, sourceIds)
+    markDirty()
+    return { node, result }
+  }
+
+  /**
+   * 执行群组连接：逐源校验 → 批量建线 → 逐条触发 connect 联动。
+   * 不自行压撤销栈（connectGroupToNode/createNodeAndConnect 已快照）。
+   *
+   * @param targetNodeId 目标节点 id
+   * @param sourceIds 源节点 id 列表
+   * @returns 连接结果
+   */
+  function performGroupConnect(targetNodeId: string, sourceIds: string[]): GroupConnectResult {
+    const targetInGroup = sourceIds.includes(targetNodeId)
+    const toPortId = getNodeInputPortId(targetNodeId, data.value.nodes) ?? 'in'
+    const connected: CanvasConnection[] = []
+    const skipped: GroupConnectResult['skipped'] = []
+    for (const sourceId of sourceIds) {
+      const source = data.value.nodes.find((n) => n.id === sourceId)
+      if (!source) continue
+      if (targetInGroup) {
+        skipped.push({ nodeId: sourceId, reason: 'in-group' })
+        continue
+      }
+      const fromPortId = getNodeOutputPortId(sourceId, data.value.nodes) ?? 'out'
+      if (data.value.connections.some(
+        (c) => c.fromNodeId === sourceId && c.fromPortId === fromPortId && c.toNodeId === targetNodeId && c.toPortId === toPortId,
+      )) {
+        skipped.push({ nodeId: sourceId, reason: 'duplicate' })
+        continue
+      }
+      const connection: CanvasConnection = {
+        id: newId(),
+        fromNodeId: sourceId,
+        fromPortId,
+        toNodeId: targetNodeId,
+        toPortId,
+      }
+      if (!canConnectNodes(data.value.connections, connection.fromNodeId, connection.toNodeId, data.value.nodes, connection.toPortId)) {
+        skipped.push({ nodeId: sourceId, reason: classifyConnectFailure(connection, data.value.nodes) })
+        continue
+      }
+      connected.push(connection)
+    }
+    if (connected.length > 0) {
+      data.value.connections.push(...connected)
+      for (const connection of connected) {
+        emitConnectionsChanged({ type: 'connect', connection })
+      }
+    }
+    return { connected: connected.map((c) => c.fromNodeId), skipped }
+  }
+
+  /**
+   * 分类连接校验失败原因（类型不兼容 / 会形成循环）。
+   *
+   * @param connection 拟建立的连线（端口已解析）
+   * @param nodesList 画布全部节点
+   * @returns 失败原因
+   */
+  function classifyConnectFailure(
+    connection: CanvasConnection,
+    nodesList: CanvasNodeData[],
+  ): GroupConnectSkipReason {
+    const source = nodesList.find((n) => n.id === connection.fromNodeId)
+    const target = nodesList.find((n) => n.id === connection.toNodeId)
+    const sourceProto = source ? getPrototype(source.prototypeId) : undefined
+    const targetProto = target ? getPrototype(target.prototypeId) : undefined
+    const outType = sourceProto?.outputPorts[0]?.type
+    const port = targetProto?.inputPorts.find((p) => p.id === connection.toPortId)
+    if (outType && port && !canConnect(outType, port.type)) return 'incompatible'
+    return 'cycle'
   }
 
   /**
@@ -404,11 +631,15 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     save,
     addNode,
     removeNode,
+    removeNodes,
     updateNode,
+    updateNodes,
     updateDirectorAudioClipDuration,
     removeInputOrderEntry,
     connect,
     disconnect,
+    connectGroupToNode,
+    createNodeAndConnect,
     onConnectionsChanged,
     historyPast,
     historyFuture,
@@ -419,7 +650,9 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     clipboard,
     canPaste,
     copyNode,
+    copyNodes,
     pasteNode,
+    pasteNodes,
     applyNodes,
     switchTarget,
   }

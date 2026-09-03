@@ -130,6 +130,41 @@
       断开连接
     </div>
   </div>
+
+  <!-- 群组右键菜单（复制/删除整组） -->
+  <div
+    v-if="groupMenu.show"
+    class="canvas-context-menu"
+    :style="{ left: `${groupMenu.x}px`, top: `${groupMenu.y}px` }"
+  >
+    <div class="canvas-context-menu__title">
+      已选 {{ groupMenu.count }} 个节点
+    </div>
+    <div
+      class="canvas-context-menu__item"
+      @click="emit('group-copy')"
+    >
+      <v-icon
+        size="small"
+        class="mr-2"
+      >
+        mdi-content-copy
+      </v-icon>
+      复制
+    </div>
+    <div
+      class="canvas-context-menu__item canvas-context-menu__item--danger"
+      @click="emit('group-delete')"
+    >
+      <v-icon
+        size="small"
+        class="mr-2"
+      >
+        mdi-delete-outline
+      </v-icon>
+      删除
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -156,6 +191,8 @@ defineProps<{
   hasConnections: boolean
   /** 连线右键菜单状态（x/y 相对画布容器） */
   edgeMenu: { show: boolean; x: number; y: number }
+  /** 群组右键菜单状态（x/y 相对画布容器；count 为选中节点数） */
+  groupMenu: { show: boolean; x: number; y: number; count: number }
 }>()
 
 const emit = defineEmits<{
@@ -175,6 +212,10 @@ const emit = defineEmits<{
   (e: 'delete'): void
   /** 断开选中连线 */
   (e: 'disconnect-edge'): void
+  /** 复制整组 */
+  (e: 'group-copy'): void
+  /** 删除整组 */
+  (e: 'group-delete'): void
 }>()
 
 /**
@@ -252,5 +293,16 @@ function saveTargetLabel(type: SaveAsType): string {
 
 .canvas-context-menu__item--danger:hover {
   background: rgba(176, 0, 32, 0.08);
+}
+
+/* 群组菜单标题：加粗 + 底部细分隔线 */
+.canvas-context-menu__title {
+  padding: 4px 14px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.6);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  margin-bottom: 2px;
+  user-select: none;
 }
 </style>

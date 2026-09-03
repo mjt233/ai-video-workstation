@@ -4,6 +4,7 @@
  * Ctrl+V 不 preventDefault（放行原生 paste 事件），由粘贴组合式统一分派
  * （节点复制标记 → 粘贴节点；文件 → 加载节点；文本 → 文本节点）；
  * 剪贴板为空不派发 paste 事件时，由 keydown 置兜底标记粘贴画布内复制的节点。
+ * 多选语义：Ctrl+C/Ctrl+D 作用于全部选中节点；Delete 删除整组（一次确认）。
  */
 
 import type { WritableStringRef } from './types'
@@ -14,16 +15,15 @@ export interface UseCanvasKeyboardOptions {
   store: {
     undo: () => void
     redo: () => void
-    copyNode: (nodeId: string) => void
-    pasteNode: () => unknown
+    copyNodes: (nodeIds: string[]) => void
     disconnect: (connectionId: string) => void
     canPaste: { value: boolean }
   }
   /** 选中状态（快捷键目标节点/连线） */
   selection: {
-    selectedNodeId: WritableStringRef
+    getSelectedNodeIds: () => string[]
     selectedEdgeId: WritableStringRef
-    deleteNode: (nodeId: string) => Promise<void>
+    deleteSelected: () => Promise<void>
   }
   /** 菜单关闭（Esc） */
   menus: { closeAll: () => void }
@@ -31,6 +31,8 @@ export interface UseCanvasKeyboardOptions {
   rename: { cancelRename: () => void }
   /** Ctrl+V 兜底句柄（由粘贴组合式提供） */
   handleCtrlV: () => void
+  /** Ctrl+D 复制粘贴整组句柄（由粘贴组合式提供：复制选中 → 粘贴 → 聚焦新节点） */
+  duplicateSelected: () => void
 }
 
 /**
@@ -40,7 +42,7 @@ export interface UseCanvasKeyboardOptions {
  * @returns 全局 keydown 事件处理器
  */
 export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
-  const { store, selection, menus, rename, handleCtrlV } = options
+  const { store, selection, menus, rename, handleCtrlV, duplicateSelected } = options
 
   /**
    * 全局键盘快捷键：撤销/重做/复制/粘贴/复制粘贴/删除。
@@ -64,7 +66,8 @@ export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
     }
     if (mod && e.key.toLowerCase() === 'c') {
       e.preventDefault()
-      if (selection.selectedNodeId.value) store.copyNode(selection.selectedNodeId.value)
+      const ids = selection.getSelectedNodeIds()
+      if (ids.length > 0) store.copyNodes(ids)
       return
     }
     if (mod && e.key.toLowerCase() === 'v') {
@@ -76,10 +79,7 @@ export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
     }
     if (mod && e.key.toLowerCase() === 'd') {
       e.preventDefault()
-      if (selection.selectedNodeId.value) {
-        store.copyNode(selection.selectedNodeId.value)
-        store.pasteNode()
-      }
+      if (selection.getSelectedNodeIds().length > 0) duplicateSelected()
       return
     }
     if (e.key === 'Escape') {
@@ -89,8 +89,8 @@ export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
       e.preventDefault()
-      if (selection.selectedNodeId.value) {
-        void selection.deleteNode(selection.selectedNodeId.value)
+      if (selection.getSelectedNodeIds().length > 0) {
+        void selection.deleteSelected()
       } else if (selection.selectedEdgeId.value) {
         store.disconnect(selection.selectedEdgeId.value)
       }

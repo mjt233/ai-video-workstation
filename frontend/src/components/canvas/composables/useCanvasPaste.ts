@@ -1,6 +1,6 @@
 /**
- * 剪贴板粘贴组合式：全局 paste 事件处理与 Ctrl+V 兜底。
- * 剪贴板内容分派：画布内复制的节点标记 → 粘贴节点（最高优先级，复制节点已覆盖系统剪贴板）；
+ * 剪贴板粘贴组合式：全局 paste 事件处理与 Ctrl+V 兜底、Ctrl+D 复制粘贴整组。
+ * 剪贴板内容分派：画布内复制的节点标记（单/多节点）→ 粘贴节点（最高优先级，复制节点已覆盖系统剪贴板）；
  * 文件（图片/视频/音频）→ 先创建加载节点再上传为自定义资产（上传进度显示在节点遮罩上）；
  * 文本 → 创建文本节点；无内容时兜底粘贴画布内复制的节点。
  * 文件识别纯函数在 canvas/clipboard.ts，节点复制标记解析在 canvas/nodeClipboard.ts。
@@ -9,7 +9,7 @@
 import { nextTick } from 'vue'
 import type { Ref } from 'vue'
 import { collectPastedMedia, buildClipboardAssetDest, type PastedMedia } from '../../../canvas/clipboard'
-import { parseNodeClipboardText } from '../../../canvas/nodeClipboard'
+import { parseNodeClipboardText, type NodeClipboardPayload } from '../../../canvas/nodeClipboard'
 import type { CanvasNodeData } from '../../../canvas/types'
 import type { CanvasStoreApi, ScreenToFlow, FindNode, AddSelectedNodes, ShowSnackbar } from './types'
 import type { CanvasUploadApi } from './useCanvasUpload'
@@ -30,9 +30,11 @@ export interface UseCanvasPasteOptions {
   upload: CanvasUploadApi
   /** 选中控制（粘贴聚焦写入应用级选中并抑制面板弹出） */
   selection: {
-    setSelectedNode: (nodeId: string) => void
+    setSelectedNodes: (nodeIds: string[]) => void
     setSuppressPanelOnSelect: (value: boolean) => void
   }
+  /** 当前选中节点 id 列表读取（Ctrl+D 复制整组） */
+  getSelectedNodeIds: () => string[]
   /** 操作反馈提示 */
   showSnackbar: ShowSnackbar
 }
@@ -41,10 +43,10 @@ export interface UseCanvasPasteOptions {
  * 剪贴板粘贴组合式。
  *
  * @param options 依赖注入参数
- * @returns 粘贴事件处理器与 Ctrl+V 兜底句柄
+ * @returns 粘贴事件处理器、Ctrl+V 兜底与 Ctrl+D 复制粘贴整组句柄
  */
 export function useCanvasPaste(options: UseCanvasPasteOptions) {
-  const { store, flowEl, screenToFlowCoordinate, findNode, addSelectedNodes, selection, upload, showSnackbar } = options
+  const { store, flowEl, screenToFlowCoordinate, findNode, addSelectedNodes, selection, getSelectedNodeIds, upload, showSnackbar } = options
 
   /** 粘贴兜底标记：剪贴板为空时浏览器不派发 paste 事件，由 keydown 置位、宏任务兜底粘贴内部复制的节点 */
   let nodePasteFallbackArmed = false
@@ -66,7 +68,7 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
   /**
    * 程序化选中（聚焦）新粘贴的节点：
    * - 写入 Vue Flow 内部选中态 → 节点显示选中边框与可调整大小的缩放控制点；
-   * - 设置应用级选中（Delete/复制等快捷键指向新节点）；
+   * - 设置应用级选中（全部粘贴节点，Delete/复制等快捷键指向它们）；
    * - 抑制配置面板自动弹出（仅用户点击节点才打开配置面板）。
    *
    * @param nodeIds 新节点 id 列表（全部选中）
@@ -79,7 +81,7 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
       .map((id) => findNode(id))
       .filter((n): n is NonNullable<ReturnType<FindNode>> => !!n)
     if (flowNodeObjs.length > 0) addSelectedNodes(flowNodeObjs)
-    selection.setSelectedNode(nodeIds[nodeIds.length - 1] ?? '')
+    selection.setSelectedNodes(nodeIds)
     selection.setSuppressPanelOnSelect(true)
   }
 
@@ -128,14 +130,26 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
   }
 
   /**
-   * 粘贴画布内复制的节点并聚焦（选中显示边框，不自动打开配置面板）。
+   * 粘贴画布内复制的节点（单/多节点）并聚焦（选中显示边框，不自动打开配置面板）。
    *
-   * @param source 外部节点源（如系统剪贴板标记解析出的节点）；缺省用 store 内部剪贴板
+   * @param source 外部复制载荷（如系统剪贴板标记解析出的，支持跨画布/刷新后粘贴）；缺省用 store 内部剪贴板
    */
-  async function pasteNodeAndFocus(source?: CanvasNodeData): Promise<void> {
-    const node = store.pasteNode(source)
-    if (!node) return
-    await focusPastedNodes([node.id])
+  async function pasteNodeAndFocus(source?: NodeClipboardPayload): Promise<void> {
+    const nodes = store.pasteNodes(source)
+    if (nodes.length === 0) return
+    await focusPastedNodes(nodes.map((n) => n.id))
+  }
+
+  /**
+   * Ctrl+D：复制当前选中的节点（含组内连线）并粘贴，聚焦新节点。
+   */
+  async function duplicateSelected(): Promise<void> {
+    const ids = getSelectedNodeIds()
+    if (ids.length === 0) return
+    store.copyNodes(ids)
+    const nodes = store.pasteNodes()
+    if (nodes.length === 0) return
+    await focusPastedNodes(nodes.map((n: CanvasNodeData) => n.id))
   }
 
   /**
@@ -172,12 +186,12 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
 
     // 画布内复制的节点标记：任何焦点目标下都拦截（含输入框，避免标记 JSON 被当作普通文本粘贴）
     const text = e.clipboardData?.getData('text/plain') ?? ''
-    const copiedNode = parseNodeClipboardText(text)
-    if (copiedNode) {
+    const copiedPayload = parseNodeClipboardText(text)
+    if (copiedPayload) {
       e.preventDefault()
       nodePasteFallbackArmed = false
       // 输入框内粘贴节点标记：仅吞掉，不在画布上粘贴节点（避免输入时误操作）
-      if (!inInput) void pasteNodeAndFocus(copiedNode)
+      if (!inInput) void pasteNodeAndFocus(copiedPayload)
       return
     }
     if (inInput) return
@@ -209,5 +223,5 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
     nodePasteFallbackArmed = false
   }
 
-  return { onPaste, handleCtrlV, pasteNodeAndFocus, reset }
+  return { onPaste, handleCtrlV, pasteNodeAndFocus, duplicateSelected, reset }
 }

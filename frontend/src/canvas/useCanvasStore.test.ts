@@ -299,4 +299,168 @@ describe('useCanvasStore', () => {
     expect(store.connections.value).toHaveLength(1)
     expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toEqual([a.id])
   })
+
+  // ── 多选群组批量操作 ──────────────────────────────────
+
+  it('copyNodes/pasteNodes：多节点复制粘贴重建 id 与组内连线', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 100)
+    expect(store.connect(a.id, b.id)).toBe(true)
+    store.copyNodes([a.id, b.id])
+    const pasted = store.pasteNodes()
+    expect(pasted).toHaveLength(2)
+    const pastedIds = new Set(pasted.map((n) => n.id))
+    expect(pastedIds.has(a.id)).toBe(false)
+    expect(pastedIds.has(b.id)).toBe(false)
+    // 组内连线按新 id 重建
+    expect(store.connections.value).toHaveLength(2)
+    const newConn = store.connections.value.find((cn) => pastedIds.has(cn.fromNodeId) && pastedIds.has(cn.toNodeId))
+    expect(newConn).toBeTruthy()
+    // 偏移 30px
+    const pastedA = pasted.find((n) => n.prototypeId === 'image-loader')!
+    expect(pastedA.x).toBe(30)
+    expect(pastedA.y).toBe(30)
+  })
+
+  it('pasteNodes：重映射 config.inputOrder 与导演台素材块引用', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 100)
+    store.updateNode(b.id, { config: { inputOrder: [a.id] } })
+    expect(store.connect(a.id, b.id)).toBe(true)
+    store.copyNodes([a.id, b.id])
+    const pasted = store.pasteNodes()
+    const pastedB = pasted.find((n) => n.prototypeId === 'image-generate')!
+    expect(pastedB.config.inputOrder).toHaveLength(1)
+    expect((pastedB.config.inputOrder as string[])[0]).not.toBe(a.id)
+    // 重映射后的 id 与重建连线端点一致
+    expect(store.connections.value.some((cn) => cn.toNodeId === pastedB.id && cn.fromNodeId === (pastedB.config.inputOrder as string[])[0])).toBe(true)
+  })
+
+  it('pasteNodes：外部载荷（多节点）粘贴不写入内部剪贴板', () => {
+    const store = useCanvasStore('p', TARGET)
+    const payload = {
+      nodes: [{ ...store.addNode('text', 0, 0) }],
+      connections: [] as { id: string; fromNodeId: string; fromPortId: string; toNodeId: string; toPortId: string }[],
+    }
+    const pasted = store.pasteNodes(payload)
+    expect(pasted).toHaveLength(1)
+    expect(store.canPaste.value).toBe(false)
+  })
+
+  it('pasteNodes：无剪贴板内容返回空数组', () => {
+    const store = useCanvasStore('p', TARGET)
+    expect(store.pasteNodes()).toEqual([])
+  })
+
+  it('updateNodes：批量移动位置为单次撤销', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('text', 0, 0)
+    const b = store.addNode('text', 200, 200)
+    store.updateNodes([{ id: a.id, x: 50, y: 60 }, { id: b.id, x: 260, y: 220 }])
+    expect(store.nodes.value.find((n) => n.id === a.id)!.x).toBe(50)
+    expect(store.nodes.value.find((n) => n.id === b.id)!.x).toBe(260)
+    // 单次撤销回退整组
+    store.undo()
+    expect(store.nodes.value.find((n) => n.id === a.id)!.x).toBe(0)
+    expect(store.nodes.value.find((n) => n.id === b.id)!.x).toBe(200)
+  })
+
+  it('updateNodes：全部 id 不存在时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.updateNodes([{ id: 'ghost', x: 1, y: 1 }])
+    expect(store.nodes.value).toHaveLength(0)
+    expect(store.canUndo.value).toBe(false)
+  })
+
+  it('removeNodes：批量删除节点与连线，单次撤销可恢复', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 100)
+    store.connect(a.id, b.id)
+    const events: { type: string }[] = []
+    store.onConnectionsChanged((e) => events.push(e))
+    store.removeNodes([a.id, b.id])
+    expect(store.nodes.value).toHaveLength(0)
+    expect(store.connections.value).toHaveLength(0)
+    expect(events.map((e) => e.type)).toEqual(['disconnect'])
+    store.undo()
+    expect(store.nodes.value).toHaveLength(2)
+    expect(store.connections.value).toHaveLength(1)
+  })
+
+  it('connectGroupToNode：兼容源全部连接，不兼容源忽略并给出原因', () => {
+    const store = useCanvasStore('p', TARGET)
+    const img1 = store.addNode('image-loader', 0, 0)
+    const img2 = store.addNode('image-loader', 200, 0)
+    const aud = store.addNode('audio-loader', 400, 0)
+    const target = store.addNode('image-generate', 600, 0)
+    const result = store.connectGroupToNode(target.id, [img1.id, img2.id, aud.id])
+    expect(result.connected).toEqual([img1.id, img2.id])
+    expect(result.skipped).toEqual([{ nodeId: aud.id, reason: 'incompatible' }])
+    expect(store.connections.value).toHaveLength(2)
+  })
+
+  it('connectGroupToNode：media 输入口兼容全部来源类型', () => {
+    const store = useCanvasStore('p', TARGET)
+    const img = store.addNode('image-loader', 0, 0)
+    const aud = store.addNode('audio-loader', 200, 0)
+    const vid = store.addNode('video-loader', 400, 0)
+    const target = store.addNode('video-generate', 600, 0)
+    const result = store.connectGroupToNode(target.id, [img.id, aud.id, vid.id])
+    expect(result.connected).toEqual([img.id, aud.id, vid.id])
+    expect(result.skipped).toEqual([])
+  })
+
+  it('connectGroupToNode：目标在群组内/重复连线/成环均忽略', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 300, 0)
+    store.connect(a.id, b.id)
+    // 重复连接（已存在同源同目标）
+    const dup = store.connectGroupToNode(b.id, [a.id])
+    expect(dup.connected).toEqual([])
+    expect(dup.skipped).toEqual([{ nodeId: a.id, reason: 'duplicate' }])
+    // 成环：生成节点 → 加载节点
+    const cycle = store.connectGroupToNode(a.id, [b.id])
+    expect(cycle.connected).toEqual([])
+    expect(cycle.skipped).toEqual([{ nodeId: b.id, reason: 'cycle' }])
+    // 目标在群组内：把 a 自身连向 a
+    const self = store.connectGroupToNode(a.id, [a.id])
+    expect(self.skipped).toEqual([{ nodeId: a.id, reason: 'in-group' }])
+  })
+
+  it('connectGroupToNode：单次撤销回退全部群组连线', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-loader', 200, 0)
+    const target = store.addNode('image-generate', 400, 0)
+    const result = store.connectGroupToNode(target.id, [a.id, b.id])
+    expect(result.connected).toHaveLength(2)
+    store.undo()
+    expect(store.connections.value).toHaveLength(0)
+  })
+
+  it('createNodeAndConnect：创建节点并连接全部兼容源，忽略不兼容源', () => {
+    const store = useCanvasStore('p', TARGET)
+    const img1 = store.addNode('image-loader', 0, 0)
+    const img2 = store.addNode('image-loader', 200, 0)
+    const vid = store.addNode('video-loader', 400, 0)
+    const { node, result } = store.createNodeAndConnect('image-generate', 600, 300, [img1.id, img2.id, vid.id])
+    expect(node.prototypeId).toBe('image-generate')
+    expect(node.x).toBe(600)
+    expect(result.connected).toEqual([img1.id, img2.id])
+    expect(result.skipped).toEqual([{ nodeId: vid.id, reason: 'incompatible' }])
+    expect(store.connections.value.filter((c) => c.toNodeId === node.id)).toHaveLength(2)
+    // 一次撤销同时回退新节点与连线
+    store.undo()
+    expect(store.nodes.value.some((n) => n.id === node.id)).toBe(false)
+    expect(store.connections.value).toHaveLength(0)
+  })
+
+  it('createNodeAndConnect：未知原型抛错', () => {
+    const store = useCanvasStore('p', TARGET)
+    expect(() => store.createNodeAndConnect('unknown', 0, 0, [])).toThrow()
+  })
 })

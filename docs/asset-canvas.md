@@ -111,20 +111,26 @@
 
 | 交互 | 行为 |
 |------|------|
-| 点击节点 | 选中 + 显示配置面板（有 editorComponent 时） |
+| 点击节点 | 选中 + 显示配置面板（有 editorComponent 时）；**多选下普通单击切换为仅选中该节点** |
+| `Ctrl`+点击节点 | 增/减选该节点（多选） |
+| `Ctrl`+空白处左键拖动 | **框选多个节点**（Vue Flow 内置框选：selectionKeyCode/multiSelectionKeyCode 经 `setState` 写入 `Control`，避免运行时 prop 类型告警；`selection-mode` 为 Partial——**与节点存在交集（无需完全覆盖）即选中**）；框选结束（`@selection-end`）后应用级多选与 Vue Flow 内部选中态双向同步 |
+| 多选（≥2 个节点） | 显示**群组虚线框**（合成节点 `__group-frame`，位于节点下层，与边缘节点保留 12px 流坐标留白 `GROUP_FRAME_PADDING`）+ 右侧垂直居中的**输出连接圆点**（合成节点 `__group-dot`，位于全部节点上层）。原生多选包围框被样式隐藏（避免覆盖节点点击），由合成节点替代 |
+| 拖动群组虚线框 | **整体移动全部选中节点**（框架节点 `draggable`，Vue Flow 原生拖动携带全部选中节点；结束经 `store.updateNodes` 单次撤销快照批量回写） |
+| 右键群组虚线框 | 组菜单：复制 / 删除（删除整组一次确认） |
+| 群组输出圆点拖拽 | 从圆点拖出预览虚线（SVG）→ 悬停目标节点高亮（绿色描边）；释放：① 命中其他节点（流坐标包围盒命中）→ **成组连接**（类型兼容/成环/目标在组内/重复连线逐源校验，失败源忽略 + snackbar 气泡提示原因）；② 未命中任何已有节点（拖拽位移 > 6px 最小判定，区分点击圆点）→ 弹出「选择目标节点」菜单（全部有输入端口的原型：生成图片/生成视频/TTS/获取视频帧/拼接视频/裁剪视频，按群组输出类型兼容性过滤，不兼容项置灰并注明原因），选中后在释放点创建该节点并把全部兼容源连接到新节点输入口（不兼容源忽略 + 气泡提示），随后单选新节点（不自动弹配置面板）；③ 位移 ≤ 6px（视作点击圆点）→ 取消 |
 | 双击节点名称 | 内联重命名（回车/失焦提交、Esc 取消、空名放弃） |
-| 拖拽节点 | 移动位置，结束回写 store（防误触：拖拽中隐藏配置面板） |
+| 拖拽节点 | 移动位置，结束回写 store（防误触：拖拽中隐藏配置面板）；**拖动选中节点时 Vue Flow 原生把全部选中节点一起移动**（结束批量单次撤销） |
 | 悬浮/选中节点后拖拽边缘或四角 | 调整节点大小（**全部节点类型**可缩放，最小 120×80px，`@vue-flow/node-resizer` 渲染控制点；缩放中控制点保持可见，结束才回写 store） |
-| 右键节点 | 菜单：重新生成 / 历史 / 保存为（hover 子菜单：角色设计 / 角色设计-衍生变体 / 场景图 / 场景图-衍生变体 / 自定义资产，仅输出类型为图片且有产物的节点显示）/ 断开连接 / 重命名 / 复制 / 删除（删除需 `confirm` 确认） |
+| 右键节点 | 菜单：重新生成 / 历史 / 保存为（hover 子菜单：角色设计 / 角色设计-衍生变体 / 场景图 / 场景图-衍生变体 / 自定义资产，仅输出类型为图片且有产物的节点显示）/ 断开连接 / 重命名 / 复制 / 删除（删除需 `confirm` 确认）。**右键节点时切换为单选该节点** |
 | 右键连线 | 菜单：断开连接 |
 | 单击空白 | 取消选中、关闭菜单 |
 | 双击空白 | 在鼠标双击处弹出「添加节点」VMenu（选择节点原型后在该处添加节点） |
 | 适应视图 / 放大 / 缩小 | 工具栏按钮（`fitView` / `zoomIn` / `zoomOut`）；适应视图按全部节点包围盒居中并缩放落入可视区（padding 0.2、maxZoom 1，不放大超过 100%） |
 | 滚轮 | 空白/节点上滚动 = 缩放画布；文本节点文本域上滚动 = 滚动文本（`nowheel` 类豁免缩放） |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | 撤销 / 重做（输入框聚焦时跳过） |
-| `Ctrl+C` / `Ctrl+D` | 复制选中节点到画布内部剪贴板，并同步把「节点复制标记 + JSON」写入系统剪贴板（覆盖剪贴板旧内容，与主流节点编辑器复制语义一致；无剪贴板 API 时静默降级为仅内部剪贴板） / 复制粘贴（重复节点） |
-| `Ctrl+V` | 粘贴剪贴板内容，按类型分派：**画布内复制的节点标记 → 粘贴节点（最高优先级，不会被剪贴板中残留的旧文本/文件抢占；也支持跨画布/刷新后粘贴，节点 JSON 从系统剪贴板解析）**；图片/视频/音频文件 → 上传到 `assert/custom/canvas/` 并创建对应加载节点（可视区中心错位摆放）；文本 → 创建文本节点并写入文本；剪贴板为空不派发 paste 事件时由 keydown 兜底粘贴内部复制的节点。粘贴的新节点**自动聚焦**（全部选中，显示可调整大小的边框与缩放控制点，应用级选中使 Delete/复制快捷键可用），且**不自动打开配置面板**（仅用户点击节点才打开） |
-| `Delete` / `Backspace` | 删除选中节点（确认）或选中连线 |
+| `Ctrl+C` / `Ctrl+D` | 复制选中节点（1 个或多个，**含组内连线**）到画布内部剪贴板，并同步把「节点复制标记 + JSON」写入系统剪贴板（覆盖剪贴板旧内容，与主流节点编辑器复制语义一致；无剪贴板 API 时静默降级为仅内部剪贴板） / 复制粘贴（重复节点/整组） |
+| `Ctrl+V` | 粘贴剪贴板内容，按类型分派：**画布内复制的节点标记 → 粘贴节点（单/多节点，最高优先级，不会被剪贴板中残留的旧文本/文件抢占；也支持跨画布/刷新后粘贴，节点 JSON 从系统剪贴板解析；多节点粘贴**重建组内连线，并重映射 `config.inputOrder` 与导演台素材块 `sourceNodeId`**）**；图片/视频/音频文件 → 上传到 `assert/custom/canvas/` 并创建对应加载节点（可视区中心错位摆放）；文本 → 创建文本节点并写入文本；剪贴板为空不派发 paste 事件时由 keydown 兜底粘贴内部复制的节点。粘贴的新节点**自动聚焦**（全部选中，显示可调整大小的边框与缩放控制点，应用级选中使 Delete/复制快捷键可用），且**不自动打开配置面板**（仅用户点击节点才打开） |
+| `Delete` / `Backspace` | 删除选中节点（1 个显示节点名、多个显示数量，均 `confirm` 一次确认；整组删除单次撤销）或选中连线 |
 | `Esc` | 关闭右键菜单 / 取消内联重命名 |
 | 节点处于 loading（`status = running`） | **通用能力**：`CanvasNodeCard` 在节点内容上叠加半透明遮罩 + 加载动画 + 最近日志 + 「中断」按钮（统一中断入口）；error 时叠加错误遮罩 + 「重试」。loading 任务持久化于 localStorage，离开画布/刷新后未完成任务继续显示 loading（见 §2.3 / §8） |
 | 加载节点上传文件（「上传图片/音频/视频」按钮或粘贴媒体） | **节点内上传进度条（通用能力，`useCanvasUpload` 状态驱动）**：上传中节点卡片叠加进度遮罩（文件名 + `v-progress-linear` + 百分比/已传大小，总大小未知时显示不确定进度条）；失败时叠加错误遮罩（错误文案 + 「重试」按钮，沿用原文件与目标路径重传）+ snackbar 提示，遮罩 8s 后自动消失；成功遮罩消失、节点立即展示新资产。粘贴媒体先创建空加载节点再逐个上传（进度显示在各节点上，全部完成后 snackbar 汇总），上传失败保留空节点可直接重试/选资产 |
@@ -261,6 +267,7 @@ frontend/src/
 │   ├── types.ts                  # 数据模型 + 版本迁移 + id 工具
 │   ├── registry.ts               # 节点原型注册表（含 canGenerate/hasHistory 能力标志）
 │   ├── connection.ts             # 连接校验（类型/成环）
+│   ├── groupSelection.ts         # 多选群组纯函数（包围盒/命中测试/原型兼容性过滤/config id 重映射/合成节点 id）
 │   ├── paths.ts                  # 定义文件与产物路径
 │   ├── preview.ts                # 预览 URL
 │   ├── api.ts                    # loadCanvas / saveCanvas
@@ -268,28 +275,32 @@ frontend/src/
 │   ├── autobuild.ts              # 自动搭画布
 │   │   # 注：autobuild.ts 另含 resolveShotStageRef / resolveCharacterRef / deriveStageRefFromAssetPath / buildSubSceneAutoCanvas
 │   ├── clipboard.ts              # 剪贴板媒体识别（classifyPastedFile/collectPastedMedia/粘贴上传目标路径）
-│   ├── nodeClipboard.ts          # 节点复制标记（NODE_CLIPBOARD_PREFIX/serializeNodeClipboard/parseNodeClipboardText）
+│   ├── nodeClipboard.ts          # 节点复制标记（单/多节点：NODE_GROUP_CLIPBOARD_PREFIX + { nodes, connections }；兼容旧单节点标记）
 │   ├── sceneFrame.ts             # 设为分镜场景图纯函数（buildSceneFrameOptions/deriveStageFrameBody）
-│   ├── useCanvasStore.ts         # 状态：加载/保存(防抖 800ms)/增删改查/撤销重做/剪贴板/switchTarget
+│   ├── useCanvasStore.ts         # 状态：加载/保存(防抖 800ms)/增删改查/撤销重做/剪贴板/批量操作（applyNodes/updateNodes/removeNodes/connectGroupToNode/createNodeAndConnect）/switchTarget
 │   ├── useCanvasGeneration.ts    # 生成：跑工作流/轮询（纯体验层，不回写元数据）/统一中断/结果通知/运行中任务 localStorage 持久化与 restore/switchTarget
-│   └── *.test.ts                 # 单元测试（220+ 用例）
+│   └── *.test.ts                 # 单元测试（390+ 用例）
 └── components/canvas/
     ├── AssetCanvas.vue           # 编排层：组装 store/gen/composables，渲染 VueFlow + 子组件
     ├── CanvasToolbar.vue         # 工具栏（视图缩放/撤销重做/自动搭画布/添加节点/保存状态）
-    ├── CanvasNodeCard.vue        # 节点卡片（名称头/内联重命名/端口/主体组件/缩放控制点 + 通用 loading/错误遮罩与中断入口）
-    ├── CanvasEditorPanel.vue     # 配置悬浮面板（固定大小、位置联动、边界钳制、淡入淡出）
-    ├── CanvasContextMenu.vue     # 节点/连线右键菜单（纯展示）
+    ├── CanvasNodeCard.vue        # 节点卡片（名称头/内联重命名/端口/主体组件/缩放控制点 + 通用 loading/错误遮罩与中断入口 + 成组连接悬停高亮）
+    ├── CanvasEditorPanel.vue     # 配置悬浮面板（固定大小、位置联动、边界钳制、淡入淡出；仅单选节点显示）
+    ├── CanvasContextMenu.vue     # 节点/连线/群组右键菜单（纯展示）
     ├── CanvasAddNodeMenu.vue     # 添加节点菜单（锚点 + VMenu 列表）
+    ├── CanvasGroupFrame.vue      # 群组虚线框（合成节点 __group-frame 的展示内容；拖动整组由 Vue Flow 原生拖动承接）
+    ├── CanvasGroupDot.vue        # 群组输出连接圆点（合成节点 __group-dot 的展示内容；mousedown 启动成组连接拖拽）
+    ├── CanvasGroupConnectMenu.vue# 群组连接目标选择菜单（输出点拖拽超阈值释放后弹出）
     ├── SetAsSceneDialog.vue      # 设为分镜场景图对话框（帧加载/选中/覆盖/新增）
     ├── CanvasAssertHistoryDialog.vue / SaveAssetDialog.vue / SaveAsDialog.vue  # 历史/保存为自定义资产/保存为（目标选择）对话框
     ├── composables/              # 画布交互组合式（与组件同域，store/gen/VueFlow 工具以参数注入）
     │   ├── types.ts              # 共享类型（CanvasStoreApi/CanvasGenerationApi/NodeMap 等）
-    │   ├── useCanvasFlow.ts      # Vue Flow 数据映射、拖拽/缩放回写、连线交互
-    │   ├── useCanvasSelection.ts # 选中状态/配置面板信息/删除
-    │   ├── useCanvasMenus.ts     # 右键菜单与添加节点菜单状态/动作
+    │   ├── useCanvasFlow.ts      # Vue Flow 数据映射（含群组合成节点）、拖拽/缩放回写（多节点批量）、连线交互
+    │   ├── useCanvasSelection.ts # 选中状态（单/多选 selectedNodeIds）、配置面板信息、整组删除
+    │   ├── useCanvasGroup.ts     # 群组包围盒/输出点拖拽连接/目标原型菜单/成组连接执行与忽略反馈
+    │   ├── useCanvasMenus.ts     # 右键菜单（节点/群组）与添加节点菜单状态/动作
     │   ├── useCanvasRename.ts    # 内联重命名状态
-    │   ├── useCanvasPaste.ts     # 剪贴板粘贴（文件/文本/画布内复制节点）+ Ctrl+V 兜底
-    │   ├── useCanvasKeyboard.ts  # 全局快捷键（撤销/重做/复制/粘贴/删除/Esc）
+    │   ├── useCanvasPaste.ts     # 剪贴板粘贴（文件/文本/画布内复制节点）+ Ctrl+V 兜底 + Ctrl+D 复制粘贴整组
+    │   ├── useCanvasKeyboard.ts  # 全局快捷键（撤销/重做/复制/粘贴/删除/Esc；多选整组语义）
     │   ├── useCanvasNodeOps.ts   # 生成调度（按原型分发）+ 输入收集查询
     │   ├── useCanvasUpload.ts    # 加载节点上传：节点级进度状态（上传中/失败遮罩数据源）+ 上传/重试/中止（reset）
     │   ├── useCanvasDialogs.ts   # 历史/保存资产/场景图/分镜视频/资产选择器状态

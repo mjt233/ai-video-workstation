@@ -2,7 +2,10 @@
   <!-- Vue Flow 自定义节点卡片：名称头部（双击内联重命名）+ 端口 + 主体组件 + 缩放控制点 -->
   <div
     class="canvas-node"
-    :class="{ 'canvas-node--selected': selected }"
+    :class="{
+      'canvas-node--selected': selected,
+      'canvas-node--highlighted': highlighted,
+    }"
     @contextmenu.prevent="emit('context-menu', $event)"
     @mouseenter="hovered = true"
     @mouseleave="hovered = false"
@@ -200,6 +203,8 @@ const props = defineProps<{
   project: string
   /** Vue Flow 选中态（选中边框 + 缩放控制点） */
   selected: boolean
+  /** 成组连接拖拽悬停高亮（连接目标提示） */
+  highlighted?: boolean
   /** 生成状态（由本卡片渲染通用 loading/错误遮罩） */
   status?: GenerateStatus
   /** 节点当前产物（固定路径 + 防缓存 token；生成类节点由 AssetCanvas 按固定产物路径推导） */
@@ -310,6 +315,12 @@ function handleStyle(count: number, index: number): Record<string, string> {
 .canvas-node--selected {
   border-color: rgb(25, 118, 210);
   box-shadow: 0 0 0 1px rgb(25, 118, 210);
+}
+
+/* 成组连接拖拽悬停高亮：绿色描边提示「可连接目标」 */
+.canvas-node--highlighted {
+  border-color: rgb(56, 142, 60);
+  box-shadow: 0 0 0 2px rgb(56, 142, 60);
 }
 
 .canvas-node__header {

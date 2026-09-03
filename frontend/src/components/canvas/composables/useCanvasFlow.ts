@@ -4,6 +4,7 @@
  */
 
 import { computed, reactive, watch } from 'vue'
+import type { ComputedRef } from 'vue'
 import type {
   Connection,
   Edge as FlowEdge,
@@ -15,6 +16,13 @@ import type { OnResizeEnd } from '@vue-flow/node-resizer'
 import { canConnectNodes, getNodeOutputType } from '../../../canvas/connection'
 import { getAudioInfo } from '../../../canvas/api'
 import { getNodeCurrentAssetPath } from '../../../canvas/generate'
+import {
+  GROUP_DOT_ID,
+  GROUP_FRAME_ID,
+  groupDotPosition,
+  isSyntheticNodeId,
+  type GroupRect,
+} from '../../../canvas/groupSelection'
 import type { CanvasStoreApi, NodeMap, WritableStringRef } from './types'
 
 /** useCanvasFlow 参数 */
@@ -27,6 +35,8 @@ export interface UseCanvasFlowOptions {
   project: string
   /** 当前选中连线 id（连线右键菜单选中与断开共用，由 selection 持有） */
   selectedEdgeId: WritableStringRef
+  /** 当前多选（≥2 个）节点包围盒（合成节点定位；单选/无选中时为 null） */
+  groupRect: ComputedRef<GroupRect | null>
 }
 
 /**
@@ -36,7 +46,7 @@ export interface UseCanvasFlowOptions {
  * @returns Vue Flow 数据映射、交互处理器与连线右键菜单状态
  */
 export function useCanvasFlow(options: UseCanvasFlowOptions) {
-  const { store, nodeMap, project, selectedEdgeId } = options
+  const { store, nodeMap, project, selectedEdgeId, groupRect } = options
 
   /** Vue Flow 节点列表（type 固定 canvas，走自定义 slot 渲染） */
   const flowNodeList = computed(() =>
@@ -48,6 +58,47 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
       style: { width: `${n.width}px`, height: `${n.height}px` },
     })),
   )
+
+  /**
+   * 群组合成节点（多选 ≥2 时追加，不入 store）：
+   * - __group-frame：虚线框（置于节点下层 zIndex -1，拖动框体经 Vue Flow 原生拖动整体移动选中节点）；
+   * - __group-dot：右侧输出连接点（zIndex 2000，位于全部节点之上，mousedown 由 useCanvasGroup 承接）。
+   * 两者均 selectable/connectable/focusable=false，不参与选中/连线/框选。
+   */
+  const syntheticNodeList = computed(() => {
+    const rect = groupRect.value
+    if (!rect) return []
+    const dot = groupDotPosition(rect)
+    return [
+      {
+        id: GROUP_FRAME_ID,
+        type: 'group-frame',
+        position: { x: rect.x, y: rect.y },
+        width: rect.width,
+        height: rect.height,
+        draggable: true,
+        selectable: false,
+        connectable: false,
+        focusable: false,
+        zIndex: -1,
+      },
+      {
+        id: GROUP_DOT_ID,
+        type: 'group-dot',
+        position: dot,
+        width: 16,
+        height: 16,
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        focusable: false,
+        zIndex: 2000,
+      },
+    ]
+  })
+
+  /** Vue Flow 节点列表（真实节点 + 群组合成节点） */
+  const flowNodeFullList = computed(() => [...flowNodeList.value, ...syntheticNodeList.value])
 
   /** Vue Flow 连线列表 */
   const flowEdgeList = computed<FlowEdge[]>(() =>
@@ -76,10 +127,22 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
     { deep: true },
   )
 
-  /** 拖动结束：通过 store.updateNode 持久化位置（置脏并保存） */
+  /**
+   * 拖动结束：通过 store 持久化位置（置脏并保存，进入撤销栈）。
+   * 多个节点同时拖（含拖动群组虚线框时 Vue Flow 原生一起移动全部选中节点）批量回写，
+   * 单次撤销快照即可整体回退；单个节点保持既有单条撤销语义。
+   *
+   * @param dragged 被拖动的节点列表（可能含群组合成节点，需过滤）
+   */
   function onNodeDragStop({ nodes: dragged }: NodeDragEvent): void {
-    for (const n of dragged) {
-      store.updateNode(n.id, { x: Math.round(n.position.x), y: Math.round(n.position.y) })
+    const real = dragged.filter((n) => !isSyntheticNodeId(n.id))
+    if (real.length === 0) return
+    if (real.length > 1) {
+      store.updateNodes(
+        real.map((n) => ({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) })),
+      )
+    } else {
+      store.updateNode(real[0].id, { x: Math.round(real[0].position.x), y: Math.round(real[0].position.y) })
     }
   }
 
@@ -195,7 +258,7 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   }
 
   return {
-    flowNodes: flowNodeList,
+    flowNodes: flowNodeFullList,
     flowEdges: flowEdgeList,
     onNodeDragStop,
     onNodeResizeEnd,
