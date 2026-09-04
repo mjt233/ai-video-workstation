@@ -9,6 +9,7 @@ import VideoGenerateNode from '../components/canvas/nodes/VideoGenerateNode.vue'
 import ExtractFrameNode from '../components/canvas/nodes/ExtractFrameNode.vue'
 import ConcatVideoNode from '../components/canvas/nodes/ConcatVideoNode.vue'
 import TrimVideoNode from '../components/canvas/nodes/TrimVideoNode.vue'
+import AudioTrimNode from '../components/canvas/nodes/AudioTrimNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
@@ -18,6 +19,7 @@ import VideoGenerateEditor from '../components/canvas/editors/VideoGenerateEdito
 import ExtractFrameEditor from '../components/canvas/editors/ExtractFrameEditor.vue'
 import ConcatVideoEditor from '../components/canvas/editors/ConcatVideoEditor.vue'
 import TrimVideoEditor from '../components/canvas/editors/TrimVideoEditor.vue'
+import AudioTrimEditor from '../components/canvas/editors/AudioTrimEditor.vue'
 import TtsGenerateEditor from '../components/canvas/editors/TtsGenerateEditor.vue'
 
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
@@ -225,6 +227,24 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     outputExt: 'mp4',
     defaultConfig: {
       startMode: 'time',
+      startValue: 0,
+      duration: 1,
+    },
+  },
+  {
+    id: 'audio-trim',
+    name: '裁剪音频',
+    icon: 'mdi-scissors-cutting',
+    // 输入/输出均为 audio；手动点击裁剪（服务端 ffmpeg 重编码 flac，小数秒精度）
+    inputPorts: [{ id: 'in', type: 'audio', label: '音频' }],
+    outputPorts: [{ id: 'out', type: 'audio', label: '音频' }],
+    resizeable: true,
+    canGenerate: true,
+    bodyComponent: AudioTrimNode,
+    editorComponent: AudioTrimEditor,
+    getOutputAssetPath: generateOutput,
+    outputExt: 'flac',
+    defaultConfig: {
       startValue: 0,
       duration: 1,
     },

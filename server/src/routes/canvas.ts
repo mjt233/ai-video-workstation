@@ -11,6 +11,7 @@ import {
 } from '../assets/extract-frame.js';
 import { concatVideos, ConcatError } from '../assets/concat-video.js';
 import { trimVideo, TrimError } from '../assets/trim-video.js';
+import { assertAudioTrimOutputPath, trimAudio, TrimAudioError } from '../assets/trim-audio.js';
 import { isUnderAssert } from './fs-path.js';
 import { copyExistingAssetToHistory } from '../assets/history.js';
 import { saveCanvasNodeUpload } from '../assets/canvas-upload.js';
@@ -385,6 +386,66 @@ canvasRouter.post('/canvas/trim-video', async (req: Request, res: Response) => {
       return;
     }
     console.error('Failed to trim video:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * 裁剪音频：POST /api/canvas/trim-audio
+ *
+ * body: { project, audioPath, outputPath, startTime, duration }
+ * - startTime：起始位置（秒，可小数，必须 ≥ 0）；
+ * - duration：持续时长（秒，> 0，可小数；超出片尾截到剩余时长）。
+ * 重编码为 FLAC 输出（不用 -c copy），保证小数秒切口准确。
+ * audioPath 须位于 assert/ 前缀下；outputPath 必须是画布节点固定产物 output.flac。
+ */
+canvasRouter.post('/canvas/trim-audio', async (req: Request, res: Response) => {
+  try {
+    const project = String(req.body?.project ?? '');
+    const audioPath = String(req.body?.audioPath ?? '');
+    const outputPath = String(req.body?.outputPath ?? '');
+    const audioNorm = audioPath.replace(/\\/g, '/');
+    const outputNorm = outputPath.replace(/\\/g, '/');
+    if (!project || !audioPath || !outputPath) {
+      res.status(400).json({ error: 'project / audioPath / outputPath 必填' });
+      return;
+    }
+    if (!isUnderAssert(audioNorm)) {
+      res.status(403).json({ error: '仅支持 assert/ 下的音频路径' });
+      return;
+    }
+    let outputRel: string;
+    try {
+      outputRel = assertAudioTrimOutputPath(outputNorm);
+    } catch (err) {
+      const e = err as { message?: string };
+      res.status(400).json({ error: e.message ?? '输出路径不是合法的画布节点产物', code: 'INVALID' });
+      return;
+    }
+    const startTime = Number(req.body?.startTime);
+    if (!Number.isFinite(startTime) || startTime < 0) {
+      res.status(400).json({ error: 'startTime 必须是大于等于 0 的数字（秒）' });
+      return;
+    }
+    const duration = Number(req.body?.duration);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      res.status(400).json({ error: 'duration 必须是大于 0 的数字（秒）' });
+      return;
+    }
+    await archiveCanvasOutput(project, outputRel);
+    const result = await trimAudio(project, audioNorm, { startTime, duration }, outputRel);
+    res.json({ success: true, path: result.path, duration: result.duration });
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    if (e instanceof TrimAudioError || e?.code === 'INVALID') {
+      res.status(400).json({ error: e.message, code: e.code ?? 'INVALID' });
+      return;
+    }
+    if (e?.code === 'NOT_FOUND') {
+      res.status(404).json({ error: e.message, code: 'NOT_FOUND' });
+      return;
+    }
+    console.error('Failed to trim audio:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

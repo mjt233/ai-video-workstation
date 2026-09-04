@@ -110,12 +110,20 @@ describe('groupConnectOptions', () => {
     expect(options.find((o) => o.prototypeId === 'video-generate')!.compatible).toBe(true)
   })
 
-  it('audio 输出可连 TTS 与生成视频', () => {
+  it('audio 输出可连 TTS、裁剪音频与生成视频', () => {
     const options = groupConnectOptions(['audio'])
     const map = Object.fromEntries(options.map((o) => [o.prototypeId, o]))
     expect(map['tts-generate'].compatible).toBe(true)
+    expect(map['audio-trim'].compatible).toBe(true)
     expect(map['video-generate'].compatible).toBe(true)
     expect(map['image-generate'].compatible).toBe(false)
+  })
+
+  it('video 输出不可连裁剪音频（仅支持音频输入）', () => {
+    const options = groupConnectOptions(['video'])
+    const map = Object.fromEntries(options.map((o) => [o.prototypeId, o]))
+    expect(map['audio-trim'].compatible).toBe(false)
+    expect(map['audio-trim'].reason).toContain('音频')
   })
 
   it('不包含无输入口的原型（加载类/文本）', () => {

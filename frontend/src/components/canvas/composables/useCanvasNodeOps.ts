@@ -85,6 +85,11 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       await trimNodeVideo(nodeId)
       return
     }
+    if (node.prototypeId === 'audio-trim') {
+      // 裁剪音频：本地 ffmpeg 裁剪（不走工作流）
+      await trimNodeAudio(nodeId)
+      return
+    }
     if (node.prototypeId === 'video-generate') {
       const implMsg = missingWorkflowImplMessage(node)
       if (implMsg) {
@@ -186,6 +191,39 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     await gen.trimVideo(node, videoPath, applyResult)
   }
 
+  /**
+   * 裁剪音频节点：收集第一路音频输入并触发服务端 ffmpeg 裁剪。
+   *
+   * 校验音频输入（缺失时提示）与裁剪参数（起始位置 ≥ 0、时长 > 0）；
+   * 多路音频输入只取第一路（与裁剪视频节点行为一致，见 docs/asset-canvas.md）。
+   *
+   * @param nodeId 节点 id
+   */
+  async function trimNodeAudio(nodeId: string): Promise<void> {
+    const node = nodeMap.value[nodeId]
+    if (!node) return
+    const audios = audioInputsOf(nodeId)
+    const audioPath = audios[0]?.path
+    if (!audioPath) {
+      showSnackbar('请先连接音频输入', 'primary')
+      return
+    }
+    const rawStart = node.config.startValue
+    const startValue = typeof rawStart === 'number' && Number.isFinite(rawStart) ? rawStart : 0
+    if (!(startValue >= 0)) {
+      showSnackbar('请填写有效的起始位置', 'primary')
+      return
+    }
+    const rawDuration = node.config.duration
+    const duration = typeof rawDuration === 'number' && Number.isFinite(rawDuration) ? rawDuration : 0
+    if (!(duration > 0)) {
+      showSnackbar('请填写有效的裁剪时长', 'primary')
+      return
+    }
+    gen.clearStatus(nodeId)
+    await gen.trimAudio(node, audioPath, applyResult)
+  }
+
   /** 节点当前是否在生成中（供编辑器显示） */
   function isNodeRunning(nodeId: string): boolean {
     return gen.statusByNode.value[nodeId]?.status === 'running'
@@ -204,6 +242,21 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   function withVersions(list: CanvasInputInfo[]): CanvasInputInfo[] {
     if (!getOutputMtime) return list
     return list.map((i) => ({ ...i, version: getOutputMtime(i.nodeId) ?? undefined }))
+  }
+
+  /**
+   * 收集节点的音频输入资产（来源节点输出类型为 audio）。
+   *
+   * 音频裁剪节点使用 audio 输入连接点，连线校验已保证来源为音频输出；
+   * 这里仍按来源输出类型过滤，防御旧数据/异常连线把非音频资产带入 ffmpeg。
+   *
+   * @param nodeId 目标节点 id
+   * @returns 音频输入资产信息数组
+   */
+  function audioInputsOf(nodeId: string): CanvasInputInfo[] {
+    const node = nodeMap.value[nodeId]
+    const all = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope()))
+    return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === 'audio')
   }
 
   /** 节点当前输入资产信息（含来源节点，供编辑器预览/拖拽排序；生成类来源按固定产物路径推导） */
@@ -307,8 +360,10 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     extractNodeFrame,
     concatNodeVideos,
     trimNodeVideo,
+    trimNodeAudio,
     isNodeRunning,
     inputsOf,
+    audioInputsOf,
     videoInputsOf,
     videoInputGroups,
     isUpstreamUpdated,

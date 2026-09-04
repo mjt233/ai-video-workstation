@@ -256,3 +256,46 @@ export async function trimVideo(
   })
   return data
 }
+
+/** 音频裁剪请求参数（起始位置与持续时长均使用秒） */
+export interface TrimAudioParams {
+  /** 起始位置（秒，可小数，须 ≥ 0） */
+  startTime: number
+  /** 裁剪时长（秒，> 0，可小数） */
+  duration: number
+}
+
+/** 音频裁剪执行结果（服务端返回，含输出相对路径） */
+export interface TrimAudioResult {
+  /** 裁剪产物相对路径（assert/ 下，output.flac） */
+  path: string
+  /** 实际裁剪时长（秒；超出片尾时短于请求值） */
+  duration: number
+}
+
+/**
+ * 裁剪音频：调用服务端 ffmpeg 接口，把输入音频按起点与持续时长剪切为单个 FLAC。
+ *
+ * 服务端重编码输出（不用 -c copy），保证小数秒切口准确；产物固定为 output.flac。
+ *
+ * @param project 项目名
+ * @param audioPath 输入音频相对路径（assert/ 下）
+ * @param params 裁剪参数（startTime + duration）
+ * @param outputPath 输出音频相对路径（assert/ 下，画布节点固定 output.flac）
+ * @returns 服务端执行结果（含输出相对路径与实际时长）
+ */
+export async function trimAudio(
+  project: string,
+  audioPath: string,
+  params: TrimAudioParams,
+  outputPath: string,
+): Promise<TrimAudioResult> {
+  const { data } = await client.post<TrimAudioResult>('/canvas/trim-audio', {
+    project,
+    audioPath,
+    outputPath,
+    startTime: params.startTime,
+    duration: params.duration,
+  })
+  return data
+}

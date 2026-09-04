@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含十个内置节点', () => {
+  it('包含十一个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
+      'audio-trim',
       'image-generate',
       'image-loader',
       'text',
@@ -100,6 +101,16 @@ describe('getOutputAssetPath（各节点自实现输出资产解析）', () => {
     expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/vt/output.mp4' } })).toBe('assert/scene/1/1/canvas/vt/output.mp4')
     expect(p.getOutputAssetPath?.({})).toBeUndefined()
   })
+
+  it('裁剪音频节点：audio 输入、audio 输出、默认配置与 current.path 解析', () => {
+    const p = getPrototype('audio-trim')!
+    expect(p.name).toBe('裁剪音频')
+    expect(p.inputPorts[0]?.type).toBe('audio')
+    expect(p.outputPorts[0]?.type).toBe('audio')
+    expect(p.defaultConfig).toMatchObject({ startValue: 0, duration: 1 })
+    expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/at/output.flac' } })).toBe('assert/scene/1/1/canvas/at/output.flac')
+    expect(p.getOutputAssetPath?.({})).toBeUndefined()
+  })
 })
 
 describe('outputExt（生成类节点产物扩展名）', () => {
@@ -110,6 +121,7 @@ describe('outputExt（生成类节点产物扩展名）', () => {
     expect(getPrototype('video-frame-extract')?.outputExt).toBe('png')
     expect(getPrototype('video-concat')?.outputExt).toBe('mp4')
     expect(getPrototype('video-trim')?.outputExt).toBe('mp4')
+    expect(getPrototype('audio-trim')?.outputExt).toBe('flac')
     expect(getPrototype('image-loader')?.outputExt).toBeUndefined()
     expect(getPrototype('audio-loader')?.outputExt).toBeUndefined()
     expect(getPrototype('video-loader')?.outputExt).toBeUndefined()
@@ -119,7 +131,7 @@ describe('outputExt（生成类节点产物扩展名）', () => {
 
 describe('canGenerate / hasHistory 能力标志', () => {
   it('生成类节点支持重新生成', () => {
-    const ids = ['image-generate', 'video-generate', 'tts-generate', 'video-frame-extract', 'video-concat', 'video-trim']
+    const ids = ['image-generate', 'video-generate', 'tts-generate', 'video-frame-extract', 'video-concat', 'video-trim', 'audio-trim']
     for (const id of ids) {
       expect(getPrototype(id)?.canGenerate, `${id} 应支持重新生成`).toBe(true)
     }
@@ -139,6 +151,7 @@ describe('canGenerate / hasHistory 能力标志', () => {
     expect(getPrototype('video-frame-extract')?.hasHistory ?? false).toBe(false)
     expect(getPrototype('video-concat')?.hasHistory ?? false).toBe(false)
     expect(getPrototype('video-trim')?.hasHistory ?? false).toBe(false)
+    expect(getPrototype('audio-trim')?.hasHistory ?? false).toBe(false)
     expect(getPrototype('image-loader')?.hasHistory ?? false).toBe(false)
   })
 })

@@ -6,6 +6,7 @@ import {
   extractVideoFrameAtTime,
   concatVideo as requestConcatVideo,
   trimVideo as requestTrimVideo,
+  trimAudio as requestTrimAudio,
   getCanvasNodeInfo,
 } from './api'
 import type { VideoSubmitParams } from './videoSubmit'
@@ -655,6 +656,43 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
   }
 
   /**
+   * 裁剪音频节点：调用服务端 ffmpeg 接口，成功后通知结果（产物固定覆盖 output.flac）。
+   *
+   * 同步路由（ffmpeg 阻塞等待），无轮询；重复裁剪时旧产物由服务端归档进历史目录。
+   *
+   * @param node 裁剪音频节点数据
+   * @param audioPath 输入音频相对路径（来自连线输入）
+   * @param onResult 完成（含失败）回调（nodeId, outputPath），可省略
+   */
+  async function trimAudio(
+    node: CanvasNodeData,
+    audioPath: string,
+    onResult?: (nodeId: string, outputPath: string) => void,
+  ): Promise<void> {
+    const nodeId = node.id
+    if (statusByNode.value[nodeId]?.status === 'running') return
+    statusByNode.value[nodeId] = { status: 'running' }
+    const outputPath = computeOutputPath(node)
+    await startFfmpegTask(nodeId, outputPath)
+    const resultCb = onResult ?? onResultCb
+    try {
+      const rawStart = node.config.startValue
+      const startValue = typeof rawStart === 'number' && Number.isFinite(rawStart) ? rawStart : 0
+      const rawDuration = node.config.duration
+      const duration = typeof rawDuration === 'number' && Number.isFinite(rawDuration) ? rawDuration : 0
+      const res = await requestTrimAudio(project, audioPath, { startTime: startValue, duration }, outputPath)
+      finishFfmpegTask(nodeId)
+      statusByNode.value[nodeId] = {
+        status: 'success',
+        lastLog: `已从 ${startValue}s 处裁剪 ${duration}s`,
+      }
+      resultCb?.(nodeId, res.path)
+    } catch (e) {
+      failFfmpegTask(nodeId, e)
+    }
+  }
+
+  /**
    * ffmpeg 同步任务开始：读取产物基线（服务端 mtime，完成判定用）并持久化 running 记录。
    *
    * @param nodeId 节点 id
@@ -753,5 +791,5 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     await restore()
   }
 
-  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, trimVideo, interrupt, clearStatus, computeOutputPath, getScope, reset, restore, switchTarget }
+  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, trimVideo, trimAudio, interrupt, clearStatus, computeOutputPath, getScope, reset, restore, switchTarget }
 }
