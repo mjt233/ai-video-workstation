@@ -162,6 +162,13 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
   /** 资产选择器状态（nodeId 记录绑定目标加载节点；mediaKind 记录道具页签媒体过滤） */
   const picker = reactive({ show: false, nodeId: '', showVoice: false, mediaKind: 'image' as 'image' | 'video' | 'audio' })
 
+  /** 资产选择器预选路径：加载节点当前绑定的资产路径（单选；供各页签高亮与自定义页签初始目录定位） */
+  const pickerSelected = computed<string[]>(() => {
+    const node = picker.nodeId ? nodeMap.value[picker.nodeId] : undefined
+    const p = node?.config?.assetPath
+    return typeof p === 'string' && p ? [p] : []
+  })
+
   /**
    * 资产选择器页签：按节点类型定制——
    * 音频加载节点提供「音频」页签（台词音频/自定义音频）与道具音频；
@@ -232,6 +239,7 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
     openSetAsShotVideo,
     picker,
     pickerTabs,
+    pickerSelected,
     openAssetPicker,
     onPickerConfirm,
     resetAll,

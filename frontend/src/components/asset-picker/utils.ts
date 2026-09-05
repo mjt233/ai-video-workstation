@@ -11,24 +11,62 @@ import type { AssetItem } from './types'
 /** 缓存破坏时间戳（保证缩略图 URL 每次刷新） */
 export const ts = () => Date.now()
 
-/** 支持的图片扩展名集合 */
-const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
+/** 支持的图片扩展名列表（不含点、小写） */
+export const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp'] as const
 
-/** 支持的音频扩展名集合 */
-const AUDIO_EXTS = new Set(['flac', 'mp3', 'wav', 'm4a', 'ogg', 'opus'])
+/** 支持的音频扩展名列表（不含点、小写） */
+export const AUDIO_EXTS = ['flac', 'mp3', 'wav', 'm4a', 'ogg', 'opus'] as const
 
-/** 支持的视频扩展名集合 */
-const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'])
+/** 支持的视频扩展名列表（不含点、小写） */
+export const VIDEO_EXTS = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'] as const
+
+/** 媒体分类（与 PropMediaFilter 同义，供扩展名映射使用） */
+export type MediaKind = 'image' | 'audio' | 'video'
 
 /**
- * 判断文件名是否为支持的视频文件。
+ * 判断文件名扩展名是否命中可接受扩展名列表（忽略大小写）。
+ *
+ * @param name 文件名（大小写不敏感）
+ * @param acceptExts 可接受扩展名列表（不含点；为空列表时恒返回 false）
+ * @returns true 表示扩展名命中可选项
+ */
+export function hasAcceptExt(name: string, acceptExts: readonly string[]): boolean {
+  if (acceptExts.length === 0) return false
+  const idx = name.lastIndexOf('.')
+  const ext = idx >= 0 && idx < name.length - 1 ? name.slice(idx + 1).toLowerCase() : ''
+  return ext !== '' && acceptExts.some((e) => e.toLowerCase() === ext)
+}
+
+/**
+ * 将媒体分类映射为可接受的扩展名列表（不含点、小写）。
+ *
+ * @param kind 媒体分类：image / audio / video
+ * @returns 该媒体分类的扩展名列表副本
+ */
+export function acceptExtsForMedia(kind: MediaKind): string[] {
+  if (kind === 'audio') return [...AUDIO_EXTS]
+  if (kind === 'video') return [...VIDEO_EXTS]
+  return [...IMAGE_EXTS]
+}
+
+/**
+ * 判断文件名是否为支持的图片文件（扩展名忽略大小写）。
+ *
+ * @param name 文件名
+ * @returns true 表示图片文件
+ */
+export function isImageFile(name: string): boolean {
+  return hasAcceptExt(name, IMAGE_EXTS)
+}
+
+/**
+ * 判断文件名是否为支持的视频文件（扩展名忽略大小写）。
  *
  * @param name 文件名
  * @returns true 表示视频文件
  */
 export function isVideoFile(name: string): boolean {
-  const ext = name.toLowerCase().split('.').pop()
-  return !!ext && VIDEO_EXTS.has(ext)
+  return hasAcceptExt(name, VIDEO_EXTS)
 }
 
 /**
@@ -140,11 +178,8 @@ export async function listImageFilesRecursive(project: string, dirRelPath: strin
       const childRel = relPath.endsWith('/') ? `${relPath}${entry.name}` : `${relPath}/${entry.name}`
       if (entry.type === 'dir') {
         await walk(childRel)
-      } else {
-        const ext = entry.name.toLowerCase().split('.').pop()
-        if (ext && IMAGE_EXTS.has(`.${ext}`)) {
-          results.push(childRel)
-        }
+      } else if (isImageFile(entry.name)) {
+        results.push(childRel)
       }
     }
   }
@@ -222,12 +257,11 @@ export async function listVideoFilesRecursive(project: string, dirRelPath: strin
 }
 
 /**
- * 判断文件名是否为支持的音频文件。
+ * 判断文件名是否为支持的音频文件（扩展名忽略大小写）。
  *
  * @param name 文件名
  * @returns true 表示音频文件
  */
 export function isAudioFile(name: string): boolean {
-  const ext = name.toLowerCase().split('.').pop()
-  return !!ext && AUDIO_EXTS.has(ext)
+  return hasAcceptExt(name, AUDIO_EXTS)
 }

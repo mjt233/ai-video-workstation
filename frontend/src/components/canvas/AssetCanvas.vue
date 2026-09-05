@@ -265,6 +265,7 @@
         v-model="picker.show"
         :project="props.project"
         :multiple="false"
+        :selected="pickerSelected"
         :tabs="pickerTabs"
         :show-voice="picker.showVoice"
         :media-kind="picker.mediaKind"
@@ -737,7 +738,7 @@ const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } =
 const { editorPanel, isMultiSelected, onEdgeClick, onNodeDragStart } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
-const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, openAssetPicker, onPickerConfirm, openHistory } = dialogs
+const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
 // 群组组合式导出（顶层解构：模板内自动解包 ref）

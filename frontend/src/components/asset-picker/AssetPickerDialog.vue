@@ -119,7 +119,7 @@
           @select="onSelect"
         />
 
-        <!-- 自定义资产：平铺网格 -->
+        <!-- 自定义资产：目录浏览器（可按 mediaKind 扩展名过滤，默认图片） -->
         <CustomAssetsGrid
           v-else-if="activeTab === 'custom' && visibleTabs.includes('custom')"
           :active="modelValue"
@@ -127,6 +127,7 @@
           :project="project"
           :exclude="exclude"
           :selected-paths="selectedPaths"
+          :accept-exts="customAcceptExts"
           @select="onSelect"
         />
 
@@ -201,7 +202,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { getPathLabel, thumbUrl } from './utils'
+import { getPathLabel, acceptExtsForMedia, thumbUrl } from './utils'
 import type { AssetItem, AssetTab, PropMediaFilter } from './types'
 import ParentVariantGrid from './ParentVariantGrid.vue'
 import EntityAssetTree from './EntityAssetTree.vue'
@@ -303,6 +304,9 @@ const selectedPaths = computed(() => localSelected.value.map((item) => item.path
 const entityKind = computed<'character' | 'stage'>(() =>
   activeTab.value === 'stage' ? 'stage' : 'character',
 )
+
+/** 自定义资产页签可接受扩展名列表（由 mediaKind 映射，忽略大小写；未指定时默认图片扩展名） */
+const customAcceptExts = computed<string[]>(() => acceptExtsForMedia(props.mediaKind ?? 'image'))
 
 /**
  * 处理页签子组件的选中事件：
