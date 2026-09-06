@@ -11,6 +11,9 @@ import type { CanvasDirectorConfig } from './videoTypes'
 /** 自动保存防抖毫秒数 */
 const SAVE_DEBOUNCE_MS = 800
 
+/** 节点默认尺寸：原型未声明 defaultSize 时的兜底值 */
+const DEFAULT_NODE_SIZE = { width: 240, height: 160 }
+
 /** 撤销/重做历史栈容量上限 */
 const HISTORY_LIMIT = 50
 
@@ -151,8 +154,8 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
       name: proto.name,
       x,
       y,
-      width: 240,
-      height: 160,
+      width: proto.defaultSize?.width ?? DEFAULT_NODE_SIZE.width,
+      height: proto.defaultSize?.height ?? DEFAULT_NODE_SIZE.height,
       config: {
         ...(proto.defaultConfig ? JSON.parse(JSON.stringify(proto.defaultConfig)) : {}),
         ...(configPatch ?? {}),
@@ -476,8 +479,8 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
       name: proto.name,
       x: Math.round(x),
       y: Math.round(y),
-      width: 240,
-      height: 160,
+      width: proto.defaultSize?.width ?? DEFAULT_NODE_SIZE.width,
+      height: proto.defaultSize?.height ?? DEFAULT_NODE_SIZE.height,
       config: {
         ...(proto.defaultConfig ? JSON.parse(JSON.stringify(proto.defaultConfig)) : {}),
       },

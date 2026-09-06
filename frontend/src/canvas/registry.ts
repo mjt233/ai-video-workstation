@@ -47,6 +47,8 @@ export interface NodePrototype {
   editorComponent?: Component
   /** 创建节点时的默认配置（可选） */
   defaultConfig?: NodeConfig
+  /** 创建节点时的默认尺寸（可选；未声明时使用全局兜底 240×160，见 useCanvasStore.DEFAULT_NODE_SIZE） */
+  defaultSize?: { width: number; height: number }
   /**
    * 输出资产路径解析：由节点自身配置推导当前输出资产（项目内相对路径），无则 undefined。
    * 未声明时 getNodeCurrentAssetPath 按画布约定默认读 config.current.path。
@@ -165,6 +167,9 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,
     bodyComponent: AiTextGenerateNode,
+    // 默认尺寸大于通用兜底（240×160）：AI 文本节点含模型/预设下拉 + 输入预览 + 双栏文本区，
+    // 需要更多空间展示内容（用户可再手动缩放）
+    defaultSize: { width: 360, height: 240 },
     defaultConfig: {
       providerInstanceId: '',
       modelId: '',

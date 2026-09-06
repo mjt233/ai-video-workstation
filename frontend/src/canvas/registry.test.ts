@@ -30,6 +30,13 @@ describe('NODE_PROTOTYPES', () => {
     expect(p.canGenerate ?? false).toBe(false)
   })
 
+  it('AI 文本生成节点声明更大默认尺寸（其余节点未声明走 240×160 兜底）', () => {
+    expect(getPrototype('text-ai')!.defaultSize).toEqual({ width: 360, height: 240 })
+    for (const p of NODE_PROTOTYPES) {
+      if (p.id !== 'text-ai') expect(p.defaultSize, `${p.id} 不应声明 defaultSize`).toBeUndefined()
+    }
+  })
+
   it('生成图片只接受 image 输入，输出 image', () => {
     const p = getPrototype('image-generate')!
     expect(p.inputPorts.every((port) => port.type === 'image')).toBe(true)

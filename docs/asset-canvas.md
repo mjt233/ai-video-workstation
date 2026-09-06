@@ -65,7 +65,7 @@
 
 ## 3. 节点类型（`frontend/src/canvas/registry.ts`）
 
-节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / outputExt / defaultConfig / bodyComponent / editorComponent / getOutputAssetPath`。
+节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / outputExt / defaultConfig / defaultSize / bodyComponent / editorComponent / getOutputAssetPath`。其中 `defaultSize`（可选）指定创建节点时的默认尺寸（宽×高），未声明时使用全局兜底 240×160（`useCanvasStore.DEFAULT_NODE_SIZE`）——目前仅 AI文本生成节点声明更大默认尺寸 360×240（内容多：模型/预设下拉 + 输入预览 + 双栏文本区）。
 其中端口 `type` 支持**单一类型或多类型数组**（`DataType | DataType[]`，如 AI文本生成节点的 `['media','text']` —— 任一匹配即可连接）；输出端口均为单一类型（v1 每节点单输出）。
 其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有**历史对话框入口**）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`video-frame-extract`/`video-concat`/`video-trim`/`audio-trim` 仅 `canGenerate`（无历史对话框入口；但重复执行时旧产物仍会被服务端归档进 history 目录，只是没有 UI 入口查看）。`outputExt`（生成类节点产物扩展名，如 jpg/mp4/png/flac）决定固定产物文件名 `output.{ext}`。
 

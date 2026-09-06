@@ -61,6 +61,16 @@ describe('useCanvasStore', () => {
     expect(() => store.addNode('unknown', 0, 0)).toThrow()
   })
 
+  it('addNode：默认尺寸按原型 defaultSize 应用（AI 文本生成更大，其余 240×160 兜底）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const ai = store.addNode('text-ai', 0, 0)
+    expect(ai.width).toBe(360)
+    expect(ai.height).toBe(240)
+    const loader = store.addNode('image-loader', 200, 200)
+    expect(loader.width).toBe(240)
+    expect(loader.height).toBe(160)
+  })
+
   it('removeNode：删除节点及其连线', () => {
     const store = useCanvasStore('p', TARGET)
     const a = store.addNode('image-loader', 0, 0)
@@ -462,5 +472,13 @@ describe('useCanvasStore', () => {
   it('createNodeAndConnect：未知原型抛错', () => {
     const store = useCanvasStore('p', TARGET)
     expect(() => store.createNodeAndConnect('unknown', 0, 0, [])).toThrow()
+  })
+
+  it('createNodeAndConnect：AI 文本生成节点按 defaultSize 创建更大默认尺寸', () => {
+    const store = useCanvasStore('p', TARGET)
+    const { node } = store.createNodeAndConnect('text-ai', 0, 0, [])
+    expect(node.prototypeId).toBe('text-ai')
+    expect(node.width).toBe(360)
+    expect(node.height).toBe(240)
   })
 })
