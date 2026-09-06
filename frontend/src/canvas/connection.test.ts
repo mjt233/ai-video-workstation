@@ -28,6 +28,22 @@ describe('canConnect', () => {
   it('media 仅作输入口，不能作为来源连接到具体类型', () => {
     expect(canConnect('media', 'image')).toBe(false)
   })
+
+  it('数组端口：任一类型匹配即可连接', () => {
+    expect(canConnect('text', ['media', 'text'])).toBe(true)
+    expect(canConnect('image', ['media', 'text'])).toBe(true)
+    expect(canConnect('audio', ['media', 'text'])).toBe(true)
+    expect(canConnect('video', ['media', 'text'])).toBe(true)
+    expect(canConnect('text', ['text'])).toBe(true)
+    expect(canConnect('image', ['text'])).toBe(false)
+    expect(canConnect('audio', [])).toBe(false)
+  })
+
+  it('数组来源端口：任一类型匹配即可连接', () => {
+    expect(canConnect(['image', 'text'], 'text')).toBe(true)
+    expect(canConnect(['image', 'audio'], 'text')).toBe(false)
+    expect(canConnect(['image', 'audio'], 'media')).toBe(true)
+  })
 })
 
 describe('getNodeOutputType / getNodeInputType', () => {
@@ -119,5 +135,30 @@ describe('media 输入口连接校验', () => {
 
   it('getNodeInputPortType 返回 media', () => {
     expect(getNodeInputPortType('target', 'in', mediaNodes)).toBe('media')
+  })
+})
+
+describe('AI文本生成节点单一多类型输入口', () => {
+  // text-ai 使用单一 in 输入口（type: ['media', 'text']），媒体/文本来源均可连接
+  const aiNodes: CanvasNodeData[] = [
+    { id: 'img', prototypeId: 'image-loader', name: 'img', x: 0, y: 0, width: 200, height: 120, config: {} },
+    { id: 'aud', prototypeId: 'audio-loader', name: 'aud', x: 0, y: 0, width: 200, height: 120, config: {} },
+    { id: 'vid', prototypeId: 'video-loader', name: 'vid', x: 0, y: 0, width: 200, height: 120, config: {} },
+    { id: 'txt', prototypeId: 'text', name: 'txt', x: 0, y: 0, width: 200, height: 120, config: {} },
+    { id: 'target', prototypeId: 'text-ai', name: 'target', x: 0, y: 0, width: 240, height: 160, config: {} },
+  ]
+
+  it('图片/音频/视频源可连接到 in 输入口', () => {
+    expect(canConnectNodes([], 'img', 'target', aiNodes, 'in')).toBe(true)
+    expect(canConnectNodes([], 'aud', 'target', aiNodes, 'in')).toBe(true)
+    expect(canConnectNodes([], 'vid', 'target', aiNodes, 'in')).toBe(true)
+  })
+
+  it('文本源可连接到 in 输入口（数组端口任一匹配）', () => {
+    expect(canConnectNodes([], 'txt', 'target', aiNodes, 'in')).toBe(true)
+  })
+
+  it('getNodeInputPortType 返回多类型数组', () => {
+    expect(getNodeInputPortType('target', 'in', aiNodes)).toEqual(['media', 'text'])
   })
 })

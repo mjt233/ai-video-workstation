@@ -13,12 +13,19 @@
  */
 export type DataType = 'image' | 'video' | 'audio' | 'text' | 'media'
 
-/** 端口：节点的输入/输出接口，每个端口有固定类型 */
+/**
+ * 端口可接受的数据类型：
+ * 单一类型（如 'image'），或多个类型的数组（如 AI文本生成节点的 ['media', 'text'] ——
+ * 任意一个匹配即可连接，容忍多种来源挂到同一输入点）。
+ */
+export type PortType = DataType | DataType[]
+
+/** 端口：节点的输入/输出接口，每个端口有固定（或一组可接受的）类型 */
 export interface Port {
   /** 端口唯一标识（节点内唯一） */
   id: string
-  /** 端口数据类型，连接时校验 */
-  type: DataType
+  /** 端口数据类型（单一类型或可接受的多类型数组），连接时校验 */
+  type: PortType
   /** 端口显示名 */
   label?: string
 }

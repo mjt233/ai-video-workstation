@@ -19,10 +19,12 @@ describe('NODE_PROTOTYPES', () => {
     ])
   })
 
-  it('AI 文本生成节点：text 输入 + media 输入 + text 输出', () => {
+  it('AI 文本生成节点：单一输入端口（media+text 多类型），输出 text', () => {
     const p = getPrototype('text-ai')!
     expect(p.name).toBe('AI文本生成')
-    expect(p.inputPorts.map((port) => port.type)).toEqual(['media', 'text'])
+    expect(p.inputPorts).toHaveLength(1)
+    expect(p.inputPorts[0].id).toBe('in')
+    expect(p.inputPorts[0].type).toEqual(['media', 'text'])
     expect(p.outputPorts[0].type).toBe('text')
     expect(p.defaultConfig).toMatchObject({ providerInstanceId: '', modelId: '', reasoningLevel: '', input: '', output: '' })
     expect(p.canGenerate ?? false).toBe(false)

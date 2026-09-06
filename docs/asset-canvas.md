@@ -66,6 +66,7 @@
 ## 3. 节点类型（`frontend/src/canvas/registry.ts`）
 
 节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / outputExt / defaultConfig / bodyComponent / editorComponent / getOutputAssetPath`。
+其中端口 `type` 支持**单一类型或多类型数组**（`DataType | DataType[]`，如 AI文本生成节点的 `['media','text']` —— 任一匹配即可连接）；输出端口均为单一类型（v1 每节点单输出）。
 其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有**历史对话框入口**）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`video-frame-extract`/`video-concat`/`video-trim`/`audio-trim` 仅 `canGenerate`（无历史对话框入口；但重复执行时旧产物仍会被服务端归档进 history 目录，只是没有 UI 入口查看）。`outputExt`（生成类节点产物扩展名，如 jpg/mp4/png/flac）决定固定产物文件名 `output.{ext}`。
 
 | 原型 | 输入端口 | 输出端口 | 可缩放 | 卡片主体 | 配置组件（editorComponent） |
@@ -77,7 +78,7 @@
 | `text`（文本） | 无 | `out: text` | 是 | `nodes/TextNode.vue` | 无 |
 | `video-generate`（生成视频） | `in: media` | `out: video` | 是 | `nodes/VideoGenerateNode.vue` | `editors/VideoGenerateEditor.vue` |
 | `tts-generate`（TTS声音生成） | `in: audio` | `out: audio` | 是 | `nodes/TtsGenerateNode.vue` | `editors/TtsGenerateEditor.vue` |
-| `text-ai`（AI文本生成） | `media: media` + `text: text` | `out: text` | 是 | `nodes/AiTextGenerateNode.vue` | 无（全部交互在节点内） |
+| `text-ai`（AI文本生成） | `in: ['media','text']`（输入，媒体+文本） | `out: text` | 是 | `nodes/AiTextGenerateNode.vue` | 无（全部交互在节点内） |
 | `video-frame-extract`（获取视频帧） | `in: video` | `out: image` | 是 | `nodes/ExtractFrameNode.vue` | `editors/ExtractFrameEditor.vue` |
 | `video-concat`（拼接视频） | `in: video` | `out: video` | 是 | `nodes/ConcatVideoNode.vue` | `editors/ConcatVideoEditor.vue` |
 | `video-trim`（裁剪视频） | `in: video` | `out: video` | 是 | `nodes/TrimVideoNode.vue` | `editors/TrimVideoEditor.vue` |
@@ -91,7 +92,7 @@
 - **生成图片**：配置组件采用统一生成节点布局——`CanvasInputPreview` 输入预览（图片类型；无输入时显示「无输入图，默认使用文生图工作流」）+ 提示词字段 + 参数行（工作流类型/工作流实现两个紧凑下拉、输出尺寸 `WorkflowSizePicker`、工作流参数 `WorkflowParamsTrigger`，后两者均为点击弹出菜单式配置，见 §6.1）。`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（有输入图用 `image-edit`，否则 `text-to-image`；`workflowImpl` **须显式选择**，未选择时生成被前端校验拦截，后端也不再兜底）、`workflowParams`（用户参数）、`sizeConfig`（输出尺寸）、`inputOrder`（输入图顺序，见 §7）。产物固定 `output.jpg`。配置面板提供「上传产物」按钮（jpg/png/webp → 统一落盘 `output.jpg`，旧产物自动归档历史，见 §2.3）。
 - **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`（**须显式选择**，未选择时生成被前端校验拦截）、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`duration`（首尾帧/参考模式时长，秒）、`resolution` / `sizeConfig`（输出尺寸）、`workflowParams`、`inputOrder`。单一 `media` 输入口，素材类型由来源节点自动归类。**非导演台模式（首尾帧/参考）采用统一布局**（见 §6.1）：`CanvasInputPreview` 输入预览（图片/视频/音频分组，无对应输入不显示）+ 提示词 + 参数行（生成模式**位于工作流之前**、工作流、时长 `DurationPicker`、输出尺寸、工作流参数、全屏按钮）。`director` 模式保持内嵌导演台布局（首行工作流/模式/全屏 + 输出规格 + 参数表单 + `VideoDirector`），仅把时长输入框换成 `DurationPicker`；分镜画布下提供「设为分镜视频」（把当前产物复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。产物固定 `output.mp4`。配置面板提供「上传产物」按钮（**仅接受 mp4**，旧产物自动归档历史，见 §2.3）。
 - **TTS声音生成**：`config` 含 `mode`（`clone` 音色克隆 / `design` 音色设计）、`text`（朗读文本）、`refText`（克隆参考文字）/ `prompt`（设计声线描述）、`workflowImpl`（**须显式选择**）、`workflowParams`。配置组件同样采用统一布局——`CanvasInputPreview` 输入预览（音频类型，克隆模式需连接「加载音频」节点）+ 文本字段 + 参数行（工作流实现 + 工作流参数；**TTS 不显示时长与输出尺寸**）。
-- **AI文本生成**：调试用一次性输入/输出节点（调用服务商配置「大语言模型」页签中的 LLM 服务商）。端口：`media` 输入口接受图片/音频/视频任意来源（与生成视频节点同机制），`text` 输入口接受「文本」节点内容；输出 `text`。`config` 含 `providerInstanceId`（服务商实例）、`modelId`、`reasoningLevel`（思考强度挡位，选项来自模型元信息）、`input`、`output`、`inputOrder`（媒体输入顺序）。节点内模型选择为普通 `v-select`（`AiTextGenerateNode`）：条目按服务商分组（Vuetify `type: 'subheader'` 分组头），模型项只显示**名称或 id**，选项 subtitle 显示**输入模态图标 + 上下文大小（K/M 格式）**，来源于 `config.models[].meta`（`inputModalities` / `contextWindow`）。媒体输入复用统一输入预览组件 `CanvasInputPreview`（与生成图片/视频一致：按类型分组缩略图、悬浮放大、组内拖拽排序、悬停红色 x 断开；排序写 `config.inputOrder`，断开经 `nodeOps.disconnectInput`）。文本输入：连接「文本」节点后【用户输入】禁用并提示「（来自外部输入）输入的内容」，生成内容取 `textInputs[0]`；**存在多个文本连线输入时禁止生成**，并在【用户输入】标题栏提示用户。生成经 `POST /api/llm/chat`（SSE 流式）：正文增量流式显示、推理增量显示「Thinking...」，流式期间全部用户控件禁用、「停止」按钮中止请求（AbortController）；流式输出按 500ms 节流走**静默更新**（`store.updateNodeQuiet`，不入撤销栈）写入 `config.output`，流结束时正常提交一次（单次撤销）。媒体输入由服务端读取后按协议能力过滤（协议/模型不支持的类型忽略并提示）；音频/视频仅 Gemini 等原生支持，图片全协议支持。错误以响应区红字 + console 日志呈现。**不注册工作流、无产物文件**（`canGenerate`/`hasHistory`/`outputExt` 均不声明）。LLM 服务商配置页含「一键获取模型列表」（各协议免费 `/models` 接口 + OpenRouter 元数据匹配，服务端内存缓存 24h）。
+- **AI文本生成**：调试用一次性输入/输出节点（调用服务商配置「大语言模型」页签中的 LLM 服务商）。端口：**单一 `in` 输入口**（`type: ['media','text']` —— 同时接受图片/音频/视频任意媒体来源与「文本」节点内容），连接后按**来源节点输出类型自动归类**：媒体来源进输入预览（与生成视频节点同机制），文本来源作为外部用户输入；输出 `text`。`config` 含 `providerInstanceId`（服务商实例）、`modelId`、`reasoningLevel`（思考强度挡位，选项来自模型元信息）、`input`、`output`、`inputOrder`（媒体输入顺序）。节点内模型选择为普通 `v-select`（`AiTextGenerateNode`）：条目按服务商分组（Vuetify `type: 'subheader'` 分组头），模型项只显示**名称或 id**，选项 subtitle 显示**输入模态图标 + 上下文大小（K/M 格式）**，来源于 `config.models[].meta`（`inputModalities` / `contextWindow`）。媒体输入复用统一输入预览组件 `CanvasInputPreview`（与生成图片/视频一致：按类型分组缩略图、悬浮放大、组内拖拽排序、悬停红色 x 断开；排序写 `config.inputOrder`，断开经 `nodeOps.disconnectInput`）。文本输入：连接「文本」节点后【用户输入】禁用并提示「（来自外部输入）输入的内容」，生成内容取 `textInputs[0]`；**存在多个文本连线输入时禁止生成**，并在【用户输入】标题栏提示用户。生成经 `POST /api/llm/chat`（SSE 流式）：正文增量流式显示、推理增量显示「Thinking...」，流式期间全部用户控件禁用、「停止」按钮中止请求（AbortController）；流式输出按 500ms 节流走**静默更新**（`store.updateNodeQuiet`，不入撤销栈）写入 `config.output`，流结束时正常提交一次（单次撤销）。媒体输入由服务端读取后按协议能力过滤（协议/模型不支持的类型忽略并提示）；音频/视频仅 Gemini 等原生支持，图片全协议支持。错误以响应区红字 + console 日志呈现。**不注册工作流、无产物文件**（`canGenerate`/`hasHistory`/`outputExt` 均不声明）。LLM 服务商配置页含「一键获取模型列表」（各协议免费 `/models` 接口 + OpenRouter 元数据匹配，服务端内存缓存 24h）。
 - **拼接视频**：`config` 含 `inputOrder`（拼接顺序，编辑器内 `VideoRefInputGroup` 拖拽排序）。单一 `video` 输入口，同一端口可连多段视频（无输入上限校验）；编辑器「拼接」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/concat-video`（本地 ffmpeg，concat demuxer + `-c copy` 无损拼接，各段编码/分辨率/帧率/音轨结构须一致，不一致返回清晰中文错误）；产物固定 `output.mp4`，重复拼接旧产物自动归档进历史目录。
 - **裁剪视频**：`config` 含 `startMode`（`time` / `frame`）、`startValue`（秒可小数，或帧索引整数 ≥ 0）、`duration`（秒，> 0 可小数）。单一 `video` 输入口（多路只取第一路）；编辑器「裁剪」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/trim-video`（本地 ffmpeg **重编码**，不用 `-c copy`，保证帧索引 / 小数秒切口准确：`libx264 veryfast crf=18`，有音轨则 `aac`）。起点 + 时长超出片尾时截到剩余时长。产物固定覆盖 `output.mp4`，重复裁剪旧产物自动归档（**裁剪也有历史**，与其余节点一致）。节点卡片与配置面板均可预览裁剪结果。
 - **裁剪音频**：`config` 含 `startValue`（起始位置，秒可小数 ≥ 0）、`duration`（裁剪时长，秒 > 0 可小数）。单一 `audio` 输入口（多路只取第一路）；编辑器「裁剪」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/trim-audio`（本地 ffmpeg 重编码为 **FLAC 无损输出**，不用 `-c copy`，保证小数秒切口准确）。起点 + 时长超出片尾时截到剩余时长（编辑器在源时长已知时提前给出越界提示；源时长由输入音频 ffprobe 探测）。产物固定覆盖 `output.flac`，重复裁剪旧产物自动归档（与其余 ffmpeg 节点一致，无历史对话框入口）。输出 `audio` 可直接接到 TTS/生成视频等音频消费节点；编辑器提供「使用当前播放位置」把预览播放时间写入起始位置。
@@ -101,7 +102,7 @@
 
 ## 4. 连线规则（`frontend/src/canvas/connection.ts`）
 
-- 按**端口数据类型**判断兼容（ComfyUI 思路），v1 仅支持同类型：`image→image`、`text→text`。
+- 按**端口数据类型**判断兼容（ComfyUI 思路），v1 仅支持同类型：`image→image`、`text→text`；端口类型为**数组**（如 AI文本生成节点的 `['media','text']`）时任一匹配即可连接；`media` 输入口（生成视频）可接受任意来源（`canConnect`）。
 - `canConnectNodes` = 类型兼容 + 不成环（`wouldCreateCycle` 反向可达性检测）+ 目标输入未满。
 - 建立连线：从源节点输出手柄拖到目标节点输入手柄（`@connect` → `store.connect`）；连接失败静默忽略。
 - 断开连线：

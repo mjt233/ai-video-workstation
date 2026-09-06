@@ -217,9 +217,9 @@ const props = defineProps<{
   upload?: CanvasUploadState | null
   /** 上游已更新角标 */
   upstreamUpdated: boolean
-  /** AI 文本生成节点：媒体输入条目（连到 media 端口的来源资产） */
+  /** AI 文本生成节点：媒体输入条目（来源节点输出类型为图片/音频/视频；单一输入口按来源类型归类） */
   inputs?: unknown[]
-  /** AI 文本生成节点：文本输入内容（连到 text 端口的文本节点内容） */
+  /** AI 文本生成节点：文本输入内容（来源为「文本」节点，取其 config.text） */
   textInputs?: string[]
   /** 是否处于名称内联编辑 */
   renaming: boolean

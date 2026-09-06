@@ -8,7 +8,7 @@ import { computed } from 'vue'
 import { buildVideoSubmitParams } from '../../../canvas/videoSubmit'
 import { collectInputPaths, collectInputs, type CanvasInputInfo } from '../../../canvas/generate'
 import { getNodeOutputType } from '../../../canvas/connection'
-import type { CanvasNodeData } from '../../../canvas/types'
+import type { CanvasNodeData, PortType } from '../../../canvas/types'
 import type { CanvasScope } from '../../../canvas/paths'
 import type { CanvasGenerationApi, CanvasStoreApi, NodeMap, ShowSnackbar } from './types'
 
@@ -28,6 +28,19 @@ export interface LlmMediaInputItem {
    * 媒体反复重新加载；无 mtime 信息时缺失）。
    */
   version?: number
+}
+
+/**
+ * 判断来源节点输出类型是否为媒体类（图片/音频/视频）。
+ *
+ * 端口类型理论上可为数组（DataType[]，见 Port.type），但输出端口均为单一类型；
+ * 数组类型不属于媒体类（false），与 AI 文本生成节点的「按来源类型归类」语义一致。
+ *
+ * @param type 来源节点输出类型
+ * @returns 是否为媒体类（image / audio / video）
+ */
+function isMediaOutputType(type: PortType | undefined): type is 'image' | 'audio' | 'video' {
+  return type === 'image' || type === 'audio' || type === 'video'
 }
 
 /** useCanvasNodeOps 参数 */
@@ -367,7 +380,10 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   }
 
   /**
-   * 收集 AI 文本生成节点的媒体输入（连到 media 端口的图片/音频/视频来源节点产物）。
+   * 收集 AI 文本生成节点的媒体输入（图片/音频/视频来源节点产物）。
+   *
+   * 节点为单一输入口（type: ['media', 'text']），故按「来源节点输出类型」而非端口区分：
+   * 媒体类来源进本方法，文本类来源见 textInputsOf。
    *
    * @param nodeId 目标节点 id
    * @returns 媒体输入条目（按连接顺序/inputOrder）
@@ -376,18 +392,21 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     const node = nodeMap.value[nodeId]
     if (!node) return []
     // withVersions 附带来源产物 mtime 作为输入预览 URL 缓存键（与生成节点预览一致）
-    const collected = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node.config, 'media', getScope()))
+    const collected = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node.config, undefined, getScope()))
     const out: LlmMediaInputItem[] = []
     for (const i of collected) {
       const type = getNodeOutputType(i.nodeId, store.nodes.value)
-      if (type !== 'image' && type !== 'audio' && type !== 'video') continue
+      if (!isMediaOutputType(type)) continue
       out.push({ nodeId: i.nodeId, path: i.path, type, label: i.label, version: i.version })
     }
     return out
   }
 
   /**
-   * 收集 AI 文本生成节点的文本输入内容（连到 text 端口的「文本」节点 config.text）。
+   * 收集 AI 文本生成节点的文本输入内容（来源为「文本」节点的 config.text）。
+   *
+   * 节点为单一输入口（type: ['media', 'text']），故按「来源节点输出类型」而非端口区分：
+   * text 类来源进本方法，媒体类来源见 llmMediaInputsOf。
    *
    * @param nodeId 目标节点 id
    * @returns 非空文本内容列表（按连接顺序）
@@ -397,7 +416,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     if (!node) return []
     const out: string[] = []
     for (const c of store.connections.value) {
-      if (c.toNodeId !== nodeId || c.toPortId !== 'text') continue
+      if (c.toNodeId !== nodeId) continue
       const src = nodeMap.value[c.fromNodeId]
       if (!src || getNodeOutputType(src.id, store.nodes.value) !== 'text') continue
       const text = src.config.text

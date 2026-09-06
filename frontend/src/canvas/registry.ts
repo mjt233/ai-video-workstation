@@ -158,13 +158,10 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'text-ai',
     name: 'AI文本生成',
     icon: 'mdi-robot-outline',
-    // media 输入口接受图片/音频/视频任意来源；text 输入口接受「文本」节点内容。
-    // 端口顺序 media 在前：无端口指定的成组连接默认落在 media 口（对媒体源兼容），
-    // 文本来源走手动拖到 text 句柄。
-    inputPorts: [
-      { id: 'media', type: 'media', label: '媒体' },
-      { id: 'text', type: 'text', label: '文本' },
-    ],
+    // 单一输入连接点：同时接受媒体（图片/音频/视频）与文本来源。
+    // 连接后按来源节点输出类型自动归类 —— 媒体进输入预览（与生成节点同机制），
+    // 「文本」节点内容自动作为用户输入（见 useCanvasNodeOps.llmMediaInputsOf / textInputsOf）。
+    inputPorts: [{ id: 'in', type: ['media', 'text'], label: '输入' }],
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,
     bodyComponent: AiTextGenerateNode,

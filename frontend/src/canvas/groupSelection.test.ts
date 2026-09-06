@@ -5,6 +5,7 @@ import {
   GROUP_FRAME_ID,
   computeGroupRect,
   dataTypeLabel,
+  dataTypeLabels,
   findNodeAt,
   groupConnectOptions,
   groupDotPosition,
@@ -110,6 +111,12 @@ describe('groupConnectOptions', () => {
     expect(options.find((o) => o.prototypeId === 'video-generate')!.compatible).toBe(true)
   })
 
+  it('text-ai 多类型输入口（media+text）兼容媒体与文本输出', () => {
+    expect(groupConnectOptions(['text']).find((o) => o.prototypeId === 'text-ai')!.compatible).toBe(true)
+    expect(groupConnectOptions(['image']).find((o) => o.prototypeId === 'text-ai')!.compatible).toBe(true)
+    expect(groupConnectOptions(['audio']).find((o) => o.prototypeId === 'text-ai')!.compatible).toBe(true)
+  })
+
   it('audio 输出可连 TTS、裁剪音频与生成视频', () => {
     const options = groupConnectOptions(['audio'])
     const map = Object.fromEntries(options.map((o) => [o.prototypeId, o]))
@@ -140,6 +147,14 @@ describe('dataTypeLabel', () => {
     expect(dataTypeLabel('audio')).toBe('音频')
     expect(dataTypeLabel('text')).toBe('文本')
     expect(dataTypeLabel('media')).toBe('媒体')
+  })
+})
+
+describe('dataTypeLabels', () => {
+  it('数组类型用「/」连接展示；单值行为不变', () => {
+    expect(dataTypeLabels(['media', 'text'])).toBe('媒体/文本')
+    expect(dataTypeLabels(['image', 'video', 'audio'])).toBe('图片/视频/音频')
+    expect(dataTypeLabels('text')).toBe('文本')
   })
 })
 

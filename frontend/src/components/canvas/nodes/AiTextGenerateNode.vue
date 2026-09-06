@@ -209,9 +209,9 @@ import CanvasInputPreview from '../editors/CanvasInputPreview.vue'
 const props = defineProps<{
   project: string
   node: CanvasNodeData
-  /** 媒体输入（连到 media 端口的图片/音频/视频来源节点） */
+  /** 媒体输入（来源节点输出类型为图片/音频/视频；单一输入口按来源类型归类） */
   inputs?: LlmMediaInputItem[]
-  /** 文本输入内容（连到 text 端口的「文本」节点 config.text） */
+  /** 文本输入内容（来源为「文本」节点，取其 config.text） */
   textInputs?: string[]
 }>()
 
@@ -370,7 +370,7 @@ const mediaByType = computed<{ images: CanvasInputInfo[]; videos: CanvasInputInf
   return { images, videos, audios }
 })
 
-/** 文本输入数量（连到 text 端口的非空「文本」节点内容） */
+/** 文本输入数量（来源为「文本」节点的非空内容） */
 const textInputCount = computed(() => props.textInputs?.length ?? 0)
 
 /** 是否禁用用户输入（生成中 / 已连接文本输入时禁用，输入内容来自外部连线） */

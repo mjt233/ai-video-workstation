@@ -6,7 +6,7 @@
  * components/canvas/composables/useCanvasGroup.ts 与 useCanvasSelection.ts。
  */
 
-import type { CanvasNodeData, DataType, NodeConfig } from './types'
+import type { CanvasNodeData, DataType, NodeConfig, PortType } from './types'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from './registry'
 import { canConnect } from './connection'
 
@@ -98,7 +98,7 @@ export function findNodeAt(
 }
 
 /**
- * 收集群组输出类型（按原型输出端口去重，v1 每节点单输出端口）。
+ * 收集群组输出类型（按原型输出端口去重，v1 每节点单输出端口且为单一类型）。
  *
  * @param nodes 选中节点列表
  * @returns 去重后的输出类型列表
@@ -108,7 +108,8 @@ export function groupOutputTypes(nodes: CanvasNodeData[]): DataType[] {
   for (const n of nodes) {
     const proto = getPrototype(n.prototypeId)
     const t = proto?.outputPorts[0]?.type
-    if (t) types.add(t)
+    // 输出端口不声明数组类型（v1 约定单类型输出）；数组防御性跳过
+    if (t && !Array.isArray(t)) types.add(t)
   }
   return [...types]
 }
@@ -149,6 +150,16 @@ export function dataTypeLabel(type: DataType): string {
 }
 
 /**
+ * 端口类型的可读名称（支持多类型数组，如 ['media','text'] → '媒体/文本'）。
+ *
+ * @param type 端口类型（单一或数组）
+ * @returns 中文名称（数组用「/」连接）
+ */
+export function dataTypeLabels(type: PortType): string {
+  return Array.isArray(type) ? type.map(dataTypeLabel).join('/') : dataTypeLabel(type)
+}
+
+/**
  * 计算「群组连接到新节点」菜单项：列出全部有输入端口的原型，
  * 按群组输出类型集合判定兼容性（与 canConnect 规则一致：media 输入口兼容一切）。
  * 不兼容项给出原因（如「仅支持 图片 输入」）。
@@ -162,7 +173,7 @@ export function groupConnectOptions(outputTypes: DataType[]): GroupConnectOption
     const compatible = proto.inputPorts.some((port) =>
       outputTypes.some((t) => canConnect(t, port.type)),
     )
-    const labels = proto.inputPorts.map((p) => dataTypeLabel(p.type))
+    const labels = proto.inputPorts.map((p) => dataTypeLabels(p.type))
     return {
       prototypeId: proto.id,
       name: proto.name,

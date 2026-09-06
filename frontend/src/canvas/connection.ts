@@ -1,4 +1,4 @@
-import type { CanvasConnection, CanvasNodeData, DataType } from './types'
+import type { CanvasConnection, CanvasNodeData, PortType } from './types'
 import { getPrototype } from './registry'
 
 /**
@@ -8,23 +8,30 @@ import { getPrototype } from './registry'
 /**
  * 两个端口类型是否兼容。
  *
+ * - 类型为数组时（如 AI文本生成节点的 ['media', 'text']）：任一匹配即可连接；
  * - media 输入口（如生成视频节点）可接受任意来源类型；
  * - 其余情况要求类型一致（v1 仅支持同类型）。
+ *
+ * @param fromType 来源端口类型（单一或数组）
+ * @param toType 目标端口类型（单一或数组；数组表示可接受多种类型）
+ * @returns 兼容返回 true
  */
-export function canConnect(fromType: DataType, toType: DataType): boolean {
+export function canConnect(fromType: PortType, toType: PortType): boolean {
+  if (Array.isArray(toType)) return toType.some((t) => canConnect(fromType, t))
+  if (Array.isArray(fromType)) return fromType.some((f) => canConnect(f, toType))
   if (toType === 'media') return true
   return fromType === toType
 }
 
 /** 获取节点的输出端口类型（v1 每个节点单输出端口，取第一个） */
-export function getNodeOutputType(nodeId: string, nodes: CanvasNodeData[]): DataType | undefined {
+export function getNodeOutputType(nodeId: string, nodes: CanvasNodeData[]): PortType | undefined {
   const node = nodes.find((n) => n.id === nodeId)
   const proto = node ? getPrototype(node.prototypeId) : undefined
   return proto?.outputPorts[0]?.type
 }
 
 /** 获取节点的输入端口类型（v1 每个节点单输入端口，取第一个） */
-export function getNodeInputType(nodeId: string, nodes: CanvasNodeData[]): DataType | undefined {
+export function getNodeInputType(nodeId: string, nodes: CanvasNodeData[]): PortType | undefined {
   const node = nodes.find((n) => n.id === nodeId)
   const proto = node ? getPrototype(node.prototypeId) : undefined
   return proto?.inputPorts[0]?.type
@@ -50,9 +57,9 @@ export function getNodeInputPortId(nodeId: string, nodes: CanvasNodeData[]): str
  * @param nodeId 节点 id
  * @param portId 输入端口 id
  * @param nodes 画布全部节点
- * @returns 端口数据类型，端口或节点不存在时返回 undefined
+ * @returns 端口数据类型（可能为数组），端口或节点不存在时返回 undefined
  */
-export function getNodeInputPortType(nodeId: string, portId: string, nodes: CanvasNodeData[]): DataType | undefined {
+export function getNodeInputPortType(nodeId: string, portId: string, nodes: CanvasNodeData[]): PortType | undefined {
   const node = nodes.find((n) => n.id === nodeId)
   const proto = node ? getPrototype(node.prototypeId) : undefined
   return proto?.inputPorts.find((p) => p.id === portId)?.type
