@@ -65,9 +65,13 @@
               :output="outputOf(nodeMap[id])"
               :upload="upload.stateOf(id)"
               :upstream-updated="isUpstreamUpdated(id)"
+              :inputs="nodeMap[id]?.prototypeId === 'text-ai' ? llmMediaInputsOf(id) : undefined"
+              :text-inputs="nodeMap[id]?.prototypeId === 'text-ai' ? textInputsOf(id) : undefined"
               :renaming="renamingNodeId === id"
               :rename-value="renameInput"
               @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
+              @update:config-quiet="(patch: Record<string, unknown>) => onUpdateConfigQuiet(id, patch)"
+              @disconnect-input="(nodeId: string, sourceNodeId: string) => disconnectInput(nodeId, sourceNodeId)"
               @open-picker="openAssetPicker"
               @upload-file="onUploadFile"
               @retry-upload="(nodeId: string) => void upload.retry(nodeId)"
@@ -736,7 +740,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 // 组合式导出解构（模板绑定用）
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, isMultiSelected, onEdgeClick, onNodeDragStart } = selection
-const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, disconnectInput } = nodeOps
+const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, addMenu, addNodeAt } = menus

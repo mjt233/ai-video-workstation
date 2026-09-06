@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含十一个内置节点', () => {
+  it('包含十二个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'audio-trim',
       'image-generate',
       'image-loader',
       'text',
+      'text-ai',
       'tts-generate',
       'video-concat',
       'video-frame-extract',
@@ -16,6 +17,15 @@ describe('NODE_PROTOTYPES', () => {
       'video-loader',
       'video-trim',
     ])
+  })
+
+  it('AI 文本生成节点：text 输入 + media 输入 + text 输出', () => {
+    const p = getPrototype('text-ai')!
+    expect(p.name).toBe('AI文本生成')
+    expect(p.inputPorts.map((port) => port.type)).toEqual(['media', 'text'])
+    expect(p.outputPorts[0].type).toBe('text')
+    expect(p.defaultConfig).toMatchObject({ providerInstanceId: '', modelId: '', reasoningLevel: '', input: '', output: '' })
+    expect(p.canGenerate ?? false).toBe(false)
   })
 
   it('生成图片只接受 image 输入，输出 image', () => {

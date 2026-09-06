@@ -195,6 +195,23 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
+   * 静默更新节点 config（不入撤销栈，仅修改 + 触发防抖保存）。
+   *
+   * 供高频流式更新使用（如 AI 文本生成节点的流式输出写入 config.output）：
+   * 每次增量不入撤销历史，避免流式期间产生大量撤销快照；流结束时由调用方
+   * 追加一次正常 updateNode 提交（单次撤销可回退到生成前状态）。
+   *
+   * @param nodeId 节点 id
+   * @param configPatch 配置补丁（合并写入节点 config）
+   */
+  function updateNodeQuiet(nodeId: string, configPatch: Record<string, unknown>): void {
+    const node = data.value.nodes.find((n) => n.id === nodeId)
+    if (!node) return
+    node.config = { ...node.config, ...configPatch }
+    markDirty()
+  }
+
+  /**
    * 建立连线（自动校验类型兼容与防循环，成功后触发 connect 事件）。
    *
    * @param fromNodeId 输出节点 id
@@ -633,6 +650,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     removeNode,
     removeNodes,
     updateNode,
+    updateNodeQuiet,
     updateNodes,
     updateDirectorAudioClipDuration,
     removeInputOrderEntry,

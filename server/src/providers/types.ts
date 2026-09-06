@@ -58,6 +58,11 @@ export interface ProviderDefinition {
   name: string;
   /** 可选描述 */
   description?: string;
+  /**
+   * 分类：media=媒体生成（图像/音频/视频工作流服务商，缺省值）；
+   * llm=大语言模型服务商（配置页「大语言模型」页签展示+新增）。
+   */
+  category?: 'media' | 'llm';
   /** 配置字段声明（设置界面据此渲染表单） */
   configSchema: ProviderConfigField[];
   /** 按已解析配置创建传输客户端（每次调用返回独立实例，token 缓存等按实例持有） */

@@ -53,6 +53,8 @@ export interface ProviderTypeInfo {
   id: string
   name: string
   description?: string
+  /** 分类：media=媒体生成（图像/音频/视频工作流服务商）；llm=大语言模型服务商 */
+  category: 'media' | 'llm'
   configSchema: ProviderConfigField[]
 }
 

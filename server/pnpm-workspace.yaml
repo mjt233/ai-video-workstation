@@ -1,0 +1,8 @@
+allowBuilds:
+  better-sqlite3: false
+  esbuild: false
+minimumReleaseAgeExclude:
+  - '@ai-sdk/gateway@4.0.75'
+  - '@ai-sdk/google@4.0.64'
+  - '@ai-sdk/openai@4.0.59'
+  - ai@7.0.93

@@ -52,9 +52,13 @@
         :node="node"
         :output="output"
         :upstream-updated="upstreamUpdated"
+        :inputs="inputs"
+        :text-inputs="textInputs"
         @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
+        @update:config-quiet="(patch: Record<string, unknown>) => emit('update:config-quiet', patch)"
         @open-picker="emit('open-picker', node.id)"
         @upload-file="(payload: CanvasUploadFilePayload) => emit('upload-file', { ...payload, nodeId: node.id })"
+        @disconnect-input="(sourceNodeId: string) => emit('disconnect-input', node.id, sourceNodeId)"
       />
       <!-- 节点状态遮罩（通用能力）：running 显示加载动画 + 统一中断入口；error 显示错误与重试 -->
       <div
@@ -213,6 +217,10 @@ const props = defineProps<{
   upload?: CanvasUploadState | null
   /** 上游已更新角标 */
   upstreamUpdated: boolean
+  /** AI 文本生成节点：媒体输入条目（连到 media 端口的来源资产） */
+  inputs?: unknown[]
+  /** AI 文本生成节点：文本输入内容（连到 text 端口的文本节点内容） */
+  textInputs?: string[]
   /** 是否处于名称内联编辑 */
   renaming: boolean
   /** 内联编辑输入框临时值 */
@@ -222,6 +230,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 主体组件配置补丁（合并写入节点 config） */
   (e: 'update:config', patch: Record<string, unknown>): void
+  /** 主体组件高频流式配置补丁（静默更新，不入撤销栈） */
+  (e: 'update:config-quiet', patch: Record<string, unknown>): void
+  /** 主体组件快捷断开输入（AI 文本生成节点媒体徽标 x 触发） */
+  (e: 'disconnect-input', nodeId: string, sourceNodeId: string): void
   /** 主体组件打开资产选择器 */
   (e: 'open-picker', nodeId: string): void
   /** 主体组件上传文件（加载节点：进度显示在本卡片遮罩上） */

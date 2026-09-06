@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('./OpenAICompatibleModelsEditor.vue', () => ({ default: { name: 'OpenAICompatibleModelsEditor' } }))
 vi.mock('./CustomCodeEditorField.vue', () => ({ default: { name: 'CustomCodeEditorField' } }))
 vi.mock('./CustomWorkflowsEditorField.vue', () => ({ default: { name: 'CustomWorkflowsEditorField' } }))
+vi.mock('./LlmModelsEditor.vue', () => ({ default: { name: 'LlmModelsEditor' } }))
 vi.mock('./UnknownProviderField.vue', () => ({ default: { name: 'UnknownProviderField' } }))
 
 import {
@@ -19,9 +20,11 @@ describe('provider-fields 映射表', () => {
       .toBe(PROVIDER_FIELD_COMPONENTS.OpenAICompatibleModelsEditor)
   })
 
-  it('登记自定义服务商代码/工作流编辑组件', () => {
+  it('登记自定义服务商代码/工作流编辑组件与 LLM 模型编辑组件', () => {
     expect(PROVIDER_FIELD_COMPONENTS.CustomCodeEditorField).toEqual({ name: 'CustomCodeEditorField' })
     expect(PROVIDER_FIELD_COMPONENTS.CustomWorkflowsEditorField).toEqual({ name: 'CustomWorkflowsEditorField' })
+    expect(PROVIDER_FIELD_COMPONENTS.LlmModelsEditor).toEqual({ name: 'LlmModelsEditor' })
+    expect(isRegisteredProviderFieldComponent('LlmModelsEditor')).toBe(true)
     expect(resolveProviderFieldComponent('CustomCodeEditorField'))
       .toBe(PROVIDER_FIELD_COMPONENTS.CustomCodeEditorField)
     expect(resolveProviderFieldComponent('CustomWorkflowsEditorField'))

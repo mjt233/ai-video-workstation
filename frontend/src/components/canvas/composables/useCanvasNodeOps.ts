@@ -12,6 +12,24 @@ import type { CanvasNodeData } from '../../../canvas/types'
 import type { CanvasScope } from '../../../canvas/paths'
 import type { CanvasGenerationApi, CanvasStoreApi, NodeMap, ShowSnackbar } from './types'
 
+/** AI 文本生成节点的媒体输入条目（来源节点输出类型 + 资产路径） */
+export interface LlmMediaInputItem {
+  /** 来源节点 id（断开连接用） */
+  nodeId: string
+  /** 资产相对路径（项目内） */
+  path: string
+  /** 媒体类型（来源节点输出类型） */
+  type: 'image' | 'audio' | 'video'
+  /** 显示名（文件名） */
+  label: string
+  /**
+   * 源资产版本号（来源节点产物的 mtime；作为输入预览 URL 的缓存键，
+   * 与生成图片/视频节点的 CanvasInputPreview 保持一致——避免无关重渲染导致
+   * 媒体反复重新加载；无 mtime 信息时缺失）。
+   */
+  version?: number
+}
+
 /** useCanvasNodeOps 参数 */
 export interface UseCanvasNodeOpsOptions {
   /** 画布数据 store（回写 config/连接查询） */
@@ -334,6 +352,61 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   }
 
   /**
+   * update:config-quiet → 静默合并写入节点 config（不入撤销栈）。
+   *
+   * 供 AI 文本生成节点流式输出节流写入使用：流式期间高频小增量不污染撤销历史，
+   * 流结束时由节点另发一次 update:config 正常提交（单次撤销）。
+   *
+   * @param nodeId 节点 id
+   * @param patch 配置补丁
+   */
+  function onUpdateConfigQuiet(nodeId: string, patch: Record<string, unknown>): void {
+    const node = nodeMap.value[nodeId]
+    if (!node) return
+    store.updateNodeQuiet(nodeId, patch)
+  }
+
+  /**
+   * 收集 AI 文本生成节点的媒体输入（连到 media 端口的图片/音频/视频来源节点产物）。
+   *
+   * @param nodeId 目标节点 id
+   * @returns 媒体输入条目（按连接顺序/inputOrder）
+   */
+  function llmMediaInputsOf(nodeId: string): LlmMediaInputItem[] {
+    const node = nodeMap.value[nodeId]
+    if (!node) return []
+    // withVersions 附带来源产物 mtime 作为输入预览 URL 缓存键（与生成节点预览一致）
+    const collected = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node.config, 'media', getScope()))
+    const out: LlmMediaInputItem[] = []
+    for (const i of collected) {
+      const type = getNodeOutputType(i.nodeId, store.nodes.value)
+      if (type !== 'image' && type !== 'audio' && type !== 'video') continue
+      out.push({ nodeId: i.nodeId, path: i.path, type, label: i.label, version: i.version })
+    }
+    return out
+  }
+
+  /**
+   * 收集 AI 文本生成节点的文本输入内容（连到 text 端口的「文本」节点 config.text）。
+   *
+   * @param nodeId 目标节点 id
+   * @returns 非空文本内容列表（按连接顺序）
+   */
+  function textInputsOf(nodeId: string): string[] {
+    const node = nodeMap.value[nodeId]
+    if (!node) return []
+    const out: string[] = []
+    for (const c of store.connections.value) {
+      if (c.toNodeId !== nodeId || c.toPortId !== 'text') continue
+      const src = nodeMap.value[c.fromNodeId]
+      if (!src || getNodeOutputType(src.id, store.nodes.value) !== 'text') continue
+      const text = src.config.text
+      if (typeof text === 'string' && text.trim()) out.push(text)
+    }
+    return out
+  }
+
+  /**
    * 快捷断开某个输入：删除该来源节点到目标节点的全部连线，并清理 config.inputOrder。
    *
    * 由编辑器输入项右上角红色 x 触发（不弹确认，与右键「断开连接」一致）。
@@ -368,6 +441,9 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     videoInputGroups,
     isUpstreamUpdated,
     onUpdateConfig,
+    onUpdateConfigQuiet,
+    llmMediaInputsOf,
+    textInputsOf,
     disconnectInput,
   }
 }

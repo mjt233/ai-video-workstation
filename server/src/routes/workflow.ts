@@ -114,6 +114,7 @@ workflowRouter.get('/providers', async (_req: Request, res: Response) => {
       id: p.id,
       name: p.name,
       description: p.description,
+      category: p.category ?? 'media',
       configSchema: p.configSchema,
     }));
     const instances = await listInstances();

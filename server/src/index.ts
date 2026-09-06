@@ -7,6 +7,7 @@ import { projectPortRouter } from './routes/project-port.js';
 import { assetsRouter } from './routes/assets.js';
 import { workflowRouter } from './routes/workflow.js';
 import { canvasRouter } from './routes/canvas.js';
+import { llmRouter } from './routes/llm.js';
 import { discoverProviders } from './providers/index.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
 import { syncAllInstances } from './providers/instance-sync.js';
@@ -32,6 +33,7 @@ app.use('/api', projectPortRouter);
 app.use('/api', assetsRouter);
 app.use('/api', workflowRouter);
 app.use('/api', canvasRouter);
+app.use('/api', llmRouter);
 
 const distPath = path.resolve(__dirname, '../../frontend/dist');
 app.use(express.static(distPath));

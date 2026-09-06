@@ -11,6 +11,7 @@ import ConcatVideoNode from '../components/canvas/nodes/ConcatVideoNode.vue'
 import TrimVideoNode from '../components/canvas/nodes/TrimVideoNode.vue'
 import AudioTrimNode from '../components/canvas/nodes/AudioTrimNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
+import AiTextGenerateNode from '../components/canvas/nodes/AiTextGenerateNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
@@ -151,6 +152,28 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       prompt: '',
       director: { duration: 0, width: 0, height: 0, fps: 0, imageClips: [], audioClips: [] },
       inputOrder: [],
+    },
+  },
+  {
+    id: 'text-ai',
+    name: 'AI文本生成',
+    icon: 'mdi-robot-outline',
+    // media 输入口接受图片/音频/视频任意来源；text 输入口接受「文本」节点内容。
+    // 端口顺序 media 在前：无端口指定的成组连接默认落在 media 口（对媒体源兼容），
+    // 文本来源走手动拖到 text 句柄。
+    inputPorts: [
+      { id: 'media', type: 'media', label: '媒体' },
+      { id: 'text', type: 'text', label: '文本' },
+    ],
+    outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
+    resizeable: true,
+    bodyComponent: AiTextGenerateNode,
+    defaultConfig: {
+      providerInstanceId: '',
+      modelId: '',
+      reasoningLevel: '',
+      input: '',
+      output: '',
     },
   },
   {

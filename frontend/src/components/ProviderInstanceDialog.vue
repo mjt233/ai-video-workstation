@@ -30,11 +30,11 @@
           @click:close="error = ''"
         />
 
-        <!-- 新增时第一步：选服务商类型 -->
+        <!-- 新增时第一步：选服务商类型（仅列出当前页签分类） -->
         <v-select
           v-if="!isEdit"
           v-model="form.type"
-          :items="types"
+          :items="categoryTypes"
           item-title="name"
           item-value="id"
           label="服务商类型"
@@ -46,12 +46,12 @@
           @update:model-value="onTypeChange"
         />
 
-        <!-- 实例名称 -->
+        <!-- 实例名称（LLM 服务商显示为「服务商名称」） -->
         <v-text-field
           v-model="form.name"
-          label="实例名称"
-          placeholder="如：火山方舟-主账号"
-          hint="用于区分多个同类型服务商，展示在卡片与工作流下拉中"
+          :label="isLlmType ? '服务商名称' : '实例名称'"
+          :placeholder="isLlmType ? '如：智谱 GLM 主账号' : '如：火山方舟-主账号'"
+          :hint="isLlmType ? '用于区分多个大语言模型服务商，展示在卡片与节点模型下拉中' : '用于区分多个同类型服务商，展示在卡片与工作流下拉中'"
           persistent-hint
           density="comfortable"
           variant="outlined"
@@ -170,7 +170,7 @@
             variant="tonal"
             :loading="testing"
             :disabled="!form.type"
-            @click="onTest"
+            @click="onTestClick"
           >
             测试连接
           </v-btn>
@@ -182,9 +182,17 @@
             density="compact"
           />
         </div>
+        <!-- LLM 服务商：测试连接费用提示（点击时弹确认） -->
+        <div
+          v-if="isLlmType"
+          class="text-caption text-medium-emphasis mt-1"
+        >
+          测试连接优先使用免费的模型列表接口验证；若不可用将回退为最小对话请求，可能产生少量费用。
+        </div>
 
-        <!-- 工作流预览：获取按钮 + 类型标识（只读；该服务商全部工作流默认可用） -->
-        <template v-if="form.type">
+        <!-- 工作流预览：获取按钮 + 类型标识（只读；该服务商全部工作流默认可用）。
+             LLM 服务商不注册工作流，不显示该区域。 -->
+        <template v-if="form.type && !isLlmType">
           <v-divider class="my-3" />
           <div class="d-flex align-center mb-2">
             <div class="text-body-medium font-weight-medium">
@@ -282,6 +290,7 @@ import {
 } from '../api/providers'
 import { resolveProviderFieldComponent } from './provider-fields'
 import { workflowTypeColor, workflowTypeLabel } from '../utils/workflow-types'
+import { confirm } from '../utils/confirm'
 
 const props = defineProps<{
   modelValue: boolean
@@ -289,6 +298,8 @@ const props = defineProps<{
   types: ProviderTypeInfo[]
   /** 编辑目标实例；null = 新增模式 */
   instance: ProviderInstanceInfo | null
+  /** 当前页签分类（新增时类型下拉仅显示该分类） */
+  category?: 'media' | 'llm'
 }>()
 
 const emit = defineEmits<{
@@ -298,6 +309,14 @@ const emit = defineEmits<{
 
 /** 是否为编辑模式 */
 const isEdit = computed(() => !!props.instance)
+
+/** 是否为 LLM 服务商（驱动「服务商名称」label 与测试连接费用确认） */
+const isLlmType = computed(() => props.types.find((x) => x.id === form.value.type)?.category === 'llm')
+
+/** 新增时可选的类型：仅当前页签分类 */
+const categoryTypes = computed(() =>
+  props.types.filter((t) => (t.category ?? 'media') === (props.category ?? 'media')),
+)
 
 /** 当前类型对应的 configSchema */
 const schemaFields = computed<ProviderConfigField[]>(() => {
@@ -365,6 +384,12 @@ function componentExtraProps(f: ProviderConfigField): Record<string, unknown> {
   if (f.component === 'CustomWorkflowsEditorField'
     || (f.component === 'CustomCodeEditorField' && f.key !== 'commonCode')) {
     out.commonCode = form.value.config.commonCode
+  }
+  // 模型列表编辑器：注入同表单的协议/BaseURL/API Key（一键获取模型列表前提校验）
+  // 与编辑模式 instanceId（apiKey 为空时服务端回填已保存值）
+  if (f.component === 'LlmModelsEditor') {
+    out.formConfig = form.value.config
+    out.instanceId = props.instance?.id ?? undefined
   }
   return out
 }
@@ -440,6 +465,22 @@ async function loadWorkflows() {
   } finally {
     workflowsLoading.value = false
   }
+}
+
+/** 连接测试入口：LLM 服务商先弹费用确认（可能回退到计费对话请求），其余类型直接执行 */
+async function onTestClick() {
+  if (!form.value.type) return
+  if (!isLlmType.value) {
+    await onTest()
+    return
+  }
+  const ok = await confirm({
+    title: '测试连接费用提示',
+    content: '测试连接将调用服务商接口验证配置。优先使用免费的模型列表接口；若不可用，将回退为最小化对话请求（可能产生少量费用）。是否继续？',
+    confirmText: '继续测试',
+  })
+  if (!ok) return
+  await onTest()
 }
 
 /** 连接测试：用当前表单参数调用后端（不落盘） */
