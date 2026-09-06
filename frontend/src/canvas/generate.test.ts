@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { collectInputs, collectInputPaths, getNodeCurrentAssetPath, mergeInputOrder } from './generate'
+import { collectInputs, collectInputPaths, collectTextContents, getNodeCurrentAssetPath, mergeInputOrder } from './generate'
 
 const loader: CanvasNodeData = {
   id: 'l1', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,
@@ -156,5 +156,57 @@ describe('collectInputs / collectInputPaths：portId 过滤', () => {
   it('指定不存在的 portId 返回空数组', () => {
     expect(collectInputs('g1', conns, [loader, text], undefined, 'other')).toEqual([])
     expect(collectInputPaths('g1', conns, [loader, text], undefined, 'other')).toEqual([])
+  })
+})
+
+describe('collectTextContents（文本输入内容收集）', () => {
+  const textNode: CanvasNodeData = {
+    id: 'txt', prototypeId: 'text', name: '文本', x: 0, y: 0, width: 10, height: 10,
+    config: { text: '天空是蓝色的' },
+  }
+  const emptyText: CanvasNodeData = {
+    id: 'txt-empty', prototypeId: 'text', name: '文本', x: 0, y: 0, width: 10, height: 10,
+    config: { text: '   ' },
+  }
+  const aiText: CanvasNodeData = {
+    id: 'ai', prototypeId: 'text-ai', name: 'AI文本生成', x: 0, y: 0, width: 10, height: 10,
+    config: { output: 'AI 生成的提示词', input: '用户输入' },
+  }
+  const aiTextEmpty: CanvasNodeData = {
+    id: 'ai-empty', prototypeId: 'text-ai', name: 'AI文本生成', x: 0, y: 0, width: 10, height: 10,
+    config: { output: '' },
+  }
+  const imageNode: CanvasNodeData = {
+    id: 'img', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,
+    config: { assetPath: 'assert/custom/a.jpg' },
+  }
+
+  it('「文本」节点读 config.text，「AI文本生成」节点读 config.output', () => {
+    const conns: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'txt', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+      { id: 'c2', fromNodeId: 'ai', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    ]
+    expect(collectTextContents('vg', conns, [textNode, aiText])).toEqual(['天空是蓝色的', 'AI 生成的提示词'])
+  })
+
+  it('空白内容（空串/纯空白）不收集，非 text 输出来源忽略', () => {
+    const conns: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'txt-empty', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+      { id: 'c2', fromNodeId: 'ai-empty', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+      { id: 'c3', fromNodeId: 'img', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+      { id: 'c4', fromNodeId: 'txt', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    ]
+    expect(collectTextContents('vg', conns, [textNode, emptyText, aiTextEmpty, imageNode])).toEqual(['天空是蓝色的'])
+  })
+
+  it('无文本输入返回空数组；portId 过滤生效', () => {
+    const conns: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'img', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+      { id: 'c2', fromNodeId: 'txt', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    ]
+    const nodes = [imageNode, textNode]
+    expect(collectTextContents('other', conns, nodes)).toEqual([])
+    expect(collectTextContents('vg', conns, nodes, 'other')).toEqual([])
+    expect(collectTextContents('vg', conns, nodes, 'in')).toEqual(['天空是蓝色的'])
   })
 })

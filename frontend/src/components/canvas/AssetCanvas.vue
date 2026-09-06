@@ -71,6 +71,7 @@
               :rename-value="renameInput"
               @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
               @update:config-quiet="(patch: Record<string, unknown>) => onUpdateConfigQuiet(id, patch)"
+              @open-history="openHistory"
               @disconnect-input="(nodeId: string, sourceNodeId: string) => disconnectInput(nodeId, sourceNodeId)"
               @open-picker="openAssetPicker"
               @upload-file="onUploadFile"
@@ -134,6 +135,7 @@
           :output-path="editorPanel ? outputPathOf(editorPanel.node) : undefined"
           :upload-state="editorPanel ? upload.stateOf(editorPanel.node.id) ?? null : null"
           :video-input-groups="videoInputGroups"
+          :text-inputs="videoTextInputs"
           :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
           :kind="target.kind"
           :viewport="viewport"
@@ -212,8 +214,20 @@
         </div>
       </div>
 
-      <!-- 版本历史对话框（服务端历史 API：列表/激活/删除 + 当前产物预览） -->
+      <!-- 文本历史版本对话框（AI 文本生成节点：config.outputHistory 纯文本快照，无服务端请求） -->
+      <AiTextHistoryDialog
+        v-if="historyNode?.prototypeId === 'text-ai'"
+        v-model="historyDialog.show"
+        :project="props.project"
+        :node="historyNode"
+        @update:config="(patch: Record<string, unknown>) => historyNode && onUpdateConfig(historyNode.id, patch)"
+        @update:config-quiet="(patch: Record<string, unknown>) => historyNode && onUpdateConfigQuiet(historyNode.id, patch)"
+        @notify="(text: string, color: 'success' | 'error' | 'primary') => showSnackbar(text, color)"
+      />
+
+      <!-- 版本历史对话框（服务端历史 API：列表/激活/删除 + 当前产物预览；适用于有产物文件的生成节点） -->
       <CanvasAssertHistoryDialog
+        v-else
         v-model="historyDialog.show"
         :project="props.project"
         :node="historyNode"
@@ -308,6 +322,7 @@ import { isSyntheticNodeId } from '../../canvas/groupSelection'
 import type { CanvasScope } from '../../canvas/paths'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
+import AiTextHistoryDialog from './AiTextHistoryDialog.vue'
 import SaveAssetDialog from './SaveAssetDialog.vue'
 import SaveAsDialog from './SaveAsDialog.vue'
 import CanvasToolbar from './CanvasToolbar.vue'
@@ -740,7 +755,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 // 组合式导出解构（模板绑定用）
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, isMultiSelected, onEdgeClick, onNodeDragStart } = selection
-const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
+const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, addMenu, addNodeAt } = menus

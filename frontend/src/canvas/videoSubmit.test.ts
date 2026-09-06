@@ -139,4 +139,18 @@ describe('buildVideoSubmitParams', () => {
     expect(buildVideoSubmitParams(mkNode({ mode: 'reference', prompt: 'p', resolution: {}, workflowParams: {}, sizeConfig: { ratio: 'bad' } }), inputs).sizeConfig).toBeUndefined()
     expect(buildVideoSubmitParams(mkNode({ mode: 'reference', prompt: 'p', resolution: {}, workflowParams: {}, sizeConfig: { ratio: '16:9', size: '1K', width: 'abc', height: 0 } }), inputs).sizeConfig).toEqual({ ratio: '16:9', size: '1K' })
   })
+
+  it('连线文本输入优先作为 prompt（textPrompt 覆盖 config.prompt；未提供时用 config.prompt）', () => {
+    const inputs = { images: [mkInput('img1', 'assert/1.png')], videos: [], audios: [] }
+    const node = mkNode({ mode: 'reference', prompt: '配置中的提示词', resolution: {}, workflowParams: {} })
+    // 提供外部文本：prompt 使用外部文本
+    expect(buildVideoSubmitParams(node, inputs, '外部文本输入').prompt).toBe('外部文本输入')
+    // 不提供外部文本：回退 config.prompt
+    expect(buildVideoSubmitParams(node, inputs).prompt).toBe('配置中的提示词')
+    // 三种模式均生效（导演台/首尾帧）
+    const director = mkNode({ mode: 'director', prompt: 'p', director: { duration: 5, imageClips: [], width: 0, height: 0, fps: 0, audioClips: [] }, workflowParams: {} })
+    expect(buildVideoSubmitParams(director, inputs, '外部文本输入').prompt).toBe('外部文本输入')
+    const flf = mkNode({ mode: 'first-last-frame', prompt: 'p', inputOrder: ['img1'], duration: 5, resolution: {}, workflowParams: {} })
+    expect(buildVideoSubmitParams(flf, inputs, '外部文本输入').prompt).toBe('外部文本输入')
+  })
 })

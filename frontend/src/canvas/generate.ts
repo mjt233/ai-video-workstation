@@ -1,5 +1,6 @@
 import type { CanvasConnection, CanvasNodeData, NodeConfig } from './types'
 import { getPrototype } from './registry'
+import { getNodeOutputType } from './connection'
 import { canvasNodeOutputPath, type CanvasScope } from './paths'
 
 /**
@@ -95,6 +96,38 @@ export function collectInputs(
     return (ia === -1 ? Number.MAX_SAFE_INTEGER : ia) - (ib === -1 ? Number.MAX_SAFE_INTEGER : ib)
   })
   return list
+}
+
+/**
+ * 收集某节点的文本输入内容（来源节点输出类型为 text）。
+ *
+ * 文本来源包括「文本」节点（读 config.text）与「AI 文本生成」节点（读 config.output，
+ * 该节点产物写入 output 而非 text）；空白内容（空串/纯空白）不收集——无内容的输入
+ * 不能作为提示词。顺序按连接顺序（文本输入不参与 config.inputOrder 排序）。
+ *
+ * @param nodeId 目标节点 id
+ * @param connections 全部连线
+ * @param nodes 全部节点
+ * @param portId 目标输入端口 id（可选，仅收集连到该端口的输入）
+ * @returns 非空文本内容列表
+ */
+export function collectTextContents(
+  nodeId: string,
+  connections: CanvasConnection[],
+  nodes: CanvasNodeData[],
+  portId?: string,
+): string[] {
+  const out: string[] = []
+  for (const c of connections) {
+    if (c.toNodeId !== nodeId) continue
+    if (portId && c.toPortId !== portId) continue
+    const src = nodes.find((n) => n.id === c.fromNodeId)
+    if (!src || getNodeOutputType(src.id, nodes) !== 'text') continue
+    const raw = src.config.text ?? src.config.output
+    const text = typeof raw === 'string' ? raw : ''
+    if (text.trim()) out.push(text)
+  }
+  return out
 }
 
 /**

@@ -95,11 +95,20 @@
           class="mb-2"
         />
 
-        <!-- 导演台（内含 prompt 输入） -->
+        <!-- 多个文本连线输入：报错并禁止生成（仅保留一个） -->
+        <div
+          v-if="multiTextInput"
+          class="text-error text-body-small mb-2"
+        >
+          存在多个文本连线输入（{{ textInputCount }} 个），生成已禁用，请仅保留一个
+        </div>
+
+        <!-- 导演台（内含 prompt 输入；连线文本输入时 prompt 字段只读并显示「（已连接外部输入）」） -->
         <VideoDirector
           :project="props.project"
           :director="directorProject"
-          :prompt="prompt"
+          :prompt="externalPrompt ? '（已连接外部输入）' : prompt"
+          :prompt-readonly="externalPrompt"
           :read-only="false"
           :allow-add-asset="false"
           :standalone="true"
@@ -134,14 +143,23 @@
           {{ refLimitHint }}
         </div>
 
-        <!-- 提示词 Prompt -->
+        <!-- 多个文本连线输入：报错并禁止生成（仅保留一个） -->
+        <div
+          v-if="multiTextInput"
+          class="text-error text-body-small mb-2"
+        >
+          存在多个文本连线输入（{{ textInputCount }} 个），生成已禁用，请仅保留一个
+        </div>
+
+        <!-- 提示词 Prompt（连线文本输入时禁用并显示「（已连接外部输入）」，实际使用外部文本） -->
         <v-textarea
-          :model-value="prompt"
+          :model-value="externalPrompt ? '（已连接外部输入）' : prompt"
           label="提示词 Prompt"
           rows="5"
           density="compact"
           variant="outlined"
           hide-details
+          :disabled="externalPrompt"
           class="mb-2"
           @update:model-value="(v) => emit('update:config', { prompt: v })"
         />
@@ -337,6 +355,8 @@ const props = defineProps<{
   videosInputs: CanvasInputInfo[]
   /** 音频端口（audios）输入，已按 config.inputOrder 排序 */
   audiosInputs: CanvasInputInfo[]
+  /** 连线文本输入内容（来源为「文本」节点；存在时 prompt 字段禁用并使用外部文本，多个时禁止生成） */
+  textInputs?: string[]
   /** 节点是否正在生成（显示加载态与「中断」按钮） */
   isRunning: boolean
   /** 画布类型 */
@@ -463,6 +483,18 @@ const workflowImpl = computed(() => {
 
 /** 当前提示词（config.prompt） */
 const prompt = computed(() => (typeof props.node.config.prompt === 'string' ? props.node.config.prompt : ''))
+
+/** 连线文本输入内容（来源为「文本」节点；未连接时为空数组） */
+const textInputs = computed<string[]>(() => props.textInputs ?? [])
+
+/** 连线文本输入数量 */
+const textInputCount = computed(() => textInputs.value.length)
+
+/** 是否已连接文本输入（存在单个/多个：prompt 字段禁用并使用外部文本） */
+const externalPrompt = computed(() => textInputCount.value > 0)
+
+/** 是否连接了多个文本输入（报错并禁止生成，仅保留一个） */
+const multiTextInput = computed(() => textInputCount.value > 1)
 
 /** 当前生成模式（config.mode；非法值回退导演台） */
 const mode = computed<VideoGenerateMode>(() => {
@@ -813,8 +845,9 @@ const refLimitHint = computed(() => {
   return parts.join('；')
 })
 
-/** 是否可触发生成：导演台需有图片块；首尾帧需有帧图片；参考需至少一个输入且不超上限 */
+/** 是否可触发生成：多个文本连线输入禁止生成；导演台需有图片块；首尾帧需有帧图片；参考需至少一个输入且不超上限 */
 const canGenerate = computed(() => {
+  if (multiTextInput.value) return false
   if (mode.value === 'director') {
     return directorConfig.value.imageClips.length > 0
   }

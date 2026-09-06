@@ -72,15 +72,22 @@ function sizeConfigOf(config: CanvasNodeData['config']): VideoSubmitParams['size
  * @param node 视频生成节点（config 含 mode/prompt/workflowParams；director 模式用 config.director，
  *             首尾帧/参考模式用 config.inputOrder + config.resolution + config.duration）
  * @param inputs 按端口分组的输入资产
+ * @param textPrompt 外部文本输入（连线「文本」节点提供的提示词；提供时优先于 config.prompt，
+ *                   未提供（undefined）时使用 config.prompt）
  * @returns 视频提交参数（与后端 VideoWorkflowSubmitParams wire 形态一致）
  */
-export function buildVideoSubmitParams(node: CanvasNodeData, inputs: VideoNodeInputs): VideoSubmitParams {
+export function buildVideoSubmitParams(
+  node: CanvasNodeData,
+  inputs: VideoNodeInputs,
+  textPrompt?: string,
+): VideoSubmitParams {
   const config = node.config
   const mode: VideoGenerateMode =
     config.mode === 'director' || config.mode === 'first-last-frame' || config.mode === 'reference'
       ? config.mode
       : 'director'
-  const prompt = typeof config.prompt === 'string' ? config.prompt : ''
+  // 连线文本输入优先（外部文本作为 prompt）；否则用节点配置的 prompt
+  const prompt = textPrompt ?? (typeof config.prompt === 'string' ? config.prompt : '')
   const seedRaw = (config.workflowParams as Record<string, unknown> | undefined)?.seed
   const seed =
     typeof seedRaw === 'number'

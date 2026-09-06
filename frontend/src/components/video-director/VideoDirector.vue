@@ -174,7 +174,7 @@
       />
     </div>
 
-    <!-- prompt：与分镜-视频生成的 prompt 集成（同一来源 prompt.md） -->
+    <!-- prompt：与分镜-视频生成的 prompt 集成（同一来源 prompt.md）；外部文本输入时只读并提示 -->
     <div class="pt-4">
       <v-textarea
         :model-value="prompt"
@@ -184,8 +184,8 @@
         rows="3"
         auto-grow
         hide-details
-        :readonly="readOnly"
-        placeholder="视频生成 prompt（与分镜-视频生成的 prompt 同步）"
+        :readonly="readOnly || promptReadonly"
+        :placeholder="promptReadonly ? '（已连接外部输入）' : '视频生成 prompt（与分镜-视频生成的 prompt 同步）'"
         @update:model-value="onPromptInput"
       />
     </div>
@@ -247,6 +247,8 @@ const props = defineProps<{
   shot?: string
   /** 只读模式：禁止一切编辑（含播放除外）与保存 */
   readOnly?: boolean
+  /** prompt 字段只读：外部（画布连线文本输入）提供提示词时禁用编辑并提示「（已连接外部输入）」 */
+  promptReadonly?: boolean
   /** 独立模式（画布节点嵌入）：隐藏「保存/生成视频」按钮，数据实时写回外部 */
   standalone?: boolean
   /** 是否允许添加资产；非只读且为 false 时隐藏「添加图片/音频」按钮，其余编辑仍可用 */
@@ -621,11 +623,13 @@ function onSave(): void {
  * prompt 文本域输入：上报最新值（由外部同步到分镜-视频生成的 prompt）。
  *
  * 修改 prompt 视为未保存编辑（启用「保存」按钮），保存时由外部连同
- * director.json 一并落盘 prompt.md。
+ * director.json 一并落盘 prompt.md。只读（readOnly / promptReadonly）时忽略输入
+ * （只读文本域本不会触发，此处防御性拦截）。
  *
  * @param v 最新 prompt 文本
  */
 function onPromptInput(v: string): void {
+  if (props.readOnly || props.promptReadonly) return
   dirty.value = true
   emit('update:prompt', v)
 }

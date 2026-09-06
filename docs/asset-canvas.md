@@ -67,7 +67,7 @@
 
 节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / outputExt / defaultConfig / defaultSize / bodyComponent / editorComponent / getOutputAssetPath`。其中 `defaultSize`（可选）指定创建节点时的默认尺寸（宽×高），未声明时使用全局兜底 240×160（`useCanvasStore.DEFAULT_NODE_SIZE`）——目前仅 AI文本生成节点声明更大默认尺寸 360×240（内容多：模型/预设下拉 + 输入预览 + 双栏文本区）。
 其中端口 `type` 支持**单一类型或多类型数组**（`DataType | DataType[]`，如 AI文本生成节点的 `['media','text']` —— 任一匹配即可连接）；输出端口均为单一类型（v1 每节点单输出）。
-其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有**历史对话框入口**）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`video-frame-extract`/`video-concat`/`video-trim`/`audio-trim` 仅 `canGenerate`（无历史对话框入口；但重复执行时旧产物仍会被服务端归档进 history 目录，只是没有 UI 入口查看）。`outputExt`（生成类节点产物扩展名，如 jpg/mp4/png/flac）决定固定产物文件名 `output.{ext}`。
+其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有**历史对话框入口**）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`text-ai` 仅 `hasHistory`（无「重新生成」菜单项，其生成按钮在节点内部，历史为文本版本对话框见 §10.1）；`video-frame-extract`/`video-concat`/`video-trim`/`audio-trim` 仅 `canGenerate`（无历史对话框入口；但重复执行时旧产物仍会被服务端归档进 history 目录，只是没有 UI 入口查看）。`outputExt`（生成类节点产物扩展名，如 jpg/mp4/png/flac）决定固定产物文件名 `output.{ext}`。
 
 | 原型 | 输入端口 | 输出端口 | 可缩放 | 卡片主体 | 配置组件（editorComponent） |
 |------|----------|----------|--------|----------|------------------------------|
@@ -90,9 +90,9 @@
 - **三种加载节点均可选道具**：资产选择器新增「道具」页签（`PropPicker.vue`：分类 → 道具 → 资产三级选择），按节点类型过滤媒体——加载图片只列道具图片产物（`assert/prop/{分类}/{道具}/` 下图片）、加载视频只列视频产物、加载音频只列音频产物（见 `docs/asset-layout.md` 2.3 道具）。道具页签媒体过滤由 `useCanvasDialogs.openAssetPicker` 记录的 `picker.mediaKind` 驱动，经 `AssetPickerDialog` 的 `media-kind` prop 透传。
 - **三种加载节点打开的资产选择器「自定义资产」页签为目录浏览器**（`asset-picker/CustomAssetsGrid`）：以 `assert/custom/` 为根，可逐层进入子目录，经顶部**面包屑**（各分段可点击）与返回上级按钮跳回任意层级。目录内文件按节点媒体类型过滤——以**可接受扩展名列表（忽略大小写）**判定（`AssetPickerDialog` 把自身 `mediaKind` 映射为扩展名：加载图片=图片扩展名并以缩略图网格展示，加载音频/视频=对应扩展名并以图标行展示）；打开对话框时若节点当前绑定资产（`config.assetPath`）位于 `assert/custom/` 内，自动定位到其所在目录并高亮该文件。
 - **生成图片**：配置组件采用统一生成节点布局——`CanvasInputPreview` 输入预览（图片类型；无输入时显示「无输入图，默认使用文生图工作流」）+ 提示词字段 + 参数行（工作流类型/工作流实现两个紧凑下拉、输出尺寸 `WorkflowSizePicker`、工作流参数 `WorkflowParamsTrigger`，后两者均为点击弹出菜单式配置，见 §6.1）。`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（有输入图用 `image-edit`，否则 `text-to-image`；`workflowImpl` **须显式选择**，未选择时生成被前端校验拦截，后端也不再兜底）、`workflowParams`（用户参数）、`sizeConfig`（输出尺寸）、`inputOrder`（输入图顺序，见 §7）。产物固定 `output.jpg`。配置面板提供「上传产物」按钮（jpg/png/webp → 统一落盘 `output.jpg`，旧产物自动归档历史，见 §2.3）。
-- **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`（**须显式选择**，未选择时生成被前端校验拦截）、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`duration`（首尾帧/参考模式时长，秒）、`resolution` / `sizeConfig`（输出尺寸）、`workflowParams`、`inputOrder`。单一 `media` 输入口，素材类型由来源节点自动归类。**非导演台模式（首尾帧/参考）采用统一布局**（见 §6.1）：`CanvasInputPreview` 输入预览（图片/视频/音频分组，无对应输入不显示）+ 提示词 + 参数行（生成模式**位于工作流之前**、工作流、时长 `DurationPicker`、输出尺寸、工作流参数、全屏按钮）。`director` 模式保持内嵌导演台布局（首行工作流/模式/全屏 + 输出规格 + 参数表单 + `VideoDirector`），仅把时长输入框换成 `DurationPicker`；分镜画布下提供「设为分镜视频」（把当前产物复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。产物固定 `output.mp4`。配置面板提供「上传产物」按钮（**仅接受 mp4**，旧产物自动归档历史，见 §2.3）。
+- **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`（**须显式选择**，未选择时生成被前端校验拦截）、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`duration`（首尾帧/参考模式时长，秒）、`resolution` / `sizeConfig`（输出尺寸）、`workflowParams`、`inputOrder`。单一 `media` 输入口，素材类型由来源节点自动归类（媒体进输入预览分组）；**文本来源作为外部提示词输入**——「文本」节点（`config.text`）与「AI文本生成」节点（`config.output`）的输出文本均可（见 `generate.ts: collectTextContents`）：存在文本输入时 prompt 字段（含导演台内嵌 prompt 文本域）禁用并显示「（已连接外部输入）」，生成请求的 prompt 使用连接文本（优先于 `config.prompt`）；连接**多个**文本输入时编辑器报错「存在多个文本连线输入（N 个），生成已禁用，请仅保留一个」且生成按钮禁用（右键菜单/节点重试等入口由 `useCanvasNodeOps.generateNode` 校验拦截并 snackbar 提示）。**非导演台模式（首尾帧/参考）采用统一布局**（见 §6.1）：`CanvasInputPreview` 输入预览（图片/视频/音频分组，无对应输入不显示）+ 提示词 + 参数行（生成模式**位于工作流之前**、工作流、时长 `DurationPicker`、输出尺寸、工作流参数、全屏按钮）。`director` 模式保持内嵌导演台布局（首行工作流/模式/全屏 + 输出规格 + 参数表单 + `VideoDirector`），仅把时长输入框换成 `DurationPicker`；分镜画布下提供「设为分镜视频」（把当前产物复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。产物固定 `output.mp4`。配置面板提供「上传产物」按钮（**仅接受 mp4**，旧产物自动归档历史，见 §2.3）。
 - **TTS声音生成**：`config` 含 `mode`（`clone` 音色克隆 / `design` 音色设计）、`text`（朗读文本）、`refText`（克隆参考文字）/ `prompt`（设计声线描述）、`workflowImpl`（**须显式选择**）、`workflowParams`。配置组件同样采用统一布局——`CanvasInputPreview` 输入预览（音频类型，克隆模式需连接「加载音频」节点）+ 文本字段 + 参数行（工作流实现 + 工作流参数；**TTS 不显示时长与输出尺寸**）。
-- **AI文本生成**：调试用一次性输入/输出节点（调用服务商配置「大语言模型」页签中的 LLM 服务商）。端口：**单一 `in` 输入口**（`type: ['media','text']` —— 同时接受图片/音频/视频任意媒体来源与「文本」节点内容），连接后按**来源节点输出类型自动归类**：媒体来源进输入预览（与生成视频节点同机制），文本来源作为外部用户输入；输出 `text`。`config` 含 `providerInstanceId`（服务商实例）、`modelId`、`reasoningLevel`（思考强度挡位，选项来自模型元信息）、`input`、`output`、`inputOrder`（媒体输入顺序）。节点内模型选择为普通 `v-select`（`AiTextGenerateNode`）：条目按服务商分组（Vuetify `type: 'subheader'` 分组头），模型项只显示**名称或 id**，选项 subtitle 显示**输入模态图标 + 上下文大小（K/M 格式）**，来源于 `config.models[].meta`（`inputModalities` / `contextWindow`）。媒体输入复用统一输入预览组件 `CanvasInputPreview`（与生成图片/视频一致：按类型分组缩略图、悬浮放大、组内拖拽排序、悬停红色 x 断开；排序写 `config.inputOrder`，断开经 `nodeOps.disconnectInput`）。文本输入：连接「文本」节点后【用户输入】禁用并提示「（来自外部输入）输入的内容」，生成内容取 `textInputs[0]`；**存在多个文本连线输入时禁止生成**，并在【用户输入】标题栏提示用户。生成经 `POST /api/llm/chat`（SSE 流式）：正文增量流式显示、推理增量显示「Thinking...」，流式期间全部用户控件禁用、「停止」按钮中止请求（AbortController）；流式输出按 500ms 节流走**静默更新**（`store.updateNodeQuiet`，不入撤销栈）写入 `config.output`，流结束时正常提交一次（单次撤销）。媒体输入由服务端读取后按协议能力过滤（协议/模型不支持的类型忽略并提示）；音频/视频仅 Gemini 等原生支持，图片全协议支持。错误以响应区红字 + console 日志呈现。**不注册工作流、无产物文件**（`canGenerate`/`hasHistory`/`outputExt` 均不声明）。LLM 服务商配置页含「一键获取模型列表」（各协议免费 `/models` 接口 + OpenRouter 元数据匹配，服务端内存缓存 24h）。
+- **AI文本生成**：调试用一次性输入/输出节点（调用服务商配置「大语言模型」页签中的 LLM 服务商）。端口：**单一 `in` 输入口**（`type: ['media','text']` —— 同时接受图片/音频/视频任意媒体来源与「文本」节点内容），连接后按**来源节点输出类型自动归类**：媒体来源进输入预览（与生成视频节点同机制），文本来源作为外部用户输入；输出 `text`（`config.output` 为生成结果，可作为文本数据源连接到生成视频等节点充当外部 prompt；`config.text ?? config.output` 的读取规则见 `generate.ts: collectTextContents`）。`config` 含 `providerInstanceId`（服务商实例）、`modelId`、`reasoningLevel`（思考强度挡位，选项来自模型元信息）、`input`、`output`、`inputOrder`（媒体输入顺序）。节点内模型选择为普通 `v-select`（`AiTextGenerateNode`）：条目按服务商分组（Vuetify `type: 'subheader'` 分组头），模型项只显示**名称或 id**，选项 subtitle 显示**输入模态图标 + 上下文大小（K/M 格式）**，来源于 `config.models[].meta`（`inputModalities` / `contextWindow`）。媒体输入复用统一输入预览组件 `CanvasInputPreview`（与生成图片/视频一致：按类型分组缩略图、悬浮放大、组内拖拽排序、悬停红色 x 断开；排序写 `config.inputOrder`，断开经 `nodeOps.disconnectInput`）。文本输入：连接「文本」节点后【用户输入】禁用并提示「（来自外部输入）输入的内容」，生成内容取 `textInputs[0]`；**存在多个文本连线输入时禁止生成**，并在【用户输入】标题栏提示用户。生成经 `POST /api/llm/chat`（SSE 流式）：正文增量流式显示、推理增量显示「Thinking...」，流式期间全部用户控件禁用（**AI 响应输出框只读**，防止手动输入与流式增量互相覆盖）、「停止」按钮中止请求（AbortController）；流式输出按 500ms 节流走**静默更新**（`store.updateNodeQuiet`，不入撤销栈）写入 `config.output`，流结束时正常提交一次（单次撤销）。**响应结束后输出框转为可手动编辑**：编辑内容写入 `config.output`（走正常可撤销更新；出错且无输出时输出框展示错误红字并保持只读，不误存错误文案）。**文本历史版本**：每次 AI 响应**正常结束**（未被停止、无错误）且输出非空时，自动向 `config.outputHistory` 追加一条版本（静默更新、不入撤销栈，且在最终输出提交之前写入——撤销生成不连带丢失存档；记录当时的输入/输出快照与模型/预设/媒体元信息，上限 50 条超出丢弃最旧，详见 §10.1）；手动停止/出错/空响应不存档，手动编辑过的输出不自动存档。媒体输入由服务端读取后按协议能力过滤（协议/模型不支持的类型忽略并提示）；音频/视频仅 Gemini 等原生支持，图片全协议支持。错误以响应区红字 + console 日志呈现。**不注册工作流、无产物文件**（`canGenerate`/`outputExt` 不声明；`hasHistory: true` —— 右键「历史」与节点内标题栏历史按钮打开的是**文本历史对话框** `AiTextHistoryDialog`，见 §10.1，非资产文件历史）。LLM 服务商配置页含「一键获取模型列表」（各协议免费 `/models` 接口 + OpenRouter 元数据匹配，服务端内存缓存 24h）。
 - **拼接视频**：`config` 含 `inputOrder`（拼接顺序，编辑器内 `VideoRefInputGroup` 拖拽排序）。单一 `video` 输入口，同一端口可连多段视频（无输入上限校验）；编辑器「拼接」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/concat-video`（本地 ffmpeg，concat demuxer + `-c copy` 无损拼接，各段编码/分辨率/帧率/音轨结构须一致，不一致返回清晰中文错误）；产物固定 `output.mp4`，重复拼接旧产物自动归档进历史目录。
 - **裁剪视频**：`config` 含 `startMode`（`time` / `frame`）、`startValue`（秒可小数，或帧索引整数 ≥ 0）、`duration`（秒，> 0 可小数）。单一 `video` 输入口（多路只取第一路）；编辑器「裁剪」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/trim-video`（本地 ffmpeg **重编码**，不用 `-c copy`，保证帧索引 / 小数秒切口准确：`libx264 veryfast crf=18`，有音轨则 `aac`）。起点 + 时长超出片尾时截到剩余时长。产物固定覆盖 `output.mp4`，重复裁剪旧产物自动归档（**裁剪也有历史**，与其余节点一致）。节点卡片与配置面板均可预览裁剪结果。
 - **裁剪音频**：`config` 含 `startValue`（起始位置，秒可小数 ≥ 0）、`duration`（裁剪时长，秒 > 0 可小数）。单一 `audio` 输入口（多路只取第一路）；编辑器「裁剪」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/trim-audio`（本地 ffmpeg 重编码为 **FLAC 无损输出**，不用 `-c copy`，保证小数秒切口准确）。起点 + 时长超出片尾时截到剩余时长（编辑器在源时长已知时提前给出越界提示；源时长由输入音频 ffprobe 探测）。产物固定覆盖 `output.flac`，重复裁剪旧产物自动归档（与其余 ffmpeg 节点一致，无历史对话框入口）。输出 `audio` 可直接接到 TTS/生成视频等音频消费节点；编辑器提供「使用当前播放位置」把预览播放时间写入起始位置。
@@ -218,7 +218,18 @@
 
 ## 10. 设为分镜场景图
 
-> **历史对话框**：生成节点「历史」打开的是独立组件 `CanvasAssertHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（当前产物虚拟项 + 服务端历史目录条目，按时间戳文件名/生成时间展示）；点「设为当前」→ 服务端 `POST /api/assets/:project/history/activate`（history 文件换回当前产物固定路径），成功后通知父级刷新产物展示；点「删除」→ `confirm` 弹窗确认 → `DELETE /api/assets/:project/history` 删除历史文件，对话框保持打开并刷新列表。**历史数据完全由服务端管理，前端不再维护 `config.history`**。
+> **历史对话框**：生成节点「历史」打开的是独立组件 `CanvasAssertHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（当前产物虚拟项 + 服务端历史目录条目，按时间戳文件名/生成时间展示）；点「设为当前」→ 服务端 `POST /api/assets/:project/history/activate`（history 文件换回当前产物固定路径），成功后通知父级刷新产物展示；点「删除」→ `confirm` 弹窗确认 → `DELETE /api/assets/:project/history` 删除历史文件，对话框保持打开并刷新列表。**历史数据完全由服务端管理，前端不再维护 `config.history`**。例外：AI 文本生成节点（无产物文件）的历史见下方 §10.1 文本历史版本，由 `AssetCanvas` 按 `historyNode.prototypeId === 'text-ai'` 把同一 `historyDialog` 状态分支到不同对话框。
+
+### 10.1 AI 文本生成节点的文本历史版本
+
+AI 文本生成节点不产生资产文件，其历史是**纯文本快照**，存放在节点 `config.outputHistory`（随 `canvas.json` 持久化；类型与纯函数见 `canvas/aiTextHistory.ts`：`AiTextHistoryEntry` 含 id/createdAt/input/output 与可选的 modelName/presetName/mediaLabels 展示快照；数组**末尾为最新**，最多保留 `MAX_TEXT_HISTORY_VERSIONS = 50` 条、超出丢弃最旧；读取时逐条过滤脏数据）。
+
+- **存档时机**：每次 AI 响应**正常结束**（未被「停止」、无错误事件）且输出非空时自动追加一条，记录**当时的输入**（本次实际发送的用户侧文本：外部文本连线取连线内容，否则取输入框文本；不含预设提示词替换后的完整内容）与**当时的输出**，并附模型名/预设名/媒体输入名称快照；手动停止、出错、空响应**不存档**；手动编辑过的当前输出**不自动存档**（再次生成直接覆盖，与需求约定一致）。
+- **写入语义**：追加/删除走**静默更新**（`update:config-quiet`，不入撤销栈）；追加发生在流结束最终输出正常提交**之前**，撤销（Ctrl+Z）生成不会连带丢失已存档版本。「设为当前」走正常更新（可撤销）。
+- **当前值即 `config.output`**：AI 响应结束后输出框转为可手动编辑，编辑内容即当前值；「设为当前」仅把所选版本的输出写回 `config.output`（不恢复输入/模型参数）。
+- **入口**（两个，均打开 `AiTextHistoryDialog.vue`）：① 节点右键菜单「历史」——`text-ai` 原型声明 `hasHistory: true`；② 节点内 AI 响应标题栏右侧历史小按钮——事件链 `AiTextGenerateNode` → `CanvasNodeCard` 转发（带 node.id）→ `AssetCanvas.openHistory`。
+- **对话框交互**（`AiTextHistoryDialog.vue`）：左侧展示所选版本的时间/模型/预设/媒体元信息与「当时的输入」「当时的输出」（只读滚动区）；右侧版本列表最新在前，行操作「设为当前」（仅恢复输出，snackbar 反馈）与「删除」（`confirm` 确认 → 静默移除，删除不可撤销）。数据全部来自 config，打开对话框无任何服务端请求；刷新/切换画布后版本仍随 canvas.json 保留。
+- **复制/粘贴节点**：`remapNodeConfig`（`groupSelection.ts`）剥离 `config.outputHistory`，粘贴出的副本从零开始记录自己的版本。
 
 - 生成节点编辑器「设为分镜场景图」→ 弹出对话框（独立组件 `SetAsSceneDialog.vue`，帧加载/新增/覆盖逻辑在组件内部；入口状态由 `useCanvasDialogs` 持有）。
 - 读取 `prompt/scene/{ep}/{shot}/stage.json` 列出**全部场景帧**（label = `基础场景` || prompt || `分镜场景图 N`，预览 `stage/{i}.jpg`，404 时 `@error` 置 `broken` 显示占位）。
@@ -231,7 +242,7 @@
   - 无基础场景时复用现有帧第一个的 `基础场景`，仍无则禁用「新增」并提示。
 - 服务端 `addStageFrame` 约束：`基础场景` 必填（`场景名/标签` 或 `prev`）；有登场角色时必须填 prompt。
 
-### 10.1 保存为（节点右键菜单）
+### 10.2 保存为（节点右键菜单）
 
 有当前产物的节点（图片/视频/音频输出）右键菜单显示「保存为」hover 子菜单，按**节点输出类型**提供目标：
 
@@ -278,6 +289,7 @@ frontend/src/
 │   ├── preview.ts                # 预览 URL
 │   ├── api.ts                    # loadCanvas / saveCanvas
 │   ├── generate.ts               # 输入收集（collectInputs/collectInputPaths）、节点当前资产推导（固定产物路径）
+│   ├── aiTextHistory.ts          # AI 文本生成节点文本历史版本（类型/上限/追加/删除/读取过滤）
 │   ├── autobuild.ts              # 自动搭画布
 │   │   # 注：autobuild.ts 另含 resolveShotStageRef / resolveCharacterRef / deriveStageRefFromAssetPath / buildSubSceneAutoCanvas
 │   ├── clipboard.ts              # 剪贴板媒体识别（classifyPastedFile/collectPastedMedia/粘贴上传目标路径）
@@ -297,7 +309,7 @@ frontend/src/
     ├── CanvasGroupDot.vue        # 群组输出连接圆点（合成节点 __group-dot 的展示内容；mousedown 启动成组连接拖拽）
     ├── CanvasGroupConnectMenu.vue# 群组连接目标选择菜单（输出点拖拽超阈值释放后弹出）
     ├── SetAsSceneDialog.vue      # 设为分镜场景图对话框（帧加载/选中/覆盖/新增）
-    ├── CanvasAssertHistoryDialog.vue / SaveAssetDialog.vue / SaveAsDialog.vue  # 历史/保存为自定义资产/保存为（目标选择）对话框
+    ├── CanvasAssertHistoryDialog.vue / AiTextHistoryDialog.vue / SaveAssetDialog.vue / SaveAsDialog.vue  # 历史（产物/文本）/保存为自定义资产/保存为（目标选择）对话框
     ├── composables/              # 画布交互组合式（与组件同域，store/gen/VueFlow 工具以参数注入）
     │   ├── types.ts              # 共享类型（CanvasStoreApi/CanvasGenerationApi/NodeMap 等）
     │   ├── useCanvasFlow.ts      # Vue Flow 数据映射（含群组合成节点）、拖拽/缩放回写（多节点批量）、连线交互

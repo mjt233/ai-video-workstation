@@ -167,6 +167,10 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,
     bodyComponent: AiTextGenerateNode,
+    // 有文本历史版本（右键「历史」打开的是 AiTextHistoryDialog —— config.outputHistory
+    // 纯文本快照历史，非资产文件历史；与产物节点的 CanvasAssertHistoryDialog 不同，
+    // AssetCanvas 按原型分支渲染对应对话框）
+    hasHistory: true,
     // 默认尺寸大于通用兜底（240×160）：AI 文本节点含模型/预设下拉 + 输入预览 + 双栏文本区，
     // 需要更多空间展示内容（用户可再手动缩放）
     defaultSize: { width: 360, height: 240 },

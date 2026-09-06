@@ -171,23 +171,34 @@
         />
       </div>
       <div class="ai-text-node__pane">
-        <div class="ai-text-node__pane-title">
-          AI 响应
-          <span
-            v-if="warnings.length > 0"
-            class="ai-text-node__warn"
-          >
-            {{ warnings.join('；') }}
+        <div class="ai-text-node__pane-title ai-text-node__pane-title--actions">
+          <span class="ai-text-node__pane-title-text">
+            AI 响应
+            <span
+              v-if="warnings.length > 0"
+              class="ai-text-node__warn"
+            >
+              {{ warnings.join('；') }}
+            </span>
           </span>
+          <v-btn
+            icon="mdi-history"
+            size="x-small"
+            variant="text"
+            class="ai-text-node__history-btn"
+            title="历史版本（每次 AI 响应结束后自动保存，可查看当时的输入与输出）"
+            @click.stop="emit('open-history')"
+          />
         </div>
         <textarea
           ref="outputEl"
           class="ai-text-node__area ai-text-node__area--output nodrag nowheel"
           :class="{ 'ai-text-node__area--error': !!errorMsg }"
           :value="outputText || (errorMsg ?? '')"
-          readonly
-          placeholder="生成结果将流式显示在此"
+          :readonly="outputAreaReadonly"
+          placeholder="生成结果将流式显示在此；响应结束后可直接手动编辑"
           spellcheck="false"
+          @input="onOutputEdit"
           @scroll="onOutputScroll"
         />
       </div>
@@ -236,6 +247,7 @@ import { usePresetPrompts } from '../../../composables/usePresetPrompts'
 import { formatContextWindow } from '../../../utils/llmContextWindow'
 import { MODALITY_ICONS, MODALITY_LABELS } from '../../../utils/llmModality'
 import { composePresetPrompt } from '../../../utils/presetPrompt'
+import { appendTextHistory, createTextHistoryEntry, readTextHistory } from '../../../canvas/aiTextHistory'
 import type { LlmMediaInputItem } from '../composables/useCanvasNodeOps'
 import CanvasInputPreview from '../editors/CanvasInputPreview.vue'
 
@@ -252,6 +264,8 @@ const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
   (e: 'update:config-quiet', patch: Record<string, unknown>): void
   (e: 'disconnect-input', sourceNodeId: string): void
+  /** 打开该节点的文本历史版本对话框（父级经 CanvasNodeCard 转发到画布层） */
+  (e: 'open-history'): void
 }>()
 
 /** 大语言模型服务商选项（共享缓存） */
@@ -439,6 +453,16 @@ const textInputCount = computed(() => props.textInputs?.length ?? 0)
 /** 是否禁用用户输入（生成中 / 已连接文本输入时禁用，输入内容来自外部连线） */
 const userInputDisabled = computed(() => generating.value || textInputCount.value > 0)
 
+/**
+ * 输出区是否只读：
+ * - 生成流式期间只读（防止手动输入与流式增量互相覆盖）；
+ * - 出错且无输出时只读（响应区展示的是红字错误文案，不允许误存为输出）；
+ * 其余时刻（响应结束后/加载历史输出）允许手动编辑 AI 响应。
+ */
+const outputAreaReadonly = computed(
+  () => generating.value || (outputText.value.trim().length === 0 && !!errorMsg.value),
+)
+
 /** 用户输入占位提示（按文本输入连接情况区分） */
 const userInputPlaceholder = computed(() => {
   if (textInputCount.value > 1) return '存在多个文本连线输入，无法执行生成，请仅保留一个'
@@ -521,6 +545,38 @@ function onInputText(e: Event): void {
   emit('update:config', { input: v })
 }
 
+/**
+ * AI 响应手动编辑：更新本地值并提交配置（可撤销，与用户输入区编辑一致）。
+ * 出错时响应区展示的是错误文案（见 outputAreaReadonly），能进入本处理即表示
+ * 编辑的是真实输出内容；编辑同时清掉残留的错误红字状态。
+ */
+function onOutputEdit(e: Event): void {
+  const v = (e.target as HTMLTextAreaElement).value
+  if (v === outputText.value) return
+  outputText.value = v
+  if (errorMsg.value) errorMsg.value = ''
+  emit('update:config', { output: v })
+}
+
+/**
+ * 生成正常结束且输出非空时，追加一条文本历史版本（记录「当时的输入与输出」快照）。
+ *
+ * 走静默更新（update:config-quiet，不入撤销栈），且须在最终输出正常提交之前调用：
+ * 最终提交的撤销快照此时已包含本条历史，撤销生成不会连带丢失已存档的版本。
+ * 输入快照取本次实际发送的用户侧文本（外部文本连线取连线内容，否则取输入框文本；
+ * 不含预设提示词替换后的完整发送内容），另附模型名/预设名/媒体输入名称供历史对话框对照。
+ *
+ * @param sentText 本次生成实际发送的用户侧文本（已 trim）
+ */
+function saveOutputHistoryVersion(sentText: string): void {
+  const entry = createTextHistoryEntry(sentText, outputText.value, {
+    modelName: selectedModel.value?.name || selectedModel.value?.modelId || modelId.value || undefined,
+    presetName: activePreset.value?.name ?? undefined,
+    mediaLabels: (props.inputs ?? []).map((i) => i.label).filter((s) => s.length > 0),
+  })
+  emit('update:config-quiet', { outputHistory: appendTextHistory(readTextHistory(config.value), entry) })
+}
+
 /** 生成 */
 async function onGenerate(): Promise<void> {
   if (generating.value) return
@@ -560,6 +616,8 @@ async function onGenerate(): Promise<void> {
   controller = new AbortController()
   generating.value = true
   stickToBottom.value = true
+  // 本次生成是否「正常结束」（未被停止、无错误）：为真且输出非空时流结束后自动存档历史版本
+  let finishedOk = false
   // 生成前先提交一次输入快照
   emit('update:config', { input: inputText.value })
   try {
@@ -586,6 +644,8 @@ async function onGenerate(): Promise<void> {
       }
     }
     await flushCommit()
+    // 正常结束判定：未收到错误事件且未被「停止」中止（controller 在 finally 置空前仍可用）
+    finishedOk = !errorMsg.value && !controller.signal.aborted
   } catch (e) {
     if (!controller.signal.aborted) {
       errorMsg.value = e instanceof Error ? e.message : String(e)
@@ -597,6 +657,10 @@ async function onGenerate(): Promise<void> {
     // 空响应且无错误时给占位提示
     if (!outputText.value && !errorMsg.value) {
       hint.value = '模型未返回内容（响应为空）'
+    }
+    // 正常结束且输出非空 → 先静默追加历史版本（在最终提交前，撤销生成不会丢失存档）
+    if (finishedOk && outputText.value.trim().length > 0) {
+      saveOutputHistoryVersion(text)
     }
     // 流结束后提交最终输出（走可撤销的正常更新路径）
     emit('update:config', { output: outputText.value })
@@ -767,6 +831,31 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 带操作按钮的标题行（AI 响应面板：标题文本省略 + 右侧历史按钮） */
+.ai-text-node__pane-title--actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: visible;
+}
+
+.ai-text-node__pane-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-text-node__history-btn {
+  flex: 0 0 auto;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.ai-text-node__history-btn:hover {
+  color: rgb(25, 118, 210);
 }
 
 .ai-text-node__warn {

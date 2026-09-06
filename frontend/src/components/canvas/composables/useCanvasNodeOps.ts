@@ -6,7 +6,7 @@
 
 import { computed } from 'vue'
 import { buildVideoSubmitParams } from '../../../canvas/videoSubmit'
-import { collectInputPaths, collectInputs, type CanvasInputInfo } from '../../../canvas/generate'
+import { collectInputPaths, collectInputs, collectTextContents, type CanvasInputInfo } from '../../../canvas/generate'
 import { getNodeOutputType } from '../../../canvas/connection'
 import type { CanvasNodeData, PortType } from '../../../canvas/types'
 import type { CanvasScope } from '../../../canvas/paths'
@@ -127,11 +127,22 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
         showSnackbar(implMsg, 'error')
         return
       }
-      const videoParams = buildVideoSubmitParams(node, {
-        images: videoInputsOf(nodeId, 'image'),
-        videos: videoInputsOf(nodeId, 'video'),
-        audios: videoInputsOf(nodeId, 'audio'),
-      })
+      // 连线文本输入（「文本」节点）：多个文本输入时禁止生成（提示并拦截，
+      // 保证提交的 prompt 唯一且与界面显示一致）；单个文本输入时作为 prompt 提交
+      const texts = textInputsOf(nodeId)
+      if (texts.length > 1) {
+        showSnackbar(`存在多个文本连线输入（${texts.length} 个），生成已禁用，请仅保留一个`, 'error')
+        return
+      }
+      const videoParams = buildVideoSubmitParams(
+        node,
+        {
+          images: videoInputsOf(nodeId, 'image'),
+          videos: videoInputsOf(nodeId, 'video'),
+          audios: videoInputsOf(nodeId, 'audio'),
+        },
+        texts[0],
+      )
       await gen.generate(node, videoParams, applyResult)
       return
     }
@@ -328,6 +339,20 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   })
 
   /**
+   * 视频生成节点（配置面板当前选中节点）的文本输入内容。
+   *
+   * 来源为「文本」节点（输出类型 text）：配置面板据此禁用 prompt 字段（显示
+   * 「（已连接外部输入）」）并在多个文本输入时禁止生成。非选中视频生成节点时为空数组。
+   *
+   * @returns 非空文本内容列表（按连接顺序）
+   */
+  const videoTextInputs = computed<string[]>(() => {
+    const panelNode = getSelectedNode()
+    if (!panelNode || panelNode.prototypeId !== 'video-generate') return []
+    return textInputsOf(panelNode.id)
+  })
+
+  /**
    * 上游更新角标：任一输入节点的产物 mtime 比本节点当前产物新 → 提示重新生成。
    * （产物 mtime 由 AssetCanvas 经 getOutputMtime 提供；无 mtime 信息时返回 false）
    *
@@ -403,10 +428,12 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   }
 
   /**
-   * 收集 AI 文本生成节点的文本输入内容（来源为「文本」节点的 config.text）。
+   * 收集节点的文本输入内容（来源节点输出类型为 text）。
    *
    * 节点为单一输入口（type: ['media', 'text']），故按「来源节点输出类型」而非端口区分：
-   * text 类来源进本方法，媒体类来源见 llmMediaInputsOf。
+   * text 类来源进本方法，媒体类来源见 llmMediaInputsOf。文本内容按来源节点类型读取：
+   * 「文本」节点读 config.text，「AI 文本生成」节点读 config.output（纯函数
+   * collectTextContents，见 generate.ts），空白内容不收集。
    *
    * @param nodeId 目标节点 id
    * @returns 非空文本内容列表（按连接顺序）
@@ -414,15 +441,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   function textInputsOf(nodeId: string): string[] {
     const node = nodeMap.value[nodeId]
     if (!node) return []
-    const out: string[] = []
-    for (const c of store.connections.value) {
-      if (c.toNodeId !== nodeId) continue
-      const src = nodeMap.value[c.fromNodeId]
-      if (!src || getNodeOutputType(src.id, store.nodes.value) !== 'text') continue
-      const text = src.config.text
-      if (typeof text === 'string' && text.trim()) out.push(text)
-    }
-    return out
+    return collectTextContents(nodeId, store.connections.value, store.nodes.value)
   }
 
   /**
@@ -458,6 +477,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     audioInputsOf,
     videoInputsOf,
     videoInputGroups,
+    videoTextInputs,
     isUpstreamUpdated,
     onUpdateConfig,
     onUpdateConfigQuiet,

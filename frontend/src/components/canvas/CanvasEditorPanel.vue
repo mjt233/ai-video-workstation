@@ -18,6 +18,7 @@
         :images-inputs="videoInputGroups.images"
         :videos-inputs="videoInputGroups.videos"
         :audios-inputs="videoInputGroups.audios"
+        :text-inputs="textInputs"
         :is-running="isRunning"
         :kind="kind"
         @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
@@ -78,6 +79,8 @@ const props = defineProps<{
     videos: CanvasInputInfo[]
     audios: CanvasInputInfo[]
   }
+  /** 视频生成节点连线文本输入内容（「文本」节点；非视频节点为空数组，供 prompt 字段禁用/报错） */
+  textInputs?: string[]
   /** 节点生成中标记 */
   isRunning: boolean
   /** 画布类型（生成图片编辑器用它控制「设为分镜场景图」按钮显隐） */

@@ -212,6 +212,8 @@ export function nodeCanConnectToPrototype(node: CanvasNodeData, prototype: NodeP
  * - config.inputOrder：来源节点 id 数组；
  * - config.director.imageClips / audioClips[].sourceNodeId：导演台素材块来源。
  * 未出现在 idMap 中的 id 保持原值（指向画布中仍存在的节点，如复制单个节点时）。
+ * 另外剥离 AI 文本生成节点的 config.outputHistory（文本历史版本）——
+ * 粘贴出的副本从零开始记录自己的历史，不继承源节点的版本记录。
  *
  * @param config 节点配置
  * @param idMap 旧 id → 新 id 映射
@@ -219,6 +221,11 @@ export function nodeCanConnectToPrototype(node: CanvasNodeData, prototype: NodeP
  */
 export function remapNodeConfig(config: NodeConfig, idMap: ReadonlyMap<string, string>): NodeConfig {
   const next: NodeConfig = { ...config }
+
+  // AI 文本生成节点：文本历史不随节点复制（粘贴副本从零记录自己的版本）
+  if (next.outputHistory !== undefined) {
+    delete next.outputHistory
+  }
 
   if (Array.isArray(config.inputOrder)) {
     next.inputOrder = (config.inputOrder as unknown[]).map((id) =>

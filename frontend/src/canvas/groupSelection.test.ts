@@ -191,4 +191,23 @@ describe('remapNodeConfig', () => {
     expect(config.prompt).toBe('你好')
     expect(config.inputOrder).toEqual(['keep'])
   })
+
+  it('剥离 AI 文本生成节点的 outputHistory（复制出的节点从零记录历史）', () => {
+    const config = remapNodeConfig(
+      {
+        input: 'x',
+        output: 'y',
+        outputHistory: [{ id: 'h1', createdAt: '2026-01-01T00:00:00.000Z', input: 'x', output: 'y' }],
+      },
+      new Map(),
+    )
+    expect(config.outputHistory).toBeUndefined()
+    expect(config.input).toBe('x')
+    expect(config.output).toBe('y')
+  })
+
+  it('无 outputHistory 字段时配置不受影响', () => {
+    const config = remapNodeConfig({ input: 'x', output: 'y' }, new Map())
+    expect(config).toEqual({ input: 'x', output: 'y' })
+  })
 })

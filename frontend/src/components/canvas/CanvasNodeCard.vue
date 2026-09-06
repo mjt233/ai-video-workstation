@@ -59,6 +59,7 @@
         @open-picker="emit('open-picker', node.id)"
         @upload-file="(payload: CanvasUploadFilePayload) => emit('upload-file', { ...payload, nodeId: node.id })"
         @disconnect-input="(sourceNodeId: string) => emit('disconnect-input', node.id, sourceNodeId)"
+        @open-history="emit('open-history', node.id)"
       />
       <!-- 节点状态遮罩（通用能力）：running 显示加载动画 + 统一中断入口；error 显示错误与重试 -->
       <div
@@ -238,6 +239,8 @@ const emit = defineEmits<{
   (e: 'open-picker', nodeId: string): void
   /** 主体组件上传文件（加载节点：进度显示在本卡片遮罩上） */
   (e: 'upload-file', payload: CanvasUploadFilePayload): void
+  /** 主体组件请求打开版本历史（AI 文本生成节点：config.outputHistory 文本历史对话框） */
+  (e: 'open-history', nodeId: string): void
   /** 上传失败「重试」按钮（父级按状态中保存的文件与路径重传） */
   (e: 'retry-upload', nodeId: string): void
   /** 状态遮罩「重试」按钮（失败后重新生成） */
