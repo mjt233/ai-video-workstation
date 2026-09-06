@@ -47,6 +47,8 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
   const suppressEditor = ref(false)
   /** 程序化选中（如粘贴自动聚焦）后抑制配置面板自动弹出；用户点击节点后恢复 */
   const suppressPanelOnSelect = ref(false)
+  /** 配置面板被用户手动关闭（X/Esc）：仅隐藏面板、保留节点选中与关联高亮；点击节点/切换选中后自动重开 */
+  const panelDismissed = ref(false)
 
   /** 当前选中节点 id：恰好选中一个节点时为其 id，否则为空串（单节点路径兼容） */
   const selectedNodeId = computed(() => (selectedNodeIds.value.length === 1 ? selectedNodeIds.value[0] : ''))
@@ -81,6 +83,7 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
   function onNodeClick(payload: NodeMouseEvent): void {
     suppressEditor.value = false
     suppressPanelOnSelect.value = false
+    panelDismissed.value = false
     const id = payload.node.id
     if (isSyntheticNodeId(id)) return
     const event = payload.event as MouseEvent | undefined
@@ -100,6 +103,7 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
   function onPaneClick(): void {
     suppressEditor.value = false
     suppressPanelOnSelect.value = false
+    panelDismissed.value = false
     selectedNodeIds.value = []
     selectedEdgeId.value = ''
   }
@@ -143,6 +147,15 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
   /** 程序化设置面板抑制标志（粘贴自动聚焦等场景） */
   function setSuppressPanelOnSelect(value: boolean): void {
     suppressPanelOnSelect.value = value
+  }
+
+  /**
+   * 关闭配置面板（X 按钮 / Esc）：仅隐藏面板，不改动选中态——
+   * 节点保持聚焦（选中边框/关联高亮/Delete 等快捷键均保留）。
+   * 再次点击当前节点或选中其他节点时面板自动重新打开（onNodeClick 复位该标志）。
+   */
+  function dismissPanel(): void {
+    panelDismissed.value = true
   }
 
   /**
@@ -197,6 +210,7 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
   function reset(): void {
     suppressEditor.value = false
     suppressPanelOnSelect.value = false
+    panelDismissed.value = false
     selectedNodeIds.value = []
     selectedEdgeId.value = ''
   }
@@ -209,6 +223,7 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
     selectedEdgeId,
     suppressEditor,
     suppressPanelOnSelect,
+    panelDismissed,
     isMultiSelected,
     editorPanel,
     onNodeClick,
@@ -220,6 +235,7 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
     toggleSelectNode,
     syncFromVueFlow,
     setSuppressPanelOnSelect,
+    dismissPanel,
     deleteNode,
     deleteSelected,
     reset,

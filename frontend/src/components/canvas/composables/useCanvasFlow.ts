@@ -41,8 +41,9 @@ export interface UseCanvasFlowOptions {
   groupRect: ComputedRef<GroupRect | null>
 }
 
-/** 单选联动高亮连线挂载到 edge wrapper 的 class（样式见 AssetCanvas scoped `:deep` 规则） */
-const EDGE_RELATED_CLASS = 'canvas-edge--related'
+/** 单选联动高亮连线挂载到 edge wrapper 的 class（输入侧绿色 / 输出侧橙色，样式见 AssetCanvas scoped `:deep` 规则） */
+const EDGE_RELATED_INPUT_CLASS = 'canvas-edge--related canvas-edge--input'
+const EDGE_RELATED_OUTPUT_CLASS = 'canvas-edge--related canvas-edge--output'
 
 /**
  * 画布流渲染与连线交互组合式。
@@ -54,34 +55,63 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   const { store, nodeMap, project, selectedEdgeId, selectedNodeIds, groupRect } = options
 
   /**
-   * 单选联动高亮：恰好选中 1 个节点时，收集与该节点直接相连的连线 id
-   * （选中节点作 source 或 target 均计入：输入侧连线 + 输出侧连线）。
-   * 无选中/多选（≥2，群组操作模式）时返回空集，不产生关联高亮（见 docs/asset-canvas.md §5）。
+   * 单选联动高亮（输入侧）：恰好选中 1 个节点时，收集「指向选中节点」的连线 id
+   * （`toNodeId === 选中节点`，数据流方向为邻接节点 → 选中节点）。
+   * 输入侧以绿色高亮（#2E7D32）；无选中/多选（≥2，群组操作模式）时返回空集。
    */
-  const relatedEdgeIds = computed<Set<string>>(() => {
+  const relatedInputEdgeIds = computed<Set<string>>(() => {
     const ids = selectedNodeIds.value
     if (ids.length !== 1) return new Set()
     const focus = ids[0]
     const set = new Set<string>()
     for (const c of store.connections.value) {
-      if (c.fromNodeId === focus || c.toNodeId === focus) set.add(c.id)
+      if (c.toNodeId === focus) set.add(c.id)
     }
     return set
   })
 
   /**
-   * 单选联动高亮：与选中节点「直接相连」的邻接节点 id（输入邻居 + 输出邻居，
-   * 即 relatedEdgeIds 对应连线的另一端点，剔除选中节点自身）。
-   * 供 CanvasNodeCard 邻接边框高亮使用；无选中/多选时为空集。
+   * 单选联动高亮（输出侧）：恰好选中 1 个节点时，收集「由选中节点发出」的连线 id
+   * （`fromNodeId === 选中节点`，数据流方向为选中节点 → 邻接节点）。
+   * 输出侧以橙色高亮（#EF6C00）；无选中/多选时返回空集。
    */
-  const adjacentNodeIds = computed<Set<string>>(() => {
+  const relatedOutputEdgeIds = computed<Set<string>>(() => {
+    const ids = selectedNodeIds.value
+    if (ids.length !== 1) return new Set()
+    const focus = ids[0]
+    const set = new Set<string>()
+    for (const c of store.connections.value) {
+      if (c.fromNodeId === focus) set.add(c.id)
+    }
+    return set
+  })
+
+  /**
+   * 单选联动高亮（输入侧邻接节点）：指向选中节点的连线其「源」节点（输入邻居，
+   * 即数据流上游，剔除选中节点自身）。用于输入侧邻接节点绿色边框。
+   */
+  const adjacentInputNodeIds = computed<Set<string>>(() => {
+    const ids = selectedNodeIds.value
+    if (ids.length !== 1) return new Set()
+    const focus = ids[0]
+    const set = new Set<string>()
+    for (const c of store.connections.value) {
+      if (c.toNodeId === focus) set.add(c.fromNodeId)
+    }
+    return set
+  })
+
+  /**
+   * 单选联动高亮（输出侧邻接节点）：由选中节点发出的连线其「目标」节点（输出邻居）。
+   * 用于输出侧邻接节点橙色边框；无选中/多选时为空集。
+   */
+  const adjacentOutputNodeIds = computed<Set<string>>(() => {
     const ids = selectedNodeIds.value
     if (ids.length !== 1) return new Set()
     const focus = ids[0]
     const set = new Set<string>()
     for (const c of store.connections.value) {
       if (c.fromNodeId === focus) set.add(c.toNodeId)
-      else if (c.toNodeId === focus) set.add(c.fromNodeId)
     }
     return set
   })
@@ -138,7 +168,8 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   /** Vue Flow 节点列表（真实节点 + 群组合成节点） */
   const flowNodeFullList = computed(() => [...flowNodeList.value, ...syntheticNodeList.value])
 
-  /** Vue Flow 连线列表（type 固定 default；单选联动高亮时给关联连线挂 EDGE_RELATED_CLASS，
+  /** Vue Flow 连线列表（type 固定 default；单选联动高亮时给关联连线挂方向分色 class：
+      输入侧 canvas-edge--input（绿）/ 输出侧 canvas-edge--output（橙），
       Vue Flow 会把 edge.class 合并到 g.vue-flow__edge 上，由 AssetCanvas 的 :deep 规则渲染主题色） */
   const flowEdgeList = computed<FlowEdge[]>(() =>
     store.connections.value.map((c) => ({
@@ -148,7 +179,11 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
       target: c.toNodeId,
       targetHandle: c.toPortId,
       type: 'default',
-      class: relatedEdgeIds.value.has(c.id) ? EDGE_RELATED_CLASS : undefined,
+      class: relatedInputEdgeIds.value.has(c.id)
+        ? EDGE_RELATED_INPUT_CLASS
+        : relatedOutputEdgeIds.value.has(c.id)
+          ? EDGE_RELATED_OUTPUT_CLASS
+          : undefined,
     })),
   )
 
@@ -300,8 +335,10 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   return {
     flowNodes: flowNodeFullList,
     flowEdges: flowEdgeList,
-    relatedEdgeIds,
-    adjacentNodeIds,
+    relatedInputEdgeIds,
+    relatedOutputEdgeIds,
+    adjacentInputNodeIds,
+    adjacentOutputNodeIds,
     onNodeDragStop,
     onNodeResizeEnd,
     isValidConnection,

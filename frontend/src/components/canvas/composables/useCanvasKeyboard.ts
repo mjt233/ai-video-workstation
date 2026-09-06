@@ -29,6 +29,8 @@ export interface UseCanvasKeyboardOptions {
   menus: { closeAll: () => void }
   /** 内联重命名取消（Esc） */
   rename: { cancelRename: () => void }
+  /** 配置面板关闭（Esc；仅隐藏面板，保留节点选中与关联高亮） */
+  panel: { close: () => void }
   /** Ctrl+V 兜底句柄（由粘贴组合式提供） */
   handleCtrlV: () => void
   /** Ctrl+D 复制粘贴整组句柄（由粘贴组合式提供：复制选中 → 粘贴 → 聚焦新节点） */
@@ -42,7 +44,7 @@ export interface UseCanvasKeyboardOptions {
  * @returns 全局 keydown 事件处理器
  */
 export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
-  const { store, selection, menus, rename, handleCtrlV, duplicateSelected } = options
+  const { store, selection, menus, rename, panel, handleCtrlV, duplicateSelected } = options
 
   /**
    * 全局键盘快捷键：撤销/重做/复制/粘贴/复制粘贴/删除。
@@ -85,6 +87,8 @@ export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
     if (e.key === 'Escape') {
       menus.closeAll()
       rename.cancelRename()
+      // 关闭配置面板（仅隐藏，保留节点选中；焦点在输入框内时已被上方 inInput 拦截，不会误触发）
+      panel.close()
       return
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {

@@ -118,7 +118,7 @@
 | 交互 | 行为 |
 |------|------|
 | 点击节点 | 选中 + 显示配置面板（有 editorComponent 时）；**多选下普通单击切换为仅选中该节点** |
-| 单选联动高亮（选中 1 个节点时） | 与该节点**直接相连**的全部连线（选中节点作 source 或 target：输入侧 + 输出侧）以主题色显示并加粗（2px，`useCanvasFlow` 按单选集在连线上挂 `canvas-edge--related` class，样式见 AssetCanvas `:deep` 规则）；上述连线的另一端点（1 跳邻接节点，剔除选中节点自身）以主题色描边（`CanvasNodeCard` 的 `canvas-node--adjacent`，半透明外圈、**弱于选中态**，与选中/成组拖拽悬停同现时后两者优先）。纯前端派生：无选中/多选（≥2，群组操作模式）时不高亮；清空选中、切换分镜/场景自动消失 |
+| 单选联动高亮（选中 1 个节点时） | 与该节点**直接相连**的全部连线（选中节点作 source 或 target）按**方向分色**并加粗（2px）：输入侧（指向选中节点）= 绿色 `#2E7D32`，输出侧（选中节点发出）= 橙色 `#EF6C00`（`useCanvasFlow` 按单选集在连线上挂 `canvas-edge--related canvas-edge--input/output` class，颜色经 `--edge-related-color` CSS 变量单一来源，样式见 AssetCanvas `:deep` 规则）。关联连线叠加**沿数据流向**移动的箭头动画（`#edge-default` 插槽：与 `BezierEdge` 完全相同的参数经 `getBezierPath` 计算连线 d，注入箭头 `offset-path: path(...)`，`offset-rotate: auto` + `@keyframes canvas-edge-arrow-flow`（1.4s 无限循环）驱动 `offset-distance` 0%→100%——连线路径由 source→target 生成，方向天然即数据流：输入侧箭头从邻接节点流向选中节点，输出侧反向；未关联连线无箭头）。连线另一端点（1 跳邻接节点，剔除选中节点自身）按方向分色描边（`CanvasNodeCard` 的 `canvas-node--adjacent-input/output`：输入绿 `#2E7D32` / 输出橙 `#EF6C00`，半透明外圈、**弱于选中态**，与选中/成组拖拽悬停同现时后两者优先）。纯前端派生：无选中/多选（≥2，群组操作模式）时不高亮；清空选中、切换分镜/场景自动消失 |
 | `Ctrl`+点击节点 | 增/减选该节点（多选） |
 | `Ctrl`+空白处左键拖动 | **框选多个节点**（Vue Flow 内置框选：selectionKeyCode/multiSelectionKeyCode 经 `setState` 写入 `Control`，避免运行时 prop 类型告警；`selection-mode` 为 Partial——**与节点存在交集（无需完全覆盖）即选中**）；框选结束（`@selection-end`）后应用级多选与 Vue Flow 内部选中态双向同步 |
 | 多选（≥2 个节点） | 显示**群组虚线框**（合成节点 `__group-frame`，位于节点下层，与边缘节点保留 12px 流坐标留白 `GROUP_FRAME_PADDING`）+ 右侧垂直居中的**输出连接圆点**（合成节点 `__group-dot`，位于全部节点上层）。原生多选包围框被样式隐藏（避免覆盖节点点击），由合成节点替代 |
@@ -149,6 +149,7 @@
 ## 6. 配置面板（`CanvasEditorPanel.vue` 实现，由 AssetCanvas 编排）
 
 - 独立悬浮于节点下方的面板（不随节点尺寸撑大），渲染选中节点的 `editorComponent`；组件常驻挂载，显隐由 `visible` prop 驱动，`<Transition>` 与定位逻辑在组件内部。
+- **右上角 X 关闭按钮**：关闭面板**仅隐藏面板、保留节点选中与关联高亮**（`selection.dismissPanel`，`panelDismissed` 标志并入 `editorPanelVisible` 判断）；`Esc` 键同样关闭（`useCanvasKeyboard`，输入框聚焦时跳过）。再次点击当前节点或选中其他节点时面板自动重新打开（`onNodeClick` 复位标志）。
 - **固定大小不随缩放**：宽度为固定屏幕像素（普通节点 440px、生成图片节点 560px、生成视频节点 720px，见组件内常量 `EDITOR_PANEL_WIDTH[_GENERATE/_VIDEO]`），上限高度 65vh（超出滚动），间距 12px（`EDITOR_PANEL_GAP`）；仅**位置**随节点/视图联动（水平中心与节点中心对齐），视口与画布可视区尺寸由 AssetCanvas 以 props 传入（`viewport`/`flowWidth`/`flowHeight`）。
 - **边界钳制**：优先放节点下方；放不下且上方有空间则翻转到节点上方；仍放不下则把面板底部钳到画布可视区内（必要时与节点重叠）。钳制用 `flowEl.clientHeight/Width`（AssetCanvas 的 ResizeObserver 监听 `flowEl`）+ 面板自身高度（面板组件 ResizeObserver 监听 `panelEl`）测量，勿用 Vue Flow `dimensions`（不可靠）。
 - **淡入淡出**：`<Transition name="editor-panel">` + CSS（opacity 0.18s + `translateY(6px)`）；关闭淡出期间用 `lastPanelStyle` 缓存保持原位不跳位（缓存写在 `watch(editorPanelStyle)`，勿在 computed 内写副作用，会触发 eslint `vue/no-side-effects-in-computed-properties`）。

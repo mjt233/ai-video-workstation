@@ -4,7 +4,8 @@
     class="canvas-node"
     :class="{
       'canvas-node--selected': selected,
-      'canvas-node--adjacent': adjacent,
+      'canvas-node--adjacent-input': adjacentSide === 'input',
+      'canvas-node--adjacent-output': adjacentSide === 'output',
       'canvas-node--highlighted': highlighted,
     }"
     @contextmenu.prevent="emit('context-menu', $event)"
@@ -211,8 +212,8 @@ const props = defineProps<{
   selected: boolean
   /** 成组连接拖拽悬停高亮（连接目标提示） */
   highlighted?: boolean
-  /** 单选联动高亮：是否与当前选中节点直接相连（邻接节点边框提示，弱于选中态） */
-  adjacent?: boolean
+  /** 单选联动高亮：与当前选中节点的连接方向（'input' = 数据流向选中节点的输入侧邻居，'output' = 由选中节点输出的输出侧邻居），null = 不关联；边框弱于选中态 */
+  adjacentSide?: 'input' | 'output' | null
   /** 生成状态（由本卡片渲染通用 loading/错误遮罩） */
   status?: GenerateStatus
   /** 节点当前产物（固定路径 + 防缓存 token；生成类节点由 AssetCanvas 按固定产物路径推导） */
@@ -335,12 +336,18 @@ function handleStyle(count: number, index: number): Record<string, string> {
   box-shadow: 0 0 0 1px rgb(25, 118, 210);
 }
 
-/* 单选联动高亮（邻接节点）：选中某节点时与其直接相连的节点以主题色描边提示。
-   弱于选中态（半透明外圈 vs 选中节点实色描边），且声明在 --selected/--highlighted 之前，
+/* 单选联动高亮（邻接节点）：选中某节点时，与其直接相连的节点按连接方向分色描边——
+   输入侧（数据流入选中节点）绿色，输出侧（数据流出）橙色。
+   均弱于选中态（半透明外圈 vs 选中节点实色描边），且声明在 --selected/--highlighted 之前，
    与选中态/成组拖拽悬停同现时后两者优先生效。 */
-.canvas-node--adjacent {
-  border-color: rgb(var(--v-theme-primary));
-  box-shadow: 0 0 0 1px rgba(var(--v-theme-primary), 0.45);
+.canvas-node--adjacent-input {
+  border-color: rgb(46, 125, 50);
+  box-shadow: 0 0 0 1px rgba(46, 125, 50, 0.45);
+}
+
+.canvas-node--adjacent-output {
+  border-color: rgb(239, 108, 0);
+  box-shadow: 0 0 0 1px rgba(239, 108, 0, 0.45);
 }
 
 /* 成组连接拖拽悬停高亮：绿色描边提示「可连接目标」 */

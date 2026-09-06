@@ -1,5 +1,6 @@
 <template>
-  <!-- 节点配置悬浮面板：固定大小不随缩放，位置随节点/视图联动，带淡入淡出 -->
+  <!-- 节点配置悬浮面板：固定大小不随缩放，位置随节点/视图联动，带淡入淡出；
+       右上角 X 可关闭面板（仅隐藏，保留节点选中与关联高亮），再次点击节点重新打开 -->
   <Transition name="editor-panel">
     <div
       v-if="visible && node"
@@ -7,31 +8,47 @@
       class="canvas-node-editor-panel"
       :style="panelStyle"
     >
-      <component
-        :is="editorComponent"
-        :project="project"
-        :node="node"
-        :inputs="inputs"
-        :output="output"
-        :output-path="outputPath"
-        :uploading="isUploading"
-        :images-inputs="videoInputGroups.images"
-        :videos-inputs="videoInputGroups.videos"
-        :audios-inputs="videoInputGroups.audios"
-        :text-inputs="textInputs"
-        :is-running="isRunning"
-        :kind="kind"
-        @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
-        @generate="(nodeId: string) => emit('generate', nodeId)"
-        @interrupt="(nodeId: string) => emit('interrupt', nodeId)"
-        @open-history="(nodeId: string) => emit('open-history', nodeId)"
-        @set-as-scene="(nodeId: string) => emit('set-as-scene', nodeId)"
-        @open-picker="(nodeId: string) => emit('open-picker', nodeId)"
-        @extract="(nodeId: string) => emit('extract', nodeId)"
-        @set-as-video="(nodeId: string) => emit('set-as-video', nodeId)"
-        @upload-file="(payload: CanvasUploadFilePayload) => emit('upload-file', payload)"
-        @disconnect-input="(sourceNodeId: string) => emit('disconnect-input', sourceNodeId)"
-      />
+      <v-btn
+        icon
+        size="x-small"
+        variant="text"
+        class="canvas-node-editor-panel__close"
+        title="关闭面板（保留节点选中）"
+        aria-label="关闭配置面板"
+        @click="emit('close')"
+      >
+        <v-icon
+          icon="mdi-close"
+          size="16"
+        />
+      </v-btn>
+      <div class="canvas-node-editor-panel__body">
+        <component
+          :is="editorComponent"
+          :project="project"
+          :node="node"
+          :inputs="inputs"
+          :output="output"
+          :output-path="outputPath"
+          :uploading="isUploading"
+          :images-inputs="videoInputGroups.images"
+          :videos-inputs="videoInputGroups.videos"
+          :audios-inputs="videoInputGroups.audios"
+          :text-inputs="textInputs"
+          :is-running="isRunning"
+          :kind="kind"
+          @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
+          @generate="(nodeId: string) => emit('generate', nodeId)"
+          @interrupt="(nodeId: string) => emit('interrupt', nodeId)"
+          @open-history="(nodeId: string) => emit('open-history', nodeId)"
+          @set-as-scene="(nodeId: string) => emit('set-as-scene', nodeId)"
+          @open-picker="(nodeId: string) => emit('open-picker', nodeId)"
+          @extract="(nodeId: string) => emit('extract', nodeId)"
+          @set-as-video="(nodeId: string) => emit('set-as-video', nodeId)"
+          @upload-file="(payload: CanvasUploadFilePayload) => emit('upload-file', payload)"
+          @disconnect-input="(sourceNodeId: string) => emit('disconnect-input', sourceNodeId)"
+        />
+      </div>
     </div>
   </Transition>
 </template>
@@ -94,6 +111,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  /** 用户点击右上角 X（或 Esc）关闭面板：仅隐藏面板、保留节点选中与关联高亮 */
+  (e: 'close'): void
   /** 编辑器配置补丁（合并写入节点 config） */
   (e: 'update:config', patch: Record<string, unknown>): void
   /** 触发生成 */
@@ -199,10 +218,24 @@ onUnmounted(() => {
   border: 1px solid rgba(0, 0, 0, 0.16);
   border-radius: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-  padding: 8px;
   box-sizing: border-box;
+}
+
+/* 内容滚动区（原根节点样式迁移至此：面板滚动不影响右上角关闭按钮固定定位） */
+.canvas-node-editor-panel__body {
   max-height: 65vh;
   overflow-y: auto;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+/* 关闭按钮：固定在面板右上角（位于滚动内容之上） */
+.canvas-node-editor-panel__close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.92);
 }
 
 /* 配置面板淡入淡出：透明度 + Y 轴位移 */

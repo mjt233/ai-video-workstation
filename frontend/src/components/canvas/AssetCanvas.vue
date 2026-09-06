@@ -54,6 +54,19 @@
           @selection-end="onSelectionEnd"
         >
           <Background :gap="16" />
+          <!-- 连线渲染插槽：默认连线保持 BezierEdge 原样渲染（右键/点击/选中行为不变）；
+               单选联动高亮的关联连线追加沿数据流向移动的箭头动画（输入侧绿色/输出侧橙色，
+               箭头经 CSS offset-path 沿连线几何（bezier d）运动，offset-rotate: auto 随路径切线转向；
+               方向即数据流方向：连线路径从 source→target 生成，无需单独定义） -->
+          <template #edge-default="edgeProps">
+            <BezierEdge v-bind="edgeProps" />
+            <path
+              v-if="edgeRelatedSide(edgeProps.id)"
+              class="canvas-edge__arrow"
+              :style="arrowMotionStyle(edgeProps)"
+              d="M10,0 L0,-5 L2.5,0 L0,5 Z"
+            />
+          </template>
           <template #node-canvas="{ id, selected }">
             <CanvasNodeCard
               v-if="nodeMap[id]"
@@ -61,7 +74,7 @@
               :project="props.project"
               :selected="selected"
               :highlighted="hoveredNodeId === id"
-              :adjacent="adjacentNodeIds.has(id)"
+              :adjacent-side="adjacentSideOf(id)"
               :status="statusByNode[id]"
               :output="outputOf(nodeMap[id])"
               :upload="upload.stateOf(id)"
@@ -142,6 +155,7 @@
           :viewport="viewport"
           :flow-width="flowWidth"
           :flow-height="flowHeight"
+          @close="selection.dismissPanel()"
           @update:config="(patch: Record<string, unknown>) => editorPanel && onUpdateConfig(editorPanel.node.id, patch)"
           @generate="generateNode"
           @interrupt="onInterrupt"
@@ -308,7 +322,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { VueFlow, SelectionMode, useVueFlow, type EdgeMouseEvent, type NodeMouseEvent } from '@vue-flow/core'
+import { VueFlow, BezierEdge, SelectionMode, getBezierPath, Position, useVueFlow, type EdgeMouseEvent, type NodeMouseEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -747,6 +761,7 @@ const keyboard = useCanvasKeyboard({
   },
   menus: { closeAll: closeAllMenus },
   rename: { cancelRename: rename.cancelRename },
+  panel: { close: selection.dismissPanel },
   handleCtrlV: paste.handleCtrlV,
   duplicateSelected: () => void paste.duplicateSelected(),
 })
@@ -758,7 +773,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, isMultiSelected, onEdgeClick, onNodeDragStart } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
-const { flowNodes, flowEdges, adjacentNodeIds, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
+const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
@@ -778,10 +793,68 @@ function disconnectEditorInput(sourceNodeId: string): void {
   disconnectInput(id, sourceNodeId)
 }
 
-/** 配置面板可见性：单选节点且未被拖拽/程序化选中抑制（多选不显示配置面板） */
+/** 配置面板可见性：单选节点且未被拖拽/程序化选中/手动关闭抑制（多选不显示配置面板） */
 const editorPanelVisible = computed(
-  () => !!editorPanel.value && !isMultiSelected.value && !selection.suppressEditor.value && !selection.suppressPanelOnSelect.value,
+  () => !!editorPanel.value
+    && !isMultiSelected.value
+    && !selection.suppressEditor.value
+    && !selection.suppressPanelOnSelect.value
+    && !selection.panelDismissed.value,
 )
+
+/**
+ * 节点邻接方向（单选联动高亮）：'input' = 数据流入选中节点的输入邻居，'output' = 输出侧邻居，
+ * null = 无关联。供 CanvasNodeCard 邻接边框分色。
+ *
+ * @param nodeId 节点 id
+ * @returns 邻接方向或 null
+ */
+function adjacentSideOf(nodeId: string): 'input' | 'output' | null {
+  if (adjacentInputNodeIds.value.has(nodeId)) return 'input'
+  if (adjacentOutputNodeIds.value.has(nodeId)) return 'output'
+  return null
+}
+
+/**
+ * 连线关联方向（单选联动高亮）：'input' = 指向选中节点的输入侧连线，'output' = 选中节点发出的
+ * 输出侧连线，null = 无关联。供 #edge-default 插槽决定是否渲染流向箭头。
+ *
+ * @param edgeId 连线 id
+ * @returns 关联方向或 null
+ */
+function edgeRelatedSide(edgeId: string): 'input' | 'output' | null {
+  if (relatedInputEdgeIds.value.has(edgeId)) return 'input'
+  if (relatedOutputEdgeIds.value.has(edgeId)) return 'output'
+  return null
+}
+
+/**
+ * 构建流向箭头的 CSS 运动路径样式（#edge-default 插槽内使用）：
+ * 按与 BezierEdge 完全一致的参数计算连线贝塞尔路径 d，注入 `offset-path: path(...)`，
+ * 配合 .canvas-edge__arrow 的 offset-rotate/动画：箭头从源端（source）滑向目标端（target），
+ * 即数据流方向——输入侧（target=选中节点）流向选中节点，输出侧（source=选中节点）流向输出节点。
+ *
+ * @param edgeProps Vue Flow 连线插槽 props（含连线几何）
+ * @returns 内联样式（offset-path）
+ */
+function arrowMotionStyle(edgeProps: {
+  sourceX: number
+  sourceY: number
+  targetX: number
+  targetY: number
+  sourcePosition?: Position
+  targetPosition?: Position
+}): Record<string, string> {
+  const [pathD] = getBezierPath({
+    sourceX: edgeProps.sourceX,
+    sourceY: edgeProps.sourceY,
+    targetX: edgeProps.targetX,
+    targetY: edgeProps.targetY,
+    sourcePosition: edgeProps.sourcePosition ?? Position.Bottom,
+    targetPosition: edgeProps.targetPosition ?? Position.Top,
+  })
+  return { 'offset-path': `path('${pathD}')` }
+}
 
 /** 内联重命名输入：写入 rename 组合式的临时值（卡片输入框上抛） */
 function onRenameInput(value: string): void {
@@ -950,13 +1023,40 @@ watch(flowEl, (flow) => {
   display: none !important;
 }
 
-/* 单选联动高亮：与选中节点直接相连的连线（输入+输出）以主题色显示并加粗（2px）。
-   class 由 useCanvasFlow 挂到 edge wrapper（g.vue-flow__edge）上；
-   :deep 带 scoped 属性前缀，特异性高于 Vue Flow 默认规则
-   （.vue-flow__edge.selected .vue-flow__edge-path 等），确保主题色生效。 */
+/* 单选联动高亮：与选中节点直接相连的连线按方向分色显示并加粗（2px）——
+   输入侧（指向选中节点）绿色 #2E7D32，输出侧（选中节点发出）橙色 #EF6C00。
+   class 由 useCanvasFlow 挂到 edge wrapper（g.vue-flow__edge）上，颜色经 CSS 变量单一来源；
+   :deep 带 scoped 属性前缀，特异性高于 Vue Flow 默认规则（.vue-flow__edge.selected 等），确保生效。
+   箭头（.canvas-edge__arrow）与连线同色，沿数据流方向移动。 */
+:deep(.vue-flow__edge.canvas-edge--input) {
+  --edge-related-color: #2e7d32;
+}
+
+:deep(.vue-flow__edge.canvas-edge--output) {
+  --edge-related-color: #ef6c00;
+}
+
 :deep(.vue-flow__edge.canvas-edge--related .vue-flow__edge-path) {
-  stroke: rgb(var(--v-theme-primary));
+  stroke: var(--edge-related-color);
   stroke-width: 2;
+}
+
+:deep(.vue-flow__edge .canvas-edge__arrow) {
+  fill: var(--edge-related-color, #b1b1b7);
+  pointer-events: none;
+  offset-rotate: auto;
+  /* 箭头沿连线移动（数据流方向，源→目标）：offset-path 由模板按连线几何注入，
+     1.4s 循环，方向随路径切线自动转向 */
+  animation: canvas-edge-arrow-flow 1.4s linear infinite;
+}
+
+@keyframes canvas-edge-arrow-flow {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
 }
 
 /* 成组连接预览线：覆盖在画布之上、不拦截指针 */
