@@ -169,6 +169,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       providerInstanceId: '',
       modelId: '',
       reasoningLevel: '',
+      promptPresetId: '',
       input: '',
       output: '',
     },

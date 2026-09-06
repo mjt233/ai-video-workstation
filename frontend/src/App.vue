@@ -30,14 +30,14 @@
         icon="mdi-cog"
         variant="text"
         color="white"
-        aria-label="服务商配置"
-        @click="showProviderSettings = true"
+        aria-label="系统配置"
+        @click="showSystemSettings = true"
       />
     </v-app-bar>
     <v-main>
       <router-view />
     </v-main>
-    <ProviderSettingsDialog v-model="showProviderSettings" />
+    <SystemSettingsDialog v-model="showSystemSettings" />
   </v-app>
 </template>
 
@@ -45,10 +45,10 @@
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { downloadProjectExport } from './api/client'
-import ProviderSettingsDialog from './components/ProviderSettingsDialog.vue'
+import SystemSettingsDialog from './components/SystemSettingsDialog.vue'
 
 const route = useRoute()
-const showProviderSettings = ref(false)
+const showSystemSettings = ref(false)
 
 /**
  * 是否处于项目详情页（存在 project 查询参数）：

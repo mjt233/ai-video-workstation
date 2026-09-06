@@ -101,6 +101,31 @@
       </v-menu>
     </div>
 
+    <!-- 预设提示词行：模型行下方整行下拉（系统配置 → 预设提示词） -->
+    <div class="ai-text-node__preset">
+      <v-select
+        :model-value="selectedPresetKey"
+        :items="presetItems"
+        item-title="title"
+        item-value="value"
+        placeholder="不使用预设提示词"
+        density="compact"
+        variant="outlined"
+        hide-details
+        prepend-inner-icon="mdi-text-box-multiple-outline"
+        :disabled="generating"
+        @update:model-value="onPresetSelect"
+      >
+        <template #item="{ item, props: itemProps }">
+          <v-list-item v-bind="itemProps">
+            <template #title>
+              <span>{{ item.title }}</span>
+            </template>
+          </v-list-item>
+        </template>
+      </v-select>
+    </div>
+
     <!-- 媒体输入预览（复用生成图片/视频节点的统一输入预览组件） -->
     <div
       v-if="mediaCount > 0"
@@ -122,6 +147,12 @@
       <div class="ai-text-node__pane">
         <div class="ai-text-node__pane-title">
           用户输入
+          <span
+            v-if="activePreset"
+            class="ai-text-node__preset-tip"
+          >
+            生成时将替换到预设提示词 {user_prompt}
+          </span>
           <span
             v-if="textInputCount > 1"
             class="ai-text-node__warn"
@@ -201,8 +232,10 @@ import type { CanvasInputInfo } from '../../../canvas/generate'
 import { mergeInputOrder as mergeGlobalInputOrder } from '../../../canvas/generate'
 import { chatLlmStream } from '../../../api/llm'
 import { useLlmProviders } from '../../../composables/useLlmProviders'
+import { usePresetPrompts } from '../../../composables/usePresetPrompts'
 import { formatContextWindow } from '../../../utils/llmContextWindow'
 import { MODALITY_ICONS, MODALITY_LABELS } from '../../../utils/llmModality'
+import { composePresetPrompt } from '../../../utils/presetPrompt'
 import type { LlmMediaInputItem } from '../composables/useCanvasNodeOps'
 import CanvasInputPreview from '../editors/CanvasInputPreview.vue'
 
@@ -223,6 +256,9 @@ const emit = defineEmits<{
 
 /** 大语言模型服务商选项（共享缓存） */
 const providerOptions = useLlmProviders()
+
+/** 预设提示词列表（共享缓存；系统配置 → 预设提示词） */
+const presetPrompts = usePresetPrompts()
 
 /** 流式输出节流间隔（毫秒；流式期间写入 config 的限流） */
 const STREAM_COMMIT_THROTTLE_MS = 500
@@ -261,6 +297,33 @@ const providerInstanceId = computed(() => (typeof config.value.providerInstanceI
 const modelId = computed(() => (typeof config.value.modelId === 'string' ? config.value.modelId : ''))
 /** 思考挡位（空 = 不设置） */
 const selectedEffort = computed(() => (typeof config.value.reasoningLevel === 'string' ? config.value.reasoningLevel : ''))
+/** 预设提示词 id（空 = 不使用预设） */
+const promptPresetId = computed(() => (typeof config.value.promptPresetId === 'string' ? config.value.promptPresetId : ''))
+
+/** 当前生效的预设提示词（按 id 匹配缓存；已删除的预设回退为不使用） */
+const activePreset = computed(() =>
+  promptPresetId.value ? presetPrompts.value.find((p) => p.id === promptPresetId.value) ?? null : null,
+)
+
+/** 下拉回显键：配置的预设仍存在时展示其 id，否则回退为「不使用」（占位） */
+const selectedPresetKey = computed(() => activePreset.value?.id ?? null)
+
+/** 预设提示词下拉条目（前置「不使用」空选项；无任何预设时显示占位提示） */
+const presetItems = computed<{ title: string; value: string; props?: { disabled: boolean } }[]>(() => {
+  if (presetPrompts.value.length === 0) {
+    return [
+      {
+        title: '尚未配置预设提示词（系统配置 → 预设提示词）',
+        value: '__empty__',
+        props: { disabled: true },
+      },
+    ]
+  }
+  return [
+    { title: '不使用预设提示词', value: '' },
+    ...presetPrompts.value.map((p) => ({ title: p.name, value: p.id })),
+  ]
+})
 
 /** 拼接模型选择键 */
 function keyOf(instId: string, mId: string): string {
@@ -380,18 +443,21 @@ const userInputDisabled = computed(() => generating.value || textInputCount.valu
 const userInputPlaceholder = computed(() => {
   if (textInputCount.value > 1) return '存在多个文本连线输入，无法执行生成，请仅保留一个'
   if (textInputCount.value === 1) return '（来自外部输入）输入的内容'
+  if (activePreset.value) return '输入内容…（生成时将替换到预设提示词 {user_prompt}）'
   return '输入内容…（可连接文本/图片/音频/视频输入）'
 })
 
 /** 用户输入框显示值（连接文本输入时清空显示，内容来自外部连线，改由占位提示说明） */
 const userInputDisplay = computed(() => (textInputCount.value > 0 ? '' : inputText.value))
 
-/** 是否满足生成条件（模型已选 + 输入非空；多个文本输入禁止生成） */
+/** 是否满足生成条件（模型已选 + 输入非空；选择预设时必须提供用户输入；多个文本输入禁止生成） */
 const canGenerate = computed(() => {
   if (!providerInstanceId.value || !modelId.value) return false
   if (textInputCount.value > 1) return false
   // 连接文本输入时以外部文本为准（用户输入框中残留的手动输入不再参与判定）
   const text = (textInputCount.value > 0 ? (props.textInputs?.[0] ?? '') : inputText.value).trim()
+  // 选择预设提示词：必须提供用户输入（替换/追加到预设提示词中），与未选预设时的媒体兜底不同
+  if (activePreset.value) return text.length > 0
   return text.length > 0 || (props.inputs?.length ?? 0) > 0
 })
 
@@ -442,6 +508,12 @@ function selectEffort(level: string): void {
   emit('update:config', { reasoningLevel: level })
 }
 
+/** 预设提示词选择（'' = 不使用；占位条目静默忽略） */
+function onPresetSelect(key: string | null): void {
+  if (key === null || key === '__empty__') return
+  emit('update:config', { promptPresetId: key })
+}
+
 /** 用户输入变化：更新本地值并提交配置 */
 function onInputText(e: Event): void {
   const v = (e.target as HTMLTextAreaElement).value
@@ -464,13 +536,26 @@ async function onGenerate(): Promise<void> {
   }
   // 连接文本输入时发送外部文本内容（用户输入框已禁用）；否则使用用户手动输入
   const text = (textInputCount.value > 0 ? (props.textInputs?.[0] ?? '').trim() : inputText.value.trim()).trim()
+  // 预设提示词生效时：必须提供用户输入（用于替换 {user_prompt} 占位符或追加到末尾）
+  const preset = activePreset.value
+  if (!text && preset) {
+    errorMsg.value = '请先输入内容（生成时将替换到预设提示词 {user_prompt} 中）'
+    return
+  }
   if (!text) {
     errorMsg.value = '请输入内容，或连接「文本」节点提供输入'
     return
   }
+  // 预设不存在（已删除）时回退为不使用预设，并给出提示
+  let presetNotice = ''
+  if (promptPresetId.value && !preset) {
+    presetNotice = '所选预设提示词已被删除，本次按不使用预设生成'
+  }
+  // 组装最终发送文本：有预设时替换 {user_prompt} 占位符或追加用户输入到末尾
+  const finalInput = preset ? composePresetPrompt(preset.content, text) : text
   errorMsg.value = ''
   warnings.value = []
-  hint.value = ''
+  hint.value = presetNotice
   outputText.value = ''
   controller = new AbortController()
   generating.value = true
@@ -484,7 +569,7 @@ async function onGenerate(): Promise<void> {
         providerInstanceId: instId,
         modelId: mId,
         reasoningEffort: selectedEffort.value || undefined,
-        input: text,
+        input: finalInput,
         media: (props.inputs ?? []).map((i) => ({ path: i.path, type: i.type })),
       },
       controller.signal,
@@ -630,6 +715,21 @@ onBeforeUnmount(() => {
   max-width: 100%;
   text-transform: none;
   font-size: 12px;
+}
+
+/* 预设提示词行（模型行下方整行下拉） */
+.ai-text-node__preset {
+  flex: 0 0 auto;
+}
+
+.ai-text-node__preset :deep(.v-field__input) {
+  font-size: 12px;
+}
+
+/* 用户输入标题栏：预设提示词提示 */
+.ai-text-node__preset-tip {
+  color: rgba(0, 0, 0, 0.5);
+  padding-left: 6px;
 }
 
 /* 媒体输入预览（复用 CanvasInputPreview；nodrag 防止拖动预览区时移动节点） */

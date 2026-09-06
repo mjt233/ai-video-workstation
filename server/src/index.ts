@@ -8,6 +8,7 @@ import { assetsRouter } from './routes/assets.js';
 import { workflowRouter } from './routes/workflow.js';
 import { canvasRouter } from './routes/canvas.js';
 import { llmRouter } from './routes/llm.js';
+import { presetsRouter } from './routes/presets.js';
 import { discoverProviders } from './providers/index.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
 import { syncAllInstances } from './providers/instance-sync.js';
@@ -34,6 +35,7 @@ app.use('/api', assetsRouter);
 app.use('/api', workflowRouter);
 app.use('/api', canvasRouter);
 app.use('/api', llmRouter);
+app.use('/api', presetsRouter);
 
 const distPath = path.resolve(__dirname, '../../frontend/dist');
 app.use(express.static(distPath));
