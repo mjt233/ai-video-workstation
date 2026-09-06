@@ -118,6 +118,7 @@
 | 交互 | 行为 |
 |------|------|
 | 点击节点 | 选中 + 显示配置面板（有 editorComponent 时）；**多选下普通单击切换为仅选中该节点** |
+| 单选联动高亮（选中 1 个节点时） | 与该节点**直接相连**的全部连线（选中节点作 source 或 target：输入侧 + 输出侧）以主题色显示并加粗（2px，`useCanvasFlow` 按单选集在连线上挂 `canvas-edge--related` class，样式见 AssetCanvas `:deep` 规则）；上述连线的另一端点（1 跳邻接节点，剔除选中节点自身）以主题色描边（`CanvasNodeCard` 的 `canvas-node--adjacent`，半透明外圈、**弱于选中态**，与选中/成组拖拽悬停同现时后两者优先）。纯前端派生：无选中/多选（≥2，群组操作模式）时不高亮；清空选中、切换分镜/场景自动消失 |
 | `Ctrl`+点击节点 | 增/减选该节点（多选） |
 | `Ctrl`+空白处左键拖动 | **框选多个节点**（Vue Flow 内置框选：selectionKeyCode/multiSelectionKeyCode 经 `setState` 写入 `Control`，避免运行时 prop 类型告警；`selection-mode` 为 Partial——**与节点存在交集（无需完全覆盖）即选中**）；框选结束（`@selection-end`）后应用级多选与 Vue Flow 内部选中态双向同步 |
 | 多选（≥2 个节点） | 显示**群组虚线框**（合成节点 `__group-frame`，位于节点下层，与边缘节点保留 12px 流坐标留白 `GROUP_FRAME_PADDING`）+ 右侧垂直居中的**输出连接圆点**（合成节点 `__group-dot`，位于全部节点上层）。原生多选包围框被样式隐藏（避免覆盖节点点击），由合成节点替代 |

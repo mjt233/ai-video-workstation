@@ -61,6 +61,7 @@
               :project="props.project"
               :selected="selected"
               :highlighted="hoveredNodeId === id"
+              :adjacent="adjacentNodeIds.has(id)"
               :status="statusByNode[id]"
               :output="outputOf(nodeMap[id])"
               :upload="upload.stateOf(id)"
@@ -688,12 +689,13 @@ const group = useCanvasGroup({
   focusNode: (ids) => void focusNodes(ids),
 })
 
-/** Vue Flow 渲染映射、群组合成节点与连线交互 */
+/** Vue Flow 渲染映射、群组合成节点与连线交互（含单选联动高亮的派生集） */
 const flow = useCanvasFlow({
   store,
   nodeMap,
   project: props.project,
   selectedEdgeId: selection.selectedEdgeId,
+  selectedNodeIds: selection.selectedNodeIds,
   groupRect: group.groupRect,
 })
 
@@ -756,7 +758,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, isMultiSelected, onEdgeClick, onNodeDragStart } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
-const { flowNodes, flowEdges, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
+const { flowNodes, flowEdges, adjacentNodeIds, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
@@ -946,6 +948,15 @@ watch(flowEl, (flow) => {
    改由合成节点 __group-frame 渲染虚线框（本组件自定义样式与整组拖动行为） */
 :deep(.vue-flow__nodesselection) {
   display: none !important;
+}
+
+/* 单选联动高亮：与选中节点直接相连的连线（输入+输出）以主题色显示并加粗（2px）。
+   class 由 useCanvasFlow 挂到 edge wrapper（g.vue-flow__edge）上；
+   :deep 带 scoped 属性前缀，特异性高于 Vue Flow 默认规则
+   （.vue-flow__edge.selected .vue-flow__edge-path 等），确保主题色生效。 */
+:deep(.vue-flow__edge.canvas-edge--related .vue-flow__edge-path) {
+  stroke: rgb(var(--v-theme-primary));
+  stroke-width: 2;
 }
 
 /* 成组连接预览线：覆盖在画布之上、不拦截指针 */
