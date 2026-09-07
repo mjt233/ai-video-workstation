@@ -1616,147 +1616,144 @@ function syncTreeSelectionFromRoute() {
   }
 }
 
+/**
+ * 跨类型切换时清除页签参数：同类型切换（分镜A→分镜B、角色A→角色B）保留页签，
+ * 跨类型切换（如 scene → character）清除，避免上一视图的页签残留为非法值。
+ *
+ * @param patch 待写入 URL 的查询参数
+ * @returns 处理后的查询参数（跨类型切换时追加 tab: undefined 以删除参数）
+ */
+function clearTabOnTypeChange(patch: Record<string, string | undefined>): Record<string, string | undefined> {
+  const currentType = router.currentRoute.value.query.type as string | undefined
+  const nextType = patch.type as string | undefined
+  if (patch.tab === undefined && nextType !== undefined && nextType !== currentType) {
+    return { ...patch, tab: undefined }
+  }
+  return patch
+}
+
 function onSelect(item: TreeItem) {
   if (item.kind === 'project-info') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'project',
       name: undefined,
       subscene: undefined,
       episode: undefined,
       shot: undefined,
-    })
+    }))
     return
   }
 
   if (item.kind === 'character') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'character',
       name: item.name,
       subscene: undefined,
       episode: undefined,
       shot: undefined,
-    })
+    }))
     return
   }
 
-  if (item.kind === 'stage') {
-    // 仅选中场景父节点时不指定子场景，详情区提示从树中选择子场景
-    patchQuery({
-      type: 'stage',
-      name: item.stageName ?? item.name,
-      subscene: undefined,
-      episode: undefined,
-      shot: undefined,
-    })
-    return
-  }
+  // 场景父节点：仅高亮/展开（onRowClick），不切换视图、不改 URL——
+  // 用户须点中最终子场景才会进入场景详情
 
   if (item.kind === 'subscene') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'stage',
       name: item.stageName,
       subscene: item.label,
       episode: undefined,
       shot: undefined,
-    })
+    }))
     return
   }
 
-  if (item.kind === 'prop-category') {
-    // 仅选中分类节点时不指定道具，详情区提示从树中选择道具
-    patchQuery({
-      type: 'prop',
-      name: undefined,
-      category: item.category,
-      subscene: undefined,
-      episode: undefined,
-      shot: undefined,
-    })
-    return
-  }
+  // 道具分类节点：仅高亮/展开（onRowClick），不切换视图、不改 URL——
+  // 用户须点中具体道具才会进入道具详情
 
   if (item.kind === 'prop') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'prop',
       name: item.name,
       category: item.category,
       subscene: undefined,
       episode: undefined,
       shot: undefined,
-    })
+    }))
     return
   }
 
   if (item.kind === 'shot') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'scene',
       name: undefined,
       subscene: undefined,
       episode: item.episode,
       shot: item.shot,
-    })
+    }))
     return
   }
 
   if (item.kind === 'root-script') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'script',
       name: undefined,
       subscene: undefined,
       section: undefined,
       episode: undefined,
       shot: undefined,
-    })
+    }))
     return
   }
 
   if (item.kind === 'script-outline') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'script',
       name: undefined,
       subscene: undefined,
       section: 'outline',
       episode: undefined,
       shot: undefined,
-    })
+    }))
     return
   }
 
   if (item.kind === 'script-episodes') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'script',
       name: undefined,
       subscene: undefined,
       section: 'episodes',
       episode: undefined,
       shot: undefined,
-    })
+    }))
     return
   }
 
   if (item.kind === 'script-episode') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'script',
       name: undefined,
       subscene: undefined,
       section: 'episodes',
       episode: item.episode,
       shot: undefined,
-    })
+    }))
     return
   }
 
   if (item.kind === 'root-custom') {
-    patchQuery({
+    patchQuery(clearTabOnTypeChange({
       type: 'custom',
       name: undefined,
       subscene: undefined,
       episode: undefined,
       shot: undefined,
       path: undefined,
-    })
+    }))
   }
-  // 角色分类/角色根等节点仅高亮与展开，不改 URL
+  // 角色分类/角色根、场景父节点、道具分类等中间节点仅高亮与展开，不改 URL、不切视图
 }
 
 // ── 创建 / 删除 ──────────────────────────────────────────────────────

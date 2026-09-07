@@ -443,6 +443,7 @@ import AssetImageUploadButton from './AssetImageUploadButton.vue'
 import AssetAudioUploadButton from './AssetAudioUploadButton.vue'
 import VariantPanel from './VariantPanel.vue'
 import CustomAssetSection from './CustomAssetSection.vue'
+import { usePanelTab } from '../composables/usePanelTab'
 
 interface DialogState {
   show: boolean
@@ -458,7 +459,7 @@ interface CharData {
 
 const props = defineProps<{ project: string; name: string }>()
 
-const tab = ref<string | null>(null)
+const tab = usePanelTab(['overview', 'appearance', 'voice'], 'overview')
 const data = ref<CharData | null>(null)
 const appearanceImg = ref('')
 /** 角色基础声音实际存在的当前音频（相对路径；保留原格式上传，扩展名不定） */

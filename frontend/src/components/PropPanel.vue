@@ -671,6 +671,7 @@ import DurationPicker from './DurationPicker.vue'
 import WorkflowSizePicker from './WorkflowSizePicker.vue'
 import WorkflowParamsTrigger from './WorkflowParamsTrigger.vue'
 import MediaFileList from './prop/MediaFileList.vue'
+import { usePanelTab } from '../composables/usePanelTab'
 
 /**
  * 道具详情面板：图片 / 视频 / 音频三个页签。
@@ -692,7 +693,7 @@ const props = defineProps<{
   name?: string
 }>()
 
-const tab = ref<string | null>('image')
+const tab = usePanelTab(['image', 'video', 'audio'], 'image')
 
 // ── 描述文案与关联资产 ─────────────────────────────────────────────
 

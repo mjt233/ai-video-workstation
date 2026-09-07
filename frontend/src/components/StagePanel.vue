@@ -215,6 +215,7 @@ import AssetImageUploadButton from './AssetImageUploadButton.vue'
 import VariantPanel from './VariantPanel.vue'
 import CustomAssetSection from './CustomAssetSection.vue'
 import AssetCanvas from './canvas/AssetCanvas.vue'
+import { usePanelTab } from '../composables/usePanelTab'
 
 interface SubScene {
   label: string
@@ -233,7 +234,7 @@ const props = defineProps<{
   subscene?: string
 }>()
 
-const tab = ref<string | null>(null)
+const tab = usePanelTab(['overview', 'canvas'], 'overview')
 const selected = ref<SubScene | null>(null)
 const loadError = ref('')
 const dialog = ref<DialogState>({ show: false, content: '' })

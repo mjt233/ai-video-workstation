@@ -38,7 +38,7 @@ overview.md
 ```
 - API：`GET /api/projects`、`GET /api/fs/:project/*`（目录列表或文件读取）、`POST /api/fs/:project/*`（写入）
 - 写入限于 `prompt/`、`assert/` 前缀，以及根级 `overview.md`、`project.json`
-- 前端状态完全由 URL 查询参数驱动：`project`、`type`、`name`、`episode`、`shot`、`section`（剧本 `type=script` 时区分 `outline`/`episodes`）
+- 前端状态完全由 URL 查询参数驱动：`project`、`type`、`name`、`episode`、`shot`、`section`（剧本 `type=script` 时区分 `outline`/`episodes`）；详情面板页签同步到 `tab` 参数（分镜：overview/script/images/video/custom/canvas；场景：overview/canvas；角色：overview/appearance/voice；道具：image/video/audio），同类型资产间切换保留页签、跨类型切换清除
 
 ## 约定
 - 所有 UI 文字、文档、资产和提交信息使用**中文**

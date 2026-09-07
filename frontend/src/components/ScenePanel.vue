@@ -865,6 +865,7 @@ import {
   emptyDirectorProject,
 } from '../api/director'
 import type { DirectorProject } from './video-director/types'
+import { usePanelTab } from '../composables/usePanelTab'
 
 interface ScriptEntry {
   角色名: string
@@ -969,7 +970,8 @@ function parseOverview(raw: unknown): ShotOverview | null {
 }
 
 const props = defineProps<{ project: string; episode: string; shot: string }>()
-const tab = ref<string | null>(null)
+/** 分镜详情页签（总览/台词/场景图片/视频生成/自定义资产/资产画布），同步到 URL tab 参数 */
+const tab = usePanelTab(['overview', 'script', 'images', 'video', 'custom', 'canvas'], 'overview')
 const data = ref<SceneData | null>(null)
 const stageDefs = ref<StageDefinition[]>([])
 /** 每条台词对应的语音 URL；无资产时为空字符串 */
