@@ -3,7 +3,7 @@ import { canvasRelPath, loadCanvas, saveCanvas, CanvasVersionError } from './api
 
 vi.mock('../api/client', () => ({
   readFs: vi.fn(),
-  default: { post: vi.fn() },
+  default: { post: vi.fn(), put: vi.fn() },
 }))
 
 import client, { readFs } from '../api/client'
@@ -79,9 +79,9 @@ describe('saveCanvas（CAS）', () => {
   const data = { kind: 'scene' as const, nodes: [], connections: [] }
 
   it('提交 expectedRev / force / 目标参数，返回新版本号', async () => {
-    (client.post as Mock).mockResolvedValue({ data: { success: true, rev: 6, updatedAt: '2026-01-02T00:00:00.000Z' } })
+    (client.put as Mock).mockResolvedValue({ data: { success: true, rev: 6, updatedAt: '2026-01-02T00:00:00.000Z' } })
     const result = await saveCanvas('p', { kind: 'scene', episode: '1', shot: '1' }, data as never, { expectedRev: 5 })
-    expect(client.post).toHaveBeenCalledWith('/canvas/def', expect.objectContaining({
+    expect(client.put).toHaveBeenCalledWith('/canvas/def', expect.objectContaining({
       project: 'p',
       kind: 'scene',
       episode: '1',
@@ -94,9 +94,9 @@ describe('saveCanvas（CAS）', () => {
   })
 
   it('force 模式透传 force=true', async () => {
-    (client.post as Mock).mockResolvedValue({ data: { success: true, rev: 7, updatedAt: 'x' } })
+    (client.put as Mock).mockResolvedValue({ data: { success: true, rev: 7, updatedAt: 'x' } })
     await saveCanvas('p', { kind: 'stage', stage: '街角', label: '白天' }, data as never, { expectedRev: 6, force: true })
-    expect(client.post).toHaveBeenCalledWith('/canvas/def', expect.objectContaining({ force: true, stage: '街角', label: '白天' }))
+    expect(client.put).toHaveBeenCalledWith('/canvas/def', expect.objectContaining({ force: true, stage: '街角', label: '白天' }))
   })
 
   it('409 VERSION_CONFLICT 抛 CanvasVersionError（含当前版本）', async () => {
@@ -105,7 +105,7 @@ describe('saveCanvas（CAS）', () => {
       status: 409,
       data: { code: 'VERSION_CONFLICT', error: '画布保存冲突', currentRev: 9, expectedRev: 5 },
     }
-    ;(client.post as Mock).mockRejectedValue(err)
+    ;(client.put as Mock).mockRejectedValue(err)
     await expect(saveCanvas('p', { kind: 'scene', episode: '1', shot: '1' }, data as never, { expectedRev: 5 }))
       .rejects.toBeInstanceOf(CanvasVersionError)
     await expect(saveCanvas('p', { kind: 'scene', episode: '1', shot: '1' }, data as never, { expectedRev: 5 }))
