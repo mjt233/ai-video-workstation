@@ -945,6 +945,18 @@ async function rebuildAndRefresh() {
   emit('refresh')
 }
 
+/**
+ * 重新加载资产树（供父组件调用）：重建树后保持展开/激活状态
+ * （路径不变的分支自然保留；重编号的分支由调用方先 remapTreePaths 平移）。
+ */
+async function reload(): Promise<void> {
+  await buildTree()
+  await nextTick()
+  syncTreeSelectionFromRoute()
+}
+
+defineExpose({ reload })
+
 // ── 分类树纯函数（结构化操作，供拖拽/增删/重命名复用） ────────────────
 
 /**
@@ -1270,6 +1282,19 @@ async function saveCategoryDialog() {
   try {
     const saved = await putCharacterCategories(props.project, next)
     meta.value = { ...meta.value!, characters: saved }
+    // 重命名分类：把展开/激活路径中新旧分类前缀平移，重建后保持展开状态
+    if (categoryDialog.mode === 'rename' && categoryDialog.targetPath.length) {
+      const oldPrefix = charCatId(categoryDialog.targetPath)
+      const newPrefix = charCatId([...categoryDialog.parentPath, value])
+      if (oldPrefix !== newPrefix) {
+        opened.value = opened.value.map((p) =>
+          p.startsWith(oldPrefix) ? newPrefix + p.slice(oldPrefix.length) : p,
+        )
+        activated.value = activated.value.map((p) =>
+          p.startsWith(oldPrefix) ? newPrefix + p.slice(oldPrefix.length) : p,
+        )
+      }
+    }
     categoryDialog.show = false
     await rebuildAndRefresh()
   } catch (err) {

@@ -64,9 +64,8 @@
         </div>
         <v-divider class="mb-2" />
         <AssetTree
-          :key="treeKey"
+          ref="assetTreeRef"
           :project="project"
-          @refresh="refreshTree"
         />
         <BatchGenerateDialog
           v-model="showBatchDialog"
@@ -207,7 +206,11 @@ const shot = computed(() => route.query.shot as string)
 const section = computed(() => route.query.section as string | undefined)
 
 const showBatchDialog = ref(false)
-const treeKey = ref(0)
+/**
+ * 资产浏览器组件引用：刷新通过 reload() 触发（组件内部重建树并保持展开状态，
+ * 不用 :key 整树重挂——重挂会清空 opened/activated，导致每次调整后树全部折叠）。
+ */
+const assetTreeRef = ref<InstanceType<typeof AssetTree> | null>(null)
 /**
  * 左侧资产浏览器是否已收起。状态持久化到 localStorage，
  * 便于用户在不同项目详情页间切换时保持偏好。
@@ -244,7 +247,8 @@ const floatingStatusText = computed(() => {
 })
 
 function refreshTree() {
-  treeKey.value++
+  // 触发资产浏览器重建（组件内保持展开/激活状态）
+  void assetTreeRef.value?.reload()
 }
 
 function clearBatch() {
