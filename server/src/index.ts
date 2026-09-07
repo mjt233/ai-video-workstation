@@ -13,6 +13,10 @@ import { discoverProviders } from './providers/index.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
 import { syncAllInstances } from './providers/instance-sync.js';
 import { migrateLegacyConfig } from './providers/config-store.js';
+import { apiNotFoundHandler, errorHandler, installProcessErrorHandlers } from './error-handler.js';
+
+// 进程级兜底：未处理的 Promise 拒绝 / 未捕获同步异常全部打印到控制台，杜绝静默丢失
+installProcessErrorHandlers();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -37,6 +41,9 @@ app.use('/api', canvasRouter);
 app.use('/api', llmRouter);
 app.use('/api', presetsRouter);
 
+// /api 未匹配任何路由的请求统一返回 JSON 404（404 属正常业务反馈，不打日志）
+app.use('/api', apiNotFoundHandler);
+
 const distPath = path.resolve(__dirname, '../../frontend/dist');
 app.use(express.static(distPath));
 app.get('*', (req, res) => {
@@ -44,6 +51,11 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(distPath, 'index.html'));
   }
 });
+
+// 全局统一兜底错误中间件：必须注册在中间件链最末端，
+// 收口所有未被路由捕获的错误（同步抛错 / next(err) / body-parser / multer 等），
+// 服务端异常完整打印到控制台，客户端统一收到 JSON 错误响应
+app.use(errorHandler);
 
 /**
  * 获取本机所有对外可访问的 IPv4 地址
