@@ -62,6 +62,14 @@ import {
   readPropRefs,
   savePropRefs,
 } from '../assets/props.js';
+import {
+  readBrowserMeta,
+  readCharacterCategories,
+  removeCharacterAssignment,
+  saveAlias,
+  saveCharacterCategories,
+  type CharacterCategoriesMeta,
+} from '../assets/browser-meta.js';
 
 export const assetsRouter = Router();
 
@@ -248,6 +256,8 @@ assetsRouter.delete('/assets/:project/character/:name', async (req: Request, res
     if (refs.length) throw Object.assign(new Error('资源正在被引用，无法删除'), { code: 'IN_USE', refs });
     await removeDirIfExists(dir);
     await removeDirIfExists(resolveProjectPath(project, `assert/character/${name}`));
+    // 清理角色分类元数据中的归属记录（metadata.json 在 character 根目录，不随角色目录删除）
+    await removeCharacterAssignment(project, name);
     res.json({ success: true });
   } catch (err) {
     httpError(res, err);
@@ -305,6 +315,67 @@ assetsRouter.delete('/assets/:project/episode/:episode', async (req: Request, re
     await removeDirIfExists(resolveProjectPath(project, `assert/scene/${episode}`));
     await removeDirIfExists(resolveProjectPath(project, `assert/custom/scene/${episode}`));
     res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// GET /api/assets/:project/browser-meta — 资产浏览器元数据聚合（集数/分镜别名 + 角色分类）
+assetsRouter.get('/assets/:project/browser-meta', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const meta = await readBrowserMeta(project);
+    res.json(meta);
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT /api/assets/:project/episode/:episode/metadata — 保存/清除集数别名
+assetsRouter.put('/assets/:project/episode/:episode/metadata', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const { alias, showPrefix } = req.body as { alias?: string | null; showPrefix?: boolean };
+    await saveAlias(project, 'episode', episode, undefined, alias ?? null, showPrefix ?? true);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT /api/assets/:project/shot/:episode/:shot/metadata — 保存/清除分镜别名
+assetsRouter.put('/assets/:project/shot/:episode/:shot/metadata', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const episode = req.params.episode as string;
+    const shot = req.params.shot as string;
+    const { alias, showPrefix } = req.body as { alias?: string | null; showPrefix?: boolean };
+    await saveAlias(project, 'shot', episode, shot, alias ?? null, showPrefix ?? true);
+    res.json({ success: true });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// GET /api/assets/:project/character/categories — 读取角色分类元数据
+assetsRouter.get('/assets/:project/character/categories', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const meta = await readCharacterCategories(project);
+    res.json(meta);
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// PUT /api/assets/:project/character/categories — 全量保存角色分类树与归属映射（拖拽后整体替换）
+assetsRouter.put('/assets/:project/character/categories', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const body = req.body as CharacterCategoriesMeta;
+    const meta = await saveCharacterCategories(project, body);
+    res.json({ success: true, ...meta });
   } catch (err) {
     httpError(res, err);
   }

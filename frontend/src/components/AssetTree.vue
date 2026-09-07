@@ -1,47 +1,279 @@
 <template>
   <div>
-    <v-treeview
-      v-model:activated="activated"
-      v-model:opened="opened"
-      :items="treeItems"
-      item-title="name"
-      item-value="path"
-      color="primary"
-      hoverable
-      open-on-click
-      activatable
-      density="compact"
-      @update:activated="onSelect"
-    >
-      <template #prepend="{ item }">
-        <v-icon
-          :color="iconColor(item)"
-          size="small"
+    <!-- 资产树：自定义行渲染（支持 HTML5 拖拽调整角色分类层级） -->
+    <div class="asset-tree">
+      <template
+        v-for="row in flatRows"
+        :key="row.item.path"
+      >
+        <div
+          class="tree-row"
+          :class="{
+            'tree-row--active': activated.includes(row.item.path),
+            'tree-row--drop-target': dropTargetPath === row.item.path,
+            'tree-row--dragging': dragItem?.path === row.item.path,
+          }"
+          :style="{ paddingLeft: `${10 + row.depth * 18}px` }"
+          :draggable="isDraggable(row.item)"
+          @click="onRowClick(row.item)"
+          @dragstart="onDragStart($event, row.item)"
+          @dragover="onDragOver($event, row.item)"
+          @dragleave="onDragLeave($event, row.item)"
+          @drop="onDrop($event, row.item)"
+          @dragend="onDragEnd"
         >
-          {{ item.icon }}
-        </v-icon>
-      </template>
-      <template #append="{ item }">
-        <div class="d-flex align-center ga-0">
           <v-btn
-            v-if="canCreate(item)"
-            icon="mdi-plus"
+            v-if="row.item.children?.length"
+            :icon="opened.includes(row.item.path) ? 'mdi-chevron-down' : 'mdi-chevron-right'"
             size="x-small"
             variant="text"
-            color="primary"
-            @click.stop="openCreate(item)"
+            density="comfortable"
+            class="tree-row__toggle"
+            @click.stop="toggle(row.item)"
           />
-          <v-btn
-            v-if="canDelete(item)"
-            icon="mdi-delete"
-            size="x-small"
-            variant="text"
-            color="error"
-            @click.stop="openDelete(item)"
+          <span
+            v-else
+            class="tree-row__toggle"
           />
+
+          <v-icon
+            :color="iconColor(row.item)"
+            size="small"
+          >
+            {{ row.item.icon }}
+          </v-icon>
+
+          <span class="tree-row__title">{{ row.item.name }}</span>
+
+          <v-spacer />
+
+          <div class="tree-row__actions">
+            <!-- 角色根：新建角色 / 新建一级分类 -->
+            <template v-if="row.item.kind === 'root-character'">
+              <v-btn
+                icon="mdi-plus"
+                title="新建角色"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+              <v-btn
+                icon="mdi-folder-plus-outline"
+                title="新建一级分类"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreateCategory(row.item)"
+              />
+            </template>
+
+            <!-- 角色分类：新建角色 / 新建子分类 / 重命名 / 删除 -->
+            <template v-else-if="row.item.kind === 'character-category'">
+              <v-btn
+                icon="mdi-account-plus-outline"
+                title="在分类下新建角色"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+              <v-btn
+                icon="mdi-folder-plus-outline"
+                title="新建子分类"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreateCategory(row.item)"
+              />
+              <v-btn
+                icon="mdi-pencil-outline"
+                title="重命名分类"
+                size="x-small"
+                variant="text"
+                @click.stop="openRenameCategory(row.item)"
+              />
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除分类"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDeleteCategory(row.item)"
+              />
+            </template>
+
+            <!-- 角色 -->
+            <template v-else-if="row.item.kind === 'character'">
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除角色"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDelete(row.item)"
+              />
+            </template>
+
+            <!-- 场景根 / 场景 / 子场景 -->
+            <template v-else-if="row.item.kind === 'root-stage'">
+              <v-btn
+                icon="mdi-plus"
+                title="新建场景"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+            </template>
+            <template v-else-if="row.item.kind === 'stage'">
+              <v-btn
+                icon="mdi-plus"
+                title="新建子场景"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除场景"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDelete(row.item)"
+              />
+            </template>
+            <template v-else-if="row.item.kind === 'subscene'">
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除子场景"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDelete(row.item)"
+              />
+            </template>
+
+            <!-- 道具根 / 分类 / 道具 -->
+            <template v-else-if="row.item.kind === 'root-prop'">
+              <v-btn
+                icon="mdi-plus"
+                title="新建道具分类"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+            </template>
+            <template v-else-if="row.item.kind === 'prop-category'">
+              <v-btn
+                icon="mdi-plus"
+                title="新建道具"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除道具分类"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDelete(row.item)"
+              />
+            </template>
+            <template v-else-if="row.item.kind === 'prop'">
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除道具"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDelete(row.item)"
+              />
+            </template>
+
+            <!-- 集数分镜根 / 集数 / 分镜 -->
+            <template v-else-if="row.item.kind === 'root-scene'">
+              <v-btn
+                icon="mdi-plus"
+                title="新建集数"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+            </template>
+            <template v-else-if="row.item.kind === 'episode'">
+              <v-btn
+                icon="mdi-plus"
+                title="新建分镜"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+              <v-btn
+                icon="mdi-pencil-outline"
+                title="编辑集数别名"
+                size="x-small"
+                variant="text"
+                @click.stop="openAlias(row.item)"
+              />
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除集数"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDelete(row.item)"
+              />
+            </template>
+            <template v-else-if="row.item.kind === 'shot'">
+              <v-btn
+                icon="mdi-pencil-outline"
+                title="编辑分镜别名"
+                size="x-small"
+                variant="text"
+                @click.stop="openAlias(row.item)"
+              />
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除分镜"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDelete(row.item)"
+              />
+            </template>
+
+            <!-- 剧本 -->
+            <template v-else-if="row.item.kind === 'script-episodes'">
+              <v-btn
+                icon="mdi-plus"
+                title="新建剧本分集"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click.stop="openCreate(row.item)"
+              />
+            </template>
+            <template v-else-if="row.item.kind === 'script-episode'">
+              <v-btn
+                icon="mdi-delete-outline"
+                title="删除剧本分集"
+                size="x-small"
+                variant="text"
+                color="error"
+                @click.stop="openDelete(row.item)"
+              />
+            </template>
+          </div>
         </div>
       </template>
-    </v-treeview>
+    </div>
 
     <AssetCreateDialog
       v-model="createDialog.show"
@@ -51,13 +283,114 @@
       @created="onCreated"
     />
 
+    <!-- 集数/分镜别名编辑 -->
+    <v-dialog
+      v-model="aliasDialog.show"
+      max-width="420"
+    >
+      <v-card>
+        <v-card-title>编辑别名</v-card-title>
+        <v-card-text>
+          <div class="text-body-medium mb-2">
+            对象：{{ aliasDialog.label }}
+          </div>
+          <v-alert
+            v-if="aliasDialog.error"
+            type="error"
+            density="compact"
+            class="mb-3"
+          >
+            {{ aliasDialog.error }}
+          </v-alert>
+          <v-text-field
+            v-model="aliasDialog.value"
+            label="别名"
+            variant="outlined"
+            :maxlength="50"
+            hint="留空保存 = 清除别名；仅用于显示，不改变编号"
+            persistent-hint
+            @keyup.enter="saveAliasDialog"
+          />
+          <v-checkbox
+            v-model="aliasDialog.showPrefix"
+            label="显示编号前缀（如 第3集 / 分镜2）"
+            hide-details
+            class="mt-1"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="aliasDialog.show = false"
+          >
+            取消
+          </v-btn>
+          <v-btn
+            color="primary"
+            @click="saveAliasDialog"
+          >
+            保存
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 分类新建/重命名 -->
+    <v-dialog
+      v-model="categoryDialog.show"
+      max-width="420"
+    >
+      <v-card>
+        <v-card-title>{{ categoryDialog.mode === 'create' ? '新建分类' : '重命名分类' }}</v-card-title>
+        <v-card-text>
+          <div
+            v-if="categoryDialog.parentLabel"
+            class="text-body-medium mb-2"
+          >
+            父分类：{{ categoryDialog.parentLabel }}
+          </div>
+          <v-alert
+            v-if="categoryDialog.error"
+            type="error"
+            density="compact"
+            class="mb-3"
+          >
+            {{ categoryDialog.error }}
+          </v-alert>
+          <v-text-field
+            v-model="categoryDialog.value"
+            label="分类名"
+            variant="outlined"
+            :maxlength="50"
+            @keyup.enter="saveCategoryDialog"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="categoryDialog.show = false"
+          >
+            取消
+          </v-btn>
+          <v-btn
+            color="primary"
+            @click="saveCategoryDialog"
+          >
+            确定
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog
       v-model="errorDialog.show"
       max-width="520"
     >
       <v-card>
         <v-card-title class="text-error">
-          无法删除
+          操作失败
         </v-card-title>
         <v-card-text>
           <div class="mb-2">
@@ -103,7 +436,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { readFs, type DirResponse } from '../api/client'
 import {
@@ -116,7 +449,14 @@ import {
   deleteShot,
   deleteStage,
   deleteSubscene,
+  getBrowserMeta,
+  putCharacterCategories,
+  putEpisodeMeta,
+  putShotMeta,
   type AssetRef,
+  type BrowserMeta,
+  type CharacterCategoriesMeta,
+  type CharacterCategoryNode,
   type RenamePair,
 } from '../api/assets'
 import AssetCreateDialog, { type CreateAssetType } from './AssetCreateDialog.vue'
@@ -126,6 +466,7 @@ type TreeKind =
   | 'project-info'
   | 'root-character'
   | 'character'
+  | 'character-category'
   | 'root-stage'
   | 'stage'
   | 'subscene'
@@ -153,8 +494,19 @@ interface TreeItem {
   label?: string
   /** 道具分类名（道具节点所属分类） */
   category?: string
+  /** 角色分类节点：从分类树根到该节点的路径 */
+  charCategoryPath?: string[]
   children?: TreeItem[]
 }
+
+/** 扁平化展示行（深度用于缩进） */
+interface FlatRow {
+  item: TreeItem
+  depth: number
+}
+
+/** 分类路径内部分隔符（仅用于 join/比较，不落盘） */
+const CAT_SEP = '\u0001'
 
 const props = defineProps<{ project: string }>()
 const emit = defineEmits<{ refresh: [] }>()
@@ -164,19 +516,64 @@ const router = useRouter()
 const treeItems = ref<TreeItem[]>([])
 const activated = ref<string[]>([])
 const opened = ref<string[]>([])
-const deleting = ref(false)
+
+/** 浏览器元数据（别名 + 角色分类），buildTree 时刷新 */
+const meta = ref<BrowserMeta | null>(null)
 
 const createDialog = reactive({
   show: false,
   type: 'character' as CreateAssetType,
-  defaults: {} as Partial<{ name: string; stage: string; category: string; episode: string }>,
+  defaults: {} as Partial<{
+    name: string
+    stage: string
+    category: string
+    episode: string
+    /** 新建角色后自动归入的分类路径（[] 或 undefined = 未分类） */
+    characterCategory: string[]
+  }>,
 })
+
+const aliasDialog = reactive({
+  show: false,
+  kind: 'episode' as 'episode' | 'shot',
+  episode: '',
+  shot: '',
+  label: '',
+  value: '',
+  /** 是否显示编号前缀（默认勾选） */
+  showPrefix: true,
+  error: '',
+})
+
+const categoryDialog = reactive({
+  show: false,
+  mode: 'create' as 'create' | 'rename',
+  /** 父分类路径（mode=create 时有效；[] = 一级分类） */
+  parentPath: [] as string[],
+  /** 被重命名分类的路径（mode=rename 时有效） */
+  targetPath: [] as string[],
+  parentLabel: '',
+  value: '',
+  error: '',
+})
+
+/** 当前拖拽的树节点（角色/角色分类） */
+const dragItem = ref<TreeItem | null>(null)
+/** 当前高亮的放置目标路径（整行级） */
+const dropTargetPath = ref<string | null>(null)
 
 const errorDialog = reactive({
   show: false,
   message: '',
   refs: [] as AssetRef[],
 })
+
+// ── 展示辅助 ──────────────────────────────────────────────────────────
+
+/** 分类节点的树路径 id（path 全局唯一：分类名逐级编码后拼 '/'） */
+function charCatId(catPath: string[]): string {
+  return `charcat:${catPath.map(encodeURIComponent).join('/')}`
+}
 
 function sortByNameZh<T extends { name: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => a.name.localeCompare(b.name, 'zh'))
@@ -190,7 +587,7 @@ function iconColor(item: TreeItem): string {
   if (item.kind === 'project-info') {
     return 'deep-purple'
   }
-  if (item.type === 'character' || item.kind === 'character' || item.kind === 'root-character') {
+  if (item.type === 'character' || item.kind === 'character' || item.kind === 'root-character' || item.kind === 'character-category') {
     return 'amber-darken-1'
   }
   if (item.type === 'stage' || item.kind === 'stage' || item.kind === 'subscene' || item.kind === 'root-stage') {
@@ -208,13 +605,33 @@ function iconColor(item: TreeItem): string {
   return 'primary'
 }
 
-function canCreate(item: TreeItem): boolean {
-  return ['root-character', 'root-stage', 'root-prop', 'prop-category', 'root-scene', 'episode', 'script-episodes'].includes(item.kind)
+/** 集数显示名（带别名）：第3集 · 觉醒；勾选隐藏编号时仅显示「觉醒」 */
+function epDisplay(ep: string): string {
+  const info = meta.value?.episodes[ep]
+  if (!info) return `第${ep}集`
+  return info.showPrefix ? `第${ep}集 · ${info.alias}` : info.alias
 }
 
-function canDelete(item: TreeItem): boolean {
-  return ['character', 'stage', 'subscene', 'prop-category', 'prop', 'episode', 'shot', 'script-episode'].includes(item.kind)
+/** 分镜显示名（带别名）：分镜2 · 初遇；勾选隐藏编号时仅显示「初遇」 */
+function shotDisplay(ep: string, shot: string): string {
+  const info = meta.value?.shots[ep]?.[shot]
+  if (!info) return `分镜${shot}`
+  return info.showPrefix ? `分镜${shot} · ${info.alias}` : info.alias
 }
+
+/** 集数删除确认等提示文案：恒带编号（避免别名重复造成歧义） */
+function epFull(ep: string): string {
+  const alias = meta.value?.episodes[ep]?.alias
+  return alias ? `第${ep}集 · ${alias}` : `第${ep}集`
+}
+
+/** 分镜删除确认等提示文案：恒带编号 */
+function shotFull(ep: string, shot: string): string {
+  const alias = meta.value?.shots[ep]?.[shot]?.alias
+  return alias ? `分镜${shot} · ${alias}` : `分镜${shot}`
+}
+
+// ── 树构建（含分类树与别名） ──────────────────────────────────────────
 
 interface DirEntrySafe {
   name: string
@@ -226,28 +643,93 @@ async function safeDir(path: string): Promise<DirEntrySafe[]> {
     const res = await readFs(props.project, path) as DirResponse
     return res.entries ?? []
   } catch {
+    // 目录不存在/不可读：按空目录处理（与既有行为一致）
     return []
   }
 }
 
+/**
+ * 由分类树递归构建角色分类树节点，并把归属于各分类路径的角色挂到对应分类下。
+ * 子分类在前、角色在后；未分类角色由调用方平铺到根级。
+ *
+ * @param nodes 当前层分类节点
+ * @param parentPath 父分类路径
+ * @param assignedByPath 分类路径 → 角色节点列表
+ * @returns 树节点数组
+ */
+function buildCategoryItems(
+  nodes: CharacterCategoryNode[],
+  parentPath: string[],
+  assignedByPath: Map<string, TreeItem[]>,
+): TreeItem[] {
+  const result: TreeItem[] = []
+  for (const node of nodes) {
+    const catPath = [...parentPath, node.name]
+    const key = catPath.join(CAT_SEP)
+    const children = [
+      ...buildCategoryItems(node.children, catPath, assignedByPath),
+      ...(assignedByPath.get(key) ?? []),
+    ]
+    result.push({
+      name: node.name,
+      path: charCatId(catPath),
+      icon: 'mdi-folder-outline',
+      kind: 'character-category',
+      charCategoryPath: catPath,
+      children,
+    })
+  }
+  return result
+}
+
 async function buildTree() {
-  const [characters, stages, props, episodes] = await Promise.all([
+  // 元数据一次请求；失败时回退空态（旧项目/服务端异常时树仍可加载，仅无别名/分类）
+  let browserMeta: BrowserMeta = {
+    episodes: {},
+    shots: {},
+    characters: { categories: [], assignments: {} },
+  }
+  try {
+    browserMeta = await getBrowserMeta(props.project)
+  } catch (err) {
+    console.error('加载资产浏览器元数据失败，回退为空态：', err)
+  }
+  meta.value = browserMeta
+
+  const [characters, stages, propDirs, episodes] = await Promise.all([
     safeDir('prompt/character/'),
     safeDir('prompt/stage/'),
     safeDir('prompt/prop/'),
     safeDir('prompt/scene/'),
   ])
 
+  // 角色：按分类分组（物理目录仍为 prompt/character/{角色名}/，只有 metadata.json 记录归属）
   const charDirs = sortByNameZh(
     characters.filter(c => c.type === 'dir').map(c => ({ name: c.name })),
   )
-  const charItems: TreeItem[] = charDirs.map(c => ({
-    name: c.name,
-    path: `character-${c.name}`,
-    icon: 'mdi-account',
-    type: 'character',
-    kind: 'character',
-  }))
+  const assignments = browserMeta.characters.assignments
+  const assignedByPath = new Map<string, TreeItem[]>()
+  const uncategorizedChars: TreeItem[] = []
+  for (const c of charDirs) {
+    const item: TreeItem = {
+      name: c.name,
+      path: `character-${c.name}`,
+      icon: 'mdi-account',
+      type: 'character',
+      kind: 'character',
+    }
+    const catPath = assignments[c.name] ?? []
+    if (catPath.length) {
+      const key = catPath.join(CAT_SEP)
+      const list = assignedByPath.get(key) ?? []
+      list.push(item)
+      assignedByPath.set(key, list)
+    } else {
+      uncategorizedChars.push(item)
+    }
+  }
+  const categoryItems = buildCategoryItems(browserMeta.characters.categories, [], assignedByPath)
+  const charItems: TreeItem[] = [...categoryItems, ...uncategorizedChars]
 
   const stageDirs = sortByNameZh(
     stages.filter(s => s.type === 'dir').map(s => ({ name: s.name })),
@@ -280,11 +762,11 @@ async function buildTree() {
   }
 
   // 道具：一级=分类（目录），二级=道具本身
-  const propDirs = sortByNameZh(
-    props.filter(p => p.type === 'dir').map(p => ({ name: p.name })),
+  const propDirNames = sortByNameZh(
+    propDirs.filter(p => p.type === 'dir').map(p => ({ name: p.name })),
   )
   const propItems: TreeItem[] = []
-  for (const cat of propDirs) {
+  for (const cat of propDirNames) {
     const propNames = await safeDir(`prompt/prop/${cat.name}/`)
     const children = sortByNameZh(
       propNames.filter(p => p.type === 'dir').map(p => ({ name: p.name })),
@@ -317,13 +799,13 @@ async function buildTree() {
       shots.filter(sh => sh.type === 'dir').map(sh => sh.name),
     )
     episodeItems.push({
-      name: `第${ep}集`,
+      name: epDisplay(ep),
       path: `episode-${ep}`,
       icon: 'mdi-filmstrip',
       kind: 'episode',
       episode: ep,
       children: shotNames.map(sh => ({
-        name: `分镜${sh}`,
+        name: shotDisplay(ep, sh),
         path: `scene-${ep}-${sh}`,
         icon: 'mdi-image-multiple',
         type: 'scene',
@@ -415,12 +897,417 @@ async function buildTree() {
   ]
 }
 
+// ── 扁平渲染（展开状态 → 行列表） ────────────────────────────────────
+
+const flatRows = computed<FlatRow[]>(() => {
+  const rows: FlatRow[] = []
+  const openSet = new Set(opened.value)
+  const walk = (items: TreeItem[], depth: number) => {
+    for (const item of items) {
+      rows.push({ item, depth })
+      if (item.children?.length && openSet.has(item.path)) {
+        walk(item.children, depth + 1)
+      }
+    }
+  }
+  walk(treeItems.value, 0)
+  return rows
+})
+
+function toggle(item: TreeItem) {
+  if (!item.children?.length) return
+  const index = opened.value.indexOf(item.path)
+  if (index >= 0) {
+    opened.value.splice(index, 1)
+  } else {
+    opened.value.push(item.path)
+  }
+}
+
+/** 行点击：激活 + 有子节点时同时展开（与既有 open-on-click 行为一致） */
+function onRowClick(item: TreeItem) {
+  activated.value = [item.path]
+  if (item.children?.length) toggle(item)
+  onSelect(item)
+}
+
 async function rebuildAndRefresh() {
   await buildTree()
   await nextTick()
   syncTreeSelectionFromRoute()
   emit('refresh')
 }
+
+// ── 分类树纯函数（结构化操作，供拖拽/增删/重命名复用） ────────────────
+
+/**
+ * 深拷贝纯 JSON 数据（分类树/归属映射）。
+ * 不用 structuredClone：ref 深层响应式后的对象是 Proxy，structuredClone 无法克隆。
+ */
+function deepClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+/** 数组前缀判断：path 是否以 prefix 开头 */
+function pathStartsWith(path: string[], prefix: string[]): boolean {
+  if (prefix.length > path.length) return false
+  return prefix.every((seg, i) => path[i] === seg)
+}
+
+/**
+ * 定位路径对应的分类节点。
+ *
+ * @param nodes 分类树顶层数组
+ * @param path 节点路径（必须非空）
+ * @returns 父级数组/索引/节点；未找到返回 null
+ */
+function locateNode(
+  nodes: CharacterCategoryNode[],
+  path: string[],
+): { parent: CharacterCategoryNode[]; index: number; node: CharacterCategoryNode } | null {
+  if (!path.length) return null
+  let level = nodes
+  for (let i = 0; i < path.length - 1; i++) {
+    const found = level.find(n => n.name === path[i])
+    if (!found) return null
+    level = found.children
+  }
+  const index = level.findIndex(n => n.name === path[path.length - 1])
+  if (index < 0) return null
+  return { parent: level, index, node: level[index] }
+}
+
+/** 在父路径（[]=根）下追加分类节点 */
+function appendCategory(nodes: CharacterCategoryNode[], parentPath: string[], node: CharacterCategoryNode): boolean {
+  if (!parentPath.length) {
+    nodes.push(node)
+    return true
+  }
+  const loc = locateNode(nodes, parentPath)
+  if (!loc) return false
+  loc.node.children.push(node)
+  return true
+}
+
+/** 删除路径对应的分类节点（返回被删除的节点；未找到返回 null） */
+function removeCategory(nodes: CharacterCategoryNode[], path: string[]): CharacterCategoryNode | null {
+  const loc = locateNode(nodes, path)
+  if (!loc) return null
+  loc.parent.splice(loc.index, 1)
+  return loc.node
+}
+
+/** 重命名路径对应的分类节点（成功返回 true） */
+function renameCategory(nodes: CharacterCategoryNode[], path: string[], newName: string): boolean {
+  const loc = locateNode(nodes, path)
+  if (!loc) return false
+  loc.node.name = newName
+  return true
+}
+
+/** 移动分类节点：从原路径摘下，挂到目标路径（[]=根）末尾，并同步改写归属映射 */
+function moveCategory(
+  metaValue: CharacterCategoriesMeta,
+  dragPath: string[],
+  targetPath: string[],
+): CharacterCategoriesMeta | null {
+  const nodes = deepClone(metaValue.categories)
+  const node = removeCategory(nodes, dragPath)
+  if (!node) return null
+  if (!appendCategory(nodes, targetPath, node)) return null
+  const newPrefix = [...targetPath, node.name]
+  const assignments: Record<string, string[]> = {}
+  for (const [key, p] of Object.entries(metaValue.assignments)) {
+    assignments[key] = pathStartsWith(p, dragPath) ? [...newPrefix, ...p.slice(dragPath.length)] : p
+  }
+  return { categories: nodes, assignments }
+}
+
+/** 移动角色：设置/清除其归属分类路径（[]=未分类） */
+function moveCharacter(
+  metaValue: CharacterCategoriesMeta,
+  name: string,
+  targetPath: string[],
+): CharacterCategoriesMeta {
+  return {
+    categories: deepClone(metaValue.categories),
+    assignments: { ...metaValue.assignments, [name]: [...targetPath] },
+  }
+}
+
+/** 删除分类节点：其下所有角色（含子孙分类中的）转为未分类（移除归属键） */
+function deleteCategoryAndDetach(
+  metaValue: CharacterCategoriesMeta,
+  path: string[],
+): CharacterCategoriesMeta {
+  const nodes = deepClone(metaValue.categories)
+  removeCategory(nodes, path)
+  const assignments: Record<string, string[]> = {}
+  for (const [key, p] of Object.entries(metaValue.assignments)) {
+    if (!pathStartsWith(p, path)) assignments[key] = p
+  }
+  return { categories: nodes, assignments }
+}
+
+/** 重命名分类节点并同步改写归属映射中的路径 */
+function renameCategoryAndUpdateAssignments(
+  metaValue: CharacterCategoriesMeta,
+  path: string[],
+  newName: string,
+): CharacterCategoriesMeta {
+  const nodes = deepClone(metaValue.categories)
+  renameCategory(nodes, path, newName)
+  const assignments: Record<string, string[]> = {}
+  for (const [key, p] of Object.entries(metaValue.assignments)) {
+    assignments[key] = pathStartsWith(p, path) ? [...p.slice(0, -1), newName] : p
+  }
+  return { categories: nodes, assignments }
+}
+
+// ── 拖拽 ─────────────────────────────────────────────────────────────
+
+/** 仅角色/角色分类节点可拖拽 */
+function isDraggable(item: TreeItem): boolean {
+  return item.kind === 'character' || item.kind === 'character-category'
+}
+
+function onDragStart(e: DragEvent, item: TreeItem) {
+  if (!isDraggable(item)) return
+  dragItem.value = item
+  dropTargetPath.value = null
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    // 部分浏览器要求 setData 才会启动拖拽
+    e.dataTransfer.setData('text/plain', item.path)
+  }
+}
+
+function onDragEnd() {
+  dragItem.value = null
+  dropTargetPath.value = null
+}
+
+/** 判断拖拽项是否允许放到目标节点上（分类拖入自身/子孙无效） */
+function isValidDropTarget(drag: TreeItem, target: TreeItem): boolean {
+  if (target.kind === 'root-character') return true
+  if (target.kind !== 'character-category') return false
+  if (drag.kind === 'character') return true
+  // 分类不能拖入自己或自己的子孙
+  const dragPath = drag.charCategoryPath ?? []
+  const targetPath = target.charCategoryPath ?? []
+  return !pathStartsWith(targetPath, dragPath) && !pathStartsWith(dragPath, targetPath)
+}
+
+function onDragOver(e: DragEvent, item: TreeItem) {
+  const drag = dragItem.value
+  if (!drag || !isValidDropTarget(drag, item)) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropTargetPath.value = item.path
+}
+
+function onDragLeave(e: DragEvent, item: TreeItem) {
+  // relatedTarget 在目标外部时清除高亮（忽略子元素触发的事件）
+  const related = e.relatedTarget as Node | null
+  if (related && e.currentTarget instanceof Node && e.currentTarget.contains(related)) return
+  if (dropTargetPath.value === item.path) dropTargetPath.value = null
+}
+
+async function onDrop(e: DragEvent, item: TreeItem) {
+  e.preventDefault()
+  const drag = dragItem.value
+  const current = meta.value?.characters
+  if (!drag || !current) {
+    onDragEnd()
+    return
+  }
+  try {
+    const targetPath = item.kind === 'root-character' ? [] : (item.charCategoryPath ?? [])
+    const next = drag.kind === 'character'
+      ? moveCharacter(current, drag.name ?? '', targetPath)
+      : moveCategory(current, drag.charCategoryPath ?? [], targetPath)
+    // 无变化（如拖回原分类）时不请求
+    if (next && JSON.stringify(next) !== JSON.stringify(current)) {
+      const saved = await putCharacterCategories(props.project, next)
+      meta.value = { ...meta.value!, characters: saved }
+      await rebuildAndRefresh()
+    }
+  } catch (err) {
+    showError(err, '保存分类失败')
+  } finally {
+    onDragEnd()
+  }
+}
+
+// ── 别名编辑 ─────────────────────────────────────────────────────────
+
+function openAlias(item: TreeItem) {
+  const isEpisode = item.kind === 'episode'
+  const episode = item.episode ?? ''
+  const shot = item.shot ?? ''
+  const info = isEpisode
+    ? meta.value?.episodes[episode]
+    : meta.value?.shots[episode]?.[shot]
+  aliasDialog.kind = isEpisode ? 'episode' : 'shot'
+  aliasDialog.episode = episode
+  aliasDialog.shot = shot
+  aliasDialog.label = isEpisode ? epDisplay(episode) : `${epDisplay(episode)} ${shotDisplay(episode, shot)}`
+  aliasDialog.value = info?.alias ?? ''
+  aliasDialog.showPrefix = info?.showPrefix ?? true
+  aliasDialog.error = ''
+  aliasDialog.show = true
+}
+
+async function saveAliasDialog() {
+  const value = aliasDialog.value.trim()
+  try {
+    if (aliasDialog.kind === 'episode') {
+      await putEpisodeMeta(props.project, aliasDialog.episode, {
+        alias: value || null,
+        showPrefix: aliasDialog.showPrefix,
+      })
+    } else {
+      await putShotMeta(props.project, aliasDialog.episode, aliasDialog.shot, {
+        alias: value || null,
+        showPrefix: aliasDialog.showPrefix,
+      })
+    }
+    aliasDialog.show = false
+    await rebuildAndRefresh()
+  } catch (err) {
+    aliasDialog.error = err instanceof AssetApiError ? err.message : '保存别名失败'
+  }
+}
+
+// ── 分类新建/重命名/删除 ─────────────────────────────────────────────
+
+function openCreateCategory(item: TreeItem) {
+  categoryDialog.mode = 'create'
+  categoryDialog.parentPath = item.kind === 'root-character' ? [] : (item.charCategoryPath ?? [])
+  categoryDialog.parentLabel = item.kind === 'root-character' ? '一级分类' : (item.charCategoryPath?.join(' / ') ?? '')
+  categoryDialog.targetPath = []
+  categoryDialog.value = ''
+  categoryDialog.error = ''
+  categoryDialog.show = true
+}
+
+function openRenameCategory(item: TreeItem) {
+  categoryDialog.mode = 'rename'
+  categoryDialog.parentPath = item.charCategoryPath?.slice(0, -1) ?? []
+  categoryDialog.parentLabel = ''
+  categoryDialog.targetPath = item.charCategoryPath ?? []
+  categoryDialog.value = item.charCategoryPath?.length
+    ? item.charCategoryPath[item.charCategoryPath.length - 1]
+    : ''
+  categoryDialog.error = ''
+  categoryDialog.show = true
+}
+
+async function saveCategoryDialog() {
+  const value = categoryDialog.value.trim()
+  if (!value) {
+    categoryDialog.error = '分类名不能为空'
+    return
+  }
+  const current = meta.value?.characters
+  if (!current) {
+    categoryDialog.error = '角色分类数据未加载，请刷新后重试'
+    return
+  }
+  // 同层同名先做前端提示（基于当前树，重命名需排除自身；服务端同样校验）
+  if (siblingPathExists(
+    current,
+    categoryDialog.parentPath,
+    value,
+    categoryDialog.mode === 'rename' ? categoryDialog.targetPath : null,
+  )) {
+    categoryDialog.error = `同层已存在分类「${value}」`
+    return
+  }
+  const next = categoryDialog.mode === 'create'
+    ? createCategoryMeta(current, categoryDialog.parentPath, value)
+    : renameCategoryAndUpdateAssignments(current, categoryDialog.targetPath, value)
+  if (!next) {
+    categoryDialog.error = '父分类不存在（数据可能已变更），请刷新后重试'
+    return
+  }
+  try {
+    const saved = await putCharacterCategories(props.project, next)
+    meta.value = { ...meta.value!, characters: saved }
+    categoryDialog.show = false
+    await rebuildAndRefresh()
+  } catch (err) {
+    categoryDialog.error = err instanceof AssetApiError ? err.message : '保存分类失败'
+  }
+}
+
+/**
+ * 创建分类：在父路径（[]=根）下追加新节点。
+ *
+ * @param metaValue 当前元数据
+ * @param parentPath 父分类路径
+ * @param name 新分类名
+ * @returns 新元数据；父路径不存在返回 null
+ */
+function createCategoryMeta(metaValue: CharacterCategoriesMeta, parentPath: string[], name: string): CharacterCategoriesMeta | null {
+  const categories = deepClone(metaValue.categories)
+  if (!appendCategory(categories, parentPath, { name, children: [] })) return null
+  return { categories, assignments: deepClone(metaValue.assignments) }
+}
+
+/**
+ * 判断父分类路径下是否已存在同名分类。
+ *
+ * @param metaValue 元数据
+ * @param parentPath 父分类路径（[]=根）
+ * @param name 待检查的分类名
+ * @param excludePath 重命名场景下排除自身的路径（其余场景传 null）
+ * @returns true = 同层已存在同名
+ */
+function siblingPathExists(
+  metaValue: CharacterCategoriesMeta,
+  parentPath: string[],
+  name: string,
+  excludePath: string[] | null,
+): boolean {
+  const siblings = parentPath.length === 0
+    ? metaValue.categories
+    : (locateNode(metaValue.categories, parentPath)?.node.children ?? [])
+  return siblings.some(n => {
+    if (n.name !== name) return false
+    if (!excludePath) return true
+    return !(excludePath.length === parentPath.length + 1 && excludePath[excludePath.length - 1] === n.name)
+  })
+}
+
+/** 统计某分类路径下（含子孙分类）的角色数量 */
+function countCharactersUnder(assignments: Record<string, string[]>, path: string[]): number {
+  return Object.values(assignments).filter(p => pathStartsWith(p, path)).length
+}
+
+async function openDeleteCategory(item: TreeItem) {
+  const catPath = item.charCategoryPath ?? []
+  const affected = countCharactersUnder(meta.value?.characters.assignments ?? {}, catPath)
+  const ok = await confirm({
+    title: '确认删除',
+    content: `确定删除分类「${catPath.join(' / ')}」？其下全部角色（${affected} 个）将变为未分类，子分类将一并删除。此操作不可撤销。`,
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
+  try {
+    const current = meta.value?.characters
+    if (!current) return
+    const next = deleteCategoryAndDetach(current, catPath)
+    const saved = await putCharacterCategories(props.project, next)
+    meta.value = { ...meta.value!, characters: saved }
+    await rebuildAndRefresh()
+  } catch (err) {
+    showError(err, '删除分类失败')
+  }
+}
+
+// ── URL 同步 ─────────────────────────────────────────────────────────
 
 function patchQuery(patch: Record<string, string | undefined>) {
   const query = { ...router.currentRoute.value.query }
@@ -480,9 +1367,12 @@ function resolveSelectionFromRoute(): { activePath: string | null; openPaths: st
   }
 
   if (type === 'character' && name) {
+    // 角色可能位于分类中：展开整条分类链
+    const catPath = meta.value?.characters.assignments[name] ?? []
+    const catOpenPaths = catPath.map((_, i) => charCatId(catPath.slice(0, i + 1)))
     return {
       activePath: `character-${name}`,
-      openPaths: ['root-character'],
+      openPaths: ['root-character', ...catOpenPaths],
     }
   }
 
@@ -567,14 +1457,7 @@ function syncTreeSelectionFromRoute() {
   }
 }
 
-function onSelect(items: unknown) {
-  const selected = (Array.isArray(items) ? items : items ? [items] : []) as string[]
-  if (!selected.length) return
-  const path = selected[0]
-  if (!path) return
-  const item = findItemByPath(treeItems.value, path)
-  if (!item) return
-
+function onSelect(item: TreeItem) {
   if (item.kind === 'project-info') {
     patchQuery({
       type: 'project',
@@ -714,12 +1597,19 @@ function onSelect(items: unknown) {
       path: undefined,
     })
   }
+  // 角色分类/角色根等节点仅高亮与展开，不改 URL
 }
+
+// ── 创建 / 删除 ──────────────────────────────────────────────────────
 
 function openCreate(item: TreeItem) {
   if (item.kind === 'root-character') {
     createDialog.type = 'character'
     createDialog.defaults = {}
+  } else if (item.kind === 'character-category') {
+    // 分类下新建角色：创建成功后自动归入该分类
+    createDialog.type = 'character'
+    createDialog.defaults = { characterCategory: [...(item.charCategoryPath ?? [])] }
   } else if (item.kind === 'root-stage') {
     createDialog.type = 'stage'
     createDialog.defaults = {}
@@ -747,31 +1637,6 @@ function openCreate(item: TreeItem) {
   createDialog.show = true
 }
 
-async function openDelete(item: TreeItem) {
-  let label = item.name
-  if (item.kind === 'subscene') {
-    label = `${item.stageName}/${item.label}`
-  } else if (item.kind === 'prop-category') {
-    label = `道具分类「${item.name}」（含其下全部道具）`
-  } else if (item.kind === 'prop') {
-    label = `道具「${item.category}/${item.name}」`
-  } else if (item.kind === 'shot') {
-    label = `第${item.episode}集 分镜${item.shot}`
-  } else if (item.kind === 'episode') {
-    label = `第${item.episode}集`
-  } else if (item.kind === 'script-episode') {
-    label = `剧本 第${item.episode}集`
-  }
-  const ok = await confirm({
-    title: '确认删除',
-    content: `确定删除「${label}」？此操作不可撤销。`,
-    confirmText: '删除',
-    confirmColor: 'error',
-  })
-  if (!ok) return
-  await doDelete(item)
-}
-
 async function onCreated(payload: {
   type: CreateAssetType
   name?: string
@@ -782,6 +1647,20 @@ async function onCreated(payload: {
   shot?: string
   renames?: RenamePair[]
 }) {
+  // 在分类下新建角色：创建成功后立即归入该分类（失败仅提示，不阻断）
+  if (payload.type === 'character' && payload.name && meta.value) {
+    const catPath = createDialog.defaults.characterCategory
+    if (catPath && catPath.length > 0) {
+      try {
+        const next = moveCharacter(meta.value.characters, payload.name, catPath)
+        const saved = await putCharacterCategories(props.project, next)
+        meta.value = { ...meta.value, characters: saved }
+      } catch (err) {
+        showError(err, '角色创建成功，但归类到分类失败')
+      }
+    }
+  }
+
   await rebuildAndRefresh()
 
   if (payload.type === 'character' && payload.name) {
@@ -889,8 +1768,43 @@ function clearSelectionIfDeleted(item: TreeItem) {
   }
 }
 
+function showError(err: unknown, fallback: string) {
+  if (err instanceof AssetApiError) {
+    errorDialog.message = err.message || fallback
+    errorDialog.refs = err.refs ?? []
+  } else {
+    errorDialog.message = fallback
+    errorDialog.refs = []
+  }
+  errorDialog.show = true
+}
+
+async function openDelete(item: TreeItem) {
+  let label = item.name
+  if (item.kind === 'subscene') {
+    label = `${item.stageName}/${item.label}`
+  } else if (item.kind === 'prop-category') {
+    label = `道具分类「${item.name}」（含其下全部道具）`
+  } else if (item.kind === 'prop') {
+    label = `道具「${item.category}/${item.name}」`
+  } else if (item.kind === 'shot') {
+    label = `${epFull(item.episode ?? '')} ${shotFull(item.episode ?? '', item.shot ?? '')}`
+  } else if (item.kind === 'episode') {
+    label = epFull(item.episode ?? '')
+  } else if (item.kind === 'script-episode') {
+    label = `剧本 第${item.episode}集`
+  }
+  const ok = await confirm({
+    title: '确认删除',
+    content: `确定删除「${label}」？此操作不可撤销。`,
+    confirmText: '删除',
+    confirmColor: 'error',
+  })
+  if (!ok) return
+  await doDelete(item)
+}
+
 async function doDelete(item: TreeItem) {
-  deleting.value = true
   try {
     let renames: RenamePair[] | undefined
     if (item.kind === 'character') {
@@ -925,17 +1839,7 @@ async function doDelete(item: TreeItem) {
     }
     await rebuildAndRefresh()
   } catch (e) {
-    if (e instanceof AssetApiError && e.code === 'IN_USE') {
-      errorDialog.message = e.message || '资源正在被引用，无法删除'
-      errorDialog.refs = e.refs ?? []
-      errorDialog.show = true
-    } else {
-      errorDialog.message = e instanceof AssetApiError ? e.message : '删除失败'
-      errorDialog.refs = []
-      errorDialog.show = true
-    }
-  } finally {
-    deleting.value = false
+    showError(e, '删除失败')
   }
 }
 
@@ -962,3 +1866,64 @@ watch(
   },
 )
 </script>
+
+<style scoped>
+.asset-tree {
+  padding-bottom: 8px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-right: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree-row:hover {
+  background: rgba(127, 127, 127, 0.14);
+}
+
+.tree-row--active {
+  background: rgba(63, 81, 181, 0.16);
+}
+
+.tree-row--drop-target {
+  background: rgba(76, 175, 80, 0.22);
+  outline: 1px dashed rgba(76, 175, 80, 0.7);
+}
+
+.tree-row--dragging {
+  opacity: 0.45;
+}
+
+.tree-row__toggle {
+  min-width: 24px !important;
+  width: 24px !important;
+  height: 24px !important;
+  flex-shrink: 0;
+}
+
+.tree-row__title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tree-row__actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.tree-row:hover .tree-row__actions {
+  opacity: 1;
+}
+</style>

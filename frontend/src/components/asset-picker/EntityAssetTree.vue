@@ -12,9 +12,19 @@
         v-for="ent in entityList"
         :key="ent.key"
         class="entity-item pa-2 text-body-small cursor-pointer"
-        :class="{ 'entity-item--active': selectedEntity === ent.key }"
-        @click="selectEntity(ent.key)"
+        :class="{
+          'entity-item--active': selectedEntity === ent.key,
+          'entity-item--category': ent.category,
+        }"
+        :style="{ paddingLeft: `${8 + (ent.depth ?? 0) * 12}px` }"
+        @click="!ent.category && selectEntity(ent.key)"
       >
+        <v-icon
+          v-if="ent.category"
+          icon="mdi-folder-outline"
+          size="x-small"
+          class="mr-1"
+        />
         {{ ent.name }}
       </div>
       <div
@@ -125,7 +135,13 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { existsFs, readFs, type DirEntry, type DirResponse } from '../../api/client'
-import { listCharacterVariants, listCharacterVoiceVariants, listStageVariants } from '../../api/assets'
+import {
+  getCharacterCategories,
+  listCharacterVariants,
+  listCharacterVoiceVariants,
+  listStageVariants,
+  type CharacterCategoryNode,
+} from '../../api/assets'
 import { flattenVariantTree, listAudioFilesRecursive, listImageFilesRecursive, thumbUrl } from './utils'
 import AssetThumb from './AssetThumb.vue'
 import type { AssetItem, EntityItem } from './types'
@@ -179,7 +195,11 @@ function isSelected(path: string): boolean {
   return props.selectedPaths.includes(path)
 }
 
-/** 根据当前页签加载左侧实体列表 */
+/**
+ * 根据当前页签加载左侧实体列表。
+ * 角色页签按自定义多层分类分组展示（分类节点仅分组不可选，角色条目可选中）；
+ * 场景页签保持原有平铺。
+ */
 async function loadEntityList() {
   selectedEntity.value = ''
   currentTree.value = []
@@ -187,12 +207,76 @@ async function loadEntityList() {
   const prefix = props.kind === 'character' ? 'prompt/character/' : 'prompt/stage/'
   try {
     const res = await readFs(project, prefix) as DirResponse
-    entityList.value = (res.entries ?? [])
+    const dirs = (res.entries ?? [])
       .filter((e: DirEntry) => e.type === 'dir')
       .map((e: DirEntry) => ({ key: e.name, name: e.name }))
+    if (props.kind === 'character') {
+      entityList.value = await buildGroupedCharacterList(project, dirs)
+    } else {
+      entityList.value = dirs
+    }
   } catch {
     entityList.value = []
   }
+}
+
+/** 分类路径内部分隔符（仅用于 join/比较，不落盘） */
+const CAT_SEP = '\u0001'
+
+/**
+ * 构建角色页签的分组实体列表：分类树平铺（全展开）+ 各分类下的角色。
+ *
+ * 分类节点 category=true 不可选中，仅作分组展示（与资产浏览器主树保持一致）；
+ * 未分类角色平铺在根级。分类元数据读取失败时按未分类平铺（不影响选择功能）。
+ *
+ * @param project 项目名
+ * @param dirs prompt/character/ 下的角色目录
+ * @returns 带缩进的分组实体列表
+ */
+async function buildGroupedCharacterList(
+  project: string,
+  dirs: { key: string; name: string }[],
+): Promise<EntityItem[]> {
+  let categories: CharacterCategoryNode[] = []
+  let assignments: Record<string, string[]> = {}
+  try {
+    const meta = await getCharacterCategories(project)
+    categories = meta.categories
+    assignments = meta.assignments
+  } catch (err) {
+    console.error('读取角色分类失败，按未分类平铺展示：', err)
+  }
+
+  const byPath = new Map<string, { key: string; name: string }[]>()
+  const uncategorized: { key: string; name: string }[] = []
+  for (const d of dirs) {
+    const catPath = assignments[d.key] ?? []
+    if (catPath.length) {
+      const key = catPath.join(CAT_SEP)
+      const list = byPath.get(key) ?? []
+      list.push(d)
+      byPath.set(key, list)
+    } else {
+      uncategorized.push(d)
+    }
+  }
+
+  const result: EntityItem[] = []
+  const walk = (nodes: CharacterCategoryNode[], parentPath: string[], depth: number) => {
+    for (const node of nodes) {
+      const catPath = [...parentPath, node.name]
+      result.push({ key: `cat:${catPath.join(CAT_SEP)}`, name: node.name, depth, category: true })
+      walk(node.children, catPath, depth + 1)
+      for (const d of byPath.get(catPath.join(CAT_SEP)) ?? []) {
+        result.push({ key: d.key, name: d.name, depth: depth + 1 })
+      }
+    }
+  }
+  walk(categories, [], 0)
+  for (const d of uncategorized) {
+    result.push({ key: d.key, name: d.name, depth: 0 })
+  }
+  return result
 }
 
 /**

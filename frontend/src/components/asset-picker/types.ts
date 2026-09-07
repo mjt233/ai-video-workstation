@@ -41,6 +41,10 @@ export interface EntityItem {
   key: string
   /** 实体显示名称 */
   name: string
+  /** 缩进层级（仅角色分类分组时使用；0 = 根） */
+  depth?: number
+  /** 是否为角色分类节点（不可选中，仅分组展示） */
+  category?: boolean
 }
 
 /** 台词音频条目：一条台词 + 其语音文件是否存在 */

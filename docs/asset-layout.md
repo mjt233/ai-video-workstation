@@ -285,6 +285,47 @@ prompt/script/
 - 无对应 `assert/` 产物（纯文本原型，不参与生成流水线）
 - Agent 侧的读取与写入约定由独立技能 `script-manager` 管理（`.agents/skills/script-manager/SKILL.md`）：默认只读、写入前先读最新内容、发现问题先与用户确认、新建分集取当前最大编号 + 1
 
+### 2.6 资产浏览器元数据（metadata.json）
+
+**不改变物理目录结构**（角色名/集数/分镜目录与编号一概不动），仅在对应位置新增 metadata.json 记录额外定义；项目没有这些文件时，资产浏览器按默认（无别名、角色未分类）展示：
+
+| 位置 | 结构 | 用途 |
+|------|------|------|
+| `prompt/scene/{集数}/metadata.json` | `{ "alias": "觉醒", "showPrefix": false }` | 集数别名；默认显示为 `第3集 · 觉醒`，`showPrefix: false` 时仅显示别名（`showPrefix` 仅 false 时落盘） |
+| `prompt/scene/{集数}/{分镜}/metadata.json` | `{ "alias": "初遇" }` | 分镜别名；默认显示为 `分镜2 · 初遇`，`showPrefix: false` 时仅显示别名 |
+| `prompt/character/metadata.json` | 见下 | 角色自定义多层分类 |
+
+**校验规则：**
+
+- 别名/分类名：trim 后非空、长度 ≤ 50；别名仅显示用途（不强制唯一）；清空（传 `null`）后若文件中无其它字段则删除该文件
+- `showPrefix`：布尔值，默认 `true`（显示「第3集/分镜2」编号前缀）；仅在 `false` 时写入文件；清除别名时一并移除
+- 分类名同层兄弟唯一、层级不限，允许空分类
+
+**角色分类（虚拟树）：** 角色物理目录仍为 `prompt/character/{角色名}/`，分类只记录在 metadata.json 中：
+
+```json
+{
+  "categories": [
+    { "name": "主角", "children": [ { "name": "男主角", "children": [] } ] },
+    { "name": "配角", "children": [] }
+  ],
+  "assignments": { "张伟": ["主角", "男主角"], "李娜": ["配角"] }
+}
+```
+
+- `assignments` 值 = 分类路径（逐级匹配 `categories` 树），空数组/缺失 = 未分类（树中平铺在根级）
+- 角色/分类支持拖拽调整层级：角色拖入任意分类（拖回根 = 未分类）；分类可拖到另一分类下或根级（禁止拖入自身子孙）
+- 删除分类时，其下全部角色（含子孙分类中）转为未分类；删除角色时服务端自动清理 `assignments` 归属
+- 集数/分镜插入、删除重排时目录整体 rename，别名随实体目录移动，与编号绑定关系不变
+
+**API：**
+
+- `GET /api/assets/:project/browser-meta` — 聚合读取（集数/分镜别名 + 角色分类）
+- `PUT /api/assets/:project/episode/:episode/metadata`、`PUT /api/assets/:project/shot/:episode/:shot/metadata`（body `{ alias }`，`null` 清除）
+- `GET/PUT /api/assets/:project/character/categories`（PUT 全量替换 + 服务端结构校验）
+
+资产选择器「角色」页签左栏同步按分类分组展示（分类节点仅分组不可选）。
+
 ---
 
 ## 3. `assert/` — 生成产物

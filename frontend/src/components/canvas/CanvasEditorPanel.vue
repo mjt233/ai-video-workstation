@@ -226,6 +226,7 @@ onUnmounted(() => {
   max-height: 65vh;
   overflow-y: auto;
   padding: 8px;
+  padding-top: 21px;
   box-sizing: border-box;
 }
 

@@ -746,3 +746,109 @@ export async function deletePropCategory(project: string, category: string) {
     return data as { success: boolean }
   } catch (e) { rethrow(e) }
 }
+
+// ── 资产浏览器元数据（metadata.json：集数/分镜别名 + 角色分类）────────────
+
+/** 角色分类树节点（多层，children 递归） */
+export interface CharacterCategoryNode {
+  /** 分类名（同层唯一） */
+  name: string
+  /** 子分类列表 */
+  children: CharacterCategoryNode[]
+}
+
+/** 角色分类元数据（prompt/character/metadata.json 结构） */
+export interface CharacterCategoriesMeta {
+  /** 分类树（顶层数组，顺序即展示顺序） */
+  categories: CharacterCategoryNode[]
+  /** 角色名 → 分类路径（空数组/缺失 = 未分类） */
+  assignments: Record<string, string[]>
+}
+
+/** 集数/分镜别名元数据 */
+export interface AliasMeta {
+  /** 别名内容 */
+  alias: string
+  /** 是否显示编号前缀（如「第3集」「分镜2」；默认 true） */
+  showPrefix: boolean
+}
+
+/** 资产浏览器元数据聚合（GET browser-meta 响应） */
+export interface BrowserMeta {
+  /** 集数号 → 别名元数据 */
+  episodes: Record<string, AliasMeta>
+  /** 集数号 → { 分镜号 → 别名元数据 } */
+  shots: Record<string, Record<string, AliasMeta>>
+  /** 角色分类定义 */
+  characters: CharacterCategoriesMeta
+}
+
+/**
+ * 读取全项目资产浏览器元数据（集数/分镜别名 + 角色分类，供树一次请求）。
+ * @param project 项目名
+ */
+export async function getBrowserMeta(project: string) {
+  try {
+    const { data } = await client.get(`/assets/${project}/browser-meta`)
+    return data as BrowserMeta
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 保存/清除集数别名（写入 prompt/scene/{episode}/metadata.json；alias 为 null = 清除）。
+ * @param project 项目名
+ * @param episode 集数
+ * @param body.alias 别名；null = 清除
+ * @param body.showPrefix 是否显示编号前缀（默认 true）
+ */
+export async function putEpisodeMeta(project: string, episode: string, body: { alias?: string | null; showPrefix?: boolean }) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/episode/${encodeURIComponent(episode)}/metadata`,
+      body,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 保存/清除分镜别名（写入 prompt/scene/{episode}/{shot}/metadata.json；alias 为 null = 清除）。
+ * @param project 项目名
+ * @param episode 集数
+ * @param shot 分镜
+ * @param body.alias 别名；null = 清除
+ * @param body.showPrefix 是否显示编号前缀（默认 true）
+ */
+export async function putShotMeta(project: string, episode: string, shot: string, body: { alias?: string | null; showPrefix?: boolean }) {
+  try {
+    const { data } = await client.put(
+      `/assets/${project}/shot/${encodeURIComponent(episode)}/${encodeURIComponent(shot)}/metadata`,
+      body,
+    )
+    return data as { success: boolean }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 读取角色分类元数据（prompt/character/metadata.json；缺失回退空态）。
+ * @param project 项目名
+ */
+export async function getCharacterCategories(project: string) {
+  try {
+    const { data } = await client.get(`/assets/${project}/character/categories`)
+    return data as CharacterCategoriesMeta
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 全量保存角色分类树与归属映射（拖拽/增删分类后整体替换，服务端做结构校验）。
+ * @param project 项目名
+ * @param body 分类树与归属映射
+ * @returns 规范化后的元数据
+ */
+export async function putCharacterCategories(project: string, body: CharacterCategoriesMeta) {
+  try {
+    const { data } = await client.put(`/assets/${project}/character/categories`, body)
+    return data as { success: boolean } & CharacterCategoriesMeta
+  } catch (e) { rethrow(e) }
+}
