@@ -15,6 +15,7 @@
           }"
           :style="{ paddingLeft: `${10 + row.depth * 18}px` }"
           :draggable="isDraggable(row.item)"
+          :title="dragHint(row.item)"
           @click="onRowClick(row.item)"
           @dragstart="onDragStart($event, row.item)"
           @dragover="onDragOver($event, row.item)"
@@ -44,7 +45,6 @@
           </v-icon>
 
           <span class="tree-row__title">{{ row.item.name }}</span>
-
           <v-spacer />
 
           <div class="tree-row__actions">
@@ -458,6 +458,12 @@ import AssetCreateDialog, { type CreateAssetType } from './AssetCreateDialog.vue
 import AliasFormFields from './AliasFormFields.vue'
 import { confirm } from '../utils/confirm'
 import { epDisplay, epFull, shotDisplay, shotFull } from '../utils/aliasDisplay'
+import {
+  CANVAS_ASSET_DRAG_MIME,
+  clearCanvasDragPayload,
+  setCanvasDragPayload,
+  type CanvasAssetDragPayload,
+} from '../canvas/assetDrop'
 
 type TreeKind =
   | 'project-info'
@@ -1090,14 +1096,27 @@ function renameCategoryAndUpdateAssignments(
 // ── 拖拽 ─────────────────────────────────────────────────────────────
 
 /**
- * 可拖拽节点：角色/角色分类（调整分类层级）+ 分镜（拖到其他集数或本集进行移动/重排）。
+ * 可拖拽节点：角色/角色分类（调整分类层级）+ 分镜（拖到其他集数或本集进行移动/重排）
+ * + 子场景/道具（拖拽到资产画布）。
+ * 其中仅「角色 / 子场景 / 道具」三类会写入画布拖拽载荷（目录/分类/根节点不可拖入画布）。
  */
 function isDraggable(item: TreeItem): boolean {
-  return item.kind === 'character' || item.kind === 'character-category' || item.kind === 'shot'
+  return item.kind === 'character'
+    || item.kind === 'character-category'
+    || item.kind === 'shot'
+    || item.kind === 'subscene'
+    || item.kind === 'prop'
+}
+
+/** 行悬浮提示：三类可拖入画布的节点给出提示（目录/分类/根节点无提示） */
+function dragHint(item: TreeItem): string | undefined {
+  if (item.kind === 'character') return '拖拽到资产画布，或拖到分类调整归属'
+  if (item.kind === 'subscene' || item.kind === 'prop') return '拖拽到资产画布'
+  return undefined
 }
 
 /**
- * 判断拖拽项是否允许放到目标节点上：
+ * 判断拖拽项是否允许放到目标节点上（树内调整语义；子场景/道具在树内无合法目标）：
  * - 分镜 → 目标为集数行（含本集 = 同集重排）；
  * - 角色 → 根/分类；
  * - 分类 → 根/分类（拖入自身/子孙无效）。
@@ -1113,11 +1132,51 @@ function isValidDropTarget(drag: TreeItem, target: TreeItem): boolean {
   return !pathStartsWith(targetPath, dragPath) && !pathStartsWith(dragPath, targetPath)
 }
 
+/**
+ * 构建画布拖拽载荷（仅角色/子场景/道具三类；树内分类调整拖拽不产生载荷）。
+ *
+ * @param item 拖拽的树节点
+ * @returns 画布拖拽载荷；非三类返回 null
+ */
+function buildCanvasDragPayload(item: TreeItem): CanvasAssetDragPayload | null {
+  if (item.kind === 'character') {
+    return { entity: 'character', entityName: item.name ?? '' }
+  }
+  if (item.kind === 'subscene') {
+    return {
+      entity: 'subscene',
+      entityName: item.label ?? item.name ?? '',
+      stageName: item.stageName,
+    }
+  }
+  if (item.kind === 'prop') {
+    return { entity: 'prop', entityName: item.name ?? '', category: item.category }
+  }
+  return null
+}
+
+/**
+ * 拖拽开始：树内调整（分类/分镜）与画布拖放共用入口。
+ * 角色/子场景/道具额外写入画布载荷（共享模块状态 + dataTransfer 自定义 MIME 备份），
+ * effectAllowed 声明为 copyMove：画布内 drop 语义为复制引用（copy）、树内调整语义为移动（move）。
+ */
 function onDragStart(e: DragEvent, item: TreeItem) {
   if (!isDraggable(item)) return
   dragItem.value = item
   dropTargetPath.value = null
-  if (e.dataTransfer) {
+  const payload = buildCanvasDragPayload(item)
+  if (payload) {
+    setCanvasDragPayload(payload)
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'copyMove'
+      try {
+        e.dataTransfer.setData(CANVAS_ASSET_DRAG_MIME, JSON.stringify(payload))
+      } catch {
+        // 部分浏览器对自定义 MIME 类型有限制：写入失败不影响拖拽（以共享模块状态为准）
+        console.warn('[asset-tree] 写入画布拖拽载荷到剪贴板失败：', e)
+      }
+    }
+  } else if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'move'
     // 部分浏览器要求 setData 才会启动拖拽
     e.dataTransfer.setData('text/plain', item.path)
@@ -1127,6 +1186,7 @@ function onDragStart(e: DragEvent, item: TreeItem) {
 function onDragEnd() {
   dragItem.value = null
   dropTargetPath.value = null
+  clearCanvasDragPayload()
 }
 
 function onDragOver(e: DragEvent, item: TreeItem) {

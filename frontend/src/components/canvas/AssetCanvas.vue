@@ -33,6 +33,10 @@
       <div
         ref="flowEl"
         class="asset-canvas__flow"
+        :class="{ 'asset-canvas__flow--asset-drag': assetDragOver }"
+        @dragover="onCanvasAssetDragover"
+        @dragleave="onCanvasAssetDragleave"
+        @drop="onCanvasAssetDrop"
       >
         <VueFlow
           :nodes="flowNodes"
@@ -199,6 +203,22 @@
           :y="addMenu.y"
           @update:model-value="addMenu.show = $event"
           @select="addNodeAt"
+        />
+
+        <!-- 资产拖放菜单（从左侧资产浏览器拖入角色/子场景/道具后，在释放位置弹出；
+             图片/音频/视频各占一行：媒体标签 + 横向滚动条目（缩略图/试听组件 + 条目名），
+             点击条目名即在释放位置创建对应加载节点） -->
+        <CanvasAssetDropMenu
+          :model-value="drop.menu.show"
+          :x="drop.menu.x"
+          :y="drop.menu.y"
+          :title="drop.menu.title"
+          :groups="drop.menu.groups"
+          :loading="drop.menu.loading"
+          :bust="drop.menu.bust"
+          :project="props.project"
+          @update:model-value="drop.setShow"
+          @select-item="drop.selectItem"
         />
 
         <!-- 群组连接目标选择菜单（输出点拖拽超阈值释放后弹出） -->
@@ -487,6 +507,7 @@ import CanvasNodeCard from './CanvasNodeCard.vue'
 import CanvasEditorPanel from './CanvasEditorPanel.vue'
 import CanvasContextMenu from './CanvasContextMenu.vue'
 import CanvasAddNodeMenu from './CanvasAddNodeMenu.vue'
+import CanvasAssetDropMenu from './CanvasAssetDropMenu.vue'
 import CanvasGroupFrame from './CanvasGroupFrame.vue'
 import CanvasGroupDot from './CanvasGroupDot.vue'
 import CanvasGroupConnectMenu from './CanvasGroupConnectMenu.vue'
@@ -502,6 +523,8 @@ import { useCanvasDialogs } from './composables/useCanvasDialogs'
 import { useCanvasAutobuild } from './composables/useCanvasAutobuild'
 import { useCanvasGroup } from './composables/useCanvasGroup'
 import { useCanvasUpload, type CanvasUploadFilePayload } from './composables/useCanvasUpload'
+import { useCanvasAssetDrop } from './composables/useCanvasAssetDrop'
+import { canvasDragPayload } from '../../canvas/assetDrop'
 
 /**
  * 资产画布主组件（编排层）：
@@ -844,6 +867,44 @@ const upload = useCanvasUpload({
 function onUploadFile(payload: CanvasUploadFilePayload): void {
   void upload.uploadForNode(payload.nodeId, payload.file, payload.dest)
 }
+
+/** 资产拖放菜单组合式（AssetTree 拖入画布 → 释放位置菜单 → 点击创建加载节点） */
+const drop = useCanvasAssetDrop({ store, project: props.project, showSnackbar })
+
+// ── 资产拖放入画布（HTML5 拖放：AssetTree 写共享载荷，画布容器承接 drop）────────
+
+/** 资产拖拽悬停在画布上的高亮标记（dragover 中置位，drop/dragleave/载荷清除时复位） */
+const assetDragOver = ref(false)
+
+/** 画布 dragover：存在画布载荷时允许 drop 并高亮画布（目录/分类等无载荷拖拽不响应） */
+function onCanvasAssetDragover(event: DragEvent): void {
+  if (!canvasDragPayload.value) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  assetDragOver.value = true
+}
+
+/** 画布 dragleave：指针离开画布（含子元素）时清除高亮 */
+function onCanvasAssetDragleave(event: DragEvent): void {
+  const related = event.relatedTarget as Node | null
+  if (related && event.currentTarget instanceof Node && event.currentTarget.contains(related)) return
+  assetDragOver.value = false
+}
+
+/** 画布 drop：换算释放点为流坐标，在释放位置打开资产拖放菜单 */
+function onCanvasAssetDrop(event: DragEvent): void {
+  const payload = canvasDragPayload.value
+  assetDragOver.value = false
+  if (!payload) return
+  event.preventDefault()
+  const p = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
+  void drop.openAt(event, payload, p.x, p.y, flowEl.value)
+}
+
+// 源头拖拽结束（dragend）清除载荷：同步复位画布高亮
+watch(canvasDragPayload, (payload) => {
+  if (!payload) assetDragOver.value = false
+})
 
 /** 聚焦节点（程序化单选 + 镜像 Vue Flow 选中态 + 抑制配置面板弹出，粘贴/群组新建节点场景复用） */
 async function focusNodes(nodeIds: string[]): Promise<void> {
@@ -1218,6 +1279,7 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
   flow.closeEdgeMenu()
   paste.reset()
   group.reset()
+  drop.reset()
   dialogs.resetAll()
   upload.reset()
   await gen.switchTarget(newTarget)
@@ -1312,6 +1374,12 @@ watch(flowEl, (flow) => {
   flex: 1;
   min-height: 0;
   position: relative;
+}
+
+/* 资产拖拽悬停画布：虚线主色描边提示可释放（HTML5 drag 事件驱动） */
+.asset-canvas__flow--asset-drag {
+  outline: 2px dashed rgb(var(--v-theme-primary));
+  outline-offset: -2px;
 }
 
 .asset-canvas__overlay {

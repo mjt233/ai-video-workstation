@@ -12,7 +12,7 @@ import type { CanvasDirectorConfig } from './videoTypes'
 const SAVE_DEBOUNCE_MS = 800
 
 /** 节点默认尺寸：原型未声明 defaultSize 时的兜底值 */
-const DEFAULT_NODE_SIZE = { width: 240, height: 160 }
+export const DEFAULT_NODE_SIZE = { width: 240, height: 160 }
 
 /** 撤销/重做历史栈容量上限 */
 const HISTORY_LIMIT = 50
@@ -216,16 +216,23 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
    * @param x 画布 x 坐标
    * @param y 画布 y 坐标
    * @param configPatch 初始配置补丁（合并到原型 defaultConfig 之上；如粘贴资产时写入 assetPath、粘贴文本时写入 text）
+   * @param opts 附加选项：name 为创建时的节点名称（缺省使用原型名称；与创建同一次撤销）
    * @returns 新节点
    * @throws Error 未知原型时
    */
-  function addNode(prototypeId: string, x: number, y: number, configPatch?: NodeConfig): CanvasNodeData {
+  function addNode(
+    prototypeId: string,
+    x: number,
+    y: number,
+    configPatch?: NodeConfig,
+    opts?: { name?: string },
+  ): CanvasNodeData {
     const proto = getPrototype(prototypeId)
     if (!proto) throw new Error(`未知节点类型: ${prototypeId}`)
     const node: CanvasNodeData = {
       id: newId(),
       prototypeId,
-      name: proto.name,
+      name: opts?.name ?? proto.name,
       x,
       y,
       width: proto.defaultSize?.width ?? DEFAULT_NODE_SIZE.width,
