@@ -5,7 +5,7 @@
     @update:model-value="$emit('update:modelValue', $event)"
   >
     <v-card>
-      <v-card-title>新增{{ typeLabel }}</v-card-title>
+      <v-card-title>{{ dialogTitle }}</v-card-title>
       <v-card-text>
         <v-alert
           v-if="error"
@@ -96,28 +96,49 @@
             v-model="form.episode"
             label="集数编号（可空=自动）"
           />
+          <div class="mt-2">
+            <AliasFormFields
+              :alias="form.alias"
+              :show-prefix="form.showPrefix"
+              @update:alias="form.alias = $event"
+              @update:show-prefix="form.showPrefix = $event"
+            />
+          </div>
         </template>
 
         <template v-else-if="type === 'shot'">
+          <!-- 新增分镜：所属集数可输入；移动分镜：固定为目标集数（只读显示） -->
           <v-text-field
+            v-if="mode === 'create'"
             v-model="form.episode"
             label="所属集数"
             required
           />
-          <v-select
-            v-model="form.insertMode"
-            :items="[
-              { title: '末尾新增', value: 'end' },
-              { title: '插入到指定序号', value: 'insert' },
-            ]"
-            label="插入位置"
-          />
           <v-text-field
-            v-if="form.insertMode === 'insert'"
-            v-model="form.shot"
-            label="插入序号"
+            v-else
+            :model-value="targetEpisodeLabel"
+            label="目标集数"
+            readonly
             required
           />
+
+          <v-select
+            v-model="form.position"
+            :items="positionItems"
+            label="插入位置"
+            :hint="positionHint"
+            persistent-hint
+            variant="outlined"
+          />
+
+          <div class="mt-2">
+            <AliasFormFields
+              :alias="form.alias"
+              :show-prefix="form.showPrefix"
+              @update:alias="form.alias = $event"
+              @update:show-prefix="form.showPrefix = $event"
+            />
+          </div>
         </template>
 
         <template v-else-if="type === 'script-episode'">
@@ -141,7 +162,7 @@
           :loading="saving"
           @click="submit"
         >
-          创建
+          {{ mode === 'move' ? '移动' : '创建' }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -150,6 +171,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import AliasFormFields from './AliasFormFields.vue'
 import {
   createCharacter,
   createEpisode,
@@ -159,13 +181,22 @@ import {
   createShot,
   createStage,
   createSubscene,
+  moveShot,
   AssetApiError,
+  type BrowserMeta,
   type RenamePair,
 } from '../api/assets'
+import { epDisplay } from '../utils/aliasDisplay'
 
 export type CreateAssetType = 'character' | 'stage' | 'subscene' | 'prop-category' | 'prop' | 'episode' | 'shot' | 'script-episode'
 
-const props = defineProps<{
+/** 某集数下分镜选项（供「插入位置」下拉展示；label 已按别名规则生成） */
+export interface ShotOption {
+  shot: string
+  label: string
+}
+
+const props = withDefaults(defineProps<{
   modelValue: boolean
   project: string
   type: CreateAssetType
@@ -175,7 +206,21 @@ const props = defineProps<{
     category: string
     episode: string
   }>
-}>()
+  /** 对话框模式：create = 新增；move = 移动分镜（type 须为 shot） */
+  mode?: 'create' | 'move'
+  /** 移动分镜的源位置（mode=move 时必填） */
+  moveSource?: { episode: string; shot: string } | null
+  /** 浏览器元数据（集数/分镜别名；用于下拉显示别名） */
+  meta?: BrowserMeta | null
+  /** 集数 → 分镜选项（含别名后的显示文案；供「插入位置」下拉） */
+  shotsByEpisode?: Record<string, ShotOption[]>
+}>(), {
+  defaults: () => ({}),
+  mode: 'create',
+  moveSource: null,
+  meta: null,
+  shotsByEpisode: () => ({}),
+})
 
 const emit = defineEmits<{
   'update:modelValue': [boolean]
@@ -187,7 +232,12 @@ const emit = defineEmits<{
     category?: string
     episode?: string
     shot?: string
+    /** 新增分镜（插入/末尾）：集内重编号映射 */
     renames?: RenamePair[]
+    /** 移动分镜：各集内重编号映射（含 episode 字段） */
+    episodeRenames?: { episode: string; from: string; to: string }[]
+    /** 移动分镜：源位置（前端据此修正 URL 与树） */
+    from?: { episode: string; shot: string }
   }]
 }>()
 
@@ -203,8 +253,10 @@ const form = reactive({
   description: '',
   category: '',
   episode: '',
-  shot: '',
-  insertMode: 'end' as 'end' | 'insert',
+  /** 插入位置：'end' = 末尾新增，其余为分镜号（成为该位置） */
+  position: 'end' as string,
+  alias: '',
+  showPrefix: true,
 })
 
 const typeLabel = computed(() => ({
@@ -218,6 +270,39 @@ const typeLabel = computed(() => ({
   'script-episode': '剧本分集',
 }[props.type]))
 
+const dialogTitle = computed(() => {
+  if (props.type === 'shot' && props.mode === 'move') return '移动分镜'
+  return `新增${typeLabel.value}`
+})
+
+/** 移动模式下目标集数的显示名（带别名） */
+const targetEpisodeLabel = computed(() =>
+  epDisplay(props.meta ?? null, form.episode || (props.moveSource?.episode ?? '')),
+)
+
+/** 当前候选分镜列表（新增 = 该集全部分镜；移动 = 排除自身） */
+const candidateShots = computed<ShotOption[]>(() => {
+  const list = props.shotsByEpisode[form.episode] ?? []
+  if (props.mode !== 'move' || !props.moveSource) return list
+  if (props.moveSource.episode !== form.episode) return list
+  return list.filter((o) => o.shot !== props.moveSource!.shot)
+})
+
+/** 「插入位置」下拉选项：全部候选分镜 + 末尾选项 */
+const positionItems = computed(() => {
+  const shots = candidateShots.value
+  const count = shots.length
+  return [
+    ...shots.map((o) => ({ title: o.label, value: o.shot })),
+    { title: `末尾（第${count + 1}个）`, value: 'end' },
+  ]
+})
+
+const positionHint = computed(() => {
+  if (candidateShots.value.length === 0) return '该集暂无分镜，将作为第 1 个分镜'
+  return '选择「分镜N」= 成为该集第 N 个分镜（原位置及之后顺延）；末尾 = 追加到最后'
+})
+
 watch(() => props.modelValue, (open) => {
   if (!open) return
   error.value = ''
@@ -229,9 +314,12 @@ watch(() => props.modelValue, (open) => {
   form.label = ''
   form.description = ''
   form.category = props.defaults?.category ?? ''
-  form.episode = props.defaults?.episode ?? ''
-  form.shot = ''
-  form.insertMode = 'end'
+  form.episode = props.mode === 'move'
+    ? (props.moveSource ? props.defaults?.episode ?? '' : '')
+    : (props.defaults?.episode ?? '')
+  form.position = 'end'
+  form.alias = ''
+  form.showPrefix = true
 })
 
 async function submit() {
@@ -265,6 +353,8 @@ async function submit() {
     } else if (props.type === 'episode') {
       const r = await createEpisode(props.project, {
         episode: form.episode.trim() || undefined,
+        alias: form.alias.trim() || null,
+        showPrefix: form.showPrefix,
       })
       emit('created', { type: 'episode', episode: r.episode })
     } else if (props.type === 'script-episode') {
@@ -272,11 +362,32 @@ async function submit() {
         episode: form.episode.trim() || undefined,
       })
       emit('created', { type: 'script-episode', episode: r.episode })
+    } else if (props.type === 'shot' && props.mode === 'move') {
+      const source = props.moveSource
+      if (!source) throw new Error('缺少移动源分镜信息')
+      const r = await moveShot(props.project, {
+        fromEpisode: source.episode,
+        fromShot: source.shot,
+        toEpisode: form.episode.trim(),
+        // 末尾 = 候选数 + 1（同集候选已排除自身，末尾即当前最后位置）
+        position: form.position === 'end' ? candidateShots.value.length + 1 : Number(form.position),
+        alias: form.alias.trim() || null,
+        showPrefix: form.showPrefix,
+      })
+      emit('created', {
+        type: 'shot',
+        episode: r.episode,
+        shot: r.shot,
+        from: { episode: source.episode, shot: source.shot },
+        episodeRenames: r.renames,
+      })
     } else {
       const r = await createShot(props.project, {
         episode: form.episode.trim(),
-        shot: form.insertMode === 'insert' ? form.shot.trim() : undefined,
-        position: form.insertMode,
+        shot: form.position === 'end' ? undefined : form.position,
+        position: form.position === 'end' ? 'end' : 'insert',
+        alias: form.alias.trim() || null,
+        showPrefix: form.showPrefix,
       })
       emit('created', {
         type: 'shot',

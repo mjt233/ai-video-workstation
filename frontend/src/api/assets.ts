@@ -63,7 +63,10 @@ export async function createSubscene(
   } catch (e) { rethrow(e) }
 }
 
-export async function createEpisode(project: string, body: { episode?: string } = {}) {
+export async function createEpisode(
+  project: string,
+  body: { episode?: string; alias?: string | null; showPrefix?: boolean } = {},
+) {
   try {
     const { data } = await client.post(`/assets/${project}/episode`, body)
     return data as { success: boolean; path: string; episode: string }
@@ -72,11 +75,55 @@ export async function createEpisode(project: string, body: { episode?: string } 
 
 export async function createShot(
   project: string,
-  body: { episode: string; shot?: string; position?: 'insert' | 'end' },
+  body: {
+    episode: string
+    shot?: string
+    position?: 'insert' | 'end'
+    alias?: string | null
+    showPrefix?: boolean
+  },
 ) {
   try {
     const { data } = await client.post(`/assets/${project}/shot`, body)
     return data as { success: boolean; path: string; episode: string; shot: string; renames: RenamePair[] }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 移动分镜：跨集数移动或同集数内重排。
+ *
+ * 服务端同步迁移分镜三侧目录（prompt/assert/custom）、全项目改写
+ * canvas.json/director.json 中的 scene 资产引用（canvas.json 的版本号同步递增），
+ * 并返回各集的重编号映射供前端修正 URL 与树。
+ *
+ * @param project 项目名
+ * @param body.fromEpisode 源集数
+ * @param body.fromShot 源分镜号
+ * @param body.toEpisode 目标集数（与源相同 = 同集重排）
+ * @param body.position 目标位置（1..目标集分镜数+1；同集重排时 1..当前分镜数，且等于源号时无操作）
+ * @param body.alias 移动后设置/清除别名（null = 清除；缺省 = 保持原样，别名随目录迁移）
+ * @param body.showPrefix 是否显示编号前缀（默认 true）
+ * @returns renames 为各集内重编号映射（前端修正 URL/树用）
+ */
+export async function moveShot(
+  project: string,
+  body: {
+    fromEpisode: string
+    fromShot: string
+    toEpisode: string
+    position: number
+    alias?: string | null
+    showPrefix?: boolean
+  },
+) {
+  try {
+    const { data } = await client.post(`/assets/${project}/shot/move`, body)
+    return data as {
+      success: boolean
+      episode: string
+      shot: string
+      renames: { episode: string; from: string; to: string }[]
+    }
   } catch (e) { rethrow(e) }
 }
 

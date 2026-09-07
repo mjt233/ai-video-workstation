@@ -22,6 +22,7 @@ import {
 } from '../assets/templates.js';
 import { findCharacterRefs, findStageRefs, findSubsceneRefs } from '../assets/refs.js';
 import { removeDirIfExists, shiftShotsDownAfterDelete, shiftShotsUpForInsert } from '../assets/shot-renumber.js';
+import { moveShot } from '../assets/shot-move.js';
 import { createScriptEpisode, deleteScriptEpisode } from '../assets/script-episodes.js';
 import { reorderStageFrames } from '../assets/stage-reorder.js';
 import { reorderScriptEntries, deleteScriptEntry, updateScriptEntry } from '../assets/script-reorder.js';
@@ -159,20 +160,28 @@ assetsRouter.post('/assets/:project/subscene', async (req: Request, res: Respons
 assetsRouter.post('/assets/:project/episode', async (req: Request, res: Response) => {
   try {
     const project = req.params.project as string;
+    const { episode, alias, showPrefix } = req.body as {
+      episode?: string; alias?: string | null; showPrefix?: boolean;
+    };
     const sceneRoot = resolveProjectPath(project, 'prompt/scene');
     await ensureDir(sceneRoot);
-    let episode = (req.body as { episode?: string }).episode;
-    if (episode === undefined || episode === null || episode === '') {
-      episode = await nextNumericId(sceneRoot);
+    let episodeId = episode;
+    if (episodeId === undefined || episodeId === null || episodeId === '') {
+      episodeId = await nextNumericId(sceneRoot);
     } else {
-      episode = String(episode);
-      assertPositiveIntId(episode, '集数');
-      if (await pathExists(path.join(sceneRoot, episode))) {
+      episodeId = String(episodeId);
+      assertPositiveIntId(episodeId, '集数');
+      if (await pathExists(path.join(sceneRoot, episodeId))) {
         throw Object.assign(new Error('集数已存在'), { code: 'EXISTS' });
       }
     }
-    await ensureDir(path.join(sceneRoot, episode));
-    res.json({ success: true, path: `prompt/scene/${episode}`, episode });
+    await ensureDir(path.join(sceneRoot, episodeId));
+    // 创建时即可配置别名（仅显示用途；alias 为空串/undefined 时不写 metadata.json）
+    const aliasTrim = typeof alias === 'string' ? alias.trim() : '';
+    if (aliasTrim) {
+      await saveAlias(project, 'episode', episodeId, undefined, aliasTrim, showPrefix ?? true);
+    }
+    res.json({ success: true, path: `prompt/scene/${episodeId}`, episode: episodeId });
   } catch (err) {
     httpError(res, err);
   }
@@ -182,8 +191,9 @@ assetsRouter.post('/assets/:project/episode', async (req: Request, res: Response
 assetsRouter.post('/assets/:project/shot', async (req: Request, res: Response) => {
   try {
     const project = req.params.project as string;
-    const { episode, shot, position } = req.body as {
+    const { episode, shot, position, alias, showPrefix } = req.body as {
       episode?: string; shot?: string; position?: 'insert' | 'end';
+      alias?: string | null; showPrefix?: boolean;
     };
     if (!episode) throw Object.assign(new Error('episode 必填'), { code: 'INVALID' });
     assertPositiveIntId(String(episode), '集数');
@@ -231,6 +241,11 @@ assetsRouter.post('/assets/:project/shot', async (req: Request, res: Response) =
     await fs.writeFile(path.join(shotDir, 'stage.json'), '[]\n', 'utf-8');
     await fs.writeFile(path.join(shotDir, 'script.json'), '[]\n', 'utf-8');
     await fs.writeFile(path.join(shotDir, 'prompt.md'), shotPromptMd(), 'utf-8');
+    // 创建时即可配置分镜别名（仅显示用途；alias 为空串/undefined 时不写 metadata.json）
+    const aliasTrim = typeof alias === 'string' ? alias.trim() : '';
+    if (aliasTrim) {
+      await saveAlias(project, 'shot', String(episode), shotId, aliasTrim, showPrefix ?? true);
+    }
 
     res.json({
       success: true,
@@ -238,6 +253,46 @@ assetsRouter.post('/assets/:project/shot', async (req: Request, res: Response) =
       episode: String(episode),
       shot: shotId,
       renames,
+    });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// POST /api/assets/:project/shot/move — 分镜移动（跨集数移动或同集数内重排）
+// body: { fromEpisode, fromShot, toEpisode, position, alias?, showPrefix? }
+// position 语义 = 移动后成为目标集第 position 个分镜（1..目标集分镜数+1；同集重排时 1..当前分镜数）。
+// 服务端同步迁移三侧目录（prompt/assert/custom）、全项目改写 canvas.json/director.json 中的
+// scene 资产引用（canvas.json 的 rev 相应 +1）、并返回各集重编号映射供前端修正 URL 与树。
+assetsRouter.post('/assets/:project/shot/move', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const { fromEpisode, fromShot, toEpisode, position, alias, showPrefix } = req.body as {
+      fromEpisode?: string; fromShot?: string; toEpisode?: string;
+      position?: number; alias?: string | null; showPrefix?: boolean;
+    };
+    if (!fromEpisode || !fromShot || !toEpisode) {
+      throw Object.assign(new Error('fromEpisode/fromShot/toEpisode 必填'), { code: 'INVALID' });
+    }
+    if (position === undefined || position === null || !Number.isInteger(Number(position))) {
+      throw Object.assign(new Error('position 必填且必须是整数'), { code: 'INVALID' });
+    }
+    const result = await moveShot(
+      project,
+      String(fromEpisode),
+      String(fromShot),
+      String(toEpisode),
+      Number(position),
+    );
+    // 移动后可一并更新别名（alias 为 null = 清除；undefined = 保持原样，alias 随目录移动）
+    if (alias !== undefined) {
+      await saveAlias(project, 'shot', result.episode, result.shot, alias || null, showPrefix ?? true);
+    }
+    res.json({
+      success: true,
+      episode: result.episode,
+      shot: result.shot,
+      renames: result.renames,
     });
   } catch (err) {
     httpError(res, err);

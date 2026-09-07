@@ -133,11 +133,16 @@ async function renameShotPair(
 /**
  * 删除 shot 后：将 > deleted 的编号整体 -1（从小到大）。
  * 调用方须已删除目标目录。目录 rename 后统一改写全部分镜 JSON 的旧分镜号路径。
+ *
+ * @param opts.rewriteJson 是否在目录 rename 后改写 JSON 引用路径（默认 true）。
+ *   分镜移动（shot-move）会组合多个映射做一次性改写，传 false 避免双重改写污染
+ * @returns 重命名映射
  */
 export async function shiftShotsDownAfterDelete(
   project: string,
   episode: string,
   deletedShot: string,
+  opts: { rewriteJson?: boolean } = {},
 ): Promise<RenamePair[]> {
   const epDir = resolveProjectPath(project, `prompt/scene/${episode}`);
   const ids = await listNumericDirNames(epDir);
@@ -152,18 +157,24 @@ export async function shiftShotsDownAfterDelete(
   for (const { from, to } of renames) {
     await renameShotPair(project, episode, from, to);
   }
-  await rewriteAllShotDirAssetPaths(project, episode, renames);
+  if (opts.rewriteJson !== false) {
+    await rewriteAllShotDirAssetPaths(project, episode, renames);
+  }
   return renames;
 }
 
 /**
  * 在 position 插入空位：将 >= position 的编号 +1（从大到小）。
  * 返回 renames；调用方再在 position 创建新分镜。目录 rename 后统一改写全部分镜 JSON 的旧分镜号路径。
+ *
+ * @param opts.rewriteJson 是否在目录 rename 后改写 JSON 引用路径（默认 true）。
+ *   分镜移动（shot-move）会组合多个映射做一次性改写，传 false 避免双重改写污染
  */
 export async function shiftShotsUpForInsert(
   project: string,
   episode: string,
   position: number,
+  opts: { rewriteJson?: boolean } = {},
 ): Promise<RenamePair[]> {
   const epDir = resolveProjectPath(project, `prompt/scene/${episode}`);
   const ids = (await listNumericDirNames(epDir)).map(Number).sort((a, b) => b - a);
@@ -176,7 +187,9 @@ export async function shiftShotsUpForInsert(
   for (const { from, to } of renames) {
     await renameShotPair(project, episode, from, to);
   }
-  await rewriteAllShotDirAssetPaths(project, episode, renames);
+  if (opts.rewriteJson !== false) {
+    await rewriteAllShotDirAssetPaths(project, episode, renames);
+  }
   // 对外按 from 升序返回，便于前端映射
   renames.reverse();
   return renames;

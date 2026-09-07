@@ -279,6 +279,10 @@
       v-model="createDialog.show"
       :project="project"
       :type="createDialog.type"
+      :mode="createDialog.mode"
+      :move-source="createDialog.moveSource"
+      :meta="meta"
+      :shots-by-episode="shotsByEpisode"
       :defaults="createDialog.defaults"
       @created="onCreated"
     />
@@ -302,20 +306,11 @@
           >
             {{ aliasDialog.error }}
           </v-alert>
-          <v-text-field
-            v-model="aliasDialog.value"
-            label="别名"
-            variant="outlined"
-            :maxlength="50"
-            hint="留空保存 = 清除别名；仅用于显示，不改变编号"
-            persistent-hint
-            @keyup.enter="saveAliasDialog"
-          />
-          <v-checkbox
-            v-model="aliasDialog.showPrefix"
-            label="显示编号前缀（如 第3集 / 分镜2）"
-            hide-details
-            class="mt-1"
+          <AliasFormFields
+            :alias="aliasDialog.value"
+            :show-prefix="aliasDialog.showPrefix"
+            @update:alias="aliasDialog.value = $event"
+            @update:show-prefix="aliasDialog.showPrefix = $event"
           />
         </v-card-text>
         <v-card-actions>
@@ -460,7 +455,9 @@ import {
   type RenamePair,
 } from '../api/assets'
 import AssetCreateDialog, { type CreateAssetType } from './AssetCreateDialog.vue'
+import AliasFormFields from './AliasFormFields.vue'
 import { confirm } from '../utils/confirm'
+import { epDisplay, epFull, shotDisplay, shotFull } from '../utils/aliasDisplay'
 
 type TreeKind =
   | 'project-info'
@@ -523,6 +520,10 @@ const meta = ref<BrowserMeta | null>(null)
 const createDialog = reactive({
   show: false,
   type: 'character' as CreateAssetType,
+  /** 对话框模式：create = 新增；move = 移动分镜 */
+  mode: 'create' as 'create' | 'move',
+  /** 移动分镜的源位置（mode=move 时有效） */
+  moveSource: null as { episode: string; shot: string } | null,
   defaults: {} as Partial<{
     name: string
     stage: string
@@ -531,6 +532,18 @@ const createDialog = reactive({
     /** 新建角色后自动归入的分类路径（[] 或 undefined = 未分类） */
     characterCategory: string[]
   }>,
+})
+
+/** 集数 → 分镜选项（label 已按别名规则生成；供「插入位置」下拉展示） */
+const shotsByEpisode = computed<Record<string, { shot: string; label: string }[]>>(() => {
+  const map: Record<string, { shot: string; label: string }[]> = {}
+  for (const item of treeItems.value) {
+    if (item.kind !== 'episode' || !item.episode || !item.children) continue
+    map[item.episode] = item.children
+      .filter((c): c is TreeItem & { shot: string } => c.kind === 'shot' && !!c.shot)
+      .map((c) => ({ shot: c.shot, label: c.name }))
+  }
+  return map
 })
 
 const aliasDialog = reactive({
@@ -606,29 +619,23 @@ function iconColor(item: TreeItem): string {
 }
 
 /** 集数显示名（带别名）：第3集 · 觉醒；勾选隐藏编号时仅显示「觉醒」 */
-function epDisplay(ep: string): string {
-  const info = meta.value?.episodes[ep]
-  if (!info) return `第${ep}集`
-  return info.showPrefix ? `第${ep}集 · ${info.alias}` : info.alias
+function epDisplayOf(ep: string): string {
+  return epDisplay(meta.value, ep)
 }
 
 /** 分镜显示名（带别名）：分镜2 · 初遇；勾选隐藏编号时仅显示「初遇」 */
-function shotDisplay(ep: string, shot: string): string {
-  const info = meta.value?.shots[ep]?.[shot]
-  if (!info) return `分镜${shot}`
-  return info.showPrefix ? `分镜${shot} · ${info.alias}` : info.alias
+function shotDisplayOf(ep: string, shot: string): string {
+  return shotDisplay(meta.value, ep, shot)
 }
 
 /** 集数删除确认等提示文案：恒带编号（避免别名重复造成歧义） */
-function epFull(ep: string): string {
-  const alias = meta.value?.episodes[ep]?.alias
-  return alias ? `第${ep}集 · ${alias}` : `第${ep}集`
+function epFullOf(ep: string): string {
+  return epFull(meta.value, ep)
 }
 
 /** 分镜删除确认等提示文案：恒带编号 */
-function shotFull(ep: string, shot: string): string {
-  const alias = meta.value?.shots[ep]?.[shot]?.alias
-  return alias ? `分镜${shot} · ${alias}` : `分镜${shot}`
+function shotFullOf(ep: string, shot: string): string {
+  return shotFull(meta.value, ep, shot)
 }
 
 // ── 树构建（含分类树与别名） ──────────────────────────────────────────
@@ -799,13 +806,13 @@ async function buildTree() {
       shots.filter(sh => sh.type === 'dir').map(sh => sh.name),
     )
     episodeItems.push({
-      name: epDisplay(ep),
+      name: epDisplayOf(ep),
       path: `episode-${ep}`,
       icon: 'mdi-filmstrip',
       kind: 'episode',
       episode: ep,
       children: shotNames.map(sh => ({
-        name: shotDisplay(ep, sh),
+        name: shotDisplayOf(ep, sh),
         path: `scene-${ep}-${sh}`,
         icon: 'mdi-image-multiple',
         type: 'scene',
@@ -1066,9 +1073,28 @@ function renameCategoryAndUpdateAssignments(
 
 // ── 拖拽 ─────────────────────────────────────────────────────────────
 
-/** 仅角色/角色分类节点可拖拽 */
+/**
+ * 可拖拽节点：角色/角色分类（调整分类层级）+ 分镜（拖到其他集数或本集进行移动/重排）。
+ */
 function isDraggable(item: TreeItem): boolean {
-  return item.kind === 'character' || item.kind === 'character-category'
+  return item.kind === 'character' || item.kind === 'character-category' || item.kind === 'shot'
+}
+
+/**
+ * 判断拖拽项是否允许放到目标节点上：
+ * - 分镜 → 目标为集数行（含本集 = 同集重排）；
+ * - 角色 → 根/分类；
+ * - 分类 → 根/分类（拖入自身/子孙无效）。
+ */
+function isValidDropTarget(drag: TreeItem, target: TreeItem): boolean {
+  if (drag.kind === 'shot') return target.kind === 'episode'
+  if (target.kind === 'root-character') return true
+  if (target.kind !== 'character-category') return false
+  if (drag.kind === 'character') return true
+  // 分类不能拖入自己或自己的子孙
+  const dragPath = drag.charCategoryPath ?? []
+  const targetPath = target.charCategoryPath ?? []
+  return !pathStartsWith(targetPath, dragPath) && !pathStartsWith(dragPath, targetPath)
 }
 
 function onDragStart(e: DragEvent, item: TreeItem) {
@@ -1085,17 +1111,6 @@ function onDragStart(e: DragEvent, item: TreeItem) {
 function onDragEnd() {
   dragItem.value = null
   dropTargetPath.value = null
-}
-
-/** 判断拖拽项是否允许放到目标节点上（分类拖入自身/子孙无效） */
-function isValidDropTarget(drag: TreeItem, target: TreeItem): boolean {
-  if (target.kind === 'root-character') return true
-  if (target.kind !== 'character-category') return false
-  if (drag.kind === 'character') return true
-  // 分类不能拖入自己或自己的子孙
-  const dragPath = drag.charCategoryPath ?? []
-  const targetPath = target.charCategoryPath ?? []
-  return !pathStartsWith(targetPath, dragPath) && !pathStartsWith(dragPath, targetPath)
 }
 
 function onDragOver(e: DragEvent, item: TreeItem) {
@@ -1116,8 +1131,20 @@ function onDragLeave(e: DragEvent, item: TreeItem) {
 async function onDrop(e: DragEvent, item: TreeItem) {
   e.preventDefault()
   const drag = dragItem.value
+  if (!drag) {
+    onDragEnd()
+    return
+  }
+  // 分镜拖拽：拖到集数行 → 打开「移动分镜」对话框（跨集数移动或同集重排）
+  if (drag.kind === 'shot') {
+    if (item.kind === 'episode') {
+      openMoveShotDialog(drag, item)
+    }
+    onDragEnd()
+    return
+  }
   const current = meta.value?.characters
-  if (!drag || !current) {
+  if (!current) {
     onDragEnd()
     return
   }
@@ -1139,6 +1166,15 @@ async function onDrop(e: DragEvent, item: TreeItem) {
   }
 }
 
+/** 打开「移动分镜」对话框（复用新增分镜表单；mode=move，目标集数固定为拖放集数） */
+function openMoveShotDialog(drag: TreeItem, targetEpisode: TreeItem) {
+  createDialog.mode = 'move'
+  createDialog.type = 'shot'
+  createDialog.moveSource = { episode: drag.episode ?? '', shot: drag.shot ?? '' }
+  createDialog.defaults = { episode: targetEpisode.episode ?? '' }
+  createDialog.show = true
+}
+
 // ── 别名编辑 ─────────────────────────────────────────────────────────
 
 function openAlias(item: TreeItem) {
@@ -1151,7 +1187,7 @@ function openAlias(item: TreeItem) {
   aliasDialog.kind = isEpisode ? 'episode' : 'shot'
   aliasDialog.episode = episode
   aliasDialog.shot = shot
-  aliasDialog.label = isEpisode ? epDisplay(episode) : `${epDisplay(episode)} ${shotDisplay(episode, shot)}`
+  aliasDialog.label = isEpisode ? epDisplayOf(episode) : `${epDisplayOf(episode)} ${shotDisplayOf(episode, shot)}`
   aliasDialog.value = info?.alias ?? ''
   aliasDialog.showPrefix = info?.showPrefix ?? true
   aliasDialog.error = ''
@@ -1329,6 +1365,40 @@ function applyShotRenames(renames?: RenamePair[]) {
   if (pair) {
     patchQuery({ shot: pair.to })
   }
+}
+
+/**
+ * 按集内重编号映射修正当前 URL 的分镜号（分镜移动后源/目标集内分镜编号可能变化）。
+ * @param renames 各集内重编号映射（如 [{ episode: '1', from: '4', to: '3' }]）
+ */
+function applyEpisodeRenames(renames?: { episode: string; from: string; to: string }[]) {
+  if (!renames?.length) return
+  const q = router.currentRoute.value.query
+  if (q.type !== 'scene' || !q.episode) return
+  const pair = renames.find(r => r.episode === q.episode && r.from === q.shot)
+  if (pair) {
+    patchQuery({ shot: pair.to })
+  }
+}
+
+/**
+ * 按分镜重编号映射平移树的展开/激活路径，重建后保持展开状态：
+ * - 集内重编号：`scene-{ep}-{旧号}` → `scene-{ep}-{新号}`（插入/删除/移动的移位）；
+ * - 移动映射：被移动分镜 `scene-{源集}-{源号}` → `scene-{目标集}-{目标号}`。
+ *
+ * @param renames 各集内重编号映射
+ * @param move 被移动分镜的旧→新位置（分镜移动时提供）
+ */
+function remapTreePaths(
+  renames: { episode: string; from: string; to: string }[],
+  move?: { fromEpisode: string; fromShot: string; toEpisode: string; toShot: string },
+): void {
+  const map = new Map<string, string>()
+  for (const r of renames) map.set(`scene-${r.episode}-${r.from}`, `scene-${r.episode}-${r.to}`)
+  if (move) map.set(`scene-${move.fromEpisode}-${move.fromShot}`, `scene-${move.toEpisode}-${move.toShot}`)
+  if (map.size === 0) return
+  opened.value = opened.value.map((p) => map.get(p) ?? p)
+  activated.value = activated.value.map((p) => map.get(p) ?? p)
 }
 
 /** 剧本分集删除重排后，按重命名映射修正当前 URL 的集数参数 */
@@ -1603,6 +1673,8 @@ function onSelect(item: TreeItem) {
 // ── 创建 / 删除 ──────────────────────────────────────────────────────
 
 function openCreate(item: TreeItem) {
+  createDialog.mode = 'create'
+  createDialog.moveSource = null
   if (item.kind === 'root-character') {
     createDialog.type = 'character'
     createDialog.defaults = {}
@@ -1645,7 +1717,12 @@ async function onCreated(payload: {
   category?: string
   episode?: string
   shot?: string
+  /** 新增分镜（插入/末尾）：集内重编号映射 */
   renames?: RenamePair[]
+  /** 移动分镜：各集内重编号映射（含 episode 字段） */
+  episodeRenames?: { episode: string; from: string; to: string }[]
+  /** 移动分镜：源位置（mode=move 时由对话框回传） */
+  from?: { episode: string; shot: string }
 }) {
   // 在分类下新建角色：创建成功后立即归入该分类（失败仅提示，不阻断）
   if (payload.type === 'character' && payload.name && meta.value) {
@@ -1659,6 +1736,18 @@ async function onCreated(payload: {
         showError(err, '角色创建成功，但归类到分类失败')
       }
     }
+  }
+
+  // 重建前先按重编号映射平移展开/激活路径（重建后保持展开状态）
+  if (payload.type === 'shot' && payload.from) {
+    remapTreePaths(payload.episodeRenames ?? [], {
+      fromEpisode: payload.from.episode,
+      fromShot: payload.from.shot,
+      toEpisode: payload.episode ?? '',
+      toShot: payload.shot ?? '',
+    })
+  } else if (payload.type === 'shot' && payload.renames && payload.episode) {
+    remapTreePaths(payload.renames.map(r => ({ episode: payload.episode!, from: r.from, to: r.to })))
   }
 
   await rebuildAndRefresh()
@@ -1706,14 +1795,31 @@ async function onCreated(payload: {
       shot: undefined,
     })
   } else if (payload.type === 'shot' && payload.episode && payload.shot) {
-    applyShotRenames(payload.renames)
-    patchQuery({
-      type: 'scene',
-      name: undefined,
-      subscene: undefined,
-      episode: payload.episode,
-      shot: payload.shot,
-    })
+    if (payload.from) {
+      // 移动分镜：当前打开的就是被移动分镜 → 跳转到新位置；
+      // 否则按源/目标集的重编号映射修正当前 URL 的分镜号
+      const q = router.currentRoute.value.query
+      if (q.type === 'scene' && q.episode === payload.from.episode && q.shot === payload.from.shot) {
+        patchQuery({
+          type: 'scene',
+          name: undefined,
+          subscene: undefined,
+          episode: payload.episode,
+          shot: payload.shot,
+        })
+      } else {
+        applyEpisodeRenames(payload.episodeRenames)
+      }
+    } else {
+      applyShotRenames(payload.renames)
+      patchQuery({
+        type: 'scene',
+        name: undefined,
+        subscene: undefined,
+        episode: payload.episode,
+        shot: payload.shot,
+      })
+    }
   } else if (payload.type === 'script-episode' && payload.episode) {
     patchQuery({
       type: 'script',
@@ -1788,9 +1894,9 @@ async function openDelete(item: TreeItem) {
   } else if (item.kind === 'prop') {
     label = `道具「${item.category}/${item.name}」`
   } else if (item.kind === 'shot') {
-    label = `${epFull(item.episode ?? '')} ${shotFull(item.episode ?? '', item.shot ?? '')}`
+    label = `${epFullOf(item.episode ?? '')} ${shotFullOf(item.episode ?? '', item.shot ?? '')}`
   } else if (item.kind === 'episode') {
-    label = epFull(item.episode ?? '')
+    label = epFullOf(item.episode ?? '')
   } else if (item.kind === 'script-episode') {
     label = `剧本 第${item.episode}集`
   }
@@ -1828,6 +1934,14 @@ async function doDelete(item: TreeItem) {
     }
 
     clearSelectionIfDeleted(item)
+    // 重建前按重编号映射平移展开/激活路径（重建后保持展开状态）
+    if (item.kind === 'shot' && renames?.length && item.episode) {
+      remapTreePaths(renames.map(r => ({ episode: item.episode!, from: r.from, to: r.to })))
+    } else if (item.kind === 'script-episode' && renames?.length) {
+      const map = new Map(renames.map(r => [`script-episode-${r.from}`, `script-episode-${r.to}`]))
+      opened.value = opened.value.map(p => map.get(p) ?? p)
+      activated.value = activated.value.map(p => map.get(p) ?? p)
+    }
     if (renames?.length) {
       const q = router.currentRoute.value.query
       if (q.type === 'scene' && q.episode === item.episode) {
