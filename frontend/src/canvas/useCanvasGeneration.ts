@@ -9,6 +9,7 @@ import {
   trimAudio as requestTrimAudio,
   getCanvasNodeInfo,
 } from './api'
+import { audioTrimBitrateOf, audioTrimFormatOf, audioTrimOutputExt } from './audioTrim'
 import type { VideoSubmitParams } from './videoSubmit'
 import type { CanvasNodeData, CanvasKind } from './types'
 import { canvasNodeOutputPath, sceneCanvasRelPath, stageCanvasRelPath, type CanvasScope } from './paths'
@@ -656,7 +657,11 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
   }
 
   /**
-   * 裁剪音频节点：调用服务端 ffmpeg 接口，成功后通知结果（产物固定覆盖 output.flac）。
+   * 裁剪音频节点：调用服务端 ffmpeg 接口，成功后通知结果。
+   *
+   * 产物固定覆盖 output.{ext}——扩展名按节点输出格式解析（audioTrimOutputExt：
+   * 显式 wav/flac/mp3 取对应扩展名；「原格式」跟随输入音频扩展名），随裁剪结果
+   * 由服务端落盘；实际扩展名由 AssetCanvas handleNodeResult 静默写回 config.outputExt 镜像。
    *
    * 同步路由（ffmpeg 阻塞等待），无轮询；重复裁剪时旧产物由服务端归档进历史目录。
    *
@@ -672,7 +677,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     const nodeId = node.id
     if (statusByNode.value[nodeId]?.status === 'running') return
     statusByNode.value[nodeId] = { status: 'running' }
-    const outputPath = computeOutputPath(node)
+    // 输出扩展名按节点输出格式解析（「原格式」需输入音频路径才能定扩展名）
+    const outputPath = canvasNodeOutputPath(getScope(), node.id, audioTrimOutputExt(node.config, audioPath))
     await startFfmpegTask(nodeId, outputPath)
     const resultCb = onResult ?? onResultCb
     try {
@@ -680,7 +686,17 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
       const startValue = typeof rawStart === 'number' && Number.isFinite(rawStart) ? rawStart : 0
       const rawDuration = node.config.duration
       const duration = typeof rawDuration === 'number' && Number.isFinite(rawDuration) ? rawDuration : 0
-      const res = await requestTrimAudio(project, audioPath, { startTime: startValue, duration }, outputPath)
+      const res = await requestTrimAudio(
+        project,
+        audioPath,
+        {
+          startTime: startValue,
+          duration,
+          format: audioTrimFormatOf(node.config),
+          mp3Bitrate: audioTrimBitrateOf(node.config),
+        },
+        outputPath,
+      )
       finishFfmpegTask(nodeId)
       statusByNode.value[nodeId] = {
         status: 'success',

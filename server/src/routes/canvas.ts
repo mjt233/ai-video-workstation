@@ -11,7 +11,13 @@ import {
 } from '../assets/extract-frame.js';
 import { concatVideos, ConcatError } from '../assets/concat-video.js';
 import { trimVideo, TrimError } from '../assets/trim-video.js';
-import { assertAudioTrimOutputPath, trimAudio, TrimAudioError } from '../assets/trim-audio.js';
+import {
+  assertAudioTrimOutputPath,
+  AUDIO_TRIM_FORMATS,
+  AUDIO_TRIM_MP3_BITRATES,
+  trimAudio,
+  TrimAudioError,
+} from '../assets/trim-audio.js';
 import { isUnderAssert } from './fs-path.js';
 import { copyExistingAssetToHistory } from '../assets/history.js';
 import { saveCanvasNodeUpload } from '../assets/canvas-upload.js';
@@ -393,11 +399,14 @@ canvasRouter.post('/canvas/trim-video', async (req: Request, res: Response) => {
 /**
  * 裁剪音频：POST /api/canvas/trim-audio
  *
- * body: { project, audioPath, outputPath, startTime, duration }
+ * body: { project, audioPath, outputPath, startTime, duration, format?, mp3Bitrate? }
  * - startTime：起始位置（秒，可小数，必须 ≥ 0）；
  * - duration：持续时长（秒，> 0，可小数；超出片尾截到剩余时长）。
- * 重编码为 FLAC 输出（不用 -c copy），保证小数秒切口准确。
- * audioPath 须位于 assert/ 前缀下；outputPath 必须是画布节点固定产物 output.flac。
+ * - format：输出格式（可选）：'---' 原格式（产物扩展名须与输入一致，按输入扩展名编码输出）
+ *   / 'wav' / 'flac' / 'mp3'（产物扩展名须与格式一致）。
+ * - mp3Bitrate：MP3 码率（kbps，可选，白名单 128/192/320），仅输出 mp3 编码时生效。
+ * 重编码输出（不用 -c copy），保证小数秒切口准确。
+ * audioPath 须位于 assert/ 前缀下；outputPath 必须是画布节点固定产物 output.{音频扩展名}。
  */
 canvasRouter.post('/canvas/trim-audio', async (req: Request, res: Response) => {
   try {
@@ -432,8 +441,28 @@ canvasRouter.post('/canvas/trim-audio', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'duration 必须是大于 0 的数字（秒）' });
       return;
     }
+    // 输出格式（可选）：'---' 原格式 / wav / flac / mp3
+    let format: string | undefined;
+    const rawFormat = req.body?.format;
+    if (rawFormat !== undefined && rawFormat !== null && rawFormat !== '') {
+      format = String(rawFormat);
+      if (!(AUDIO_TRIM_FORMATS as readonly string[]).includes(format)) {
+        res.status(400).json({ error: 'format 仅支持：原格式(---)/wav/flac/mp3', code: 'INVALID' });
+        return;
+      }
+    }
+    // MP3 码率（可选）：白名单 128/192/320
+    let mp3Bitrate: number | undefined;
+    const rawBitrate = req.body?.mp3Bitrate;
+    if (rawBitrate !== undefined && rawBitrate !== null && rawBitrate !== '') {
+      mp3Bitrate = Number(rawBitrate);
+      if (!Number.isFinite(mp3Bitrate) || !(AUDIO_TRIM_MP3_BITRATES as readonly number[]).includes(mp3Bitrate)) {
+        res.status(400).json({ error: 'mp3Bitrate 仅支持 128/192/320（kbps）', code: 'INVALID' });
+        return;
+      }
+    }
     await archiveCanvasOutput(project, outputRel);
-    const result = await trimAudio(project, audioNorm, { startTime, duration }, outputRel);
+    const result = await trimAudio(project, audioNorm, { startTime, duration, format, mp3Bitrate }, outputRel);
     res.json({ success: true, path: result.path, duration: result.duration });
   } catch (err) {
     const e = err as { code?: string; message?: string };

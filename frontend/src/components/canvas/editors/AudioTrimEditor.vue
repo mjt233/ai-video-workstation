@@ -82,6 +82,40 @@
       起始位置 + 裁剪时长超出音频片尾，将截到剩余时长
     </div>
 
+    <!-- 输出格式（原格式/wav/flac/mp3）与 MP3 码率 -->
+    <div class="d-flex align-center ga-2 mt-3">
+      <v-select
+        :model-value="format"
+        :items="formatOptions"
+        item-title="label"
+        item-value="value"
+        label="输出格式"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="audio-trim-editor__format-select"
+        :disabled="isRunning"
+        @update:model-value="onFormatChange"
+      />
+      <v-select
+        v-if="targetsMp3"
+        :model-value="bitrate"
+        :items="bitrateOptions"
+        item-title="label"
+        item-value="value"
+        label="MP3 码率"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="audio-trim-editor__bitrate-select"
+        :disabled="isRunning"
+        @update:model-value="onBitrateChange"
+      />
+    </div>
+    <div class="text-body-small text-disabled mt-1">
+      「原格式」按输入音频的扩展名输出（重编码保证小数秒切口精确）
+    </div>
+
     <!-- 裁剪 / 重新裁剪 -->
     <div class="d-flex align-center ga-2 mt-3">
       <v-btn
@@ -121,11 +155,20 @@ import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { getAudioInfo } from '../../../canvas/api'
+import {
+  AUDIO_TRIM_FORMAT_OPTIONS,
+  AUDIO_TRIM_MP3_BITRATES,
+  audioTrimBitrateOf,
+  audioTrimFormatOf,
+  audioTrimTargetsMp3,
+} from '../../../canvas/audioTrim'
 
 /**
  * 裁剪音频节点配置组件。
  *
- * 展示输入音频预览（可播放定位）、起始位置（秒）与裁剪时长（秒，支持小数）；
+ * 展示输入音频预览（可播放定位）、起始位置（秒）、裁剪时长（秒，支持小数）、
+ * 输出格式下拉（原格式/ wav / flac / mp3，原格式用哨兵 '---' 存储）与条件显示的
+ * MP3 码率下拉（仅当实际输出为 mp3 时出现，128/192/320 kbps）。
  * 「使用当前播放位置」把预览 currentTime 写入起始位置。
  * 裁剪动作复用父级 @generate，由 AssetCanvas 按原型路由到服务端 ffmpeg。
  *
@@ -227,6 +270,21 @@ const duration = computed(() => {
 /** 裁剪时长输入框展示文本 */
 const durationText = computed(() => String(duration.value))
 
+/** 输出格式下拉选项（value 持久化到 config.format，原格式哨兵值 '---'） */
+const formatOptions = AUDIO_TRIM_FORMAT_OPTIONS
+
+/** MP3 码率下拉选项（kbps） */
+const bitrateOptions = AUDIO_TRIM_MP3_BITRATES.map((v) => ({ value: v, label: `${v} kbps` }))
+
+/** 当前输出格式（config.format 净化；字段缺省/非法视为「原格式」） */
+const format = computed(() => audioTrimFormatOf(props.node.config))
+
+/** 当前 MP3 码率（config.mp3Bitrate 净化；缺省/非法回退 192） */
+const bitrate = computed(() => audioTrimBitrateOf(props.node.config))
+
+/** 本次裁剪实际是否输出 mp3 编码（决定 MP3 码率下拉显隐：格式=mp3，或「原格式」且输入为 .mp3） */
+const targetsMp3 = computed(() => audioTrimTargetsMp3(props.node.config, audioInput.value?.path))
+
 /** 节点当前是否已有裁剪结果（按钮文案用；产物为固定路径文件，由服务端落盘） */
 const hasOutput = computed(() => !!(props.output || props.node.config.current))
 
@@ -275,6 +333,29 @@ function onDurationChange(v: unknown) {
 }
 
 /**
+ * 输出格式下拉变化：净化后写回 config.format（原格式 = 哨兵 '---'）。
+ * 仅改变输出格式，不自动触发裁剪；当前已有产物仍按旧扩展名展示，下次裁剪才切换。
+ *
+ * @param v 下拉值
+ */
+function onFormatChange(v: unknown) {
+  const next = audioTrimFormatOf({ format: v })
+  if (next === format.value) return
+  emit('update:config', { format: next })
+}
+
+/**
+ * MP3 码率下拉变化：净化后写回 config.mp3Bitrate（白名单 128/192/320，非法忽略）。
+ *
+ * @param v 下拉值
+ */
+function onBitrateChange(v: unknown) {
+  const next = audioTrimBitrateOf({ mp3Bitrate: v })
+  if (next === bitrate.value) return
+  emit('update:config', { mp3Bitrate: next })
+}
+
+/**
  * 把预览当前播放时间写入起始位置。
  */
 function onUseCurrentTime() {
@@ -320,5 +401,15 @@ function onUseCurrentTime() {
   width: 100%;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.04);
+}
+
+.audio-trim-editor__format-select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.audio-trim-editor__bitrate-select {
+  width: 150px;
+  flex: 0 0 auto;
 }
 </style>

@@ -2,6 +2,7 @@ import type { CanvasConnection, CanvasNodeData, NodeConfig } from './types'
 import { getPrototype } from './registry'
 import { getNodeOutputType } from './connection'
 import { canvasNodeOutputPath, type CanvasScope } from './paths'
+import { audioTrimOutputExt } from './audioTrim'
 
 /**
  * 资产生成辅助纯函数：输入路径收集、节点资产读取。
@@ -49,7 +50,10 @@ export function getNodeCurrentAssetPath(
   const proto = getPrototype(node.prototypeId)
   // 生成类节点：产物为固定文件名，按 scope+nodeId+扩展名恒等推导
   if (proto?.outputExt) {
-    if (scope) return canvasNodeOutputPath(scope, node.id, proto.outputExt)
+    // 裁剪音频节点例外：产物扩展名随输出格式变化（config.format / outputExt 镜像），
+    // 其余生成节点取原型声明扩展名
+    const ext = node.prototypeId === 'audio-trim' ? audioTrimOutputExt(node.config) : proto.outputExt
+    if (scope) return canvasNodeOutputPath(scope, node.id, ext)
     // 无 scope（如旧调用点）时回落到 config.current 旧数据
     const cur = node.config.current as { path?: string } | undefined
     return cur?.path

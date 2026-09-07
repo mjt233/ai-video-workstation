@@ -1,6 +1,7 @@
 import client, { readFs, writeFs } from '../api/client'
 import { migrateCanvasData, type CanvasData, type CanvasKind } from './types'
 import { sceneCanvasRelPath, stageCanvasRelPath } from './paths'
+import type { AudioTrimFormat, AudioTrimMp3Bitrate } from './audioTrim'
 
 /** 画布目标：定位某张画布 */
 export interface CanvasTarget {
@@ -257,31 +258,40 @@ export async function trimVideo(
   return data
 }
 
-/** 音频裁剪请求参数（起始位置与持续时长均使用秒） */
+/** 音频裁剪请求参数（起始位置与持续时长均使用秒；输出格式为可选附加参数） */
 export interface TrimAudioParams {
   /** 起始位置（秒，可小数，须 ≥ 0） */
   startTime: number
   /** 裁剪时长（秒，> 0，可小数） */
   duration: number
+  /**
+   * 输出格式（缺省按「原格式」处理）：
+   * - '---'：原格式，输出扩展名跟随输入音频（服务端按扩展名重编码）；
+   * - 'wav' / 'flac' / 'mp3'：显式输出格式。
+   */
+  format?: AudioTrimFormat
+  /** MP3 码率（kbps，白名单 128/192/320）；仅当输出为 mp3 编码时生效，缺省 192 */
+  mp3Bitrate?: AudioTrimMp3Bitrate
 }
 
 /** 音频裁剪执行结果（服务端返回，含输出相对路径） */
 export interface TrimAudioResult {
-  /** 裁剪产物相对路径（assert/ 下，output.flac） */
+  /** 裁剪产物相对路径（assert/ 下，output.{flac|wav|mp3|…}，随输出格式变化） */
   path: string
   /** 实际裁剪时长（秒；超出片尾时短于请求值） */
   duration: number
 }
 
 /**
- * 裁剪音频：调用服务端 ffmpeg 接口，把输入音频按起点与持续时长剪切为单个 FLAC。
+ * 裁剪音频：调用服务端 ffmpeg 接口，把输入音频按起点与持续时长剪切为单个音频文件。
  *
- * 服务端重编码输出（不用 -c copy），保证小数秒切口准确；产物固定为 output.flac。
+ * 服务端重编码输出（不用 -c copy），保证小数秒切口准确；输出格式由 params.format
+ * 与 outputPath 扩展名决定（「原格式」时扩展名须与输入一致）。
  *
  * @param project 项目名
  * @param audioPath 输入音频相对路径（assert/ 下）
- * @param params 裁剪参数（startTime + duration）
- * @param outputPath 输出音频相对路径（assert/ 下，画布节点固定 output.flac）
+ * @param params 裁剪参数（startTime + duration，以及可选的 format/mp3Bitrate）
+ * @param outputPath 输出音频相对路径（assert/ 下，画布节点固定 output.{ext}）
  * @returns 服务端执行结果（含输出相对路径与实际时长）
  */
 export async function trimAudio(
@@ -296,6 +306,8 @@ export async function trimAudio(
     outputPath,
     startTime: params.startTime,
     duration: params.duration,
+    format: params.format,
+    mp3Bitrate: params.mp3Bitrate,
   })
   return data
 }

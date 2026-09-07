@@ -127,7 +127,7 @@ describe('trimAudio', () => {
     expect(mockFfmpeg).not.toHaveBeenCalled();
   });
 
-  it('输出不是画布节点固定 output.flac 时拒绝执行', async () => {
+  it('输出不是画布节点固定产物路径时拒绝执行', async () => {
     await expect(
       trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1 }, 'assert/custom/out.flac'),
     ).rejects.toMatchObject({ code: 'INVALID' });
@@ -153,5 +153,113 @@ describe('trimAudio', () => {
     await expect(
       trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1 }, OUTPUT),
     ).rejects.toMatchObject({ code: 'INVALID', message: expect.stringContaining('音频裁剪失败') });
+  });
+});
+
+describe('trimAudio 输出格式（format / mp3Bitrate）', () => {
+  /** mp3 产物固定路径 */
+  const MP3_OUTPUT = 'assert/scene/1/1/canvas/trim-node/output.mp3';
+  /** wav 产物固定路径 */
+  const WAV_OUTPUT = 'assert/scene/1/1/canvas/trim-node/output.wav';
+
+  it('显式 mp3：libmp3lame + 缺省 192kbps', async () => {
+    const { chain, state } = mockRun();
+    mockFfmpeg.mockReturnValue(chain);
+
+    await trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1, format: 'mp3' }, MP3_OUTPUT);
+
+    expect(state.outputs[state.outputs.indexOf('-c:a') + 1]).toBe('libmp3lame');
+    expect(state.outputs[state.outputs.indexOf('-b:a') + 1]).toBe('192k');
+    expect(state.saved).toMatch(/output\.mp3$/);
+  });
+
+  it('显式 mp3 自定义码率 320kbps', async () => {
+    const { chain, state } = mockRun();
+    mockFfmpeg.mockReturnValue(chain);
+
+    await trimAudio(
+      'p', 'assert/source.wav', { startTime: 0, duration: 1, format: 'mp3', mp3Bitrate: 320 }, MP3_OUTPUT,
+    );
+
+    expect(state.outputs[state.outputs.indexOf('-c:a') + 1]).toBe('libmp3lame');
+    expect(state.outputs[state.outputs.indexOf('-b:a') + 1]).toBe('320k');
+  });
+
+  it('显式 wav：pcm_s16le 输出（无 -b:a）', async () => {
+    const { chain, state } = mockRun();
+    mockFfmpeg.mockReturnValue(chain);
+
+    await trimAudio('p', 'assert/source.flac', { startTime: 0, duration: 1, format: 'wav' }, WAV_OUTPUT);
+
+    expect(state.outputs[state.outputs.indexOf('-c:a') + 1]).toBe('pcm_s16le');
+    expect(state.outputs).not.toContain('-b:a');
+    expect(state.saved).toMatch(/output\.wav$/);
+  });
+
+  it('原格式（---）：输出扩展名跟随输入并重编码', async () => {
+    const { chain, state } = mockRun();
+    mockFfmpeg.mockReturnValue(chain);
+
+    await trimAudio('p', 'assert/bgm.mp3', { startTime: 0.5, duration: 2, format: '---' }, MP3_OUTPUT);
+
+    expect(state.outputs[state.outputs.indexOf('-c:a') + 1]).toBe('libmp3lame');
+    expect(state.outputs[state.outputs.indexOf('-b:a') + 1]).toBe('192k');
+    expect(state.saved).toMatch(/output\.mp3$/);
+  });
+
+  it('原格式（---）：m4a 输入按 aac 输出', async () => {
+    const { chain, state } = mockRun();
+    mockFfmpeg.mockReturnValue(chain);
+    const m4aOutput = 'assert/scene/1/1/canvas/trim-node/output.m4a';
+
+    await trimAudio('p', 'assert/bgm.m4a', { startTime: 0, duration: 1, format: '---' }, m4aOutput);
+
+    expect(state.outputs[state.outputs.indexOf('-c:a') + 1]).toBe('aac');
+    expect(state.saved).toMatch(/output\.m4a$/);
+  });
+
+  it('原格式（---）：产物扩展名与输入不一致时报错且不执行 ffmpeg', async () => {
+    await expect(
+      trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1, format: '---' }, MP3_OUTPUT),
+    ).rejects.toMatchObject({
+      code: 'INVALID',
+      message: expect.stringMatching(/原格式.*输入 \.wav/),
+    });
+    expect(mockFfmpeg).not.toHaveBeenCalled();
+  });
+
+  it('显式格式与产物路径扩展名不一致时报错', async () => {
+    await expect(
+      trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1, format: 'wav' }, MP3_OUTPUT),
+    ).rejects.toMatchObject({ code: 'INVALID', message: expect.stringContaining('不一致') });
+    expect(mockFfmpeg).not.toHaveBeenCalled();
+  });
+
+  it('不支持的输出扩展名拒绝执行', async () => {
+    const badOutput = 'assert/scene/1/1/canvas/trim-node/output.xyz';
+    await expect(
+      trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1, format: 'mp3' }, badOutput),
+    ).rejects.toMatchObject({ code: 'INVALID', message: expect.stringContaining('固定产物路径') });
+    expect(mockFfmpeg).not.toHaveBeenCalled();
+  });
+
+  it('非法 format / mp3Bitrate 报错', async () => {
+    await expect(
+      trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1, format: 'opus' }, WAV_OUTPUT),
+    ).rejects.toMatchObject({ code: 'INVALID', message: expect.stringContaining('format 仅支持') });
+    await expect(
+      trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1, format: 'mp3', mp3Bitrate: 64 }, MP3_OUTPUT),
+    ).rejects.toMatchObject({ code: 'INVALID', message: expect.stringContaining('mp3Bitrate 仅支持') });
+    expect(mockFfmpeg).not.toHaveBeenCalled();
+  });
+
+  it('缺省 format 时按 outputPath 扩展名编码（mp3 → libmp3lame 192k）', async () => {
+    const { chain, state } = mockRun();
+    mockFfmpeg.mockReturnValue(chain);
+
+    await trimAudio('p', 'assert/source.wav', { startTime: 0, duration: 1 }, MP3_OUTPUT);
+
+    expect(state.outputs[state.outputs.indexOf('-c:a') + 1]).toBe('libmp3lame');
+    expect(state.outputs[state.outputs.indexOf('-b:a') + 1]).toBe('192k');
   });
 });

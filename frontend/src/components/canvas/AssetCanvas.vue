@@ -333,6 +333,7 @@ import type { CanvasNodeData } from '../../canvas/types'
 import { getNodeCurrentAssetPath } from '../../canvas/generate'
 import { getPrototype } from '../../canvas/registry'
 import { getCanvasNodeInfo } from '../../canvas/api'
+import { extOfAudioPath } from '../../canvas/audioTrim'
 import { isSyntheticNodeId } from '../../canvas/groupSelection'
 import type { CanvasScope } from '../../canvas/paths'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
@@ -444,8 +445,27 @@ async function refreshNodeOutputs(): Promise<void> {
   nodeOutputs.value = next
 }
 
+/**
+ * 裁剪音频节点产物扩展名镜像同步（静默、不入撤销栈）：
+ * 成功裁剪（含跨页面恢复收敛）后，把实际落盘扩展名写回 config.outputExt，
+ * 供「原格式」下无输入链路上下文的固定产物路径推导使用（画布加载刷新 node-info、
+ * 保存为/自定义资产对话框、下游输入收集等），并保证产物存在性/mtime 查询路径正确。
+ * 先于乐观展示与 refreshNodeOutput 调用，使刷新按新扩展名推导产物路径。
+ *
+ * @param nodeId 节点 id
+ * @param outputPath 裁剪成功回传的产物相对路径（服务端实际落盘）
+ */
+function syncAudioTrimOutputMirror(nodeId: string, outputPath: string): void {
+  const node = nodeMap.value[nodeId]
+  if (!node || node.prototypeId !== 'audio-trim') return
+  const ext = extOfAudioPath(outputPath)
+  if (!ext || node.config.outputExt === ext) return
+  store.updateNodeQuiet(nodeId, { outputExt: ext })
+}
+
 /** 生成完成回调：产物已由服务端落盘，刷新该节点展示（先乐观更新，再取真实 mtime） */
 function handleNodeResult(nodeId: string, outputPath: string): void {
+  syncAudioTrimOutputMirror(nodeId, outputPath)
   nodeOutputs.value = { ...nodeOutputs.value, [nodeId]: { path: outputPath, mtime: Date.now(), exists: true } }
   void refreshNodeOutput(nodeId)
 }

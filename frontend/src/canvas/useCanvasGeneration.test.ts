@@ -361,7 +361,7 @@ describe('useCanvasGeneration', () => {
     expect(onResult).not.toHaveBeenCalled()
   })
 
-  it('裁剪音频节点：按时间调用 trim-audio，产物固定 output.flac，成功后通知结果', async () => {
+  it('裁剪音频节点：按时间调用 trim-audio（缺省「原格式」，输入 .flac → output.flac），成功后通知结果', async () => {
     ;(trimAudio as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/at/output.flac', duration: 2 })
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
@@ -373,11 +373,47 @@ describe('useCanvasGeneration', () => {
     expect(trimAudio).toHaveBeenCalledWith(
       'p',
       'assert/a.flac',
-      { startTime: 1.5, duration: 2 },
+      { startTime: 1.5, duration: 2, format: '---', mp3Bitrate: 192 },
       'assert/scene/1/1/canvas/at/output.flac',
     )
     expect(gen.statusByNode.value.at?.status).toBe('success')
     expect(onResult).toHaveBeenCalledWith('at', 'assert/scene/1/1/canvas/at/output.flac')
+  })
+
+  it('裁剪音频节点：原格式跟随输入扩展名（.wav 输入 → output.wav）', async () => {
+    ;(trimAudio as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/at/output.wav', duration: 2 })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'at', prototypeId: 'audio-trim', name: '裁剪音频', x: 0, y: 0, width: 240, height: 160,
+      config: { startValue: 0, duration: 2 },
+    }
+    const onResult = vi.fn()
+    await gen.trimAudio(node, 'assert/voice.wav', onResult)
+    expect(trimAudio).toHaveBeenCalledWith(
+      'p',
+      'assert/voice.wav',
+      { startTime: 0, duration: 2, format: '---', mp3Bitrate: 192 },
+      'assert/scene/1/1/canvas/at/output.wav',
+    )
+    expect(onResult).toHaveBeenCalledWith('at', 'assert/scene/1/1/canvas/at/output.wav')
+  })
+
+  it('裁剪音频节点：显式 mp3 + 自定义码率 → output.mp3 并附带格式参数', async () => {
+    ;(trimAudio as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/at/output.mp3', duration: 2 })
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'at', prototypeId: 'audio-trim', name: '裁剪音频', x: 0, y: 0, width: 240, height: 160,
+      config: { startValue: 0, duration: 2, format: 'mp3', mp3Bitrate: 320 },
+    }
+    const onResult = vi.fn()
+    await gen.trimAudio(node, 'assert/a.flac', onResult)
+    expect(trimAudio).toHaveBeenCalledWith(
+      'p',
+      'assert/a.flac',
+      { startTime: 0, duration: 2, format: 'mp3', mp3Bitrate: 320 },
+      'assert/scene/1/1/canvas/at/output.mp3',
+    )
+    expect(onResult).toHaveBeenCalledWith('at', 'assert/scene/1/1/canvas/at/output.mp3')
   })
 
   it('裁剪音频节点：失败进入 error 状态且不通知结果', async () => {

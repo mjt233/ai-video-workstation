@@ -1,4 +1,5 @@
 import type { NodeConfig, Port } from './types'
+import { AUDIO_TRIM_FORMAT_ORIG, AUDIO_TRIM_MP3_BITRATE_DEFAULT } from './audioTrim'
 import type { Component } from 'vue'
 import ImageLoaderNode from '../components/canvas/nodes/ImageLoaderNode.vue'
 import ImageGenerateNode from '../components/canvas/nodes/ImageGenerateNode.vue'
@@ -58,6 +59,8 @@ export interface NodePrototype {
    * 生成类节点产物扩展名（无点号，如 jpg / mp4 / png / flac）。
    * 声明后，产物路径按固定文件名推导：assert/{scope}/canvas/{nodeId}/output.{ext}
    * （见 paths.ts canvasNodeOutputPath）——"当前结果"为文件系统事实，不再读写 config.current/history。
+   * 例外：裁剪音频（audio-trim）节点产物扩展名随 config.format 变化（默认「原格式」跟随输入，
+   * 见 canvas/audioTrim.ts），此处 'flac' 仅作无配置上下文时的兜底声明。
    */
   outputExt?: string
 }
@@ -265,7 +268,10 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'audio-trim',
     name: '裁剪音频',
     icon: 'mdi-scissors-cutting',
-    // 输入/输出均为 audio；手动点击裁剪（服务端 ffmpeg 重编码 flac，小数秒精度）
+    // 输入/输出均为 audio；手动点击裁剪（服务端 ffmpeg 重编码，小数秒精度）。
+    // 产物扩展名随 config.format 变化（默认「原格式」= 跟随输入扩展名，见 canvas/audioTrim.ts）：
+    // 本原型 outputExt: 'flac' 仅作为无配置上下文时的兜底声明，实际路径推导走
+    // getNodeCurrentAssetPath 的 audio-trim 分支（audioTrimOutputExt）
     inputPorts: [{ id: 'in', type: 'audio', label: '音频' }],
     outputPorts: [{ id: 'out', type: 'audio', label: '音频' }],
     resizeable: true,
@@ -277,6 +283,8 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     defaultConfig: {
       startValue: 0,
       duration: 1,
+      format: AUDIO_TRIM_FORMAT_ORIG,
+      mp3Bitrate: AUDIO_TRIM_MP3_BITRATE_DEFAULT,
     },
   },
 ]
