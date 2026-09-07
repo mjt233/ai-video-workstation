@@ -64,20 +64,27 @@
       @click="emit('add', $event)"
     />
     <v-spacer />
+    <span
+      v-if="conflicted"
+      class="text-body-small text-error mr-2"
+    >保存冲突</span>
+    <span
+      v-else-if="saving"
+      class="text-body-small text-medium-emphasis mr-2"
+    >保存中…</span>
+    <span
+      v-else-if="dirty"
+      class="text-body-small text-medium-emphasis mr-2"
+    >未保存</span>
+    <span
+      class="text-body-small text-disabled mr-2"
+    >版本 {{ version }}</span>
     <v-progress-circular
       v-if="saving"
       size="18"
       indeterminate
       color="primary"
     />
-    <span
-      v-else-if="dirty"
-      class="text-body-small text-medium-emphasis"
-    >未保存</span>
-    <span
-      v-else
-      class="text-body-small text-disabled"
-    >已保存</span>
   </div>
 </template>
 
@@ -97,6 +104,10 @@ defineProps<{
   saving: boolean
   /** 画布有未保存修改（「未保存」文案） */
   dirty: boolean
+  /** 当前保存版本号（服务端 rev；显示用） */
+  version: number
+  /** 是否处于保存版本冲突态（显示「保存冲突」提示） */
+  conflicted: boolean
 }>()
 
 const emit = defineEmits<{

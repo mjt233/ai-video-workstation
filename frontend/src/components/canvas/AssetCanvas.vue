@@ -12,13 +12,15 @@
       请从左侧资产浏览器选择子场景
     </div>
     <template v-else>
-      <!-- 工具栏（视图缩放/撤销重做/自动搭画布/添加节点 + 保存状态） -->
+      <!-- 工具栏（视图缩放/撤销重做/自动搭画布/添加节点 + 保存状态与版本号） -->
       <CanvasToolbar
         :can-undo="canUndo"
         :can-redo="canRedo"
         :auto-building="autoBuilding"
         :saving="saving"
         :dirty="dirty"
+        :version="savedRev"
+        :conflicted="!!conflict"
         @fit="onFitView"
         @zoom-in="zoomIn"
         @zoom-out="zoomOut"
@@ -208,6 +210,54 @@
           @update:model-value="connectMenu.show = $event"
           @select="createNodeFromMenu"
         />
+
+        <!-- 保存版本冲突横幅（右上角）：
+             自动保存已停止，提示用户手动备份当前画布或强制覆盖保存 -->
+        <div
+          v-if="conflict"
+          class="canvas-conflict-banner"
+        >
+          <div class="canvas-conflict-banner__title">
+            <v-icon
+              icon="mdi-alert-octagon"
+              size="18"
+              class="mr-1"
+              color="error"
+            />
+            画布保存冲突
+          </div>
+          <div class="canvas-conflict-banner__text">
+            画布已被其他人或引用更新修改（当前版本 {{ conflict.currentRev }}，您基于版本 {{ conflict.expectedRev }}
+            编辑），自动保存已停止。请手动备份当前画布，或选择强制覆盖保存。
+          </div>
+          <div class="canvas-conflict-banner__actions">
+            <v-btn
+              size="small"
+              variant="outlined"
+              prepend-icon="mdi-download"
+              @click="downloadLocalBackup"
+            >
+              备份当前画布
+            </v-btn>
+            <v-btn
+              size="small"
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-content-save-check"
+              @click="forceDialog.show = true"
+            >
+              强制覆盖保存
+            </v-btn>
+            <v-btn
+              size="small"
+              variant="text"
+              prepend-icon="mdi-reload"
+              @click="reloadFromServerWithConfirm"
+            >
+              重新加载服务端版本
+            </v-btn>
+          </div>
+        </div>
       </div>
 
       <!-- 加载中 / 空画布引导 -->
@@ -281,6 +331,94 @@
         @save-error="(msg: string) => showSnackbar(msg, 'error')"
       />
 
+      <!-- 强制覆盖保存对话框：必须输入「确认覆盖」才可执行 -->
+      <v-dialog
+        v-model="forceDialog.show"
+        max-width="460"
+      >
+        <v-card>
+          <v-card-title>强制覆盖保存</v-card-title>
+          <v-card-text>
+            <p class="mb-2">
+              画布已被其他人或引用更新修改。强制覆盖会把<b>当前画布内容整体写入</b>，
+              服务端的最新更新（含分镜引用路径修正）将被你的版本<b>覆盖且不可恢复</b>。
+            </p>
+            <p class="mb-2">
+              请先在冲突横幅中备份需要保留的内容，并在下方输入「确认覆盖」：
+            </p>
+            <v-text-field
+              v-model="forceDialog.input"
+              label="输入「确认覆盖」"
+              variant="outlined"
+              density="comfortable"
+              autofocus
+            />
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn
+              variant="text"
+              :disabled="forceDialog.saving"
+              @click="forceDialog.show = false"
+            >
+              取消
+            </v-btn>
+            <v-btn
+              color="error"
+              :disabled="forceDialog.input.trim() !== '确认覆盖'"
+              :loading="forceDialog.saving"
+              @click="confirmForceSave"
+            >
+              确定
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- 切换分镜/场景时的保存冲突对话框：强制覆盖 / 放弃本地修改 / 取消 -->
+      <v-dialog
+        v-model="switchConflict.show"
+        max-width="500"
+      >
+        <v-card>
+          <v-card-title>画布保存冲突</v-card-title>
+          <v-card-text>
+            <p class="mb-2">
+              当前画布已被其他人或引用更新修改，自动保存已停止。切换到新画布前请先处理：
+            </p>
+            <ul class="pl-4 mb-2">
+              <li>强制覆盖保存：用当前内容覆盖服务端版本后切换；</li>
+              <li>放弃本地修改：放弃当前画布未保存的修改并切换；</li>
+              <li>取消：返回当前画布继续处理。</li>
+            </ul>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn
+              variant="text"
+              @click="cancelSwitchConflict"
+            >
+              取消
+            </v-btn>
+            <v-btn
+              color="warning"
+              variant="tonal"
+              :loading="switchConflict.saving"
+              @click="discardAndSwitch"
+            >
+              放弃本地修改并切换
+            </v-btn>
+            <v-btn
+              color="error"
+              :loading="switchConflict.saving"
+              @click="forceAndSwitch"
+            >
+              强制覆盖保存并切换
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
       <!-- 设为分镜场景图对话框 -->
       <SetAsSceneDialog
         v-model="sceneDialog.show"
@@ -322,6 +460,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { VueFlow, BezierEdge, SelectionMode, getBezierPath, Position, useVueFlow, type EdgeMouseEvent, type NodeMouseEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
@@ -329,7 +468,9 @@ import '@vue-flow/core/dist/theme-default.css'
 import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
+import { confirm } from '../../utils/confirm'
 import type { CanvasNodeData } from '../../canvas/types'
+import { canvasRelPath, type CanvasTarget } from '../../canvas/api'
 import { getNodeCurrentAssetPath } from '../../canvas/generate'
 import { getPrototype } from '../../canvas/registry'
 import { getCanvasNodeInfo } from '../../canvas/api'
@@ -401,7 +542,10 @@ const scope = computed<CanvasScope>(() => {
   return { kind: 'scene', primary: props.episode ?? '', secondary: props.shot }
 })
 
-/** 画布数据 store：加载/保存/增删改查/撤销重做 */
+/**
+ * 画布数据 store：加载/保存（CAS 版本校验）/增删改查/撤销重做。
+ * 版本冲突时自动保存停止，由冲突横幅与对话框提示用户处理。
+ */
 const store = useCanvasStore(props.project, target.value)
 /**
  * 资产生成组合式：跑工作流 + 轮询（纯体验层）+ 结果通知 + 运行中任务持久化恢复。
@@ -409,7 +553,9 @@ const store = useCanvasStore(props.project, target.value)
  */
 const gen = useCanvasGeneration(props.project, target.value, { onResult: handleNodeResult })
 const { statusByNode } = gen
-const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo } = store
+const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo, conflict, savedRev, forceSave, reloadFromServer } = store
+const router = useRouter()
+const route = useRoute()
 
 // ── 节点产物展示状态（固定路径 + 服务端 mtime；"当前结果"为文件系统事实）────────
 
@@ -929,10 +1075,141 @@ async function onAutoBuild(): Promise<void> {
   await refreshNodeOutputs()
 }
 
+// ── 保存版本冲突 UI 状态 ───────────────────────────────────────
+
+/** 强制覆盖保存对话框（输入「确认覆盖」才可确定） */
+const forceDialog = reactive({ show: false, input: '', saving: false })
+
+/** 切换画布（分镜/场景）时的保存冲突对话框 */
+const switchConflict = reactive({
+  show: false,
+  /** 用户尝试切换到的目标画布 */
+  pending: null as CanvasTarget | null,
+  /** 停留的当前画布（冲突归属；取消时回退 URL 与生成目标） */
+  previous: null as CanvasTarget | null,
+  saving: false,
+})
+
+/** 当前已激活的画布目标（成功切换后更新；冲突「取消」时回退用） */
+let activeTarget: CanvasTarget = { ...target.value }
+
+/**
+ * 下载当前画布（本地未保存内容）为 canvas.json 备份文件。
+ */
+function downloadLocalBackup(): void {
+  const blob = new Blob([JSON.stringify(store.data.value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = canvasRelPath(target.value).replace(/\//g, '-')
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** 重新加载服务端版本（放弃本地修改；先经用户确认） */
+async function reloadFromServerWithConfirm(): Promise<void> {
+  const ok = await confirm({
+    title: '重新加载服务端版本',
+    content: '将放弃当前画布未保存的修改，重新加载服务端最新版本。确定继续？',
+    confirmText: '重新加载',
+    confirmColor: 'warning',
+  })
+  if (!ok) return
+  await reloadFromServer()
+}
+
+/** 强制覆盖保存（对话框确认后执行；成功后横幅自动消失） */
+async function confirmForceSave(): Promise<void> {
+  forceDialog.saving = true
+  try {
+    const ok = await forceSave()
+    if (ok) {
+      forceDialog.show = false
+      forceDialog.input = ''
+      showSnackbar('已强制覆盖保存最新版本', 'success')
+    } else {
+      showSnackbar(store.error.value ?? '强制覆盖保存失败', 'error')
+    }
+  } finally {
+    forceDialog.saving = false
+  }
+}
+
+/** 把路由恢复到指定画布目标（冲突「取消」时回到原画布，保持一致） */
+function restoreRouteForTarget(t: CanvasTarget): void {
+  const query = { ...router.currentRoute.value.query } as Record<string, string | undefined>
+  if (t.kind === 'scene') {
+    query.type = 'scene'
+    query.episode = t.episode
+    query.shot = t.shot
+    delete query.name
+    delete query.subscene
+    delete query.section
+  } else if (t.kind === 'stage') {
+    query.type = 'stage'
+    query.name = t.stage
+    query.subscene = t.label
+    delete query.episode
+    delete query.shot
+    delete query.section
+  } else {
+    return
+  }
+  router.push({ query })
+}
+
+/** 切换冲突对话框「取消」：回退到原画布（恢复生成的切换目标与 URL） */
+async function cancelSwitchConflict(): Promise<void> {
+  const previous = switchConflict.previous
+  switchConflict.show = false
+  if (previous) {
+    await gen.switchTarget(previous)
+    restoreRouteForTarget(previous)
+  }
+}
+
+/** 切换冲突对话框「放弃本地修改并切换」 */
+async function discardAndSwitch(): Promise<void> {
+  const pending = switchConflict.pending
+  switchConflict.show = false
+  if (!pending) return
+  switchConflict.saving = true
+  try {
+    await applySwitch(pending, { discard: true })
+  } finally {
+    switchConflict.saving = false
+  }
+}
+
+/** 切换冲突对话框「强制覆盖保存并切换」 */
+async function forceAndSwitch(): Promise<void> {
+  const pending = switchConflict.pending
+  switchConflict.show = false
+  if (!pending) return
+  switchConflict.saving = true
+  try {
+    const ok = await forceSave()
+    if (!ok) {
+      showSnackbar(store.error.value ?? '强制覆盖保存失败，已停留在当前画布', 'error')
+      return
+    }
+    await applySwitch(pending)
+  } finally {
+    switchConflict.saving = false
+  }
+}
+
 // ── 生命周期 ────────────────────────────────────────────
 
-/** 切换分镜/场景时：重置各组合式状态，并让 store/生成组合式切换到新目标加载 */
-watch(target, async (newTarget) => {
+/**
+ * 执行一次画布切换（含冲突处理）：
+ * 先重置各组合式状态并让 store/生成组合式切换到新目标；若旧画布存在保存版本冲突
+ * （未切换），弹出切换冲突对话框由用户决定（强制覆盖 / 放弃修改 / 取消）。
+ *
+ * @param newTarget 新画布目标
+ * @param opts.discard 为 true 时放弃旧画布未保存修改直接切换（对话框「放弃本地修改」）
+ */
+async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } = {}): Promise<void> {
   const seq = ++fitViewSeq
   pendingFitView = false
   selection.reset()
@@ -945,12 +1222,27 @@ watch(target, async (newTarget) => {
   upload.reset()
   await gen.switchTarget(newTarget)
   if (disposed || seq !== fitViewSeq) return
-  await store.switchTarget(newTarget)
+  const st = await store.switchTarget(newTarget, opts)
   if (disposed || seq !== fitViewSeq) return
+  if (st === 'conflict') {
+    // 保存版本冲突：未切换，交由用户决定（数据保留在原画布）
+    switchConflict.pending = newTarget
+    switchConflict.previous = { ...activeTarget }
+    switchConflict.show = true
+    return
+  }
+  activeTarget = { ...newTarget }
   // 切分镜/场景后视口仍停在旧坐标，需重新对准新画布全部节点（不等产物信息，节点坐标已就绪）
   scheduleFitCanvas()
   // 新画布加载后刷新全部节点产物信息（固定路径 + mtime；异步任务已由服务端落盘的结果直接可见）
   await refreshNodeOutputs()
+}
+
+/** 切换分镜/场景时：重置各组合式状态，并让 store/生成组合式切换到新目标加载 */
+watch(target, (newTarget) => {
+  // 上一个冲突对话框尚未处理时先关闭（保留最新选择的优先级）
+  if (switchConflict.show) switchConflict.show = false
+  void applySwitch(newTarget)
 })
 
 onMounted(() => {
@@ -1102,5 +1394,40 @@ watch(flowEl, (flow) => {
   white-space: nowrap;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
   user-select: none;
+}
+
+/* 保存版本冲突横幅（画布右上角，覆盖在画布之上） */
+.canvas-conflict-banner {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 40;
+  max-width: 420px;
+  padding: 10px 12px;
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgba(var(--v-theme-error), 0.45);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.canvas-conflict-banner__title {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: rgb(var(--v-theme-error));
+  margin-bottom: 4px;
+}
+
+.canvas-conflict-banner__text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgb(var(--v-theme-on-surface));
+  margin-bottom: 8px;
+}
+
+.canvas-conflict-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 </style>

@@ -1,4 +1,5 @@
-import client, { readFs, writeFs } from '../api/client'
+import client, { readFs } from '../api/client'
+import type { AxiosError } from 'axios'
 import { migrateCanvasData, type CanvasData, type CanvasKind } from './types'
 import { sceneCanvasRelPath, stageCanvasRelPath } from './paths'
 import type { AudioTrimFormat, AudioTrimMp3Bitrate } from './audioTrim'
@@ -33,40 +34,124 @@ export function canvasRelPath(target: CanvasTarget): string {
   return sceneCanvasRelPath(target.episode, target.shot)
 }
 
+/** 画布定义读取结果：画布数据 + 保存版本号（rev） */
+export interface CanvasLoadResult {
+  /** 画布定义（已迁移规范化） */
+  canvas: CanvasData
+  /** 保存版本号（无文件/旧文件时为 0；由后端在每次保存时递增） */
+  rev: number
+  /** 文件更新时间（ISO，可空） */
+  updatedAt: string | null
+}
+
 /**
  * 加载画布定义；文件不存在或解析失败时返回 null。
  *
+ * 同时返回保存版本号（rev）：后续自动保存须以它作为 CAS 的 expectedRev。
+ *
  * @param project 项目名
  * @param target 画布目标
- * @returns 画布定义或 null
+ * @returns 画布定义与版本号，或 null
  */
-export async function loadCanvas(project: string, target: CanvasTarget): Promise<CanvasData | null> {
+export async function loadCanvas(project: string, target: CanvasTarget): Promise<CanvasLoadResult | null> {
   try {
     const rel = canvasRelPath(target)
     const raw = await readFs(project, rel)
     if (raw == null) return null
     // axios 会尝试对字符串响应做 JSON.parse，因此 .json 文件可能直接返回对象；
     // 同时兼容仍为字符串的情况（如空文件或代理差异）
-    if (typeof raw === 'string') {
-      if (raw.trim() === '') return null
-      return migrateCanvasData(JSON.parse(raw) as unknown)
-    }
-    return migrateCanvasData(raw)
+    const parsed: unknown = typeof raw === 'string'
+      ? (raw.trim() === '' ? null : JSON.parse(raw))
+      : raw
+    if (parsed == null) return null
+    const obj = parsed as Record<string, unknown>
+    const revRaw = Number(obj.rev)
+    const rev = Number.isInteger(revRaw) && revRaw >= 0 ? revRaw : 0
+    const updatedAt = typeof obj.updatedAt === 'string' ? obj.updatedAt : null
+    return { canvas: migrateCanvasData(parsed), rev, updatedAt }
   } catch {
     return null
   }
 }
 
+/** 画布保存版本冲突错误（服务端 409 VERSION_CONFLICT） */
+export class CanvasVersionError extends Error {
+  /** 服务端当前版本号 */
+  currentRev: number
+  /** 前端基于的版本号 */
+  expectedRev: number
+
+  /**
+   * @param message 服务端错误文案
+   * @param currentRev 服务端当前版本号
+   * @param expectedRev 前端基于的版本号
+   */
+  constructor(message: string, currentRev: number, expectedRev: number) {
+    super(message)
+    this.name = 'CanvasVersionError'
+    this.currentRev = currentRev
+    this.expectedRev = expectedRev
+  }
+}
+
+export interface SaveCanvasOptions {
+  /** 前端基于的保存版本号（首次保存/无版本文件为 0） */
+  expectedRev: number
+  /** 强制覆盖：跳过版本比对（仅用户明确确认后使用）；保存后 rev 仍由后端递增 */
+  force?: boolean
+}
+
 /**
- * 保存画布定义（写入 canvas.json）。
+ * CAS 保存画布定义（写入 canvas.json）。
+ *
+ * 服务端校验 expectedRev === 当前 rev 后才写入（强制覆盖除外），
+ * 并把 rev 置为当前值 + 1。版本过期时抛 CanvasVersionError（自动保存须停止，
+ * 由界面提示用户备份或强制覆盖）。
  *
  * @param project 项目名
  * @param target 画布目标
- * @param data 画布定义
+ * @param data 画布定义（不含 rev；rev 由后端维护）
+ * @param opts 保存选项（基于版本号 / 是否强制覆盖）
+ * @returns 保存后的新版本号与更新时间
+ * @throws CanvasVersionError 版本不一致（409）
  */
-export async function saveCanvas(project: string, target: CanvasTarget, data: CanvasData): Promise<void> {
-  const rel = canvasRelPath(target)
-  await writeFs(project, rel, JSON.stringify(data, null, 2))
+export async function saveCanvas(
+  project: string,
+  target: CanvasTarget,
+  data: CanvasData,
+  opts: SaveCanvasOptions,
+): Promise<{ rev: number; updatedAt: string }> {
+  try {
+    const { data: res } = await client.post<{ success: boolean; rev: number; updatedAt: string }>(
+      '/canvas/def',
+      {
+        project,
+        kind: target.kind,
+        episode: target.episode,
+        shot: target.shot,
+        stage: target.stage,
+        label: target.label,
+        data,
+        expectedRev: opts.expectedRev,
+        force: opts.force === true,
+      },
+    )
+    return { rev: res.rev, updatedAt: res.updatedAt }
+  } catch (e) {
+    const ax = e as AxiosError<{ code?: string; error?: string; currentRev?: number; expectedRev?: number }>
+    const d = ax.response?.data
+    if (ax.response?.status === 409 && d?.code === 'VERSION_CONFLICT') {
+      throw new CanvasVersionError(
+        d.error ?? '画布保存冲突：画布已被其他人或引用更新修改',
+        Number(d.currentRev) || 0,
+        Number(d.expectedRev) || 0,
+      )
+    }
+    if (ax.response?.status === 409 && d?.code === 'CORRUPT') {
+      throw new Error(d.error ?? '画布定义文件已损坏，无法保存')
+    }
+    throw e
+  }
 }
 
 /**

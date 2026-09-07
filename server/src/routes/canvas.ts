@@ -22,6 +22,8 @@ import { isUnderAssert } from './fs-path.js';
 import { copyExistingAssetToHistory } from '../assets/history.js';
 import { saveCanvasNodeUpload } from '../assets/canvas-upload.js';
 import { readCanvasNodeInfo } from '../canvas/node-info.js';
+import { saveCanvasDef, type CanvasDefTarget } from '../assets/canvas-def.js';
+import { httpError } from '../assets/paths.js';
 
 /**
  * 画布专属路由：本地媒体处理操作（不走工作流队列）。
@@ -59,6 +61,77 @@ async function archiveCanvasOutput(project: string, outputPath: string): Promise
     console.warn(`归档画布节点旧产物失败（不影响本次写入）: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
+
+/**
+ * 画布定义 CAS 保存：PUT /api/canvas/def
+ *
+ * body: { project, kind, episode?, shot?, stage?, label?, data, expectedRev, force? }
+ * - 分镜画布（kind=scene）需要 episode+shot；场景画布（kind=stage）需要 stage+label；
+ * - data 为前端画布定义（不含 rev，rev 由后端维护）；
+ * - expectedRev 为前端基于的版本号（旧文件按 0 处理），与当前 rev 不一致时返回
+ *   409 VERSION_CONFLICT（携带 currentRev / expectedRev）；
+ * - force=true 跳过版本比对（仅用户明确确认后使用），保存后 rev 仍自动 +1。
+ * 保存通过进程内路径互斥保证「读-比-写」原子，多个用户同时保存同一画布时，
+ * 后保存者（版本过期）收到 409 冲突而非静默覆盖。
+ */
+canvasRouter.put('/canvas/def', async (req: Request, res: Response) => {
+  try {
+    const project = String(req.body?.project ?? '');
+    if (!project) {
+      res.status(400).json({ error: 'project 必填', code: 'INVALID' });
+      return;
+    }
+    const body = req.body as {
+      kind?: string;
+      episode?: string;
+      shot?: string;
+      stage?: string;
+      label?: string;
+      data?: unknown;
+      expectedRev?: number;
+      force?: boolean;
+    };
+    const kind = body.kind === 'scene' || body.kind === 'stage' ? body.kind : '';
+    if (!kind) {
+      res.status(400).json({ error: 'kind 必须是 scene 或 stage', code: 'INVALID' });
+      return;
+    }
+    const target: CanvasDefTarget = {
+      kind,
+      episode: body.episode,
+      shot: body.shot,
+      stage: body.stage,
+      label: body.label,
+    };
+    const expectedRev = body.expectedRev === undefined || body.expectedRev === null
+      ? undefined
+      : Number(body.expectedRev);
+    const result = await saveCanvasDef(
+      project,
+      target,
+      body.data,
+      expectedRev,
+      body.force === true,
+    );
+    res.json({ success: true, rev: result.rev, updatedAt: result.updatedAt });
+  } catch (err) {
+    const e = err as { code?: string; message?: string; currentRev?: number; expectedRev?: number };
+    if (e?.code === 'VERSION_CONFLICT') {
+      res.status(409).json({
+        error: e.message,
+        code: 'VERSION_CONFLICT',
+        currentRev: e.currentRev,
+        expectedRev: e.expectedRev,
+      });
+      return;
+    }
+    if (e?.code === 'CORRUPT') {
+      res.status(409).json({ error: e.message, code: 'CORRUPT' });
+      return;
+    }
+    httpError(res, err);
+  }
+});
 
 /**
  * 上传产物到生成节点固定路径：POST /api/canvas/upload

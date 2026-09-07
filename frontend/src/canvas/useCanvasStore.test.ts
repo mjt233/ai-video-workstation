@@ -1,35 +1,56 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { useCanvasStore } from './useCanvasStore'
 
-vi.mock('./api', () => ({
-  loadCanvas: vi.fn(),
-  saveCanvas: vi.fn(),
-}))
+vi.mock('./api', async () => {
+  const actual = await vi.importActual<typeof import('./api')>('./api')
+  return {
+    ...actual,
+    loadCanvas: vi.fn(),
+    saveCanvas: vi.fn(),
+  }
+})
 
-import { loadCanvas, saveCanvas } from './api'
+import { loadCanvas, saveCanvas, CanvasVersionError } from './api'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
+
+/** 构造 loadCanvas 的模拟返回（画布 + 版本号） */
+function canvasResult(nodes: unknown[] = [], rev = 0) {
+  return {
+    canvas: {
+      version: 1,
+      kind: 'scene' as const,
+      nodes,
+      connections: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    rev,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  }
+}
 
 describe('useCanvasStore', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     ;(loadCanvas as Mock).mockResolvedValue(null)
-    ;(saveCanvas as Mock).mockResolvedValue(undefined)
+    ;(saveCanvas as Mock).mockResolvedValue({ rev: 1, updatedAt: '2026-01-02T00:00:00.000Z' })
   })
 
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  it('加载：文件不存在时保持空画布', async () => {
+  it('加载：文件不存在时保持空画布，版本号归零', async () => {
     const store = useCanvasStore('p', TARGET)
     await store.load()
     expect(store.loaded.value).toBe(true)
     expect(store.nodes.value).toHaveLength(0)
+    expect(store.savedRev.value).toBe(0)
   })
 
-  it('加载：存在时读取画布定义', async () => {
+  it('加载：存在时读取画布定义与保存版本号', async () => {
     const raw = {
       version: 1,
       kind: 'scene',
@@ -38,10 +59,11 @@ describe('useCanvasStore', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     }
-    ;(loadCanvas as Mock).mockResolvedValue(raw)
+    ;(loadCanvas as Mock).mockResolvedValue(canvasResult(raw.nodes, 3))
     const store = useCanvasStore('p', TARGET)
     await store.load()
     expect(store.nodes.value).toHaveLength(1)
+    expect(store.savedRev.value).toBe(3)
   })
 
   it('addNode：添加节点并置脏、触发防抖保存', async () => {
@@ -154,7 +176,7 @@ describe('useCanvasStore', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     }
-    ;(loadCanvas as Mock).mockResolvedValue(raw2)
+    ;(loadCanvas as Mock).mockResolvedValue(canvasResult(raw2.nodes, 0))
     const store = useCanvasStore('p', TARGET)
     store.addNode('text', 0, 0)
     expect(store.nodes.value).toHaveLength(1)
@@ -174,6 +196,85 @@ describe('useCanvasStore', () => {
     await store.switchTarget({ kind: 'scene', episode: '1', shot: '2' })
     expect(saveCanvas).not.toHaveBeenCalled()
     expect(loadCanvas).toHaveBeenCalledWith('p', { kind: 'scene', episode: '1', shot: '2' })
+  })
+
+  // ── 画布保存版本（CAS）冲突保护 ────────────────────────────────
+
+  it('自动保存后版本号更新（savedRev 跟随后端）', async () => {
+    ;(saveCanvas as Mock).mockResolvedValue({ rev: 6, updatedAt: 'x' })
+    const store = useCanvasStore('p', TARGET)
+    store.addNode('text', 0, 0)
+    await vi.runAllTimersAsync()
+    expect(saveCanvas).toHaveBeenCalledWith('p', TARGET, expect.anything(), { expectedRev: 0 })
+    expect(store.savedRev.value).toBe(6)
+    expect(store.dirty.value).toBe(false)
+    // 再次编辑并保存：基于新版本号
+    store.addNode('text', 0, 0)
+    await vi.runAllTimersAsync()
+    expect(saveCanvas).toHaveBeenLastCalledWith('p', TARGET, expect.anything(), { expectedRev: 6 })
+  })
+
+  it('版本冲突：进入冲突态、保留本地修改并停止自动保存', async () => {
+    const store = useCanvasStore('p', TARGET)
+    store.addNode('text', 0, 0)
+    ;(saveCanvas as Mock).mockRejectedValue(new CanvasVersionError('画布保存冲突', 9, 0))
+    await vi.runAllTimersAsync()
+    expect(store.conflict.value).toEqual({ currentRev: 9, expectedRev: 0 })
+    expect(store.dirty.value).toBe(true)
+    expect(store.nodes.value).toHaveLength(1)
+    // 冲突期间继续编辑不再触发自动保存
+    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    store.addNode('text', 0, 0)
+    await vi.runAllTimersAsync()
+    expect(saveCanvas).toHaveBeenCalledTimes(1)
+  })
+
+  it('forceSave：强制覆盖后清除冲突并继续正常保存', async () => {
+    const store = useCanvasStore('p', TARGET)
+    store.addNode('text', 0, 0)
+    ;(saveCanvas as Mock).mockRejectedValueOnce(new CanvasVersionError('画布保存冲突', 9, 0))
+    await vi.runAllTimersAsync()
+    expect(store.conflict.value).not.toBeNull()
+    ;(saveCanvas as Mock).mockResolvedValueOnce({ rev: 10, updatedAt: 'x' })
+    const ok = await store.forceSave()
+    expect(ok).toBe(true)
+    expect(saveCanvas).toHaveBeenLastCalledWith('p', TARGET, expect.anything(), { expectedRev: 0, force: true })
+    expect(store.conflict.value).toBeNull()
+    expect(store.dirty.value).toBe(false)
+    expect(store.savedRev.value).toBe(10)
+  })
+
+  it('reloadFromServer：重新加载服务端版本并清除冲突与未保存修改', async () => {
+    const store = useCanvasStore('p', TARGET)
+    store.addNode('text', 0, 0)
+    ;(saveCanvas as Mock).mockRejectedValueOnce(new CanvasVersionError('画布保存冲突', 9, 0))
+    await vi.runAllTimersAsync()
+    expect(store.conflict.value).not.toBeNull()
+    ;(loadCanvas as Mock).mockResolvedValue(canvasResult([{ id: 'a', prototypeId: 'text', name: 'n', x: 0, y: 0, width: 10, height: 10, config: {} }], 9))
+    await store.reloadFromServer()
+    expect(store.conflict.value).toBeNull()
+    expect(store.dirty.value).toBe(false)
+    expect(store.nodes.value).toHaveLength(1)
+    expect(store.savedRev.value).toBe(9)
+  })
+
+  it('switchTarget：存在版本冲突时不切换（返回 conflict 且数据保留）', async () => {
+    const store = useCanvasStore('p', TARGET)
+    store.addNode('text', 0, 0)
+    ;(saveCanvas as Mock).mockRejectedValueOnce(new CanvasVersionError('画布保存冲突', 9, 0))
+    await vi.runAllTimersAsync()
+    const st = await store.switchTarget({ kind: 'scene', episode: '1', shot: '2' })
+    expect(st).toBe('conflict')
+    // 未切换：仍指向旧目标，本地修改保留
+    expect(loadCanvas).not.toHaveBeenCalledWith('p', { kind: 'scene', episode: '1', shot: '2' })
+    expect(store.nodes.value).toHaveLength(1)
+    expect(store.dirty.value).toBe(true)
+    // 用户选择「放弃本地修改」：discard 切换成功
+    ;(loadCanvas as Mock).mockResolvedValue(canvasResult([], 9))
+    const st2 = await store.switchTarget({ kind: 'scene', episode: '1', shot: '2' }, { discard: true })
+    expect(st2).toBe('ok')
+    expect(store.nodes.value).toHaveLength(0)
+    expect(store.dirty.value).toBe(false)
   })
 
   it('connect：显式端口参数写入连线', () => {

@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import { listNumericDirNames, pathExists, resolveProjectPath } from './paths.js';
+import { bumpCanvasRevInJsonText } from './canvas-def.js';
 
 export interface RenamePair {
   from: string;
@@ -49,6 +50,8 @@ const SHOT_PATH_JSON_FILES = ['canvas.json', 'director.json'];
 /**
  * 重写分镜目录内 JSON 文件的 scene 资产路径。
  * 仅当内容实际变化时落盘；文件不存在则跳过。
+ * 分镜定义被外部改写后，canvas.json 的保存版本号（rev）同步 +1——
+ * 停留页面的旧画布自动保存会因版本不一致（409）停止，避免旧数据覆盖新引用。
  *
  * @param project 项目名
  * @param episode 集数
@@ -67,7 +70,8 @@ async function rewriteShotDirAssetPaths(
     const original = await fs.readFile(fullPath, 'utf8');
     const rewritten = rewriteSceneShotPathsInText(original, episode, renames);
     if (rewritten !== original) {
-      await fs.writeFile(fullPath, rewritten, 'utf8');
+      const out = fileName === 'canvas.json' ? bumpCanvasRevInJsonText(rewritten) : rewritten;
+      await fs.writeFile(fullPath, out, 'utf8');
     }
   }
 }

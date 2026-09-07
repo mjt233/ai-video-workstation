@@ -1,15 +1,16 @@
 import { describe, expect, it, vi, type Mock } from 'vitest'
-import { canvasRelPath, loadCanvas, saveCanvas } from './api'
+import { canvasRelPath, loadCanvas, saveCanvas, CanvasVersionError } from './api'
 
 vi.mock('../api/client', () => ({
   readFs: vi.fn(),
-  writeFs: vi.fn(),
+  default: { post: vi.fn() },
 }))
 
-import { readFs, writeFs } from '../api/client'
+import client, { readFs } from '../api/client'
 
 const validRaw = JSON.stringify({
   version: 1,
+  rev: 5,
   kind: 'scene',
   nodes: [],
   connections: [],
@@ -40,38 +41,74 @@ describe('canvasRelPath', () => {
 })
 
 describe('loadCanvas', () => {
-  it('读取并解析合法 JSON', async () => {
+  it('读取并解析合法 JSON，返回版本号', async () => {
     (readFs as Mock).mockResolvedValue(validRaw)
-    const data = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
-    expect(data?.kind).toBe('scene')
-    expect(data?.nodes).toEqual([])
+    const result = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
+    expect(result?.canvas.kind).toBe('scene')
+    expect(result?.canvas.nodes).toEqual([])
+    expect(result?.rev).toBe(5)
   })
 
   it('文件不存在返回 null', async () => {
     (readFs as Mock).mockRejectedValue(new Error('ENOENT'))
-    const data = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
-    expect(data).toBeNull()
+    const result = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
+    expect(result).toBeNull()
   })
 
   it('非法 JSON 返回 null', async () => {
     (readFs as Mock).mockResolvedValue('not json{{{')
-    const data = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
-    expect(data).toBeNull()
+    const result = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
+    expect(result).toBeNull()
   })
 
   it('readFs 返回已解析对象时直接使用（axios 自动 JSON.parse 的真实行为）', async () => {
     (readFs as Mock).mockResolvedValue(JSON.parse(validRaw))
-    const data = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
-    expect(data?.kind).toBe('scene')
-    expect(data?.nodes).toEqual([])
+    const result = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
+    expect(result?.canvas.kind).toBe('scene')
+    expect(result?.rev).toBe(5)
+  })
+
+  it('无 rev 字段的旧文件按 0 处理', async () => {
+    (readFs as Mock).mockResolvedValue(JSON.parse(JSON.stringify({ ...JSON.parse(validRaw), rev: undefined })))
+    const result = await loadCanvas('p', { kind: 'scene', episode: '1', shot: '1' })
+    expect(result?.rev).toBe(0)
   })
 })
 
-describe('saveCanvas', () => {
-  it('序列化写入 canvas.json', async () => {
-    (writeFs as Mock).mockResolvedValue({ success: true })
-    const data = { ...(JSON.parse(validRaw) as object), nodes: [], connections: [] }
-    await saveCanvas('p', { kind: 'scene', episode: '1', shot: '1' }, data as never)
-    expect(writeFs).toHaveBeenCalledWith('p', 'prompt/scene/1/1/canvas.json', expect.stringContaining('"kind": "scene"'))
+describe('saveCanvas（CAS）', () => {
+  const data = { kind: 'scene' as const, nodes: [], connections: [] }
+
+  it('提交 expectedRev / force / 目标参数，返回新版本号', async () => {
+    (client.post as Mock).mockResolvedValue({ data: { success: true, rev: 6, updatedAt: '2026-01-02T00:00:00.000Z' } })
+    const result = await saveCanvas('p', { kind: 'scene', episode: '1', shot: '1' }, data as never, { expectedRev: 5 })
+    expect(client.post).toHaveBeenCalledWith('/canvas/def', expect.objectContaining({
+      project: 'p',
+      kind: 'scene',
+      episode: '1',
+      shot: '1',
+      expectedRev: 5,
+      force: false,
+      data,
+    }))
+    expect(result).toEqual({ rev: 6, updatedAt: '2026-01-02T00:00:00.000Z' })
+  })
+
+  it('force 模式透传 force=true', async () => {
+    (client.post as Mock).mockResolvedValue({ data: { success: true, rev: 7, updatedAt: 'x' } })
+    await saveCanvas('p', { kind: 'stage', stage: '街角', label: '白天' }, data as never, { expectedRev: 6, force: true })
+    expect(client.post).toHaveBeenCalledWith('/canvas/def', expect.objectContaining({ force: true, stage: '街角', label: '白天' }))
+  })
+
+  it('409 VERSION_CONFLICT 抛 CanvasVersionError（含当前版本）', async () => {
+    const err = new Error('冲突')
+    ;(err as { response?: unknown }).response = {
+      status: 409,
+      data: { code: 'VERSION_CONFLICT', error: '画布保存冲突', currentRev: 9, expectedRev: 5 },
+    }
+    ;(client.post as Mock).mockRejectedValue(err)
+    await expect(saveCanvas('p', { kind: 'scene', episode: '1', shot: '1' }, data as never, { expectedRev: 5 }))
+      .rejects.toBeInstanceOf(CanvasVersionError)
+    await expect(saveCanvas('p', { kind: 'scene', episode: '1', shot: '1' }, data as never, { expectedRev: 5 }))
+      .rejects.toMatchObject({ currentRev: 9, expectedRev: 5 })
   })
 })

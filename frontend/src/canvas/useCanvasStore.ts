@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { createCanvasData, newId, type CanvasConnection, type CanvasData, type CanvasNodeData, type NodeConfig } from './types'
-import { loadCanvas, saveCanvas, type CanvasTarget } from './api'
+import { loadCanvas, saveCanvas, CanvasVersionError, type CanvasTarget } from './api'
 import { canConnect, canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
 import { getPrototype } from './registry'
 import { applyConnectionSync } from './connectionSync'
@@ -45,6 +45,14 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   const dirty = ref(false)
   const saving = ref(false)
   const error = ref<string | null>(null)
+  /** 最近一次成功保存/加载的画布版本号（rev；自动保存的 CAS 基准） */
+  const savedRev = ref(0)
+  /**
+   * 保存版本冲突状态（服务端 409 VERSION_CONFLICT）：
+   * 非空表示"当前画布已被他人或引用更新"，自动保存已停止，须用户决定
+   * 备份/强制覆盖/重新加载后才会清除。
+   */
+  const conflict = ref<{ currentRev: number; expectedRev: number } | null>(null)
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -89,12 +97,20 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     for (const l of connectionListeners) l(e)
   }
 
-  /** 加载画布；不存在时保持空画布 */
+  /**
+   * 加载画布；不存在时保持空画布（并把版本号归零）。
+   * 刷新版本号会同步清除冲突状态（加载到的即服务端最新版本）。
+   */
   async function load(): Promise<void> {
     const existing = await loadCanvas(project, targetRef.value)
     if (existing) {
-      data.value = existing
+      data.value = existing.canvas
+      savedRev.value = existing.rev
+    } else {
+      data.value = createCanvasData(targetRef.value.kind)
+      savedRev.value = 0
     }
+    conflict.value = null
     loaded.value = true
   }
 
@@ -112,27 +128,85 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   function scheduleSave(): void {
+    // 版本冲突期间停止自动保存：保留本地修改，等待用户决定（备份/强制覆盖/重新加载）
+    if (conflict.value) return
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
       void save()
     }, SAVE_DEBOUNCE_MS)
   }
 
-  /** 立即保存画布定义 */
-  async function save(): Promise<void> {
+  /**
+   * CAS 保存画布定义（自动保存/切换前落盘共用）。
+   *
+   * @returns true = 保存成功（或无冲突）；false = 失败（版本冲突 or 其它错误，
+   *   冲突详情见 conflict，其它错误见 error）
+   */
+  async function save(): Promise<boolean> {
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    if (conflict.value) return false
+    saving.value = true
+    try {
+      const res = await saveCanvas(project, targetRef.value, data.value, { expectedRev: savedRev.value })
+      savedRev.value = res.rev
+      dirty.value = false
+      conflict.value = null
+      return true
+    } catch (e) {
+      if (e instanceof CanvasVersionError) {
+        conflict.value = { currentRev: e.currentRev, expectedRev: e.expectedRev }
+        dirty.value = true
+      } else {
+        error.value = e instanceof Error ? e.message : String(e)
+      }
+      return false
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /**
+   * 强制覆盖保存（仅用户输入「确认覆盖」后调用）：跳过版本比对，rev 仍由后端递增。
+   * 成功后清除冲突状态并继续正常自动保存。
+   *
+   * @returns true = 保存成功
+   */
+  async function forceSave(): Promise<boolean> {
     if (saveTimer) {
       clearTimeout(saveTimer)
       saveTimer = null
     }
     saving.value = true
     try {
-      await saveCanvas(project, targetRef.value, data.value)
+      const res = await saveCanvas(project, targetRef.value, data.value, {
+        expectedRev: conflict.value?.expectedRev ?? savedRev.value,
+        force: true,
+      })
+      savedRev.value = res.rev
       dirty.value = false
+      conflict.value = null
+      return true
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
+      return false
     } finally {
       saving.value = false
     }
+  }
+
+  /**
+   * 重新加载服务端最新版本（放弃本地未保存修改；调用方必须先经用户确认）。
+   * 清空撤销历史与冲突状态。
+   */
+  async function reloadFromServer(): Promise<void> {
+    await load()
+    historyPast.value = []
+    historyFuture.value = []
+    dirty.value = false
+    error.value = null
   }
 
   /**
@@ -613,19 +687,35 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
    * 切换画布目标（如切换分镜/场景）：先落盘当前未保存修改，再重置全部状态并加载新画布。
    *
    * @param newTarget 新画布目标
+   * @param opts.discard 为 true 时跳过保存直接切换（仅切换对话框「放弃本地修改」使用；
+   *   此时当前画布必然处于版本冲突态，本地修改将被丢弃）
+   * @returns 'ok' = 已切换；'conflict' = 当前画布保存版本冲突，**未切换**、
+   *   数据保留原样，由调用方提示用户（强制覆盖后重试 / 放弃修改 / 取消）
    */
-  async function switchTarget(newTarget: CanvasTarget): Promise<void> {
+  async function switchTarget(
+    newTarget: CanvasTarget,
+    opts: { discard?: boolean } = {},
+  ): Promise<'ok' | 'conflict'> {
+    // 目标与当前相同：无需切换（冲突「取消」回退 URL 会再次触发切换请求）
+    const cur = targetRef.value
+    if (
+      cur.kind === newTarget.kind
+      && cur.episode === newTarget.episode
+      && cur.shot === newTarget.shot
+      && cur.stage === newTarget.stage
+      && cur.label === newTarget.label
+    ) {
+      return 'ok'
+    }
     // 先取消待执行的防抖保存，并把当前画布未保存的修改落盘（此刻仍指向旧目标）
     if (saveTimer) {
       clearTimeout(saveTimer)
       saveTimer = null
     }
-    if (dirty.value) {
-      try {
-        await save()
-      } catch {
-        // 保存失败不阻塞切换
-      }
+    if (!opts.discard && dirty.value) {
+      // 非冲突错误不阻塞切换（沿用原行为）；版本冲突则阻止切换，交由调用方提示
+      const ok = await save()
+      if (!ok && conflict.value) return 'conflict'
     }
     targetRef.value = { ...newTarget }
     data.value = createCanvasData(targetRef.value.kind)
@@ -635,8 +725,10 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     dirty.value = false
     saving.value = false
     error.value = null
+    conflict.value = null
     loaded.value = false
     await load()
+    return 'ok'
   }
 
   return {
@@ -645,10 +737,14 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     dirty,
     saving,
     error,
+    savedRev,
+    conflict,
     nodes,
     connections,
     load,
     save,
+    forceSave,
+    reloadFromServer,
     addNode,
     removeNode,
     removeNodes,
