@@ -537,11 +537,15 @@ const createDialog = reactive({
 /** 集数 → 分镜选项（label 已按别名规则生成；供「插入位置」下拉展示） */
 const shotsByEpisode = computed<Record<string, { shot: string; label: string }[]>>(() => {
   const map: Record<string, { shot: string; label: string }[]> = {}
-  for (const item of treeItems.value) {
-    if (item.kind !== 'episode' || !item.episode || !item.children) continue
-    map[item.episode] = item.children
-      .filter((c): c is TreeItem & { shot: string } => c.kind === 'shot' && !!c.shot)
-      .map((c) => ({ shot: c.shot, label: c.name }))
+  // 集数节点是 root-scene 的子节点（非顶层），须先下钻一层
+  for (const root of treeItems.value) {
+    if (root.kind !== 'root-scene' || !root.children) continue
+    for (const item of root.children) {
+      if (item.kind !== 'episode' || !item.episode || !item.children) continue
+      map[item.episode] = item.children
+        .filter((c): c is TreeItem & { shot: string } => c.kind === 'shot' && !!c.shot)
+        .map((c) => ({ shot: c.shot, label: c.name }))
+    }
   }
   return map
 })

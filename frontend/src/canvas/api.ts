@@ -122,7 +122,7 @@ export async function saveCanvas(
   opts: SaveCanvasOptions,
 ): Promise<{ rev: number; updatedAt: string }> {
   try {
-    const { data: res } = await client.post<{ success: boolean; rev: number; updatedAt: string }>(
+    const { data: res } = await client.put<{ success: boolean; rev: number; updatedAt: string }>(
       '/canvas/def',
       {
         project,

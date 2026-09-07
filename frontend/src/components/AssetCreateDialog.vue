@@ -320,6 +320,12 @@ watch(() => props.modelValue, (open) => {
   form.position = 'end'
   form.alias = ''
   form.showPrefix = true
+  // 移动分镜：预填被移动分镜的当前别名（未配置别名时留空）
+  if (props.mode === 'move' && props.moveSource) {
+    const info = props.meta?.shots[props.moveSource.episode]?.[props.moveSource.shot]
+    form.alias = info?.alias ?? ''
+    form.showPrefix = info?.showPrefix ?? true
+  }
 })
 
 async function submit() {
