@@ -49,6 +49,24 @@ const UPLOADABLE_IMAGE_PATHS = [
   /^assert\/prop\/[^/]+\/[^/]+\/image\.jpg$/u,
 ];
 
+/** 角色声音/声音变体允许上传的音频扩展名（解析"当前文件"的候选顺序，flac 为生成产物默认优先） */
+export const VOICE_AUDIO_EXTS = ['flac', 'mp3', 'wav', 'ogg', 'm4a', 'aac'] as const;
+
+/** 允许用户上传覆盖的声音资产路径（角色声音 voice.{ext} 与声音变体 voice-variants/{id}.{ext}） */
+const UPLOADABLE_AUDIO_PATHS = [
+  /^assert\/character\/[^/]+\/voice\.(?:flac|mp3|wav|ogg|m4a|aac)$/iu,
+  /^assert\/character\/[^/]+\/voice-variants\/[^/]+\.(?:flac|mp3|wav|ogg|m4a|aac)$/iu,
+];
+
+/**
+ * 声音资产路径（角色声音/声音变体）：
+ * 此类资产保留原格式上传（扩展名可能随版本变化），历史列表不按扩展名过滤，
+ * 激活历史版本时也允许扩展名不一致（按历史版本扩展名成为当前文件）。
+ */
+function isVoiceAudioPath(relPath: string): boolean {
+  return UPLOADABLE_AUDIO_PATHS.some((re) => re.test(relPath));
+}
+
 /**
  * 校验是否为可上传的图片资产路径。
  * @returns 规范化后的 assert 相对路径
@@ -65,6 +83,21 @@ export function assertUploadableImagePath(relPath: string): string {
 }
 
 /**
+ * 校验是否为可上传的声音资产路径（角色声音 / 声音变体音频）。
+ * @returns 规范化后的 assert 相对路径
+ */
+export function assertUploadableAudioPath(relPath: string): string {
+  const normalized = assertIsAssertPath(relPath);
+  if (!UPLOADABLE_AUDIO_PATHS.some((re) => re.test(normalized))) {
+    throw Object.assign(
+      new Error('仅支持上传角色声音或声音变体音频'),
+      { code: 'INVALID' },
+    );
+  }
+  return normalized;
+}
+
+/**
  * 将上传内容写入资产路径：若已有当前资产则先归档历史，再写入新文件。
  */
 export async function saveUploadedAsset(
@@ -74,6 +107,40 @@ export async function saveUploadedAsset(
 ): Promise<{ path: string; archived: string | null }> {
   const rel = assertUploadableImagePath(assetRelPath);
   const archived = await archiveExistingAsset(project, rel);
+  const full = resolveProjectPath(project, rel);
+  await fs.mkdir(path.dirname(full), { recursive: true });
+  await fs.writeFile(full, data);
+  return { path: rel, archived };
+}
+
+/**
+ * 将上传的声音写入资产路径（**保留原格式**，扩展名随上传文件）：
+ * 先把同 stem 任意扩展名的现有当前音频（如已有 voice.flac 时上传 voice.mp3）
+ * 归档进历史目录，再写入新文件——保证同一时刻只有一个"当前"音频文件。
+ *
+ * @param project 项目名
+ * @param assetRelPath 目标 assert 相对路径（voice.{ext} / voice-variants/{id}.{ext}）
+ * @param data 上传内容
+ * @returns 新文件相对路径与全部归档历史路径（无旧文件时为空数组）
+ */
+export async function saveUploadedAudio(
+  project: string,
+  assetRelPath: string,
+  data: Buffer,
+): Promise<{ path: string; archived: string[] }> {
+  const rel = assertUploadableAudioPath(assetRelPath);
+  const ext = path.extname(rel).toLowerCase();
+  const stem = path.posix.basename(rel, ext);
+  const dir = path.posix.dirname(rel);
+  // 归档同 stem 的所有候选扩展名当前文件（含目标扩展名本身）
+  const archived: string[] = [];
+  for (const candidateExt of VOICE_AUDIO_EXTS) {
+    const candidate = `${dir}/${stem}.${candidateExt}`;
+    if (candidate === rel || (await pathExists(resolveProjectPath(project, candidate)))) {
+      const archivedRel = await archiveExistingAsset(project, candidate).catch(() => null);
+      if (archivedRel) archived.push(archivedRel);
+    }
+  }
   const full = resolveProjectPath(project, rel);
   await fs.mkdir(path.dirname(full), { recursive: true });
   await fs.writeFile(full, data);
@@ -173,7 +240,8 @@ export async function listAssetHistory(
 
   for (const entry of entries) {
     if (!entry.isFile()) continue;
-    if (ext && path.extname(entry.name).toLowerCase() !== ext) continue;
+    // 声音资产保留原格式上传：历史不按当前路径扩展名过滤（跨扩展名版本均可列出与回滚）
+    if (ext && path.extname(entry.name).toLowerCase() !== ext && !isVoiceAudioPath(rel)) continue;
     const fileRel = `${histDirRel}/${entry.name}`;
     const full = resolveProjectPath(project, fileRel);
     const stat = await fs.stat(full);
@@ -192,6 +260,10 @@ export async function listAssetHistory(
 
 /**
  * 将历史版本激活为当前：当前文件归档，历史文件移到当前路径。
+ *
+ * 声音资产（保留原格式上传）允许历史版本与当前文件扩展名不一致：
+ * 激活后当前文件使用历史版本的扩展名（如当前 voice.mp3、激活历史 voice.flac
+ * 后当前文件变为 voice.flac，由前端按候选顺序重新解析）。
  */
 export async function activateHistoryVersion(
   project: string,
@@ -214,16 +286,21 @@ export async function activateHistoryVersion(
 
   const currentExt = path.extname(currentRel).toLowerCase();
   const versionExt = path.extname(versionRel).toLowerCase();
-  if (currentExt !== versionExt) {
+  const sound = isVoiceAudioPath(currentRel);
+  if (currentExt !== versionExt && !sound) {
     throw Object.assign(new Error('历史版本扩展名与当前资产不一致'), { code: 'INVALID' });
   }
 
   const archived = await archiveExistingAsset(project, currentRel);
-  const currentFull = resolveProjectPath(project, currentRel);
+  // 声音资产：当前文件用历史版本的扩展名（其余原样保留目标 stem）
+  const targetRel = currentExt !== versionExt && sound
+    ? `${path.posix.dirname(currentRel)}/${path.posix.basename(currentRel, currentExt)}${versionExt}`
+    : currentRel;
+  const currentFull = resolveProjectPath(project, targetRel);
   await fs.mkdir(path.dirname(currentFull), { recursive: true });
   await fs.rename(versionFull, currentFull);
 
-  return { archived, current: currentRel };
+  return { archived, current: targetRel };
 }
 
 /**

@@ -433,6 +433,44 @@ export async function uploadAssetImage(
   } catch (e) { rethrow(e) }
 }
 
+/**
+ * 上传声音资产（角色声音 / 声音变体音频，**保留原格式**，扩展名随上传文件）。
+ * 服务端会先把同 stem 任意扩展名的现有音频归档进历史，再写入新文件。
+ *
+ * @param project 项目名
+ * @param assetPath 目标 assert 相对路径（如 assert/character/小明/voice.mp3）
+ * @param file 上传的音频文件
+ * @returns path 为实际落盘路径；archived 为归档历史版本路径列表（无旧文件时为空数组）
+ */
+export async function uploadAssetAudio(
+  project: string,
+  assetPath: string,
+  file: File,
+) {
+  try {
+    const form = new FormData()
+    form.append('path', assetPath)
+    form.append('file', file)
+    const { data } = await client.post(`/assets/${project}/upload-audio`, form)
+    return data as { success: boolean; path: string; archived: string[] }
+  } catch (e) { rethrow(e) }
+}
+
+/**
+ * 读取角色基础声音实际存在的当前音频（voice.{flac|mp3|...}；保留原格式上传）。
+ * @param project 项目名
+ * @param name 角色名
+ * @returns path 为实际文件相对路径；无音频时为 null
+ */
+export async function getCharacterVoiceFile(project: string, name: string) {
+  try {
+    const { data } = await client.get(
+      `/assets/${project}/character/${encodeURIComponent(name)}/voice/file`,
+    )
+    return data as { path: string | null }
+  } catch (e) { rethrow(e) }
+}
+
 
 // ── 衍生变体 ────────────────────────────────────────────────────────
 
@@ -609,7 +647,10 @@ export interface VoiceVariantInfo {
   kind: 'character'
   owner: string
   metaPath: string
-  audioPath: string
+  /** 实际存在的当前音频相对路径（未上传/未生成时为 null；上传保留原格式） */
+  audioPath: string | null
+  /** 生成输出路径（规范 .flac；「重新生成」目标固定） */
+  outputPath: string
   hasAudio: boolean
 }
 

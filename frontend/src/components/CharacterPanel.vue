@@ -120,8 +120,8 @@
           </v-col>
           <v-col cols="6">
             <audio
-              v-if="voiceAudio"
-              :src="voiceAudio"
+              v-if="voiceAudioPath"
+              :src="voiceAudioUrl"
               controls
               style="width: 100%"
             />
@@ -143,12 +143,18 @@
           >
             生成
           </v-btn>
+          <AssetAudioUploadButton
+            :project="props.project"
+            :path-base="`assert/character/${props.name}/voice`"
+            label="上传音频"
+            @uploaded="load"
+          />
           <v-btn
             size="small"
             variant="text"
             prepend-icon="mdi-history"
-            :disabled="!voiceAudio"
-            @click="openHistory(`assert/character/${props.name}/voice.flac`)"
+            :disabled="!voiceAudioPath"
+            @click="openHistory(voiceAudioPath)"
           >
             历史版本
           </v-btn>
@@ -213,6 +219,22 @@
               >
                 {{ v.hasAudio ? '重新生成' : '生成' }}
               </v-btn>
+              <AssetAudioUploadButton
+                :project="props.project"
+                :path-base="`assert/character/${props.name}/voice-variants/${v.id}`"
+                label="上传音频"
+                icon-only
+                :icon="'mdi-upload'"
+                @uploaded="load"
+              />
+              <v-btn
+                size="small"
+                variant="text"
+                icon="mdi-history"
+                title="历史版本"
+                :disabled="!v.audioPath"
+                @click="openHistory(v.audioPath!)"
+              />
               <v-btn
                 size="small"
                 variant="text"
@@ -230,7 +252,7 @@
               />
             </div>
             <div
-              v-if="v.hasAudio"
+              v-if="v.audioPath"
               class="mb-2"
             >
               <audio
@@ -406,6 +428,7 @@ import {
   AssetApiError,
   createCharacterVoiceVariant,
   deleteCharacterVoiceVariant,
+  getCharacterVoiceFile,
   listCharacterVoiceVariants,
   renameCharacterVoiceVariant,
   updateCharacterVoiceVariant,
@@ -417,6 +440,7 @@ import MarkdownView from './MarkdownView.vue'
 import GenerateDialog from './GenerateDialog.vue'
 import AssetHistoryDialog from './AssetHistoryDialog.vue'
 import AssetImageUploadButton from './AssetImageUploadButton.vue'
+import AssetAudioUploadButton from './AssetAudioUploadButton.vue'
 import VariantPanel from './VariantPanel.vue'
 import CustomAssetSection from './CustomAssetSection.vue'
 
@@ -437,7 +461,15 @@ const props = defineProps<{ project: string; name: string }>()
 const tab = ref<string | null>(null)
 const data = ref<CharData | null>(null)
 const appearanceImg = ref('')
-const voiceAudio = ref('')
+/** 角色基础声音实际存在的当前音频（相对路径；保留原格式上传，扩展名不定） */
+const voiceAudioPath = ref('')
+
+/** 角色基础声音预览 URL（带缓存破坏参数；无音频时为空串） */
+const voiceAudioUrl = computed(() =>
+  voiceAudioPath.value
+    ? `/api/fs/${props.project}/${voiceAudioPath.value}?t=${Date.now()}`
+    : '',
+)
 
 const dialog = ref<DialogState>({ show: false, field: '', content: '' })
 
@@ -507,24 +539,21 @@ const genConfig = computed(() => {
       name: props.name,
     } as Record<string, string>,
     promptPaths: [`prompt/character/${props.name}/voice.md`],
-    existingAsset: voiceAudio.value ? '已有音频' : undefined,
+    existingAsset: voiceAudioPath.value ? '已有音频' : undefined,
   }
 })
 
 async function load() {
-  const results = await Promise.all([
+  const [overview, appearance, voice, hasAppearance, voiceFile] = await Promise.all([
     readFs(props.project, `prompt/character/${props.name}/overview.md`).catch(() => ''),
     readFs(props.project, `prompt/character/${props.name}/appearance.md`).catch(() => ''),
     readFs(props.project, `prompt/character/${props.name}/voice.md`).catch(() => ''),
     existsFs(props.project, `assert/character/${props.name}/appearance.jpg`),
-    existsFs(props.project, `assert/character/${props.name}/voice.flac`),
+    getCharacterVoiceFile(props.project, props.name).catch(() => ({ path: null as string | null })),
   ])
-  const overview = results[0] as string
-  const appearance = results[1] as string
-  const voice = results[2] as string
-  data.value = { overview, appearance, voice }
-  appearanceImg.value = results[3] ? `/api/fs/${props.project}/assert/character/${props.name}/appearance.jpg?t=${Date.now()}` : ''
-  voiceAudio.value = results[4] ? `/api/fs/${props.project}/assert/character/${props.name}/voice.flac?t=${Date.now()}` : ''
+  data.value = { overview: overview as string, appearance: appearance as string, voice: voice as string }
+  appearanceImg.value = hasAppearance ? `/api/fs/${props.project}/assert/character/${props.name}/appearance.jpg?t=${Date.now()}` : ''
+  voiceAudioPath.value = voiceFile.path ?? ''
   await loadVoiceVariants()
 }
 
@@ -557,9 +586,9 @@ async function loadVoiceVariants() {
   }
 }
 
-/** 生成声音变体音频的预览 URL（带缓存破坏参数） */
+/** 声音变体音频的预览 URL（实际存在的当前音频；无音频时为空串） */
 function voiceVariantAudioUrl(v: VoiceVariantInfo): string {
-  return `/api/fs/${props.project}/${v.audioPath}?t=${Date.now()}`
+  return v.audioPath ? `/api/fs/${props.project}/${v.audioPath}?t=${Date.now()}` : ''
 }
 
 /** 打开「新增声音变体」对话框 */
@@ -638,7 +667,7 @@ async function onDeleteVoiceVariant(v: VoiceVariantInfo) {
   }
 }
 
-/** 打开声音变体生成对话框（tts-voice-design，prompt 按模式拼接、text 为台词） */
+/** 打开声音变体生成对话框（tts-voice-design，prompt 按模式拼接、text 为台词；输出固定规范 .flac） */
 function openVoiceVariantGenerate(v: VoiceVariantInfo) {
   voiceVariantGen.value = {
     show: true,
@@ -649,7 +678,7 @@ function openVoiceVariantGenerate(v: VoiceVariantInfo) {
       character: props.name,
       name: props.name,
     },
-    outputPath: v.audioPath,
+    outputPath: v.outputPath,
     promptPaths: [v.metaPath],
     existingAsset: v.hasAudio ? '已有音频' : undefined,
   }

@@ -71,7 +71,8 @@ describe('角色声音变体 CRUD', () => {
     });
     expect(v.promptMode).toBe('append');
     expect(v.hasAudio).toBe(false);
-    expect(v.audioPath).toBe('assert/character/小明/voice-variants/哭腔.flac');
+    expect(v.audioPath).toBeNull();
+    expect(v.outputPath).toBe('assert/character/小明/voice-variants/哭腔.flac');
     expect(v.metaPath).toBe('prompt/character/小明/voice-variants/哭腔.json');
     // meta 落盘
     const raw = await fs.readFile(path.join(tmpRoot, 'prompt/character/小明/voice-variants/哭腔.json'), 'utf-8');
@@ -114,14 +115,33 @@ describe('角色声音变体 CRUD', () => {
     );
   });
 
-  it('列表返回已生成音频标记（hasAudio）', async () => {
+  it('列表返回已生成音频标记（hasAudio 与 audioPath 按实际文件解析）', async () => {
     const v = await createCharacterVoiceVariant('p', '小明', { id: '哭腔', prompt: 'a', 台词: 'b' });
-    // 模拟已生成音频
-    await fs.mkdir(path.dirname(path.join(tmpRoot, v.audioPath)), { recursive: true });
-    await fs.writeFile(path.join(tmpRoot, v.audioPath), 'fake-flac', 'utf-8');
+    // 模拟已生成音频（规范 .flac）
+    await fs.mkdir(path.dirname(path.join(tmpRoot, v.outputPath)), { recursive: true });
+    await fs.writeFile(path.join(tmpRoot, v.outputPath), 'fake-flac', 'utf-8');
     const list = await listCharacterVoiceVariants('p', '小明');
     expect(list).toHaveLength(1);
     expect(list[0].hasAudio).toBe(true);
+    expect(list[0].audioPath).toBe('assert/character/小明/voice-variants/哭腔.flac');
+    expect(list[0].outputPath).toBe('assert/character/小明/voice-variants/哭腔.flac');
+  });
+
+  it('手动上传 mp3 后：audioPath 按实际扩展名解析（保留原格式）', async () => {
+    await createCharacterVoiceVariant('p', '小明', { id: '哭腔', prompt: 'a', 台词: 'b' });
+    // 模拟上传 mp3（同 stem 无其它扩展名文件）
+    const mp3Rel = 'assert/character/小明/voice-variants/哭腔.mp3';
+    await fs.mkdir(path.dirname(path.join(tmpRoot, mp3Rel)), { recursive: true });
+    await fs.writeFile(path.join(tmpRoot, mp3Rel), 'fake-mp3', 'utf-8');
+    const list = await listCharacterVoiceVariants('p', '小明');
+    expect(list[0].hasAudio).toBe(true);
+    expect(list[0].audioPath).toBe(mp3Rel);
+    expect(list[0].outputPath).toBe('assert/character/小明/voice-variants/哭腔.flac');
+    // 生成产物 flac 优先于上传的 mp3（flac 为生成产物默认优先）
+    const flacRel = 'assert/character/小明/voice-variants/哭腔.flac';
+    await fs.writeFile(path.join(tmpRoot, flacRel), 'fake-flac', 'utf-8');
+    const list2 = await listCharacterVoiceVariants('p', '小明');
+    expect(list2[0].audioPath).toBe(flacRel);
   });
 
   it('更新变体：修改提示词/模式/台词', async () => {
@@ -142,14 +162,15 @@ describe('角色声音变体 CRUD', () => {
     );
   });
 
-  it('重命名变体：同步重命名音频文件', async () => {
+  it('重命名变体：同步重命名音频文件（保留原扩展名）', async () => {
     const v = await createCharacterVoiceVariant('p', '小明', { id: '哭腔', prompt: 'a', 台词: 'b' });
-    await fs.mkdir(path.dirname(path.join(tmpRoot, v.audioPath)), { recursive: true });
-    await fs.writeFile(path.join(tmpRoot, v.audioPath), 'fake', 'utf-8');
+    await fs.mkdir(path.dirname(path.join(tmpRoot, v.outputPath)), { recursive: true });
+    await fs.writeFile(path.join(tmpRoot, v.outputPath), 'fake', 'utf-8');
 
     const renamed = await renameCharacterVoiceVariant('p', '小明', '哭腔', '大哭');
     expect(renamed.id).toBe('大哭');
     expect(renamed.audioPath).toBe('assert/character/小明/voice-variants/大哭.flac');
+    expect(renamed.outputPath).toBe('assert/character/小明/voice-variants/大哭.flac');
     // 旧 meta 已删除、旧音频已移动
     await expect(fs.access(path.join(tmpRoot, 'prompt/character/小明/voice-variants/哭腔.json'))).rejects.toThrow();
     await expect(fs.access(path.join(tmpRoot, 'assert/character/小明/voice-variants/哭腔.flac'))).rejects.toThrow();
@@ -158,6 +179,17 @@ describe('角色声音变体 CRUD', () => {
     const list = await listCharacterVoiceVariants('p', '小明');
     expect(list.map((x) => x.id)).toEqual(['大哭']);
     expect(list[0].hasAudio).toBe(true);
+  });
+
+  it('重命名变体：上传的 mp3 音频同样随名称迁移（保留扩展名）', async () => {
+    await createCharacterVoiceVariant('p', '小明', { id: '哭腔', prompt: 'a', 台词: 'b' });
+    const mp3Rel = 'assert/character/小明/voice-variants/哭腔.mp3';
+    await fs.mkdir(path.dirname(path.join(tmpRoot, mp3Rel)), { recursive: true });
+    await fs.writeFile(path.join(tmpRoot, mp3Rel), 'fake-mp3', 'utf-8');
+
+    const renamed = await renameCharacterVoiceVariant('p', '小明', '哭腔', '大哭');
+    expect(renamed.audioPath).toBe('assert/character/小明/voice-variants/大哭.mp3');
+    await fs.access(path.join(tmpRoot, 'assert/character/小明/voice-variants/大哭.mp3'));
   });
 
   it('重命名到已存在名称报 EXISTS', async () => {
@@ -171,8 +203,8 @@ describe('角色声音变体 CRUD', () => {
 
   it('删除变体：移除 meta、音频与 history 目录', async () => {
     const v = await createCharacterVoiceVariant('p', '小明', { id: '哭腔', prompt: 'a', 台词: 'b' });
-    await fs.mkdir(path.dirname(path.join(tmpRoot, v.audioPath)), { recursive: true });
-    await fs.writeFile(path.join(tmpRoot, v.audioPath), 'fake', 'utf-8');
+    await fs.mkdir(path.dirname(path.join(tmpRoot, v.outputPath)), { recursive: true });
+    await fs.writeFile(path.join(tmpRoot, v.outputPath), 'fake', 'utf-8');
     const histDir = path.join(tmpRoot, 'assert/character/小明/voice-variants/history/哭腔');
     await fs.mkdir(histDir, { recursive: true });
     await fs.writeFile(path.join(histDir, 'old.flac'), 'old', 'utf-8');

@@ -137,6 +137,7 @@ import { ref, watch } from 'vue'
 import { existsFs, readFs, type DirEntry, type DirResponse } from '../../api/client'
 import {
   getCharacterCategories,
+  getCharacterVoiceFile,
   listCharacterVariants,
   listCharacterVoiceVariants,
   listStageVariants,
@@ -340,9 +341,9 @@ async function buildCharacterTree(project: string, name: string): Promise<AssetI
 }
 
 /**
- * 构建角色的「音色」分区条目：角色设计音色（assert/character/{name}/voice.flac）
- * 与声音变体音频（assert/character/{name}/voice-variants/{id}.flac）。
- * 仅在该文件已生成且未被排除时返回分区标题 + 音频条目，否则返回空数组。
+ * 构建角色的「音色」分区条目：角色设计音色（assert/character/{name}/voice.{flac|mp3|...}，
+ * 手动上传保留原格式）与声音变体音频（assert/character/{name}/voice-variants/{id}.{ext}）。
+ * 仅在该文件已存在且未被排除时返回分区标题 + 音频条目，否则返回空数组。
  *
  * @param project 项目名
  * @param name 角色名
@@ -351,18 +352,18 @@ async function buildCharacterTree(project: string, name: string): Promise<AssetI
 async function buildVoiceSection(project: string, name: string): Promise<AssetItem[]> {
   const items: AssetItem[] = []
 
-  // 角色设计音色（基础）
-  const voicePath = `assert/character/${name}/voice.flac`
-  const voiceExists = !props.exclude.includes(voicePath) && (await existsFs(project, voicePath))
-  if (voiceExists) {
+  // 角色设计音色（基础）：按实际存在的当前音频解析（扩展名不定）
+  const voiceItem = await getCharacterVoiceFile(project, name).catch(() => ({ path: null as string | null }))
+  const voicePath = voiceItem.path
+  if (voicePath && !props.exclude.includes(voicePath)) {
     items.push({ path: voicePath, label: `${name}/音色`, thumbnail: '', depth: 1, audio: true })
   }
 
-  // 声音变体（单层）：仅列出已生成音频的变体
+  // 声音变体（单层）：仅列出已有当前音频的变体
   try {
     const { variants } = await listCharacterVoiceVariants(project, name)
     for (const v of variants) {
-      if (!v.hasAudio || props.exclude.includes(v.audioPath)) continue
+      if (!v.audioPath || props.exclude.includes(v.audioPath)) continue
       items.push({
         path: v.audioPath,
         label: `${name}/音色/${v.id}`,

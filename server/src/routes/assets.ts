@@ -35,6 +35,7 @@ import {
   deleteHistoryVersion,
   listAssetHistory,
   saveUploadedAsset,
+  saveUploadedAudio,
 } from '../assets/history.js';
 import {
   createCharacterVariant,
@@ -53,6 +54,7 @@ import {
   deleteCharacterVoiceVariant,
   listCharacterVoiceVariants,
   renameCharacterVoiceVariant,
+  resolveCharacterVoiceAudio,
   updateCharacterVoiceVariant,
 } from '../assets/voice-variants.js';
 import {
@@ -81,12 +83,37 @@ const ALLOWED_IMAGE_MIME = new Set([
   'image/webp',
 ]);
 
+const ALLOWED_AUDIO_MIME = new Set([
+  'audio/flac',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/ogg',
+  'audio/mp4',
+  'audio/x-m4a',
+  'audio/m4a',
+  'audio/aac',
+]);
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_IMAGE_MIME.has(file.mimetype)) {
       cb(Object.assign(new Error('仅支持 JPG / PNG / WebP 图片'), { code: 'INVALID' }));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+/** 声音上传：内存存储，100MB 限制，MIME 限常见音频格式（flac/mp3/wav/ogg/m4a/aac） */
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_AUDIO_MIME.has(file.mimetype)) {
+      cb(Object.assign(new Error('仅支持 FLAC / MP3 / WAV / OGG / M4A / AAC 音频'), { code: 'INVALID' }));
       return;
     }
     cb(null, true);
@@ -760,6 +787,53 @@ assetsRouter.post(
 );
 
 
+/**
+ * POST 上传声音资产（角色声音 / 声音变体音频，**保留原格式**）
+ * multipart: file + path（assert 相对路径，如 `assert/character/{名}/voice.mp3`、
+ * `assert/character/{名}/voice-variants/{变体}.wav`）
+ * 上传前把同 stem 任意扩展名的现有音频归档进历史，再写入新文件（同刻仅一个"当前"文件）。
+ */
+assetsRouter.post(
+  '/assets/:project/upload-audio',
+  (req: Request, res: Response, next) => {
+    audioUpload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        const e = err as { code?: string };
+        if (e?.code === 'LIMIT_FILE_SIZE') {
+          res.status(400).json({ error: '音频大小超过 100MB 限制' });
+          return;
+        }
+        if (e?.code === 'Unexpected field') {
+          // 打日志便于排查上传异常（multipart 流错位/字段不匹配）
+          console.error('[assets-audio-upload] 上传失败:', err);
+          res.status(400).json({ error: '上传请求格式错误（multipart 字段不匹配），请重试' });
+          return;
+        }
+        // 未知错误：httpError 内部会打印日志并返回 500
+        httpError(res, err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const project = req.params.project as string;
+      const assetPath = String((req.body as { path?: string }).path ?? '');
+      if (!assetPath) throw Object.assign(new Error('path 必填'), { code: 'INVALID' });
+      const file = req.file;
+      if (!file?.buffer?.length) {
+        throw Object.assign(new Error('请选择要上传的音频文件'), { code: 'INVALID' });
+      }
+      const result = await saveUploadedAudio(project, assetPath, file.buffer);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      httpError(res, err);
+    }
+  },
+);
+
+
 // ── 道具 API（两级结构：分类 → 道具；产物为图片/视频/音频）──────────
 
 // POST 创建道具分类（仅建 prompt/prop/{分类}/ 目录）
@@ -934,6 +1008,18 @@ assetsRouter.get('/assets/:project/character/:name/voice-variants', async (req: 
     const name = req.params.name as string;
     const variants = await listCharacterVoiceVariants(project, name);
     res.json({ variants });
+  } catch (err) {
+    httpError(res, err);
+  }
+});
+
+// GET 角色基础声音实际文件（voice.{flac|mp3|...}；无文件返回 path=null）
+assetsRouter.get('/assets/:project/character/:name/voice/file', async (req: Request, res: Response) => {
+  try {
+    const project = req.params.project as string;
+    const name = req.params.name as string;
+    const path = await resolveCharacterVoiceAudio(project, name);
+    res.json({ path });
   } catch (err) {
     httpError(res, err);
   }

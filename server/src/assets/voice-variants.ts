@@ -7,7 +7,9 @@
  *
  * 目录约定（不出现在资产浏览器树中）：
  * - prompt/character/{name}/voice-variants/{variantId}.json
- * - assert/character/{name}/voice-variants/{variantId}.flac
+ * - assert/character/{name}/voice-variants/{variantId}.{flac|mp3|wav|ogg|m4a|aac}
+ *   —— 生成产物固定为 .flac（outputPath）；手动上传**保留原格式**，
+ *   实际存在的当前音频由 audioPath 给出（候选顺序见 VOICE_AUDIO_EXTS）。
  *
  * meta JSON：
  * {
@@ -28,6 +30,7 @@ import {
   pathExists,
   resolveProjectPath,
 } from './paths.js';
+import { VOICE_AUDIO_EXTS } from './history.js';
 
 /** 提示词模式：append=在角色音色原描述后追加；overwrite=完全覆盖原描述 */
 export type VoicePromptMode = 'append' | 'overwrite';
@@ -50,9 +53,11 @@ export interface VoiceVariantInfo extends VoiceVariantMeta {
   owner: string;
   /** prompt meta 相对路径 */
   metaPath: string;
-  /** assert 音频相对路径 */
-  audioPath: string;
-  /** 是否已生成音频 */
+  /** 实际存在的当前音频相对路径（未上传/未生成时为 null） */
+  audioPath: string | null;
+  /** 生成输出路径（规范 .flac；「重新生成」目标固定） */
+  outputPath: string;
+  /** 是否已有当前音频 */
   hasAudio: boolean;
 }
 
@@ -60,8 +65,48 @@ function voiceMetaRel(name: string, variantId: string): string {
   return `prompt/character/${name}/voice-variants/${variantId}.json`;
 }
 
+/** 生成输出路径（规范 .flac） */
 function voiceAudioRel(name: string, variantId: string): string {
   return `assert/character/${name}/voice-variants/${variantId}.flac`;
+}
+
+/**
+ * 解析变体实际存在的当前音频路径（按候选扩展名顺序，flac 为生成产物默认优先）。
+ *
+ * @param project 项目名
+ * @param name 角色名
+ * @param variantId 变体名称
+ * @returns 实际存在的音频相对路径；不存在时为 null
+ */
+export async function resolveVoiceVariantAudio(
+  project: string,
+  name: string,
+  variantId: string,
+): Promise<string | null> {
+  for (const ext of VOICE_AUDIO_EXTS) {
+    const rel = `assert/character/${name}/voice-variants/${variantId}.${ext}`;
+    if (await pathExists(resolveProjectPath(project, rel))) return rel;
+  }
+  return null;
+}
+
+/**
+ * 解析角色基础声音实际存在的当前音频路径（voice.{ext}）。
+ *
+ * @param project 项目名
+ * @param name 角色名
+ * @returns 实际存在的音频相对路径；不存在时为 null
+ */
+export async function resolveCharacterVoiceAudio(
+  project: string,
+  name: string,
+): Promise<string | null> {
+  assertSafeName(name, '角色名');
+  for (const ext of VOICE_AUDIO_EXTS) {
+    const rel = `assert/character/${name}/voice.${ext}`;
+    if (await pathExists(resolveProjectPath(project, rel))) return rel;
+  }
+  return null;
 }
 
 async function readMeta(project: string, metaRel: string): Promise<VoiceVariantMeta | null> {
@@ -103,7 +148,7 @@ function normalizePromptMode(mode: unknown): VoicePromptMode {
  *
  * @param project 项目名
  * @param name 角色名
- * @returns 声音变体信息数组
+ * @returns 声音变体信息数组（audioPath = 实际存在的当前音频，可空；outputPath = 规范 .flac）
  */
 export async function listCharacterVoiceVariants(
   project: string,
@@ -125,8 +170,7 @@ export async function listCharacterVoiceVariants(
     const metaPath = voiceMetaRel(name, variantId);
     const meta = await readMeta(project, metaPath);
     if (!meta) continue;
-    const audioPath = voiceAudioRel(name, variantId);
-    const hasAudio = await pathExists(resolveProjectPath(project, audioPath));
+    const audioPath = await resolveVoiceVariantAudio(project, name, variantId);
     result.push({
       ...meta,
       id: meta.id || variantId,
@@ -134,7 +178,8 @@ export async function listCharacterVoiceVariants(
       owner: name,
       metaPath,
       audioPath,
-      hasAudio,
+      outputPath: voiceAudioRel(name, variantId),
+      hasAudio: audioPath !== null,
     });
   }
   return result.sort((a, b) => a.id.localeCompare(b.id, 'zh'));
@@ -183,13 +228,13 @@ export async function createCharacterVoiceVariant(
     updatedAt: now,
   };
   await writeMeta(project, metaPath, meta);
-  const audioPath = voiceAudioRel(name, id);
   return {
     ...meta,
     kind: 'character',
     owner: name,
     metaPath,
-    audioPath,
+    audioPath: null,
+    outputPath: voiceAudioRel(name, id),
     hasAudio: false,
   };
 }
@@ -231,15 +276,15 @@ export async function updateCharacterVoiceVariant(
   }
   existing.updatedAt = new Date().toISOString();
   await writeMeta(project, metaPath, existing);
-  const audioPath = voiceAudioRel(name, variantId);
-  const hasAudio = await pathExists(resolveProjectPath(project, audioPath));
+  const audioPath = await resolveVoiceVariantAudio(project, name, variantId);
   return {
     ...existing,
     kind: 'character',
     owner: name,
     metaPath,
     audioPath,
-    hasAudio,
+    outputPath: voiceAudioRel(name, variantId),
+    hasAudio: audioPath !== null,
   };
 }
 
@@ -281,13 +326,15 @@ export async function renameCharacterVoiceVariant(
   meta.updatedAt = new Date().toISOString();
   await writeMeta(project, newMetaPath, meta);
   await fs.unlink(resolveProjectPath(project, oldMetaPath));
-  // 同步重命名音频文件
-  const oldAudioPath = voiceAudioRel(name, oldId);
-  const newAudioPath = voiceAudioRel(name, newId);
-  const oldAudioFull = resolveProjectPath(project, oldAudioPath);
-  const newAudioFull = resolveProjectPath(project, newAudioPath);
-  if (await pathExists(oldAudioFull)) {
-    await ensureDir(path.dirname(newAudioFull));
+  // 同步重命名音频文件（保留原扩展名：上传可能为 mp3/wav 等；生成产物为 flac）
+  await ensureDir(resolveProjectPath(project, `assert/character/${name}/voice-variants`));
+  for (const ext of VOICE_AUDIO_EXTS) {
+    const oldAudioFull = resolveProjectPath(project, `assert/character/${name}/voice-variants/${oldId}.${ext}`);
+    if (!(await pathExists(oldAudioFull))) continue;
+    const newAudioFull = resolveProjectPath(project, `assert/character/${name}/voice-variants/${newId}.${ext}`);
+    if (await pathExists(newAudioFull)) {
+      throw Object.assign(new Error('目标音频已存在'), { code: 'EXISTS' });
+    }
     await fs.rename(oldAudioFull, newAudioFull);
   }
   // 清理旧 history 目录（若有）
@@ -295,13 +342,15 @@ export async function renameCharacterVoiceVariant(
   if (await pathExists(oldHistDir)) {
     await fs.rm(oldHistDir, { recursive: true, force: true });
   }
+  const audioPath = await resolveVoiceVariantAudio(project, name, newId);
   return {
     ...meta,
     kind: 'character',
     owner: name,
     metaPath: newMetaPath,
-    audioPath: newAudioPath,
-    hasAudio: await pathExists(newAudioFull),
+    audioPath,
+    outputPath: voiceAudioRel(name, newId),
+    hasAudio: audioPath !== null,
   };
 }
 
@@ -325,10 +374,12 @@ export async function deleteCharacterVoiceVariant(
     throw Object.assign(new Error('声音变体不存在'), { code: 'NOT_FOUND' });
   }
   await fs.unlink(metaFull);
-  const audioPath = voiceAudioRel(name, variantId);
-  const audioFull = resolveProjectPath(project, audioPath);
-  if (await pathExists(audioFull)) {
-    await fs.unlink(audioFull);
+  // 移除所有扩展名的当前音频（上传保留原格式 + 生成 flac 可能并存）
+  for (const ext of VOICE_AUDIO_EXTS) {
+    const audioFull = resolveProjectPath(project, `assert/character/${name}/voice-variants/${variantId}.${ext}`);
+    if (await pathExists(audioFull)) {
+      await fs.unlink(audioFull);
+    }
   }
   const histDir = resolveProjectPath(project, `assert/character/${name}/voice-variants/history/${variantId}`);
   if (await pathExists(histDir)) {

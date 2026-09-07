@@ -94,11 +94,12 @@ export function getPathLabel(path: string): string {
     const rest = path.slice('assert/character/'.length)
     return rest
       .replace('/appearance.jpg', '/外观')
-      .replace('/voice.flac', '/音色')
-      // 声音变体：assert/character/{name}/voice-variants/{id}.flac → {name}/音色/{id}
+      // 角色声音保留原格式上传：voice.{flac|mp3|wav|ogg|m4a|aac} → {name}/音色
+      .replace(/\/voice\.(?:flac|mp3|wav|ogg|m4a|aac)$/i, '/音色')
+      // 声音变体：assert/character/{name}/voice-variants/{id}.{ext} → {name}/音色/{id}
       .replace('/voice-variants/', '/音色/')
       .replace('/variants/', '/')
-      .replace(/\.(jpg|flac)$/, '')
+      .replace(/\.(?:jpg|flac|mp3|wav|ogg|m4a|aac)$/i, '')
   }
   if (path.startsWith('assert/stage/')) {
     const rest = path.slice('assert/stage/'.length)
