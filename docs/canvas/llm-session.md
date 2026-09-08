@@ -6,7 +6,7 @@
 
 ## 目标与总体架构
 
-- **标准 Loading**：AI 文本节点思考/响应期间进入标准状态机（`statusByNode`，`CanvasNodeCard` 渲染原型自定义遮罩 `statusOverlay`——非阻塞轻量形态，不修改原有 UI 交互效果）；节点内 Thinking 条/「停止」按钮/禁用控件/流式输出/自动滚动全部保持。
+- **标准 Loading**：AI 文本节点思考/响应期间进入标准状态机（`statusByNode`，原型 `statusOverlay` 注册为**空组件**——画布不渲染任何遮罩，避免与节点内重复的 Thinking 层）；节点内 Thinking 条/「停止」按钮/禁用控件/流式输出/自动滚动全部保持，状态展示全部在节点内。
 - **跨页面存活**：Loading 恢复由**服务端活跃会话注册表**驱动（会话携带 nodeId + 画布 scope；**仅内存，不持久化、无 localStorage 参与**）；完成后能结束 Loading 并更新响应内容（终态由后端落盘）。
 - **LLM 活跃会话管理**：所有正在调用 LLM 的异步任务统一登记（当前唯一调用点为 AI 文本节点；**全局上限 8**，同节点单飞）；思考+响应完成后从列表移除。
 - **WebSocket 替换 SSE**：`/llm-ws`（全局单例连接，`ws` 库挂载于 `http.createServer(app)`；upgrade 不经 Express 中间件与 SPA 兜底路由）；客户端断开**不再中止上游**。
@@ -38,7 +38,7 @@ App 启动 ──连接 WS(/llm-ws 全局单例)──▶   session-ws 枢纽（
 - **`frontend/src/canvas/llmEvents.ts`**（新增）：`applyLlmEvent(state, event)` 纯函数（**连接态节点与恢复态 AssetCanvas 共用同一消费器**，双路径行为严格一致、可单测；thinking 仅内部累计、snapshot 整体替换进度、finished 置终态 / not-found 静默终态）+ `createThrottledCommit`（500ms 节流 helper，两路径共用）。
 - **`frontend/src/canvas/useCanvasGeneration.ts`**：新增 `beginClientRun(nodeId, lastLog?, taskId?)` / `updateClientRun` / `endClientRun` / `setLlmError` / `interruptLlm`（cancel + 3 秒收敛超时兜底）；**无持久化记录、无 restore llm 分支**（LLM 恢复由 AssetCanvas 按服务端会话列表编排）。
 - **`frontend/src/canvas/useCanvasStore.ts`**：`viewOnlyUpdate(nodeId, patch)`——纯内存补丁（**不入撤销栈、不置脏、不触发保存**；流式期间下游文本消费者读取同一 store 数据实时联动）；`adoptExternalChange(nodeId, patch, newRev)`——终态视图同步（合并后端已落盘补丁 + 入撤销栈（单次撤销可回退到生成前状态）+ `savedRev` 对齐，**不触发写盘**）。
-- **`frontend/src/canvas/registry.ts`**：`NodePrototype.statusOverlay?: Component`（自定义状态遮罩扩展点；未声明时 `CanvasNodeCard` 默认遮罩原样）；`text-ai` 注册 `AiTextStatusOverlay.vue`。
+- **`frontend/src/canvas/registry.ts`**：`NodePrototype.statusOverlay?: Component`（自定义状态遮罩扩展点；未声明时 `CanvasNodeCard` 默认遮罩原样）；`text-ai` 注册为空组件（`() => null`）——画布不渲染任何遮罩，状态展示全部在节点内。
 - **`frontend/src/components/canvas/CanvasNodeCard.vue`**：`statusOverlay` 声明时 running/error 渲染自定义组件（props `status/node/project`；emits `interrupt(nodeId)/retry(nodeId)` 一致）；body 组件透传 `isRunning`/`activeTaskId`/`runningLog`/`canvasTarget`；转发 `update:output-view` 与 `stream-state` 事件。
 - **`frontend/src/components/canvas/nodes/AiTextGenerateNode.vue`**：`onGenerate` → `startLlmTask`（携带 `nodeId/label/canvas/snapshot`）→ `llmSocket.subscribe`；事件经 `applyLlmEvent`（thinking 仅展示 / 首条 text 切「正在响应…」/ 500ms 节流 `update:output-view`）；`stream-state` 上抛（进入/更新/终态 Loading）；停止 → `llmSocket.cancel` + 3 秒收敛超时兜底；卸载/切换画布**仅退订（任务继续）**；`active = generating || isRunning`（恢复态同样禁用控件、Thinking 条显示、「停止」可用）；**不再自行追加历史**（后端完成）。
 - **`frontend/src/components/canvas/composables/useCanvasNodeOps.ts`**：`onInterrupt` 分流 text-ai → `gen.interruptLlm`；`generateNode` text-ai 分支防御提示（生成入口在节点内）。

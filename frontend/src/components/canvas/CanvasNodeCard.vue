@@ -70,8 +70,8 @@
         @open-history="emit('open-history', node.id)"
       />
       <!-- 节点状态遮罩（通用能力）：running 显示加载动画 + 统一中断入口；error 显示错误与重试。
-           原型声明 statusOverlay 时渲染自定义遮罩（如 AI 文本节点的非阻塞轻量遮罩），
-           未声明时保持默认整体遮罩（其余节点行为与视觉零变化）。 -->
+           原型声明 statusOverlay 时渲染自定义遮罩（如 AI 文本节点的空遮罩——节点主体完全自绘
+           运行/错误状态 UI），未声明时保持默认整体遮罩（其余节点行为与视觉零变化）。 -->
       <component
         :is="proto?.statusOverlay"
         v-if="customStatusOverlay"

@@ -13,7 +13,6 @@ import TrimVideoNode from '../components/canvas/nodes/TrimVideoNode.vue'
 import AudioTrimNode from '../components/canvas/nodes/AudioTrimNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
 import AiTextGenerateNode from '../components/canvas/nodes/AiTextGenerateNode.vue'
-import AiTextStatusOverlay from '../components/canvas/nodes/AiTextStatusOverlay.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
@@ -50,10 +49,14 @@ export interface NodePrototype {
   /**
    * 节点自定义状态遮罩组件（可选；未声明时 CanvasNodeCard 渲染默认通用遮罩）。
    *
-   * 供需要「非阻塞轻量遮罩」的节点自行声明（如 AI 文本生成节点：流式输出与
-   * 节点内「停止」按钮不能被整体遮罩拦截）。组件接收
-   * props：{ status: GenerateStatus; node: CanvasNodeData; project: string }，
-   * emits：interrupt(nodeId) / retry(nodeId)（与默认遮罩一致）。
+   * 供需要替换默认整体遮罩（半透明白底 + spinner + 「中断」，会拦截节点交互）的
+   * 节点类型自行声明。组件接收 props：{ status: GenerateStatus; node: CanvasNodeData;
+   * project: string }，emits：interrupt(nodeId) / retry(nodeId)（与默认遮罩一致）。
+   *
+   * 两种形态：
+   * - 非阻塞轻量遮罩组件：遮罩不拦截交互，仅补充部分状态 UI；
+   * - 空组件（`() => null`，如 AI 文本生成节点）：节点主体完全自绘运行/错误状态
+   *   （节点内 Thinking 条 + 「停止」按钮 + 响应区错误红字），画布不渲染任何遮罩。
    */
   statusOverlay?: Component
   /** 创建节点时的默认配置（可选） */
@@ -180,9 +183,11 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,
     bodyComponent: AiTextGenerateNode,
-    // 自定义非阻塞轻量遮罩：仅接入标准状态机，遮罩不拦截流式输出与节点内「停止」按钮
-    // （默认整体遮罩会盖住内容，与「不修改原有 UI 交互效果」冲突，见 docs/plans/ai-text-loading-llm-session.md）
-    statusOverlay: AiTextStatusOverlay,
+    // 空状态遮罩：节点主体完全自绘运行/错误状态 UI（顶部 Thinking 条 + 全控件禁用 +
+    // 「停止」按钮 + 响应区错误红字），画布不再叠加 spinner/中断/错误浮层（避免与节点内
+    // 重复的 Thinking 层）；声明空组件仅为让 CanvasNodeCard 跳过默认整体阻塞遮罩
+    // （默认遮罩会盖住流式输出并拦截节点内控件，见 docs/canvas/llm-session.md）
+    statusOverlay: () => null,
     // 有文本历史版本（右键「历史」打开的是 AiTextHistoryDialog —— config.outputHistory
     // 纯文本快照历史，非资产文件历史；与产物节点的 CanvasAssertHistoryDialog 不同，
     // AssetCanvas 按原型分支渲染对应对话框）

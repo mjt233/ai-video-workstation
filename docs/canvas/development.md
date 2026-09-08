@@ -9,7 +9,7 @@
 3. 新建 `components/canvas/nodes/{Xxx}Node.vue`（卡片主体）。
 4. （可选）新建 `components/canvas/editors/{Xxx}Editor.vue` 并挂 `editorComponent`；编辑器根元素不要自己定宽度（面板宽度由 AssetCanvas 统一控制）。
 5. `config` 字段与既有节点保持兼容（未知字段不影响读取）。
-6. **节点主体不要自行渲染 running/error 遮罩**：loading/错误状态是节点的通用能力，由 `CanvasNodeCard` 按 `status` prop 统一叠加（含「中断」按钮）；生成类节点只要经 `gen.generate` / ffmpeg 同步函数进入 running，即自动获得 loading 展示与中断能力。**例外（唯一）**：AI 文本节点声明 `statusOverlay`（`AiTextStatusOverlay.vue`）——自定义**非阻塞轻量遮罩**（容器 `pointer-events: none`、近透明背景，仅「中断」按钮可点），用于不拦截流式输出与节点内「停止」按钮；需要同样形态的节点类型按此扩展点自行声明，**不要**在节点 body 内自绘遮罩（见 [llm-session.md](./llm-session.md)）。
+6. **节点主体不要自行渲染 running/error 遮罩**：loading/错误状态是节点的通用能力，由 `CanvasNodeCard` 按 `status` prop 统一叠加（含「中断」按钮）；生成类节点只要经 `gen.generate` / ffmpeg 同步函数进入 running，即自动获得 loading 展示与中断能力。**例外（唯一）**：AI 文本节点声明 `statusOverlay` 为**空组件**（`() => null`）——节点主体完全自绘运行/错误状态 UI（节点内 Thinking 条 + 「停止」按钮 + 响应区错误红字），画布不渲染任何遮罩；声明空组件仅为让 `CanvasNodeCard` 跳过默认整体阻塞遮罩（默认遮罩会拦截流式输出与节点内控件）。需要同样形态的节点类型按此扩展点自行声明（见 [llm-session.md](./llm-session.md)）。
 7. **LLM 会话节点（text-ai）状态机接入约定**：节点内生成经 `stream-state` emit（running/log/taskId → 父级 `gen.beginClientRun`；终态 result{status/patch/rev} → `adoptExternalChange` + `endClientRun`），`isRunning`/`activeTaskId`/`runningLog`/`canvasTarget` 由父级按 `statusByNode` 下发 prop（恢复态同样禁用控件、「停止」可用）；流式输出走 `update:output-view` → `store.viewOnlyUpdate`（**纯内存，不写盘、不入撤销栈**）。
 
 ## 测试与验证
