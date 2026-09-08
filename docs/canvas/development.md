@@ -43,5 +43,6 @@
 - **加载节点上传**：统一走 `useCanvasUpload`（节点 body/编辑器 `upload-file` 事件与粘贴均经它）。进度来自 `client.uploadFs` 的 `onUploadProgress`（浏览器 XHR upload 事件，纯前端能力，服务端无需改动）；粘贴媒体会**先创建空加载节点再上传**（进度显示在节点上），因此粘贴上传完成的撤销是两步（①撤 assetPath ②撤节点）。本地回环上传很快，小文件进度条可能一闪而过属正常现象。
 - **上传进度实时性**：进度经 Vue `reactive` 代理写回（`states[nodeId]` 返回代理），**勿直接修改捕获的原始 state 对象**（不触发响应式更新，进度条不刷新）。
 - **上传并发与日志**：同一节点上传进行中再次点「上传」会被忽略（**不中止进行中的请求**）——大文件请求中途被 abort 后，keep-alive 连接复用时残留字节可能污染下一个请求的 multipart 流，服务端解析出畸形字段（如 `Unexpected field`）；该场景服务端会打印 `[fs-upload] 上传失败` 日志并返回友好文案。接口异常统一打日志：前端 axios 响应拦截器（非 2xx 打印 `[api]` 日志，HEAD 404 存在性探测除外）+ 上传组合式 `console.error`；服务端 multer 错误分支 `console.error`。
+- **轮询状态会级联重置连线/节点动画**：生成轮询每 tick 都整体重写 `statusByNode[nodeId]`（`lastLog` 变化），画布模板读到它必然重渲染并产生**新的插槽函数引用**。若把「运行中节点集合」等派生集实现为 computed，每次重算返回新 Set 实例 → `flowEdgeList` 重算出新数组 → Vue Flow 触发 `setEdges` 整体重建边对象 → EdgeWrapper 重渲染时以**已变化的插槽函数**作为组件类型（源码 `h(slots['edge-default'], …)`），Vue 判定为不同组件而 remount 插槽子树——连线箭头动画（`offset-path` 移动）被反复归零，节点脉冲动画同理。**派生集必须用 `watch` + 内容相等性守卫维护实例稳定**（内容不变则不替换 Set，见 AssetCanvas 的 `runningNodeIds`），轮询期间下游 computed 全部命中缓存零重算。
 - **删除类操作**：必须走 `confirm` 工具弹窗确认（AGENTS.md 约束）。
 - **提交信息**：中文提交信息在 PowerShell 下用 `-m` 会乱码，用 UTF-8 临时文件 `--amend -F` 方式提交。

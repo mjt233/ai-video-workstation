@@ -1164,14 +1164,28 @@ const group = useCanvasGroup({
  * 运行中（Loading）节点 id 集合：statusByNode 中 status === 'running' 的节点
  * （工作流/ffmpeg/AI 文本统一状态机；刷新/切画布经 restore 恢复后同样计入）。
  * 运行态高亮数据源：运行节点自身脉冲边框 + 直接输入连线/上游节点联动高亮。
+ *
+ * 实现说明：用 watch + 内容相等性守卫维护，**不用 computed**——轮询期间每个 tick 都会
+ * 整体重写节点状态对象（lastLog 变化），computed 每次重算都返回新 Set 实例，经
+ * flowEdgeList 级联使 Vue Flow 触发 setEdges 整体重建边对象，EdgeWrapper 重渲染时
+ * 插槽函数引用已变化（AssetCanvas 模板重渲染产生新函数），Vue 按不同组件类型处理而
+ * remount 插槽子树，连线箭头动画被反复重置归零。内容相等时保持同一 Set 实例，下游
+ * runningInputEdgeIds/flowEdgeList 命中缓存零重算（真正开始/结束运行时集合照常更新）。
  */
-const runningNodeIds = computed<Set<string>>(() => {
-  const set = new Set<string>()
-  for (const [id, s] of Object.entries(statusByNode.value)) {
-    if (s.status === 'running') set.add(id)
-  }
-  return set
-})
+const runningNodeIds = ref(new Set<string>())
+watch(
+  statusByNode,
+  () => {
+    const next = new Set<string>()
+    for (const [id, s] of Object.entries(statusByNode.value)) {
+      if (s.status === 'running') next.add(id)
+    }
+    const prev = runningNodeIds.value
+    if (next.size === prev.size && [...next].every((id) => prev.has(id))) return
+    runningNodeIds.value = next
+  },
+  { deep: true, immediate: true },
+)
 
 /** Vue Flow 渲染映射、群组合成节点与连线交互（含单选联动高亮与运行态高亮的派生集） */
 const flow = useCanvasFlow({
