@@ -1,7 +1,7 @@
 /**
  * 画布组合式共享类型：store/generation 公开 API 类型与注入参数约定。
  *
- * 设计约定（见 docs/asset-canvas.md）：
+ * 设计约定（见 docs/canvas/README.md）：
  * - 只有 AssetCanvas 调用 useVueFlow()（工具栏/面板/菜单是其兄弟节点，不能依赖 inject），
  *   Vue Flow 工具以函数参数注入各组合式，保证单实例安全且便于测试；
  * - store/gen 实例同样以参数注入，组合式不自行创建单例。

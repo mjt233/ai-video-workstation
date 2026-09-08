@@ -2,7 +2,7 @@
  * 成组群组组合式：多选包围盒计算、群组输出点连接拖拽、释放后目标节点选择菜单、
  * 成组连接执行与忽略反馈。
  *
- * 交互说明（见 docs/asset-canvas.md §5）：
+ * 交互说明（见 docs/canvas/interactions.md）：
  * - 群组虚线框由合成 Vue Flow 节点（__group-frame）渲染，拖动由 Vue Flow 原生拖动承接
  *   （框架节点 draggable，native drag 会把全部选中节点一起移动，node-drag-stop 批量回写）；
  * - 群组输出点由合成节点（__group-dot）渲染，mousedown 启动本组合式的自定义拖拽：

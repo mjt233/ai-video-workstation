@@ -11,7 +11,8 @@
  *   通知父级 adopt；恢复态直接 adoptExternalChange）。
  */
 
-import type { LlmFinishedInfo, LlmTaskEvent } from './llmSocket'
+import type { CanvasTarget } from './api'
+import type { LlmCanvasTarget, LlmFinishedInfo, LlmTaskEvent } from './llmSocket'
 
 /** 流式展示状态（事件应用器的输出） */
 export interface LlmStreamState {
@@ -118,6 +119,61 @@ export interface ThrottledCommit {
   push(value: string): void
   /** 立即提交待定值并清除定时器（终态/卸载前调用） */
   flush(): void
+}
+
+/**
+ * 判断会话画布 scope 是否与当前画布一致（项目由调用方另行比对，此处仅 scope 双属性过滤）。
+ *
+ * @param a 会话画布定位（服务端广播载荷）
+ * @param b 当前画布目标
+ * @returns 是否同一张画布
+ */
+export function sameCanvasTarget(a: LlmCanvasTarget, b: CanvasTarget): boolean {
+  if (a.kind !== b.kind) return false
+  if (b.kind === 'scene') return a.episode === b.episode && a.shot === b.shot
+  return a.stage === b.stage && a.label === b.label
+}
+
+/** 全局终态采纳构造结果：节点 id + 实际落盘补丁 + 落盘后版本号 */
+export interface LlmFinishedAdopt {
+  /** 发起会话的节点 id */
+  nodeId: string
+  /** 后端实际落盘的 config 补丁（output / outputHistory，按存在性提取） */
+  patch: Record<string, unknown>
+  /** 写入后的画布版本号（savedRev 对齐基准） */
+  rev: number
+}
+
+/**
+ * 由全局终态广播构造画布采纳数据（纯函数，AssetCanvas 全局 finished 监听用）。
+ *
+ * 规则：
+ * - 项目不符 / 画布 scope 不符 → null（终态为全局广播，各画布自行过滤）；
+ * - `prevRev`/`rev` 缺失或 `savedRev !== info.prevRev` → null（本端未跟上全部外部
+ *   写入时数据整体过期，不做部分合并，交由既有版本冲突弹窗兜底）；
+ * - 载荷无 `output` 且无 `outputHistory` → null（无落盘内容，如写入跳过/降级）。
+ *
+ * @param info 全局终态广播载荷
+ * @param project 当前项目名
+ * @param target 当前画布目标
+ * @param savedRev 前端当前保存版本号（须等于落盘前版本号 prevRev 才采纳）
+ * @returns 采纳数据（nodeId + patch + rev）；不满足采纳条件返回 null
+ */
+export function buildLlmFinishedAdopt(
+  info: LlmFinishedInfo,
+  project: string,
+  target: CanvasTarget,
+  savedRev: number,
+): LlmFinishedAdopt | null {
+  if (info.project !== project) return null
+  if (!sameCanvasTarget(info.canvas, target)) return null
+  if (typeof info.rev !== 'number' || typeof info.prevRev !== 'number') return null
+  if (savedRev !== info.prevRev) return null
+  const patch: Record<string, unknown> = {}
+  if (info.output !== undefined) patch.output = info.output
+  if (info.outputHistory) patch.outputHistory = info.outputHistory
+  if (info.output === undefined && !info.outputHistory) return null
+  return { nodeId: info.nodeId, patch, rev: info.rev }
 }
 
 /**

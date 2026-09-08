@@ -79,6 +79,8 @@ export interface LlmSession {
   cancelled: boolean;
   /** 终态落盘后的新版本号（rev，finished 载荷携带，前端 savedRev 对齐用） */
   persistRev?: number;
+  /** 终态落盘前的画布版本号（rev，finished 载荷携带；前端 savedRev === prevRev 时才采纳补丁） */
+  persistPrevRev?: number;
   /** 终态落盘实际写入的 config 补丁（output / outputHistory，finished 载荷携带） */
   persistPatch?: { output?: string; outputHistory?: LlmTextHistoryEntry[] };
   /** 服务端持有的上游中止控制器（cancel 即 abort 上游流） */
@@ -296,6 +298,7 @@ class LlmSessionManager {
     try {
       const result = await this.persister(s);
       s.persistRev = result.rev;
+      s.persistPrevRev = result.prevRev;
       s.persistPatch = result.patch;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

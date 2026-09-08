@@ -49,6 +49,7 @@ function stubPersister(result: Partial<LlmPersistResult> = {}) {
   sessionManager.setPersister(async (): Promise<LlmPersistResult> => ({
     wrote: true,
     rev: 11,
+    prevRev: 10,
     patch: { output: '最终答案', outputHistory: [{ id: 'h1', createdAt: '2024-01-01T00:00:00.000Z', input: '你好', output: '最终答案' }] },
     ...result,
   }));
@@ -165,7 +166,7 @@ describe('LlmWsHub', () => {
     expect(updated).toBeDefined();
   });
 
-  it('finish → finished 载荷（含落盘 output/outputHistory/rev）+ sessions 移除', async () => {
+  it('finish → finished 载荷（含 nodeId/project/canvas/prevRev/rev 与落盘补丁）+ sessions 移除，且终态先于列表广播', async () => {
     const { socket, messages } = await openClient();
     const s = registerSession();
     socket.send(JSON.stringify({ type: 'subscribe', taskId: s.taskId }));
@@ -175,10 +176,40 @@ describe('LlmWsHub', () => {
     const finished = await waitFor(messages, (m) => m.type === 'finished');
     expect(finished).toMatchObject({
       taskId: s.taskId,
-      info: { taskId: s.taskId, status: 'completed', output: '最终答案', rev: 11 },
+      info: {
+        taskId: s.taskId,
+        nodeId: 'node-1',
+        status: 'completed',
+        output: '最终答案',
+        rev: 11,
+        prevRev: 10,
+        project: 'proj',
+        canvas: { kind: 'scene', episode: '1', shot: '1' },
+      },
     });
     const sessionsAfter = await waitFor(messages, (m) => m.type === 'sessions' && (m as { sessions: unknown[] }).sessions.length === 0);
     expect((sessionsAfter as { sessions: unknown[] }).sessions).toHaveLength(0);
+    // 顺序保证：finished 必须先于「移除该任务的 sessions 列表」到达（终态采纳不因对账退订而丢失）
+    const finishedIdx = messages.findIndex((m) => m.type === 'finished');
+    const emptiedIdx = messages.findIndex(
+      (m, i) => i > finishedIdx && m.type === 'sessions' && (m as { sessions: unknown[] }).sessions.length === 0,
+    );
+    expect(finishedIdx).toBeGreaterThanOrEqual(0);
+    expect(emptiedIdx).toBeGreaterThan(finishedIdx);
+  });
+
+  it('finished 全局广播：未订阅该任务的客户端同样收到终态载荷（savedRev 对齐不依赖订阅）', async () => {
+    const bystander = await openClient(); // 未订阅任何任务
+    const { socket, messages } = await openClient();
+    const s = registerSession();
+    socket.send(JSON.stringify({ type: 'subscribe', taskId: s.taskId }));
+    await waitFor(messages, (m) => m.type === 'snapshot');
+    await sessionManager.finish(s.taskId, { status: 'completed' });
+    const finished = await waitFor(bystander.messages, (m) => m.type === 'finished');
+    expect(finished).toMatchObject({
+      taskId: s.taskId,
+      info: { nodeId: 'node-1', status: 'completed', rev: 11, prevRev: 10, project: 'proj' },
+    });
   });
 
   it('cancel 命令：服务端标记取消（幂等收敛为 cancelled）', async () => {

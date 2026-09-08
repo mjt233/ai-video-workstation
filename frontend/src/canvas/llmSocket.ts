@@ -36,10 +36,16 @@ export interface LlmSnapshotInfo extends LlmSessionInfo {
   error?: string
 }
 
-/** 终态信息（finished 载荷；后端已完成落盘） */
+/** 终态信息（finished 全局广播载荷；后端已完成落盘） */
 export interface LlmFinishedInfo {
   taskId: string
+  /** 发起会话的节点 id（前端按节点采纳补丁） */
+  nodeId: string
   status: 'completed' | 'failed' | 'cancelled'
+  /** 项目名（全局通知按项目过滤） */
+  project: string
+  /** 画布定位（全局通知按画布 scope 过滤） */
+  canvas: LlmCanvasTarget
   error?: string
   /** 实际写入画布的 config.output（无落盘时缺省） */
   output?: string
@@ -47,6 +53,8 @@ export interface LlmFinishedInfo {
   outputHistory?: { id: string; createdAt: string; input: string; output: string; modelName?: string; presetName?: string; mediaLabels?: string[] }[]
   /** 写入后的画布版本号（savedRev 对齐基准） */
   rev?: number
+  /** 写入前的画布版本号（前端 savedRev === prevRev 时才采纳补丁） */
+  prevRev?: number
 }
 
 /** 服务端推送的会话事件（time 通知订阅者；taskId 为会话 id） */
@@ -59,6 +67,9 @@ export type LlmTaskEvent =
 
 /** 任务事件处理器（由订阅方注册；同一任务可多订阅方） */
 export type LlmTaskHandler = (event: LlmTaskEvent) => void
+
+/** 全局终态监听器（finished 全局广播：不依赖按任务订阅，画布按 项目+scope 过滤消费） */
+export type LlmFinishedListener = (info: LlmFinishedInfo) => void
 
 /** 客户端 → 服务端消息 */
 type LlmWsClientMessage =
@@ -94,6 +105,8 @@ class LlmSocketClient {
   private connecting = false
   /** 已订阅任务 → 处理器集合（同一任务多订阅方） */
   private readonly handlers = new Map<string, Set<LlmTaskHandler>>()
+  /** 全局终态监听器（finished 广播通知；与按任务订阅解耦） */
+  private readonly finishedListeners = new Set<LlmFinishedListener>()
   /** 等待连接建立后补发的订阅队列 */
   private readonly pendingSubscribes = new Set<string>()
   /** 重连定时器 */
@@ -166,6 +179,16 @@ class LlmSocketClient {
       return
     }
     this.dispatch(msg)
+    // finished 为服务端全局广播（不依赖订阅）：任务订阅处理器之外，通知全局终态监听器
+    if (msg.type === 'finished') {
+      for (const listener of [...this.finishedListeners]) {
+        try {
+          listener(msg.info)
+        } catch (err) {
+          console.error('[llm-ws] 全局终态监听器处理异常:', err)
+        }
+      }
+    }
   }
 
   /** 分发任务事件给该任务的全部订阅处理器（处理器异常只打日志） */
@@ -194,6 +217,19 @@ class LlmSocketClient {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(msg))
     }
+  }
+
+  /**
+   * 订阅全局终态广播（finished）：服务端落盘完成后向全部客户端广播，
+   * 不依赖按任务订阅——监听方自行按 项目 + 画布 scope 过滤消费
+   * （AssetCanvas 采纳终态补丁并对齐 savedRev 用）。
+   *
+   * @param listener 终态监听器（接收 finished 载荷）
+   * @returns 取消监听函数
+   */
+  onFinished(listener: LlmFinishedListener): () => void {
+    this.finishedListeners.add(listener)
+    return () => { this.finishedListeners.delete(listener) }
   }
 
   /**

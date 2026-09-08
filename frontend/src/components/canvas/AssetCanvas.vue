@@ -501,8 +501,8 @@ import { getCanvasNodeInfo } from '../../canvas/api'
 import { extOfAudioPath } from '../../canvas/audioTrim'
 import { isSyntheticNodeId } from '../../canvas/groupSelection'
 import type { CanvasScope } from '../../canvas/paths'
-import { llmSocket, type LlmCanvasTarget, type LlmSessionInfo, type LlmTaskEvent } from '../../canvas/llmSocket'
-import { applyLlmEvent, createLlmStreamState, createThrottledCommit, type LlmStreamState, type ThrottledCommit } from '../../canvas/llmEvents'
+import { llmSocket, type LlmCanvasTarget, type LlmFinishedInfo, type LlmSessionInfo, type LlmTaskEvent } from '../../canvas/llmSocket'
+import { applyLlmEvent, buildLlmFinishedAdopt, createLlmStreamState, createThrottledCommit, sameCanvasTarget, type LlmStreamState, type ThrottledCommit } from '../../canvas/llmEvents'
 import type { CanvasStreamStatePayload } from './CanvasNodeCard.vue'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
@@ -538,7 +538,7 @@ import { canvasDragPayload } from '../../canvas/assetDrop'
  * - 组合 store / generation 与各功能组合式（交互/菜单/粘贴/快捷键/生成调度/对话框/自动搭画布）；
  * - 渲染 Vue Flow 画布与子组件（工具栏/节点卡片/配置面板/菜单/对话框）；
  * - 持有 Vue Flow 视图工具与画布容器测量，统一注入各组合式与面板组件。
- * 具体交互行为见 docs/asset-canvas.md。
+ * 具体交互行为见 docs/canvas/README.md。
  */
 
 /** 组件 props：定位一张画布 */
@@ -893,6 +893,37 @@ function resetAdoptedLlmRevs(): void {
 }
 
 /**
+ * 从 finished 载荷提取后端实际落盘的 config 补丁（output / outputHistory）。
+ *
+ * @param info finished 载荷（恢复路径事件或全局广播；可能缺省）
+ * @returns 补丁对象；无任何落盘内容（写入跳过/降级）返回 null
+ */
+function llmFinishedPatch(info: LlmFinishedInfo | undefined): Record<string, unknown> | null {
+  if (!info || (info.output === undefined && !info.outputHistory)) return null
+  return {
+    ...(info.output !== undefined ? { output: info.output } : {}),
+    ...(info.outputHistory ? { outputHistory: info.outputHistory } : {}),
+  }
+}
+
+/**
+ * 全局终态广播监听（服务端落盘完成后向全部客户端广播，不依赖按任务订阅）：
+ * 按 项目 + 画布 scope 过滤，且当前 savedRev === 落盘前版本号（prevRev）时，
+ * 仅单独采纳该 AI 文本节点的落盘补丁（入撤销栈 + savedRev 对齐为落盘后 rev，
+ * 不触发写盘）。刷新后恢复路径即使已因 sessions 对账退订，版本对齐也不会丢失。
+ */
+const offLlmFinishedGlobal = llmSocket.onFinished((info) => {
+  // 切换画布进行中（load 未完成）不采纳：target/savedRev 均处于过渡态
+  if (!store.loaded.value) return
+  const adopt = buildLlmFinishedAdopt(info, props.project, target.value, store.savedRev.value)
+  if (!adopt) return
+  const node = nodeMap.value[adopt.nodeId]
+  if (!node || node.prototypeId !== 'text-ai') return
+  adoptLlmResult(adopt.nodeId, adopt.patch, adopt.rev) // 按 rev 幂等（与在线/恢复路径双投递去重）
+})
+onUnmounted(offLlmFinishedGlobal)
+
+/**
  * AI 文本节点流式输出补丁（纯内存显示）：合入 store 但**不写盘、不入撤销栈**。
  * 终态由后端一次性落盘（result-persist），此处仅保证流式期间下游文本消费者
  * 读取同一 store 数据保持实时联动。
@@ -937,19 +968,6 @@ function onStreamState(nodeId: string, payload: CanvasStreamStatePayload): void 
   // cancelled：静默结束（后端已写部分输出；单次撤销可回退到生成前状态）
   if (r.patch && typeof r.rev === 'number') adoptLlmResult(nodeId, r.patch, r.rev)
   gen.endClientRun(nodeId)
-}
-
-/**
- * 判断会话画布 scope 是否与当前画布一致（项目 + scope 双属性过滤恢复）。
- *
- * @param a 会话画布定位（服务端）
- * @param b 当前画布目标
- * @returns 是否同一张画布
- */
-function sameCanvasTarget(a: LlmCanvasTarget, b: CanvasTarget): boolean {
-  if (a.kind !== b.kind) return false
-  if (b.kind === 'scene') return a.episode === b.episode && a.shot === b.shot
-  return a.stage === b.stage && a.label === b.label
 }
 
 /**
@@ -1012,13 +1030,7 @@ function onRestoreTaskEvent(taskId: string, event: LlmTaskEvent): void {
   // 终态：后端已完成落盘 → 视图同步（幂等：节点已被删除时 store 操作安全跳过）
   const status = event.type === 'not-found' ? 'cancelled' : event.info.status
   const info = event.type === 'finished' ? event.info : undefined
-  const patch =
-    info && (info.output !== undefined || info.outputHistory)
-      ? {
-          ...(info.output !== undefined ? { output: info.output } : {}),
-          ...(info.outputHistory ? { outputHistory: info.outputHistory } : {}),
-        }
-      : undefined
+  const patch = llmFinishedPatch(info)
   if (patch && typeof info?.rev === 'number') {
     adoptLlmResult(entry.nodeId, patch, info.rev) // 入撤销栈 + savedRev 对齐，不触发写盘（按 rev 幂等）
   }

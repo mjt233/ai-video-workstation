@@ -51,6 +51,8 @@ export interface LlmPersistResult {
   wrote: boolean;
   /** 写入成功后的新版本号（rev；前端 adoptExternalChange 的 savedRev 对齐基准） */
   rev?: number;
+  /** 写入成功前的画布版本号（rev；前端 savedRev === prevRev 时才采纳补丁的比对基准） */
+  prevRev?: number;
   /** 实际写入的 config 补丁（output / outputHistory） */
   patch?: { output?: string; outputHistory?: LlmTextHistoryEntry[] };
 }
@@ -229,7 +231,7 @@ function buildPatch(
  * 终态结果落盘（后端独占写画布定义文件；CAS + 路径锁 + 冲突重试）。
  *
  * @param session 终态会话（status 已由会话管理器置为终态）
- * @returns 落盘结果（wrote / rev / patch）；跳过写盘时 wrote=false
+ * @returns 落盘结果（wrote / rev / prevRev / patch）；跳过写盘时 wrote=false
  * @throws Error 画布文件损坏或重试 3 次仍冲突（由调用方收敛为 failed 并广播）
  */
 export async function persistLlmResult(session: LlmSession): Promise<LlmPersistResult> {
@@ -243,7 +245,7 @@ export async function persistLlmResult(session: LlmSession): Promise<LlmPersistR
     if (!built) return { wrote: false };
     try {
       const saved = await saveCanvasDef(session.project, session.canvas, built.next, data.rev, false);
-      return { wrote: true, rev: saved.rev, patch: built.patch };
+      return { wrote: true, rev: saved.rev, prevRev: data.rev, patch: built.patch };
     } catch (e) {
       const code = (e as { code?: string }).code;
       if (code === 'VERSION_CONFLICT') continue; // 页面/其它写者已推进 rev：重读最新版本重试

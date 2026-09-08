@@ -165,9 +165,11 @@ describe('persistLlmResult（completed）', () => {
     expect(history.some((h) => h.id === 'h1')).toBe(false);
   });
 
-  it('完成时 rev 递增（rev+1）且其余字段保留', async () => {
+  it('完成时 rev 递增（rev+1）且返回落盘前版本号 prevRev，其余字段保留', async () => {
     await writeCanvas([{ id: 'node-1', prototypeId: 'text-ai', name: 'x', config: {} }], 3);
-    await persistLlmResult(makeSession());
+    const result = await persistLlmResult(makeSession());
+    expect(result.prevRev).toBe(3);
+    expect(result.rev).toBe(4);
     const data = await readCanvas();
     expect(data.rev).toBe(4);
     expect(data.version).toBe(1);
@@ -194,11 +196,12 @@ describe('persistLlmResult（cancelled / failed）', () => {
     expect(cfg.outputHistory).toBeUndefined();
   });
 
-  it('取消且无累计文本：跳过写入（wrote=false，文件不变）', async () => {
+  it('取消且无累计文本：跳过写入（wrote=false，无 rev/prevRev，文件不变）', async () => {
     await writeCanvas([{ id: 'node-1', prototypeId: 'text-ai', name: 'x', config: { output: '旧输出' } }], 2);
     const result = await persistLlmResult(makeSession({ status: 'cancelled', text: '' }));
     expect(result.wrote).toBe(false);
     expect(result.rev).toBeUndefined();
+    expect(result.prevRev).toBeUndefined();
     const cfg = await readNodeConfig();
     expect(cfg.output).toBe('旧输出');
   });
@@ -216,11 +219,12 @@ describe('persistLlmResult（跳过 / 失败路径）', () => {
     expect(result.wrote).toBe(false);
   });
 
-  it('CAS 冲突自动重试（首轮冲突 → 重读成功）', async () => {
+  it('CAS 冲突自动重试（首轮冲突 → 重读成功，prevRev 取重读后版本）', async () => {
     await writeCanvas([{ id: 'node-1', prototypeId: 'text-ai', name: 'x', config: {} }], 3);
     failOnce.value = true;
     const result = await persistLlmResult(makeSession());
     expect(result.wrote).toBe(true);
+    expect(result.prevRev).toBe(3);
     expect(result.rev).toBe(4);
   });
 

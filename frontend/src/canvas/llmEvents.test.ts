@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { applyLlmEvent, createLlmStreamState, createThrottledCommit } from './llmEvents'
-import type { LlmTaskEvent } from './llmSocket'
+import { applyLlmEvent, buildLlmFinishedAdopt, createLlmStreamState, createThrottledCommit, sameCanvasTarget } from './llmEvents'
+import type { LlmFinishedInfo, LlmTaskEvent } from './llmSocket'
+import type { CanvasTarget } from './api'
 
 /** 测试事件构造：自动补 taskId */
 function ev(event: Record<string, unknown>): LlmTaskEvent {
@@ -59,6 +60,9 @@ describe('applyLlmEvent', () => {
       type: 'finished',
       info: {
         taskId: 't1',
+        nodeId: 'n1',
+        project: 'proj',
+        canvas: { kind: 'scene', episode: '1', shot: '1' },
         status: 'completed',
         output: '完整答案',
         outputHistory: [{ id: 'h1', createdAt: '2024-01-01T00:00:00.000Z', input: '你好', output: '完整答案' }],
@@ -74,7 +78,7 @@ describe('applyLlmEvent', () => {
 
   it('finished(failed)：错误信息附到 errorMsg', () => {
     let s = createLlmStreamState()
-    s = applyLlmEvent(s, ev({ type: 'finished', info: { taskId: 't1', status: 'failed', error: '模型超时' } }))
+    s = applyLlmEvent(s, ev({ type: 'finished', info: { taskId: 't1', nodeId: 'n1', project: 'proj', canvas: { kind: 'scene', episode: '1', shot: '1' }, status: 'failed', error: '模型超时' } }))
     expect(s.finishStatus).toBe('failed')
     expect(s.errorMsg).toBe('模型超时')
   })
@@ -137,5 +141,78 @@ describe('createThrottledCommit', () => {
     t.push('a')
     t.flush()
     expect(commit).toHaveBeenCalledTimes(1)
+  })
+})
+
+/** 全局终态广播载荷构造（分镜画布 1集1分镜 / node-1） */
+function finishedInfo(overrides: Partial<LlmFinishedInfo> = {}): LlmFinishedInfo {
+  return {
+    taskId: 't1',
+    nodeId: 'node-1',
+    status: 'completed',
+    project: 'proj',
+    canvas: { kind: 'scene', episode: '1', shot: '1' },
+    output: '最终答案',
+    outputHistory: [{ id: 'h1', createdAt: '2024-01-01T00:00:00.000Z', input: '你好', output: '最终答案' }],
+    rev: 11,
+    prevRev: 10,
+    ...overrides,
+  }
+}
+
+describe('sameCanvasTarget', () => {
+  const sceneTarget: CanvasTarget = { kind: 'scene', episode: '1', shot: '1' }
+
+  it('scene：集数与分镜均一致才为真', () => {
+    expect(sameCanvasTarget({ kind: 'scene', episode: '1', shot: '1' }, sceneTarget)).toBe(true)
+    expect(sameCanvasTarget({ kind: 'scene', episode: '1', shot: '2' }, sceneTarget)).toBe(false)
+    expect(sameCanvasTarget({ kind: 'scene', episode: '2', shot: '1' }, sceneTarget)).toBe(false)
+  })
+
+  it('stage：场景与子场景标签均一致才为真；kind 不同为假', () => {
+    expect(sameCanvasTarget({ kind: 'stage', stage: '客厅', label: '白天' }, { kind: 'stage', stage: '客厅', label: '白天' })).toBe(true)
+    expect(sameCanvasTarget({ kind: 'stage', stage: '客厅', label: '夜晚' }, { kind: 'stage', stage: '客厅', label: '白天' })).toBe(false)
+    expect(sameCanvasTarget({ kind: 'stage', stage: '客厅', label: '白天' }, sceneTarget)).toBe(false)
+  })
+})
+
+describe('buildLlmFinishedAdopt', () => {
+  const sceneTarget: CanvasTarget = { kind: 'scene', episode: '1', shot: '1' }
+
+  it('savedRev === prevRev 且项目/画布匹配 → 返回 nodeId + 落盘补丁 + 新 rev', () => {
+    const adopt = buildLlmFinishedAdopt(finishedInfo(), 'proj', sceneTarget, 10)
+    expect(adopt).toEqual({
+      nodeId: 'node-1',
+      patch: {
+        output: '最终答案',
+        outputHistory: [{ id: 'h1', createdAt: '2024-01-01T00:00:00.000Z', input: '你好', output: '最终答案' }],
+      },
+      rev: 11,
+    })
+  })
+
+  it('仅 output（无 outputHistory，如 cancelled 部分输出）→ 补丁只含 output', () => {
+    const info = finishedInfo({ outputHistory: undefined })
+    const adopt = buildLlmFinishedAdopt(info, 'proj', sceneTarget, 10)
+    expect(adopt?.patch).toEqual({ output: '最终答案' })
+  })
+
+  it('savedRev 不等于 prevRev（本端落后/领先外部写入）→ null', () => {
+    expect(buildLlmFinishedAdopt(finishedInfo(), 'proj', sceneTarget, 9)).toBeNull()
+    expect(buildLlmFinishedAdopt(finishedInfo(), 'proj', sceneTarget, 11)).toBeNull()
+  })
+
+  it('prevRev/rev 缺失（落盘跳过或降级）→ null', () => {
+    expect(buildLlmFinishedAdopt(finishedInfo({ prevRev: undefined }), 'proj', sceneTarget, 10)).toBeNull()
+    expect(buildLlmFinishedAdopt(finishedInfo({ rev: undefined }), 'proj', sceneTarget, 10)).toBeNull()
+  })
+
+  it('项目或画布 scope 不符 → null（全局广播由各画布自行过滤）', () => {
+    expect(buildLlmFinishedAdopt(finishedInfo({ project: 'other' }), 'proj', sceneTarget, 10)).toBeNull()
+    expect(buildLlmFinishedAdopt(finishedInfo({ canvas: { kind: 'scene', episode: '1', shot: '2' } }), 'proj', sceneTarget, 10)).toBeNull()
+  })
+
+  it('无 output 且无 outputHistory（无落盘内容）→ null', () => {
+    expect(buildLlmFinishedAdopt(finishedInfo({ output: undefined, outputHistory: undefined }), 'proj', sceneTarget, 10)).toBeNull()
   })
 })

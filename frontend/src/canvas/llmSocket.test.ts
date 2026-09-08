@@ -126,9 +126,48 @@ describe('llmSocket', () => {
     s.open()
     const handler = vi.fn()
     llmSocket.subscribe('t1', handler)
-    s.receive({ type: 'finished', taskId: 't1', info: { taskId: 't1', status: 'completed', output: '答案', rev: 5 } })
+    s.receive({ type: 'finished', taskId: 't1', info: { taskId: 't1', nodeId: 'n1', status: 'completed', output: '答案', rev: 5, prevRev: 4, project: 'p', canvas: { kind: 'scene', episode: '1', shot: '1' } } })
     expect(handler).toHaveBeenCalledTimes(1)
     expect(handler.mock.calls[0][0]).toMatchObject({ type: 'finished', info: { status: 'completed', rev: 5 } })
+  })
+
+  it('finished 全局广播通知 onFinished 监听器（不依赖按任务订阅），退订后不再通知', () => {
+    llmSocket.connect()
+    const s = sockets[0]
+    s.open()
+    const info = { taskId: 't1', nodeId: 'n1', status: 'completed' as const, output: '答案', rev: 5, prevRev: 4, project: 'p', canvas: { kind: 'scene', episode: '1', shot: '1' } }
+    const listener = vi.fn()
+    const off = llmSocket.onFinished(listener)
+    // 无任务订阅者时全局监听器仍收到通知（与订阅解耦）
+    s.receive({ type: 'finished', taskId: 't1', info })
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener.mock.calls[0][0]).toMatchObject({ taskId: 't1', nodeId: 'n1', rev: 5, prevRev: 4 })
+    // 订阅处理器与全局监听器互不影响：同一条消息双通道各自消费
+    const handler = vi.fn()
+    llmSocket.subscribe('t1', handler)
+    s.receive({ type: 'finished', taskId: 't1', info })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledTimes(2)
+    // 退订后不再通知
+    off()
+    s.receive({ type: 'finished', taskId: 't1', info })
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('onFinished 监听器异常只打日志不影响其他监听器', () => {
+    llmSocket.connect()
+    const s = sockets[0]
+    s.open()
+    const bad = vi.fn(() => { throw new Error('boom') })
+    const good = vi.fn()
+    llmSocket.onFinished(bad)
+    llmSocket.onFinished(good)
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    s.receive({ type: 'finished', taskId: 't1', info: { taskId: 't1', nodeId: 'n1', status: 'completed', project: 'p', canvas: { kind: 'scene', episode: '1', shot: '1' } } })
+    expect(bad).toHaveBeenCalledTimes(1)
+    expect(good).toHaveBeenCalledTimes(1)
+    expect(errSpy).toHaveBeenCalled()
+    errSpy.mockRestore()
   })
 
   it('cancel：WS 优先发送 + HTTP 兜底（mock 后无网络）', () => {

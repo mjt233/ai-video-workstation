@@ -12,8 +12,10 @@
  *   （运行中 = 累计进度，部分文本补齐显示），不存在 → 推 not-found（仅结束
  *   Loading，结果已在文件）；
  * - cancel 命令转发到会话管理器（HTTP 兜底见 /api/llm/chat/tasks/:taskId/cancel）；
- * - 终态 finished（含 status/error/output/outputHistory/rev）由会话管理器的
- *   finish 事件驱动推送给该会话的全部订阅者（后端已完成落盘）。
+ * - 终态 finished（含 project/canvas/prevRev/rev/error/output/outputHistory）在会话
+ *   管理器 finish 时**全局广播给全部已连接客户端**（不依赖按任务订阅：恢复路径
+ *   对账退订后仍能收到，前端按 项目+画布 过滤并按 savedRev === prevRev 采纳对齐），
+ *   随后再广播移除该任务的 sessions 列表。
  */
 
 import type { Server } from 'http';
@@ -44,10 +46,16 @@ export interface LlmSnapshotInfo extends LlmSessionInfo {
   error?: string;
 }
 
-/** 终态载荷（finished 广播；后端已完成落盘，patch/rev 供前端视图同步） */
+/** 终态载荷（finished 全局广播；后端已完成落盘，patch/rev 供前端视图同步） */
 export interface LlmFinishedInfo {
   taskId: string;
+  /** 发起会话的节点 id（前端按节点采纳补丁） */
+  nodeId: string;
   status: 'completed' | 'failed' | 'cancelled';
+  /** 项目名（前端全局通知按项目过滤） */
+  project: string;
+  /** 画布定位（前端全局通知按画布 scope 过滤） */
+  canvas: CanvasDefTarget;
   error?: string;
   /** 实际写入画布的 config.output（wrote=false 时缺省） */
   output?: string;
@@ -55,6 +63,8 @@ export interface LlmFinishedInfo {
   outputHistory?: LlmTextHistoryEntry[];
   /** 写入后的画布版本号（savedRev 对齐基准） */
   rev?: number;
+  /** 写入前的画布版本号（前端 savedRev === prevRev 时才采纳补丁） */
+  prevRev?: number;
 }
 
 /** 服务端 → 客户端消息 */
@@ -106,20 +116,26 @@ class LlmWsHub {
     });
   }
 
-  /** 会话事件 → 全局广播：begin/update 推全量列表；finish 推列表 + 终态载荷给订阅者 */
+  /** 会话事件 → 全局广播：begin/update 推全量列表；finish 先全局广播终态载荷、再推列表 */
   private onSessionEvent(e: { type: 'begin' | 'update' | 'finish'; session: LlmSession }): void {
     if (e.type === 'finish') {
-      this.broadcastSessions();
       const s = e.session;
       const info: LlmFinishedInfo = {
         taskId: s.taskId,
+        nodeId: s.nodeId,
         status: s.status === 'running' ? 'completed' : s.status,
+        project: s.project,
+        canvas: s.canvas,
         ...(s.error ? { error: s.error } : {}),
         ...(s.persistPatch?.output !== undefined ? { output: s.persistPatch.output } : {}),
         ...(s.persistPatch?.outputHistory ? { outputHistory: s.persistPatch.outputHistory } : {}),
         ...(typeof s.persistRev === 'number' ? { rev: s.persistRev } : {}),
+        ...(typeof s.persistPrevRev === 'number' ? { prevRev: s.persistPrevRev } : {}),
       };
-      this.taskEvent(s.taskId, { type: 'finished', info } satisfies LlmWsServerMessage);
+      // 先全局广播终态（不依赖订阅：恢复路径对账退订后仍能收到，savedRev 对齐不丢失），
+      // 再广播 sessions 列表（任务移除触发前端结束 Loading）
+      this.broadcastFinished(info);
+      this.broadcastSessions();
     } else {
       // begin / update（阶段切换/警告/错误）：全量活跃列表广播
       this.broadcastSessions();
@@ -182,6 +198,21 @@ class LlmWsHub {
   private broadcastSessions(): void {
     if (!this.wss) return;
     const data = JSON.stringify({ type: 'sessions', sessions: this.listActive() });
+    for (const socket of this.subscriptions.keys()) {
+      if (socket.readyState === WebSocket.OPEN) socket.send(data);
+    }
+  }
+
+  /**
+   * 向全部已连接客户端广播会话终态（不依赖按任务订阅）。
+   * 恢复路径可能在终态前已因 sessions 列表对账退订，全局广播保证
+   * savedRev 对齐载荷（prevRev/rev/patch）不因退订而丢失。
+   *
+   * @param info 终态载荷（taskId 注入消息顶层，与任务事件形状一致）
+   */
+  private broadcastFinished(info: LlmFinishedInfo): void {
+    if (!this.wss) return;
+    const data = JSON.stringify({ type: 'finished', taskId: info.taskId, info });
     for (const socket of this.subscriptions.keys()) {
       if (socket.readyState === WebSocket.OPEN) socket.send(data);
     }

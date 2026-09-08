@@ -248,7 +248,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
    * 裁剪音频节点：收集第一路音频输入并触发服务端 ffmpeg 裁剪。
    *
    * 校验音频输入（缺失时提示）与裁剪参数（起始位置 ≥ 0、时长 > 0）；
-   * 多路音频输入只取第一路（与裁剪视频节点行为一致，见 docs/asset-canvas.md）。
+   * 多路音频输入只取第一路（与裁剪视频节点行为一致，见 docs/canvas/node-types.md）。
    *
    * @param nodeId 节点 id
    */

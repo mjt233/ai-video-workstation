@@ -128,7 +128,7 @@ describe('sessionManager.pushEvent / phase', () => {
 
 describe('sessionManager.finish / cancel', () => {
   it('正常完成：先落盘（persister 接到终态会话）再移除活跃区', async () => {
-    const persister = stubPersister({ wrote: true, rev: 5 });
+    const persister = stubPersister({ wrote: true, rev: 5, prevRev: 4 });
     const s = sessionManager.begin(beginInput());
     const events: string[] = [];
     const off = sessionManager.on((e) => events.push(e.type));
@@ -136,6 +136,7 @@ describe('sessionManager.finish / cancel', () => {
     const done = await sessionManager.finish(s.taskId, { status: 'completed' });
     expect(done?.status).toBe('completed');
     expect(done?.persistRev).toBe(5);
+    expect(done?.persistPrevRev).toBe(4);
     expect(persister).toHaveBeenCalledTimes(1);
     expect(persister.mock.calls[0][0].status).toBe('completed');
     expect(persister.mock.calls[0][0].text).toBe('完整答案');
