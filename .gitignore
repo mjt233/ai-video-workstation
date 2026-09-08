@@ -7,5 +7,7 @@ __pycache__/
 .superpowers/
 .worktrees/
 server/config/providers.json*
+server/config/presets.json
 .agents
+.trae/
 skills-lock.json
