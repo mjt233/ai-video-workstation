@@ -6,6 +6,8 @@
       'canvas-node--selected': selected,
       'canvas-node--adjacent-input': adjacentSide === 'input',
       'canvas-node--adjacent-output': adjacentSide === 'output',
+      'canvas-node--running-adjacent': runningAdjacent,
+      'canvas-node--running': isRunning,
       'canvas-node--highlighted': highlighted,
     }"
     @contextmenu.prevent="emit('context-menu', $event)"
@@ -259,6 +261,8 @@ const props = defineProps<{
   highlighted?: boolean
   /** 单选联动高亮：与当前选中节点的连接方向（'input' = 数据流向选中节点的输入侧邻居，'output' = 由选中节点输出的输出侧邻居），null = 不关联；边框弱于选中态 */
   adjacentSide?: 'input' | 'output' | null
+  /** 运行态高亮：是否为运行中（Loading）节点的直接上游输入节点（主色弱描边，弱于选中态） */
+  runningAdjacent?: boolean
   /** 生成状态（由本卡片渲染通用 loading/错误遮罩） */
   status?: GenerateStatus
   /** 节点当前产物（固定路径 + 防缓存 token；生成类节点由 AssetCanvas 按固定产物路径推导） */
@@ -330,6 +334,9 @@ const proto = computed(() => getPrototype(props.node.prototypeId))
 const customStatusOverlay = computed(
   () => !!proto.value?.statusOverlay && (props.status?.status === 'running' || props.status?.status === 'error'),
 )
+
+/** 节点是否处于运行中（Loading）状态：主色脉冲边框标识（生成状态机统一驱动，含 AI 文本节点） */
+const isRunning = computed(() => props.status?.status === 'running')
 
 /** 鼠标悬浮中（悬浮时显示缩放控制点） */
 const hovered = ref(false)
@@ -406,6 +413,34 @@ function handleStyle(count: number, index: number): Record<string, string> {
 .canvas-node--adjacent-output {
   border-color: rgb(239, 108, 0);
   box-shadow: 0 0 0 1px rgba(239, 108, 0, 0.45);
+}
+
+/* 运行态高亮（节点 Loading 时）：
+   上游输入节点（直接供数给运行中节点）主色弱描边——与单选邻接同级（弱于选中态），
+   声明在 --running 之前（节点自身 running 时脉冲边框胜出）、--selected/--highlighted 之后
+   的相对次序见下方各规则注释（后声明胜出）。 */
+.canvas-node--running-adjacent {
+  border-color: rgb(25, 118, 210);
+  box-shadow: 0 0 0 1px rgba(25, 118, 210, 0.45);
+}
+
+/* 运行中节点自身：主色边框 + 脉冲呼吸外圈（box-shadow 2px↔4px 循环），
+   区别于静态选中边框；与选中态同现时脉冲动画胜出（同为蓝色系不冲突）。
+   静态 box-shadow 为 prefers-reduced-motion 等动画不生效时的回退显示。 */
+.canvas-node--running {
+  border-color: rgb(25, 118, 210);
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.35);
+  animation: canvas-node-running-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes canvas-node-running-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.7);
+  }
 }
 
 /* 成组连接拖拽悬停高亮：绿色描边提示「可连接目标」 */

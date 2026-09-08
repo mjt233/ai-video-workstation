@@ -61,13 +61,14 @@
         >
           <Background :gap="16" />
           <!-- 连线渲染插槽：默认连线保持 BezierEdge 原样渲染（右键/点击/选中行为不变）；
-               单选联动高亮的关联连线追加沿数据流向移动的箭头动画（输入侧绿色/输出侧橙色，
-               箭头经 CSS offset-path 沿连线几何（bezier d）运动，offset-rotate: auto 随路径切线转向；
+               单选联动高亮或运行态高亮的关联连线追加沿数据流向移动的箭头动画（单选输入侧绿色/
+               输出侧橙色、运行态主色蓝，箭头经 CSS offset-path 沿连线几何（bezier d）运动，
+               offset-rotate: auto 随路径切线转向；
                方向即数据流方向：连线路径从 source→target 生成，无需单独定义） -->
           <template #edge-default="edgeProps">
             <BezierEdge v-bind="edgeProps" />
             <path
-              v-if="edgeRelatedSide(edgeProps.id)"
+              v-if="edgeRelatedSide(edgeProps.id) || edgeRunningRelated(edgeProps.id)"
               class="canvas-edge__arrow"
               :style="arrowMotionStyle(edgeProps)"
               d="M10,0 L0,-5 L2.5,0 L0,5 Z"
@@ -81,6 +82,7 @@
               :selected="selected"
               :highlighted="hoveredNodeId === id"
               :adjacent-side="adjacentSideOf(id)"
+              :running-adjacent="runningInputNodeIds.has(id)"
               :status="statusByNode[id]"
               :is-running="nodeMap[id]?.prototypeId === 'text-ai' ? statusByNode[id]?.status === 'running' : undefined"
               :canvas-target="nodeMap[id]?.prototypeId === 'text-ai' ? canvasTarget : undefined"
@@ -1158,13 +1160,27 @@ const group = useCanvasGroup({
   focusNode: (ids) => void focusNodes(ids),
 })
 
-/** Vue Flow 渲染映射、群组合成节点与连线交互（含单选联动高亮的派生集） */
+/**
+ * 运行中（Loading）节点 id 集合：statusByNode 中 status === 'running' 的节点
+ * （工作流/ffmpeg/AI 文本统一状态机；刷新/切画布经 restore 恢复后同样计入）。
+ * 运行态高亮数据源：运行节点自身脉冲边框 + 直接输入连线/上游节点联动高亮。
+ */
+const runningNodeIds = computed<Set<string>>(() => {
+  const set = new Set<string>()
+  for (const [id, s] of Object.entries(statusByNode.value)) {
+    if (s.status === 'running') set.add(id)
+  }
+  return set
+})
+
+/** Vue Flow 渲染映射、群组合成节点与连线交互（含单选联动高亮与运行态高亮的派生集） */
 const flow = useCanvasFlow({
   store,
   nodeMap,
   project: props.project,
   selectedEdgeId: selection.selectedEdgeId,
   selectedNodeIds: selection.selectedNodeIds,
+  runningNodeIds,
   groupRect: group.groupRect,
 })
 
@@ -1228,7 +1244,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, isMultiSelected, onEdgeClick, onNodeDragStart } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
-const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
+const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
@@ -1281,6 +1297,18 @@ function edgeRelatedSide(edgeId: string): 'input' | 'output' | null {
   if (relatedInputEdgeIds.value.has(edgeId)) return 'input'
   if (relatedOutputEdgeIds.value.has(edgeId)) return 'output'
   return null
+}
+
+/**
+ * 是否为运行态高亮连线（节点 Loading 时）：指向运行中节点的输入侧连线。
+ * 供 #edge-default 插槽决定是否渲染流向箭头（箭头经连线 class 的
+ * --edge-related-color 变量取主色蓝，动画与单选联动高亮共用）。
+ *
+ * @param edgeId 连线 id
+ * @returns 属于运行态输入连线返回 true
+ */
+function edgeRunningRelated(edgeId: string): boolean {
+  return runningInputEdgeIds.value.has(edgeId)
 }
 
 /**
@@ -1651,6 +1679,13 @@ watch(flowEl, (flow) => {
 
 :deep(.vue-flow__edge.canvas-edge--output) {
   --edge-related-color: #ef6c00;
+}
+
+/* 运行态高亮（节点 Loading 时）：指向运行中节点的输入连线主色蓝显示（加粗复用
+   .canvas-edge--related 描边规则），箭头动画与单选联动高亮共用（同经 --edge-related-color 取色）。
+   class 由 useCanvasFlow 按优先级挂载（running > 单选输入侧 > 输出侧），互斥不叠加。 */
+:deep(.vue-flow__edge.canvas-edge--running) {
+  --edge-related-color: #1976d2;
 }
 
 :deep(.vue-flow__edge.canvas-edge--related .vue-flow__edge-path) {

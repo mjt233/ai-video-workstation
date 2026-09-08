@@ -37,6 +37,8 @@ export interface UseCanvasFlowOptions {
   selectedEdgeId: WritableStringRef
   /** 当前选中的节点 id 列表（单选联动高亮数据源：恰好 1 个选中时，其直接相连的连线与邻接节点高亮） */
   selectedNodeIds: Ref<string[]>
+  /** 运行中（Loading）节点 id 集合（运行态高亮数据源：其直接输入连线与上游节点联动高亮） */
+  runningNodeIds: Ref<Set<string>>
   /** 当前多选（≥2 个）节点包围盒（合成节点定位；单选/无选中时为 null） */
   groupRect: ComputedRef<GroupRect | null>
 }
@@ -44,6 +46,8 @@ export interface UseCanvasFlowOptions {
 /** 单选联动高亮连线挂载到 edge wrapper 的 class（输入侧绿色 / 输出侧橙色，样式见 AssetCanvas scoped `:deep` 规则） */
 const EDGE_RELATED_INPUT_CLASS = 'canvas-edge--related canvas-edge--input'
 const EDGE_RELATED_OUTPUT_CLASS = 'canvas-edge--related canvas-edge--output'
+/** 运行态高亮连线挂载到 edge wrapper 的 class（主色蓝，复用 canvas-edge--related 描边规则，颜色经 --edge-related-color 提供） */
+const EDGE_RUNNING_RELATED_CLASS = 'canvas-edge--related canvas-edge--running'
 
 /**
  * 画布流渲染与连线交互组合式。
@@ -52,7 +56,7 @@ const EDGE_RELATED_OUTPUT_CLASS = 'canvas-edge--related canvas-edge--output'
  * @returns Vue Flow 数据映射、交互处理器与连线右键菜单状态
  */
 export function useCanvasFlow(options: UseCanvasFlowOptions) {
-  const { store, nodeMap, project, selectedEdgeId, selectedNodeIds, groupRect } = options
+  const { store, nodeMap, project, selectedEdgeId, selectedNodeIds, runningNodeIds, groupRect } = options
 
   /**
    * 单选联动高亮（输入侧）：恰好选中 1 个节点时，收集「指向选中节点」的连线 id
@@ -116,6 +120,34 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
     return set
   })
 
+  /**
+   * 运行态高亮（输入连线）：节点处于 Loading（running）时，收集「指向运行中节点」的
+   * 连线 id（`toNodeId ∈ runningNodeIds`，数据流方向为上游节点 → 运行中节点）。
+   * 连线以主色蓝高亮并叠加沿数据流向移动的箭头动画；无运行中节点时返回空集。
+   */
+  const runningInputEdgeIds = computed<Set<string>>(() => {
+    const set = new Set<string>()
+    if (runningNodeIds.value.size === 0) return set
+    for (const c of store.connections.value) {
+      if (runningNodeIds.value.has(c.toNodeId)) set.add(c.id)
+    }
+    return set
+  })
+
+  /**
+   * 运行态高亮（上游节点）：指向运行中节点的连线其「源」节点（1 跳上游，
+   * 剔除运行中节点自身——连线不成环已由连接校验保证）。用于上游节点主色弱描边；
+   * 无运行中节点时为空集。
+   */
+  const runningInputNodeIds = computed<Set<string>>(() => {
+    const set = new Set<string>()
+    if (runningNodeIds.value.size === 0) return set
+    for (const c of store.connections.value) {
+      if (runningNodeIds.value.has(c.toNodeId)) set.add(c.fromNodeId)
+    }
+    return set
+  })
+
   /** Vue Flow 节点列表（type 固定 canvas，走自定义 slot 渲染） */
   const flowNodeList = computed(() =>
     store.nodes.value.map((n) => ({
@@ -168,9 +200,10 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   /** Vue Flow 节点列表（真实节点 + 群组合成节点） */
   const flowNodeFullList = computed(() => [...flowNodeList.value, ...syntheticNodeList.value])
 
-  /** Vue Flow 连线列表（type 固定 default；单选联动高亮时给关联连线挂方向分色 class：
-      输入侧 canvas-edge--input（绿）/ 输出侧 canvas-edge--output（橙），
-      Vue Flow 会把 edge.class 合并到 g.vue-flow__edge 上，由 AssetCanvas 的 :deep 规则渲染主题色） */
+  /** Vue Flow 连线列表（type 固定 default；联动高亮时给关联连线挂方向分色 class：
+      运行态 canvas-edge--running（蓝，优先级最高）/ 单选输入侧 canvas-edge--input（绿）/
+      输出侧 canvas-edge--output（橙），Vue Flow 会把 edge.class 合并到 g.vue-flow__edge 上，
+      由 AssetCanvas 的 :deep 规则渲染主题色） */
   const flowEdgeList = computed<FlowEdge[]>(() =>
     store.connections.value.map((c) => ({
       id: c.id,
@@ -179,11 +212,13 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
       target: c.toNodeId,
       targetHandle: c.toPortId,
       type: 'default',
-      class: relatedInputEdgeIds.value.has(c.id)
-        ? EDGE_RELATED_INPUT_CLASS
-        : relatedOutputEdgeIds.value.has(c.id)
-          ? EDGE_RELATED_OUTPUT_CLASS
-          : undefined,
+      class: runningInputEdgeIds.value.has(c.id)
+        ? EDGE_RUNNING_RELATED_CLASS
+        : relatedInputEdgeIds.value.has(c.id)
+          ? EDGE_RELATED_INPUT_CLASS
+          : relatedOutputEdgeIds.value.has(c.id)
+            ? EDGE_RELATED_OUTPUT_CLASS
+            : undefined,
     })),
   )
 
@@ -339,6 +374,8 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
     relatedOutputEdgeIds,
     adjacentInputNodeIds,
     adjacentOutputNodeIds,
+    runningInputEdgeIds,
+    runningInputNodeIds,
     onNodeDragStop,
     onNodeResizeEnd,
     isValidConnection,
