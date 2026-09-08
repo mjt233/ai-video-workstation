@@ -179,14 +179,19 @@ class TaskWsHub {
     if (typeof msg.taskId !== 'string' || !msg.taskId) return;
     const taskId = msg.taskId;
     if (msg.type === 'subscribe') {
+      // 订阅语义按任务类型分流：
+      // - 任务仍在注册表（ffmpeg / 工作流等）：仅登记订阅关系，进度/终态由 task-update 广播推送；
+      // - 任务已不在注册表但 LLM 会话仍活跃：推 snapshot（恢复态补齐累计进度）；
+      // - 两者都没有：任务已结束 → not-found（客户端仅结束 Loading，结果已在文件）。
+      // 注意：不能只用 llmSessionLookup 判定，否则订阅 ffmpeg/工作流任务会被误判为「已结束」。
+      const active = taskRegistry.get(taskId);
       const session = llmSessionLookup(taskId);
-      if (!session) {
-        // 订阅时会话已结束/不存在：仅结束 Loading（结果已在文件），无需提示中断
+      if (!active && !session) {
         this.send(socket, { type: 'not-found', taskId });
         return;
       }
       subs.add(taskId);
-      this.send(socket, { type: 'snapshot', taskId, session: this.snapshotOf(session) });
+      if (session) this.send(socket, { type: 'snapshot', taskId, session: this.snapshotOf(session) });
       return;
     }
     if (msg.type === 'unsubscribe') {

@@ -20,7 +20,7 @@ vi.mock('./api', () => ({
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs } from '../api/workflow'
 import { cancelTask } from '../api/tasks'
-import { extractVideoFrame, extractVideoFrameAtTime, concatVideo, trimVideo, trimAudio } from './api'
+import { extractVideoFrame, extractVideoFrameAtTime, concatVideo, trimVideo, trimAudio, getCanvasNodeInfo } from './api'
 import { taskSocket, type TaskInfo } from './taskSocket'
 import type { CanvasNodeData } from './types'
 
@@ -97,6 +97,7 @@ describe('useCanvasGeneration', () => {
     ;(trimAudio as Mock).mockResolvedValue({ taskId: 'ff-1' })
     ;(extractVideoFrame as Mock).mockResolvedValue({ taskId: 'ff-1' })
     ;(extractVideoFrameAtTime as Mock).mockResolvedValue({ taskId: 'ff-1' })
+    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: true, mtime: 1, size: 1 })
   })
 
   afterEach(() => {
@@ -487,6 +488,20 @@ describe('useCanvasGeneration', () => {
     const gen = useCanvasGeneration('p', TARGET)
     await gen.restore(new Set(['vc']))
     expect(gen.statusByNode.value.gone).toBeUndefined()
+  })
+
+  it('订阅收到 not-found（任务已结束）但产物不存在：不误报成功，提示重新执行', async () => {
+    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: false, mtime: null, size: null })
+    const gen = useCanvasGeneration('p', TARGET)
+    const onResult = vi.fn()
+    await gen.concatVideo(concatNode(), ['assert/a.mp4', 'assert/b.mp4'], onResult)
+    // 服务端任务已结束（注册表无此任务）→ 客户端收到 not-found
+    taskSocket.emitTaskEventForTest({ type: 'not-found', taskId: 'ff-1' })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(onResult).not.toHaveBeenCalled()
+    expect(gen.statusByNode.value.vc?.status).toBe('error')
+    expect(gen.statusByNode.value.vc?.errorMsg).toContain('未生成产物')
   })
 
   it('任务广播中断态（cancelled）→ 节点显示已中断', async () => {

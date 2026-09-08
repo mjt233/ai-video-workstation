@@ -420,6 +420,15 @@ class TaskSocketClient {
   emitTaskUpdateForTest(task: TaskInfo): void {
     for (const listener of [...this.taskUpdateListeners]) listener(task)
   }
+
+  /**
+   * 触发按任务订阅的事件处理器（**仅测试使用**：模拟服务端 snapshot/not-found 等）。
+   *
+   * @param event 任务事件
+   */
+  emitTaskEventForTest(event: LlmTaskEvent): void {
+    this.dispatch(event)
+  }
 }
 
 /** 全局统一任务 WS 客户端单例（App 启动即连接；全站共享任务列表） */

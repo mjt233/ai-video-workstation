@@ -13,6 +13,7 @@ import {
   concatVideo as requestConcatVideo,
   trimVideo as requestTrimVideo,
   trimAudio as requestTrimAudio,
+  getCanvasNodeInfo,
   type CanvasTaskTarget,
   type ConcatVideoParams,
 } from './api'
@@ -120,8 +121,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     delete taskIdByNode.value[nodeId]
     if (task.status === 'completed') {
       const payloadPath = typeof task.payload?.outputPath === 'string' ? task.payload.outputPath : ''
-      statusByNode.value[nodeId] = { status: 'success', lastLog: '任务已完成', progress: 100 }
       const finalPath = outputPath || payloadPath
+      statusByNode.value[nodeId] = { status: 'success', lastLog: '任务已完成', progress: 100 }
       if (finalPath) (cb ?? onResultCb)?.(nodeId, finalPath)
       return
     }
@@ -188,7 +189,22 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     delete ffmpegResultCbByNode[nodeId]
     if (status === 'completed') {
       statusByNode.value[nodeId] = { status: 'success', lastLog: '任务已完成', progress: 100 }
-      if (finalPath) onResultCb?.(nodeId, finalPath)
+      if (!finalPath) return
+      // 产物存在性核验：避免「订阅时任务已结束」误报成功（产物缺失时给出可重试的错误提示）
+      void getCanvasNodeInfo(project, finalPath)
+        .then((info) => {
+          if (info.exists) {
+            onResultCb?.(nodeId, finalPath)
+            return
+          }
+          statusByNode.value[nodeId] = { status: 'error', errorMsg: '任务已结束但未生成产物，请重新执行' }
+        })
+        .catch((e: unknown) => {
+          console.error(
+            `[canvas-gen] 产物存在性核验失败（${finalPath}）: ${e instanceof Error ? e.message : String(e)}`,
+          )
+          onResultCb?.(nodeId, finalPath)
+        })
       return
     }
     if (status === 'cancelled') {
