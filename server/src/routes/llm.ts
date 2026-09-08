@@ -20,7 +20,8 @@ import { isLlmProtocol, type LlmMediaType, type LlmProtocol } from '../llm/proto
 import { resolveProjectPath } from '../assets/paths.js';
 import type { CanvasDefTarget } from '../assets/canvas-def.js';
 import { sessionManager, LlmSessionError, type LlmSession, type LlmSessionSnapshot } from '../llm/session-manager.js';
-import { wsHub } from '../llm/session-ws.js';
+import { wsHub } from '../tasks/task-ws.js';
+import { llmExecutor } from '../tasks/llm-executor.js';
 
 export const llmRouter = Router();
 
@@ -179,6 +180,24 @@ llmRouter.post('/llm/chat', async (req: Request, res: Response) => {
       return;
     }
     throw e;
+  }
+  // 会话 id 即任务 id：登记进统一任务注册表（同节点单飞/上限冲突时回收会话）
+  try {
+    llmExecutor.create({
+      taskId: session.taskId,
+      nodeId,
+      label: session.label,
+      project,
+      canvas,
+      ...(session.snapshot.modelName ? { modelName: session.snapshot.modelName } : {}),
+    });
+    session.lifecycle = llmExecutor.lifecycleOf(session.taskId);
+  } catch (e) {
+    sessionManager.cancel(session.taskId);
+    await sessionManager.finish(session.taskId, { status: 'failed', error: '任务登记失败' });
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(429).json({ error: msg, code: 'TASK_LIMIT' });
+    return;
   }
   // 后台异步执行：逐事件 pushEvent + WS 广播；流结束/异常/取消 → finish 收敛
   void runLlmTask(session.taskId, {

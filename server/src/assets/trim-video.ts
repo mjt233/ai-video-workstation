@@ -3,6 +3,7 @@ import path from 'path';
 import Ffmpeg from 'fluent-ffmpeg';
 import { pathExists, resolveProjectPath } from './paths.js';
 import { getAudioInfo, getVideoInfo, type VideoInfo } from './extract-frame.js';
+import type { FfmpegCommandSpec } from './ffmpeg-command.js';
 
 /**
  * 裁剪视频错误：携带 HTTP 语义（INVALID=参数错误/越界、NOT_FOUND=输入缺失），
@@ -129,6 +130,34 @@ export async function trimVideo(
   params: TrimParams,
   outputPath: string,
 ): Promise<string> {
+  const spec = await buildTrimVideoCommand(project, videoPath, params, outputPath);
+  await new Promise<void>((resolve, reject) => {
+    spec.build(Ffmpeg())
+      .on('end', () => resolve())
+      .on('error', (err: Error) => reject(new TrimError(`裁剪失败：${err.message}`, 'INVALID')))
+      .save(spec.outputAbs);
+  });
+  return outputPath;
+}
+
+/**
+ * 构建裁剪 ffmpeg 命令（探测 + 参数校验 + 选项装配，不执行）。
+ *
+ * 路由层用它拿到命令后交给统一任务执行器异步执行（进度/中断由执行器接管）。
+ *
+ * @param project 项目名
+ * @param videoPath 输入视频相对路径（assert/ 下）
+ * @param params 裁剪参数（startTime 或 startFrame + duration）
+ * @param outputPath 输出视频相对路径（assert/ 下，.mp4）
+ * @returns 命令构建结果（产物绝对路径 / build / 裁剪时长 / 附加信息）
+ * @throws TrimError 输入缺失（NOT_FOUND）、参数非法/越界（INVALID）
+ */
+export async function buildTrimVideoCommand(
+  project: string,
+  videoPath: string,
+  params: TrimParams,
+  outputPath: string,
+): Promise<FfmpegCommandSpec> {
   const videoAbs = resolveProjectPath(project, videoPath);
   const outputAbs = resolveProjectPath(project, outputPath);
   if (!(await pathExists(videoAbs))) {
@@ -167,13 +196,10 @@ export async function trimVideo(
     outputOptions.push('-an');
   }
 
-  await new Promise<void>((resolve, reject) => {
-    Ffmpeg(videoAbs)
-      .outputOptions(outputOptions)
-      .on('end', () => resolve())
-      .on('error', (err: Error) => reject(new TrimError(`裁剪失败：${err.message}`, 'INVALID')))
-      .save(outputAbs);
-  });
-
-  return outputPath;
+  return {
+    outputAbs,
+    duration: window.duration,
+    info: { start: window.start, duration: window.duration, withAudio },
+    build: (cmd) => cmd.input(videoAbs).outputOptions(outputOptions),
+  };
 }

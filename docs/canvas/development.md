@@ -34,7 +34,7 @@
 - **eslint computed 副作用**：`vue/no-side-effects-in-computed-properties` 禁止在 computed 内写缓存/状态，改用 `watch`。
 - **面板钳制**：用 `flowEl.clientHeight/Width` 实测尺寸，勿依赖 Vue Flow `dimensions`。
 - **切换画布必须显式 fitView**：`fitViewOnInit` 只在 Vue Flow 首次初始化时跑一次，切换分镜/场景节点换了但视口仍停在旧坐标。`fitView` 在节点尚未测出宽高或容器尺寸为 0（画布 Tab 隐藏）时返回 `false`，必须 pending 后由 `onNodesInitialized` / ResizeObserver 再试，且用世代号丢弃过期请求；不要在每次 resize 时无条件 fit，会抢用户手动平移/缩放。
-- **loading 持久化分键**：运行中任务记录按 `项目 + 画布定义文件路径` 分键（`dsh.asset-canvas.tasks.*`），切换画布/项目互不串扰；`reset()` 只清内存不清记录，任务终态（成功/失败/中断）必须 `clearPersistedTask`，否则刷新后会出现幽灵 loading。
+- **任务状态来源**：工作流任务本地轮询 `/api/workflow/tasks/:id`；ffmpeg/LLM 任务由统一任务注册表经 WS 广播驱动（`taskSocket`）。画布切换只需 `gen.switchTarget()` + `gen.restore(knownNodeIds)`（**不要**再引入 localStorage 任务记录，已移除）。
 - **连线右键**：`@edge-context-menu` 需手动 `event.preventDefault()` 阻止浏览器默认菜单叠加。
 - **节点缩放**：核心包不含缩放组件，控制点由独立包 `@vue-flow/node-resizer` 提供；缩放中的实时尺寸只写在 Vue Flow 内部节点样式上，业务 `width/height`（及左侧/上侧缩放时的 `x/y`）在 `resizeEnd` 事件统一回写 store——勿在 `resize` 事件里回写，会高频压入撤销栈并反复触发保存。
 - **缩放控制点显隐**：`NodeResizer` 的 `isVisible` 需包含「缩放中」状态（悬浮/选中/缩放中任一为真），否则拖出节点边界触发 mouseleave 卸载控制点会中断缩放。
@@ -46,3 +46,7 @@
 - **轮询状态会级联重置连线/节点动画**：生成轮询每 tick 都整体重写 `statusByNode[nodeId]`（`lastLog` 变化），画布模板读到它必然重渲染并产生**新的插槽函数引用**。若把「运行中节点集合」等派生集实现为 computed，每次重算返回新 Set 实例 → `flowEdgeList` 重算出新数组 → Vue Flow 触发 `setEdges` 整体重建边对象 → EdgeWrapper 重渲染时以**已变化的插槽函数**作为组件类型（源码 `h(slots['edge-default'], …)`），Vue 判定为不同组件而 remount 插槽子树——连线箭头动画（`offset-path` 移动）被反复归零，节点脉冲动画同理。**派生集必须用 `watch` + 内容相等性守卫维护实例稳定**（内容不变则不替换 Set，见 AssetCanvas 的 `runningNodeIds`），轮询期间下游 computed 全部命中缓存零重算。
 - **删除类操作**：必须走 `confirm` 工具弹窗确认（AGENTS.md 约束）。
 - **提交信息**：中文提交信息在 PowerShell 下用 `-m` 会乱码，用 UTF-8 临时文件 `--amend -F` 方式提交。
+- **ffmpeg 命令必须与执行分离**：新增本地 ffmpeg 操作时，模块导出 `buildXxxCommand()`（探测 + 校验 + 装配，返回 `assets/ffmpeg-command.ts` 的 `FfmpegCommandSpec`），由 `tasks/ffmpeg-executor.ts` 统一 `save()` 并接管事件——直接在模块内 `save()` 会绕过执行器，导致无进度、无法中断（见 [task-architecture.md](./task-architecture.md)）。
+- **filter_complex 的 concat 输入标签**：必须写成 `[v0][a0][v1][a1]concat=n=2:v=1:a=1[vout][aout]`（标签串联），漏写或只写 `concat=...` 都会让 ffmpeg 报 `No output pad can be associated to link label` / `Cannot find a matching stream`。
+- **fluent-ffmpeg `inputOptions` 附着于最近一次 `input`**：追加 lavfi 静音源须 `inputOptions([...])` 与 `input('anullsrc=...')` 成对调用；静音源输入下标 = 段数 + 已追加的静音源数。
+- **任务状态只有两个来源**：工作流任务本地轮询 `/api/workflow/tasks/:id`；ffmpeg/LLM 任务由统一任务注册表经 WS 广播驱动（`taskSocket`）。**不要再引入 localStorage 任务记录**（已移除）。

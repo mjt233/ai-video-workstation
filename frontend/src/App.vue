@@ -26,22 +26,22 @@
       >
         导出项目
       </v-btn>
-      <!-- LLM 活跃会话（全局功能）：右上角独立图标 + 活跃数徽标 + 面板 -->
+      <!-- 任务管理器（全局功能）：右上角独立图标 + 活跃任务数徽标 + 面板 -->
       <v-btn
         icon
         variant="text"
         color="white"
         class="mr-1"
-        aria-label="LLM 活跃会话"
-        :title="activeLlmCount > 0 ? `LLM 活跃会话（${activeLlmCount}）` : 'LLM 活跃会话'"
+        aria-label="任务管理器"
+        :title="activeTaskCount > 0 ? `任务管理器（${activeTaskCount} 个进行中）` : '任务管理器'"
         @click="sessionsOpen = !sessionsOpen"
       >
         <v-badge
-          :content="String(activeLlmCount)"
-          :model-value="activeLlmCount > 0"
+          :content="String(activeTaskCount)"
+          :model-value="activeTaskCount > 0"
           color="error"
         >
-          <v-icon icon="mdi-broadcast" />
+          <v-icon icon="mdi-progress-clock" />
         </v-badge>
       </v-btn>
       <v-btn
@@ -59,9 +59,9 @@
       v-model="showSystemSettings"
       :initial-section="targetSection"
     />
-    <LlmSessionsDialog
+    <TaskManagerDialog
       v-model="sessionsOpen"
-      :sessions="llmSocket.sessions.value"
+      :tasks="taskSocket.tasks.value"
       @notify="onSessionsNotify"
     />
     <v-snackbar
@@ -79,9 +79,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { downloadProjectExport } from './api/client'
-import { llmSocket } from './canvas/llmSocket'
+import { taskSocket } from './canvas/taskSocket'
 import SystemSettingsDialog from './components/SystemSettingsDialog.vue'
-import LlmSessionsDialog from './components/LlmSessionsDialog.vue'
+import TaskManagerDialog from './components/TaskManagerDialog.vue'
 import { useSystemSettings } from './composables/useSystemSettings'
 
 const route = useRoute()
@@ -93,8 +93,10 @@ const sessionsOpen = ref(false)
 /** 全局操作反馈提示（LLM 会话面板中断等操作） */
 const snackbar = reactive({ show: false, text: '', color: 'primary' })
 
-/** 活跃 LLM 会话数（Header 徽标：服务端 begin/finish 广播实时刷新） */
-const activeLlmCount = computed(() => llmSocket.sessions.value.filter((s) => s.status === 'running').length)
+/** 活跃任务数（Header 徽标：服务端 begin/finish 广播实时刷新） */
+const activeTaskCount = computed(
+  () => taskSocket.tasks.value.filter((t) => t.status === 'running' || t.status === 'pending').length,
+)
 
 /** 面板操作反馈 */
 function onSessionsNotify(text: string, color: 'success' | 'error' | 'primary' = 'primary'): void {
@@ -124,6 +126,6 @@ function onExportProject() {
   downloadProjectExport(String(project))
 }
 
-// 全局 WS 连接（App 挂载即连；断线指数退避重连；会话列表 /llm-ws 广播驱动）
-onMounted(() => llmSocket.connect())
+// 全局 WS 连接（App 挂载即连；断线指数退避重连；任务列表 /llm-ws 广播驱动）
+onMounted(() => taskSocket.connect())
 </script>

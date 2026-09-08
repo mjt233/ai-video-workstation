@@ -22,7 +22,9 @@ frontend/src/
 │   ├── nodeClipboard.ts          # 节点复制标记（单/多节点：NODE_GROUP_CLIPBOARD_PREFIX + { nodes, connections }；兼容旧单节点标记）
 │   ├── sceneFrame.ts             # 设为分镜场景图纯函数（buildSceneFrameOptions/deriveStageFrameBody）
 │   ├── useCanvasStore.ts         # 状态：加载/保存(防抖 800ms)/增删改查/撤销重做/剪贴板/批量操作（applyNodes/updateNodes/removeNodes/connectGroupToNode/createNodeAndConnect）/switchTarget
-│   ├── useCanvasGeneration.ts    # 生成：跑工作流/轮询（纯体验层，不回写元数据）/统一中断/结果通知/运行中任务 localStorage 持久化与 restore/switchTarget
+│   ├── useCanvasGeneration.ts    # 生成：跑工作流/轮询（纯体验层，不回写元数据）/统一中断/结果通知/ffmpeg 异步任务（WS 驱动）+ restore/switchTarget
+│   ├── taskSocket.ts             # 统一任务 WS 客户端（全局单例：tasks 列表/增量/订阅/中断/断线重连）
+│   ├── llmSocket.ts              # 兼容再导出（= taskSocket；新代码请直接用 taskSocket）
 │   └── *.test.ts                 # 单元测试（390+ 用例）
 └── components/canvas/
     ├── AssetCanvas.vue           # 编排层：组装 store/gen/composables，渲染 VueFlow + 子组件

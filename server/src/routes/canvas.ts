@@ -3,19 +3,18 @@ import fs from 'fs/promises';
 import os from 'os';
 import multer from 'multer';
 import {
-  extractVideoFrame,
-  extractVideoFrameAtTime,
+  buildExtractFrameCommand,
   FrameIndexError,
   readAudioInfo,
   readVideoInfo,
 } from '../assets/extract-frame.js';
-import { concatVideos, ConcatError } from '../assets/concat-video.js';
-import { trimVideo, TrimError } from '../assets/trim-video.js';
+import { buildConcatCommand, ConcatError } from '../assets/concat-video.js';
+import { buildTrimVideoCommand, TrimError } from '../assets/trim-video.js';
 import {
   assertAudioTrimOutputPath,
   AUDIO_TRIM_FORMATS,
   AUDIO_TRIM_MP3_BITRATES,
-  trimAudio,
+  buildTrimAudioCommand,
   TrimAudioError,
 } from '../assets/trim-audio.js';
 import { isUnderAssert } from './fs-path.js';
@@ -24,6 +23,8 @@ import { saveCanvasNodeUpload } from '../assets/canvas-upload.js';
 import { readCanvasNodeInfo } from '../canvas/node-info.js';
 import { saveCanvasDef, type CanvasDefTarget } from '../assets/canvas-def.js';
 import { httpError } from '../assets/paths.js';
+import { startFfmpegTask } from '../tasks/ffmpeg-task.js';
+import { TaskError } from '../tasks/registry.js';
 
 /**
  * 画布专属路由：本地媒体处理操作（不走工作流队列）。
@@ -44,6 +45,44 @@ const canvasOutputUpload = multer({
   }),
   limits: { fileSize: 8 * 1024 * 1024 * 1024 }, // 8GB
 });
+
+/**
+ * 从请求体提取任务画布定位（nodeId / canvas），供任务管理器展示与画布刷新后恢复。
+ *
+ * @param body 请求体（可为空）
+ * @returns 含 nodeId/canvas 的补丁（字段缺失时为空对象）
+ */
+function taskTarget(body: unknown): { nodeId?: string; canvas?: CanvasDefTarget } {
+  const b = (body ?? {}) as { nodeId?: unknown; canvas?: unknown };
+  const out: { nodeId?: string; canvas?: CanvasDefTarget } = {};
+  if (typeof b.nodeId === 'string' && b.nodeId) out.nodeId = b.nodeId;
+  const c = b.canvas;
+  if (c && typeof c === 'object') {
+    const raw = c as Record<string, unknown>;
+    const kind = raw.kind === 'scene' || raw.kind === 'stage' ? raw.kind : '';
+    if (kind === 'scene' && typeof raw.episode === 'string' && typeof raw.shot === 'string') {
+      out.canvas = { kind, episode: raw.episode, shot: raw.shot };
+    } else if (kind === 'stage' && typeof raw.stage === 'string' && typeof raw.label === 'string') {
+      out.canvas = { kind, stage: raw.stage, label: raw.label };
+    }
+  }
+  return out;
+}
+
+/**
+ * 任务登记冲突响应（同节点单飞 409 / 全局上限 429）。
+ *
+ * @param err 捕获的异常
+ * @param res Express 响应对象
+ * @returns 已写入响应返回 true；非任务登记错误返回 false（由调用方继续处理）
+ */
+function respondTaskError(err: unknown, res: Response): boolean {
+  if (!(err instanceof TaskError)) return false;
+  res
+    .status(err.code === 'NODE_BUSY' ? 409 : 429)
+    .json({ error: err.message, code: err.code });
+  return true;
+}
 
 /**
  * 写固定路径产物前归档旧版本。
@@ -201,10 +240,13 @@ canvasRouter.post(
 /**
  * 提取视频帧：POST /api/canvas/extract-frame
  *
- * body: { project, videoPath, outputPath, frameIndex?, time? }
+ * body: { project, videoPath, outputPath, frameIndex?, time?, nodeId?, canvas? }
  * - frameIndex：帧索引（0=首帧、1=第二帧、-1=尾帧、-2=倒数第二帧，越界返回 400）；
  * - time（可选）：时间点（秒，[0, 时长] 内），提供时按时间精确选帧（ffmpeg -ss，与预览画面一致）。
+ * - nodeId / canvas（可选）：画布定位，供任务管理器展示与画布刷新后恢复 loading。
  * videoPath / outputPath 均须位于 assert/ 前缀下（与其它画布资产读写约束一致）。
+ *
+ * **异步**：登记 ffmpeg 任务后立即返回 { taskId, status }，进度与终态经 WS（/llm-ws）推送。
  */
 canvasRouter.post('/canvas/extract-frame', async (req: Request, res: Response) => {
   try {
@@ -223,25 +265,30 @@ canvasRouter.post('/canvas/extract-frame', async (req: Request, res: Response) =
     }
     // 可选 time（秒）：优先按时间点精确提取（「提取当前帧」），否则按帧索引提取
     const timeRaw = req.body?.time;
+    let spec;
     if (timeRaw !== undefined && timeRaw !== null && timeRaw !== '') {
       const time = Number(timeRaw);
       if (!Number.isFinite(time) || time < 0) {
         res.status(400).json({ error: 'time 必须是大于等于 0 的数字（秒）' });
         return;
       }
-      await archiveCanvasOutput(project, outputNorm);
-      const result = await extractVideoFrameAtTime(project, videoNorm, time, outputNorm);
-      res.json({ success: true, path: result });
-      return;
-    }
-    const frameIndex = Number(req.body?.frameIndex);
-    if (!Number.isInteger(frameIndex)) {
-      res.status(400).json({ error: 'frameIndex 必须是整数' });
-      return;
+      spec = await buildExtractFrameCommand(project, videoNorm, { timeSec: time }, outputNorm);
+    } else {
+      const frameIndex = Number(req.body?.frameIndex);
+      if (!Number.isInteger(frameIndex)) {
+        res.status(400).json({ error: 'frameIndex 必须是整数' });
+        return;
+      }
+      spec = await buildExtractFrameCommand(project, videoNorm, { frameIndex }, outputNorm);
     }
     await archiveCanvasOutput(project, outputNorm);
-    const result = await extractVideoFrame(project, videoNorm, frameIndex, outputNorm);
-    res.json({ success: true, path: result });
+    const taskId = await startFfmpegTask({
+      project,
+      label: '获取视频帧',
+      spec,
+      ...taskTarget(req.body),
+    });
+    res.json({ taskId, status: 'running' });
   } catch (err) {
     const e = err as { code?: string; message?: string };
     if (e instanceof FrameIndexError || e?.code === 'FRAME_INDEX_OUT_OF_RANGE') {
@@ -256,6 +303,7 @@ canvasRouter.post('/canvas/extract-frame', async (req: Request, res: Response) =
       res.status(400).json({ error: e.message, code: 'INVALID' });
       return;
     }
+    if (respondTaskError(err, res)) return;
     console.error('Failed to extract video frame:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -295,7 +343,9 @@ canvasRouter.get('/canvas/node-info', async (req: Request, res: Response) => {
  * 获取视频信息：GET /api/canvas/video-info
  *
  * query: { project, path }
- * 返回 { success, duration, fps, width, height }，供「提取当前帧」把预览播放时间换算为帧索引。
+ * 返回 { success, duration, fps, width, height, codec, hasAudio }：
+ * - 供「提取当前帧」把预览播放时间换算为帧索引；
+ * - 供拼接视频节点做**输入规格预检**（编码/分辨率/帧率/音轨结构是否一致，copy 模式能否无损拼接）。
  * path 须位于 assert/ 前缀下。
  */
 canvasRouter.get('/canvas/video-info', async (req: Request, res: Response) => {
@@ -312,7 +362,11 @@ canvasRouter.get('/canvas/video-info', async (req: Request, res: Response) => {
       return;
     }
     const info = await readVideoInfo(project, videoNorm);
-    res.json({ success: true, ...info });
+    // 音轨探测：getAudioInfo 无音频流时 reject，视为无音轨（拼接音轨结构校验用）
+    const hasAudio = await readAudioInfo(project, videoNorm)
+      .then(() => true)
+      .catch(() => false);
+    res.json({ success: true, ...info, hasAudio });
   } catch (err) {
     const e = err as { code?: string; message?: string };
     if (e?.code === 'NOT_FOUND') {
@@ -360,9 +414,20 @@ canvasRouter.get('/canvas/audio-info', async (req: Request, res: Response) => {
 /**
  * 拼接视频：POST /api/canvas/concat-video
  *
- * body: { project, videoPaths: string[], outputPath }
- * 按 videoPaths 顺序用 ffmpeg 无损拼接（concat demuxer + `-c copy`，各段规格须一致），
- * 产物写入 outputPath。videoPaths 与 outputPath 均须位于 assert/ 前缀下。
+ * body: {
+ *   project, videoPaths: string[], outputPath,
+ *   mode?: 'copy' | 'reencode',            // 编码方式（缺省 reencode）
+ *   sizeMode?: 'custom' | 'max' | 'min',   // 输出尺寸策略（仅 reencode 生效，缺省 max）
+ *   width?, height?,                       // sizeMode=custom 时的自定义宽高（像素）
+ *   nodeId?, canvas?                       // 画布定位（任务管理器展示 + 刷新后恢复）
+ * }
+ * - mode=copy：concat demuxer + `-c copy` 无损拼接，各段编码/分辨率/帧率/音轨结构须一致，
+ *   不一致返回 400 并提示改用重编码；
+ * - mode=reencode：filter_complex 逐段归一化（等比缩放 + 居中黑边 + 统一帧率 + 音轨补齐）后单次编码，
+ *   允许各段编码/分辨率完全不同。
+ * videoPaths 与 outputPath 均须位于 assert/ 前缀下。
+ *
+ * **异步**：登记 ffmpeg 任务后立即返回 { taskId, status }，进度与终态经 WS（/llm-ws）推送。
  */
 canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) => {
   try {
@@ -379,9 +444,41 @@ canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) =>
       res.status(403).json({ error: '仅支持 assert/ 下的视频路径' });
       return;
     }
+    // 编码方式与输出尺寸策略（枚举白名单；缺省由 buildConcatCommand 归一化）
+    const modeRaw = req.body?.mode;
+    if (modeRaw !== undefined && modeRaw !== 'copy' && modeRaw !== 'reencode') {
+      res.status(400).json({ error: 'mode 仅支持 copy / reencode' });
+      return;
+    }
+    const sizeModeRaw = req.body?.sizeMode;
+    if (sizeModeRaw !== undefined && sizeModeRaw !== 'custom' && sizeModeRaw !== 'max' && sizeModeRaw !== 'min') {
+      res.status(400).json({ error: 'sizeMode 仅支持 custom / max / min' });
+      return;
+    }
+    const widthRaw = req.body?.width;
+    const heightRaw = req.body?.height;
+    const params: { mode?: 'copy' | 'reencode'; sizeMode?: 'custom' | 'max' | 'min'; width?: number; height?: number } = {};
+    if (modeRaw) params.mode = modeRaw;
+    if (sizeModeRaw) params.sizeMode = sizeModeRaw;
+    if (sizeModeRaw === 'custom') {
+      const width = Number(widthRaw);
+      const height = Number(heightRaw);
+      if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+        res.status(400).json({ error: '自定义输出尺寸需要填写有效的宽度与高度（正整数像素）' });
+        return;
+      }
+      params.width = width;
+      params.height = height;
+    }
+    const spec = await buildConcatCommand(project, videoPaths, outputNorm, params);
     await archiveCanvasOutput(project, outputNorm);
-    const result = await concatVideos(project, videoPaths, outputNorm);
-    res.json({ success: true, path: result });
+    const taskId = await startFfmpegTask({
+      project,
+      label: '拼接视频',
+      spec,
+      ...taskTarget(req.body),
+    });
+    res.json({ taskId, status: 'running' });
   } catch (err) {
     const e = err as { code?: string; message?: string };
     if (e?.code === 'NOT_FOUND') {
@@ -392,6 +489,7 @@ canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) =>
       res.status(400).json({ error: e.message, code: e.code ?? 'INVALID' });
       return;
     }
+    if (respondTaskError(err, res)) return;
     console.error('Failed to concat videos:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -406,6 +504,8 @@ canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) =>
  * - duration：持续时长（秒，> 0，可小数；超出片尾截到剩余时长）。
  * 重编码输出（不用 -c copy），保证帧索引 / 小数秒切口准确。
  * videoPath / outputPath 均须位于 assert/ 前缀下。
+ *
+ * **异步**：登记 ffmpeg 任务后立即返回 { taskId, status }，进度与终态经 WS（/llm-ws）推送。
  */
 canvasRouter.post('/canvas/trim-video', async (req: Request, res: Response) => {
   try {
@@ -452,8 +552,14 @@ canvasRouter.post('/canvas/trim-video', async (req: Request, res: Response) => {
       params.startFrame = startFrame;
     }
     await archiveCanvasOutput(project, outputNorm);
-    const result = await trimVideo(project, videoNorm, params, outputNorm);
-    res.json({ success: true, path: result });
+    const spec = await buildTrimVideoCommand(project, videoNorm, params, outputNorm);
+    const taskId = await startFfmpegTask({
+      project,
+      label: '裁剪视频',
+      spec,
+      ...taskTarget(req.body),
+    });
+    res.json({ taskId, status: 'running' });
   } catch (err) {
     const e = err as { code?: string; message?: string };
     if (e?.code === 'NOT_FOUND') {
@@ -464,6 +570,7 @@ canvasRouter.post('/canvas/trim-video', async (req: Request, res: Response) => {
       res.status(400).json({ error: e.message, code: e.code ?? 'INVALID' });
       return;
     }
+    if (respondTaskError(err, res)) return;
     console.error('Failed to trim video:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -535,8 +642,19 @@ canvasRouter.post('/canvas/trim-audio', async (req: Request, res: Response) => {
       }
     }
     await archiveCanvasOutput(project, outputRel);
-    const result = await trimAudio(project, audioNorm, { startTime, duration, format, mp3Bitrate }, outputRel);
-    res.json({ success: true, path: result.path, duration: result.duration });
+    const { spec } = await buildTrimAudioCommand(
+      project,
+      audioNorm,
+      { startTime, duration, format, mp3Bitrate },
+      outputRel,
+    );
+    const taskId = await startFfmpegTask({
+      project,
+      label: '裁剪音频',
+      spec,
+      ...taskTarget(req.body),
+    });
+    res.json({ taskId, status: 'running' });
   } catch (err) {
     const e = err as { code?: string; message?: string };
     if (e instanceof TrimAudioError || e?.code === 'INVALID') {
@@ -547,6 +665,7 @@ canvasRouter.post('/canvas/trim-audio', async (req: Request, res: Response) => {
       res.status(404).json({ error: e.message, code: 'NOT_FOUND' });
       return;
     }
+    if (respondTaskError(err, res)) return;
     console.error('Failed to trim audio:', err);
     res.status(500).json({ error: 'Internal server error' });
   }

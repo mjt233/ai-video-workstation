@@ -20,6 +20,7 @@ import { getBatchConcurrency } from './routes/workflow.js';
 import { copyExistingAssetToHistory } from './assets/history.js';
 import { isCancelRequested } from './workflows/cancel.js';
 import { toNativeUserParams } from './workflows/user-params.js';
+import { workflowExecutor } from './tasks/workflow-executor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../design');
@@ -607,6 +608,24 @@ export async function runTask(taskId: string): Promise<void> {
     /** 本次执行的 Easy Bridge 提供商实例 ID（用户选择，仅 comfyui-bridge 工作流入库） */
     comfyuiProviderId?: string;
   };
+
+  // 登记进统一任务注册表（任务管理器可见/可中断；SQLite 仍是持久化权威）
+  try {
+    workflowExecutor.create({
+      taskId,
+      project: task.project,
+      workflowId: task.workflow_id,
+      impl: task.impl,
+      label: wf.name || `${task.workflow_id}/${task.impl}`,
+      ...(typeof paramsObj.outputPath === 'string' && paramsObj.outputPath
+        ? { outputPath: paramsObj.outputPath }
+        : {}),
+    });
+  } catch (e) {
+    // 全局任务上限等登记失败不影响工作流执行（仅任务管理器不显示该任务）
+    console.warn(`[engine] 任务登记统一注册表失败（${taskId}）: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   const projectConfig = await loadProjectConfig(task.project);
 
   // tts-voice-design + purpose=scene-tts：引擎统一读取台词/声线/情绪，并规范输出路径
@@ -987,6 +1006,7 @@ export async function runTask(taskId: string): Promise<void> {
 
     db.addLog(taskId, 'info', `Output written to: ${outputPath}`);
     db.updateTaskStatus(taskId, 'completed', { result: { path: outputPath } });
+    workflowExecutor.finish(taskId, 'completed');
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -998,6 +1018,7 @@ export async function runTask(taskId: string): Promise<void> {
     // 失败直接标记 failed，不做自动重试/重新提交：避免长时间任务因轮询超时被重复提交远端生成
     // （旧任务被遗弃仍消耗算力/费用）。需要重试时由用户通过节点「重试」/ POST /workflow/retry/:taskId 手动触发。
     db.updateTaskStatus(taskId, 'failed', { error_msg: msg });
+    workflowExecutor.finish(taskId, 'failed');
   }
 }
 

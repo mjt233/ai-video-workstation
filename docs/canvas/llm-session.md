@@ -10,7 +10,7 @@
 - **跨页面存活**：Loading 恢复由**服务端活跃会话注册表**驱动（会话携带 nodeId + 画布 scope；**仅内存，不持久化、无 localStorage 参与**）；完成后能结束 Loading 并更新响应内容（终态由后端落盘）。
 - **LLM 活跃会话管理**：所有正在调用 LLM 的异步任务统一登记（当前唯一调用点为 AI 文本节点；**全局上限 8**，同节点单飞）；思考+响应完成后从列表移除。
 - **WebSocket 替换 SSE**：`/llm-ws`（全局单例连接，`ws` 库挂载于 `http.createServer(app)`；upgrade 不经 Express 中间件与 SPA 兜底路由）；客户端断开**不再中止上游**。
-- **全局面板**：Header 右上角独立图标（`mdi-broadcast` + 活跃数徽标）→ `LlmSessionsDialog.vue`（全站可用：节点名/模型名/阶段/耗时（按 `startedAt` 客户端每秒刷新）/状态；每行「中断」（取消非删除，无需 confirm）；空态提示）。
+- **全局面板**：Header 右上角独立图标（`mdi-progress-clock` + 活跃任务数徽标）→ `TaskManagerDialog.vue`（**统一任务管理器**，覆盖工作流/LLM/ffmpeg 全部异步任务；节点名/模型名/阶段/进度/耗时（按 `startedAt` 客户端每秒刷新）/画布位置；每行「中断」（取消非删除，无需 confirm，不可中断的任务置灰并显示原因）；空态提示）。**架构与实现见 [task-architecture.md](./task-architecture.md)**。
 
 ```
 客户端（浏览器）                          服务端（Express，内存）            画布定义文件 / 上游 LLM

@@ -3,6 +3,7 @@ import path from 'path';
 import Ffmpeg from 'fluent-ffmpeg';
 import { getAudioInfo, type AudioInfo } from './extract-frame.js';
 import { pathExists, resolveProjectPath } from './paths.js';
+import type { FfmpegCommandSpec } from './ffmpeg-command.js';
 
 /**
  * 音频裁剪错误：携带 HTTP 语义，路由层据此映射响应状态码。
@@ -183,6 +184,34 @@ export async function trimAudio(
   params: TrimAudioParams,
   outputPath: string,
 ): Promise<AudioTrimResult> {
+  const { spec, result } = await buildTrimAudioCommand(project, audioPath, params, outputPath);
+  await new Promise<void>((resolve, reject) => {
+    spec.build(Ffmpeg())
+      .on('end', () => resolve())
+      .on('error', (err: Error) => reject(new TrimAudioError(`音频裁剪失败：${err.message}`, 'INVALID')))
+      .save(spec.outputAbs);
+  });
+  return result;
+}
+
+/**
+ * 构建音频裁剪 ffmpeg 命令（校验 + 探测 + 选项装配，不执行）。
+ *
+ * 路由层用它拿到命令后交给统一任务执行器异步执行（进度/中断由执行器接管）。
+ *
+ * @param project 项目名
+ * @param audioPath 输入音频相对路径（assert/ 下）
+ * @param params 起始位置与裁剪时长（秒），以及可选的输出格式 format/mp3Bitrate
+ * @param outputPath 输出音频相对路径（画布节点固定 output.{ext}）
+ * @returns 命令构建结果与业务结果（产物相对路径 + 实际裁剪时长）
+ * @throws TrimAudioError 输入缺失、参数非法、格式/码率非法、扩展名不一致、输出路径非法
+ */
+export async function buildTrimAudioCommand(
+  project: string,
+  audioPath: string,
+  params: TrimAudioParams,
+  outputPath: string,
+): Promise<{ spec: FfmpegCommandSpec; result: AudioTrimResult }> {
   const outputRel = assertAudioTrimOutputPath(outputPath);
   const audioAbs = resolveProjectPath(project, audioPath);
   const outputAbs = resolveProjectPath(project, outputRel);
@@ -235,32 +264,34 @@ export async function trimAudio(
   const window = resolveAudioTrimWindow(params, info);
 
   await fs.mkdir(path.dirname(outputAbs), { recursive: true });
-  await new Promise<void>((resolve, reject) => {
-    const outputOptions = [
-      // 输出端 -ss 在解码后按呈现时间定位，适合小数秒精确切口
-      '-ss',
-      String(window.start),
-      '-t',
-      String(window.duration),
-      // 只取第一路音频，明确去除可能存在的视频流
-      '-map',
-      '0:a:0',
-      '-vn',
-      '-c:a',
-      codec,
-      '-avoid_negative_ts',
-      'make_zero',
-    ];
-    // mp3（libmp3lame）追加定码率
-    if (codec === 'libmp3lame') {
-      outputOptions.push('-b:a', `${bitrate}k`);
-    }
-    Ffmpeg(audioAbs)
-      .outputOptions(outputOptions)
-      .on('end', () => resolve())
-      .on('error', (err: Error) => reject(new TrimAudioError(`音频裁剪失败：${err.message}`, 'INVALID')))
-      .save(outputAbs);
-  });
 
-  return { path: outputRel, duration: window.duration };
+  const outputOptions = [
+    // 输出端 -ss 在解码后按呈现时间定位，适合小数秒精确切口
+    '-ss',
+    String(window.start),
+    '-t',
+    String(window.duration),
+    // 只取第一路音频，明确去除可能存在的视频流
+    '-map',
+    '0:a:0',
+    '-vn',
+    '-c:a',
+    codec,
+    '-avoid_negative_ts',
+    'make_zero',
+  ];
+  // mp3（libmp3lame）追加定码率
+  if (codec === 'libmp3lame') {
+    outputOptions.push('-b:a', `${bitrate}k`);
+  }
+
+  return {
+    spec: {
+      outputAbs,
+      duration: window.duration,
+      info: { start: window.start, duration: window.duration, codec, bitrate },
+      build: (cmd) => cmd.input(audioAbs).outputOptions(outputOptions),
+    },
+    result: { path: outputRel, duration: window.duration },
+  };
 }

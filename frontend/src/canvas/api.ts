@@ -155,33 +155,37 @@ export async function saveCanvas(
 }
 
 /**
- * 提取视频帧：调用服务端 ffmpeg 接口，把输入视频的指定帧输出为图片（png）。
+ * 提取视频帧：提交服务端 ffmpeg **异步任务**，把输入视频的指定帧输出为图片（png）。
  *
  * 帧索引语义：0=首帧、1=第二帧、-1=尾帧、-2=倒数第二帧，以此类推（越界服务端返回错误）。
+ * 进度与终态经 WebSocket（/llm-ws）推送；中断走 `POST /api/tasks/:taskId/cancel`。
  *
  * @param project 项目名
  * @param videoPath 输入视频相对路径（assert/ 下）
  * @param frameIndex 帧索引（整数，可负）
  * @param outputPath 输出图片相对路径（assert/ 下，.png）
- * @returns 服务端执行结果（含输出相对路径）
+ * @param target 任务画布定位（可选）
+ * @returns 任务提交结果（taskId）
  */
 export async function extractVideoFrame(
   project: string,
   videoPath: string,
   frameIndex: number,
   outputPath: string,
-): Promise<{ success: boolean; path: string }> {
-  const { data } = await client.post<{ success: boolean; path: string }>('/canvas/extract-frame', {
+  target?: CanvasTaskTarget,
+): Promise<{ taskId: string }> {
+  const { data } = await client.post<{ taskId: string }>('/canvas/extract-frame', {
     project,
     videoPath,
     frameIndex,
     outputPath,
+    ...(target ?? {}),
   })
   return data
 }
 
 /**
- * 按时间点提取视频帧：调用服务端 ffmpeg 接口，把输入视频 time 秒处的帧输出为图片（png）。
+ * 按时间点提取视频帧：提交服务端 ffmpeg **异步任务**，把输入视频 time 秒处的帧输出为图片（png）。
  *
  * 服务端按呈现时间精确选帧（ffmpeg -ss），与浏览器预览画面一致；
  * 「提取当前帧」用它避免帧索引换算误差（尤其拖拽进度条后）。
@@ -190,19 +194,22 @@ export async function extractVideoFrame(
  * @param videoPath 输入视频相对路径（assert/ 下）
  * @param time 时间点（秒，须在 [0, 时长] 内）
  * @param outputPath 输出图片相对路径（assert/ 下，.png）
- * @returns 服务端执行结果（含输出相对路径）
+ * @param target 任务画布定位（可选）
+ * @returns 任务提交结果（taskId）
  */
 export async function extractVideoFrameAtTime(
   project: string,
   videoPath: string,
   time: number,
   outputPath: string,
-): Promise<{ success: boolean; path: string }> {
-  const { data } = await client.post<{ success: boolean; path: string }>('/canvas/extract-frame', {
+  target?: CanvasTaskTarget,
+): Promise<{ taskId: string }> {
+  const { data } = await client.post<{ taskId: string }>('/canvas/extract-frame', {
     project,
     videoPath,
     time,
     outputPath,
+    ...(target ?? {}),
   })
   return data
 }
@@ -231,7 +238,7 @@ export async function getCanvasNodeInfo(project: string, relPath: string): Promi
   return { exists: data.exists, mtime: data.mtime, size: data.size }
 }
 
-/** 视频基础信息（服务端 ffprobe，供「提取当前帧」把播放时间换算为帧索引） */
+/** 视频基础信息（服务端 ffprobe，供「提取当前帧」换算帧索引与拼接节点输入规格预检） */
 export interface VideoInfo {
   /** 时长（秒） */
   duration: number
@@ -241,12 +248,16 @@ export interface VideoInfo {
   width: number
   /** 视频高度（像素） */
   height: number
+  /** 视频编码（如 h264/hevc；不可用为空串） */
+  codec: string
+  /** 是否含音轨（拼接 copy 模式音轨结构一致性预检用） */
+  hasAudio: boolean
 }
 
 /**
- * 获取视频基础信息：时长 / 帧率 / 分辨率。
+ * 获取视频基础信息：时长 / 帧率 / 分辨率 / 编码 / 是否含音轨。
  *
- * 供「提取当前帧」：无 requestVideoFrameCallback 环境按 播放时间 × 帧率 换算当前帧索引。
+ * 供「提取当前帧」换算帧索引，以及拼接视频节点的输入规格预检（copy 模式能否无损拼接）。
  *
  * @param project 项目名
  * @param videoPath 视频相对路径（assert/ 下）
@@ -256,7 +267,14 @@ export async function getVideoInfo(project: string, videoPath: string): Promise<
   const { data } = await client.get<{ success: boolean } & VideoInfo>('/canvas/video-info', {
     params: { project, path: videoPath },
   })
-  return { duration: data.duration, fps: data.fps, width: data.width, height: data.height }
+  return {
+    duration: data.duration,
+    fps: data.fps,
+    width: data.width,
+    height: data.height,
+    codec: data.codec ?? '',
+    hasAudio: data.hasAudio === true,
+  }
 }
 
 /** 音频基础信息（服务端 ffprobe，供连线音频时按真实时长回填素材块） */
@@ -283,24 +301,56 @@ export async function getAudioInfo(project: string, audioPath: string): Promise<
 }
 
 /**
- * 拼接视频：调用服务端 ffmpeg 接口，把多段视频按顺序无损拼接为单个视频。
+ * 拼接视频参数（编码方式与输出尺寸策略）。
  *
- * 服务端用 concat demuxer + `-c copy`（各段编码/分辨率/帧率/音轨结构须一致，否则报错）。
+ * - `mode=copy`：无损流拷贝，各段编码/分辨率/帧率/音轨结构须一致（否则服务端报错并提示改用重编码）；
+ * - `mode=reencode`：重编码（filter_complex 逐段归一化），允许异构规格；
+ * - `sizeMode` 仅 reencode 生效：`max`/`min` 按像素面积取那一段的完整宽高，`custom` 用 width/height。
+ */
+export interface ConcatVideoParams {
+  /** 编码方式（缺省 reencode） */
+  mode?: 'copy' | 'reencode'
+  /** 输出尺寸策略（缺省 max） */
+  sizeMode?: 'custom' | 'max' | 'min'
+  /** 自定义输出宽度（像素，sizeMode=custom 时必填） */
+  width?: number
+  /** 自定义输出高度（像素，sizeMode=custom 时必填） */
+  height?: number
+}
+
+/** ffmpeg 任务提交目标（任务管理器展示 + 画布刷新后按 scope 恢复 loading） */
+export interface CanvasTaskTarget {
+  /** 发起节点 id */
+  nodeId?: string
+  /** 画布定位 */
+  canvas?: { kind: 'scene' | 'stage'; episode?: string; shot?: string; stage?: string; label?: string }
+}
+
+/**
+ * 拼接视频：提交服务端 ffmpeg **异步任务**，立即返回 taskId。
+ *
+ * 进度与终态经 WebSocket（/llm-ws）推送；中断走 `POST /api/tasks/:taskId/cancel`。
  *
  * @param project 项目名
  * @param videoPaths 视频相对路径数组（assert/ 下，按拼接顺序，至少 2 段）
  * @param outputPath 输出视频相对路径（assert/ 下，.mp4）
- * @returns 服务端执行结果（含输出相对路径）
+ * @param params 拼接参数（编码方式与输出尺寸策略）
+ * @param target 任务画布定位（可选）
+ * @returns 任务提交结果（taskId）
  */
 export async function concatVideo(
   project: string,
   videoPaths: string[],
   outputPath: string,
-): Promise<{ success: boolean; path: string }> {
-  const { data } = await client.post<{ success: boolean; path: string }>('/canvas/concat-video', {
+  params?: ConcatVideoParams,
+  target?: CanvasTaskTarget,
+): Promise<{ taskId: string }> {
+  const { data } = await client.post<{ taskId: string }>('/canvas/concat-video', {
     project,
     videoPaths,
     outputPath,
+    ...(params ?? {}),
+    ...(target ?? {}),
   })
   return data
 }
@@ -316,29 +366,33 @@ export interface TrimVideoParams {
 }
 
 /**
- * 裁剪视频：调用服务端 ffmpeg 接口，把输入视频按起点与持续时长剪切为单个视频。
+ * 裁剪视频：提交服务端 ffmpeg **异步任务**，把输入视频按起点与持续时长剪切为单个视频。
  *
  * 服务端重编码输出（不用 -c copy），保证帧索引 / 小数秒切口准确。
+ * 进度与终态经 WebSocket（/llm-ws）推送；中断走 `POST /api/tasks/:taskId/cancel`。
  *
  * @param project 项目名
  * @param videoPath 输入视频相对路径（assert/ 下）
  * @param params 裁剪参数（startTime 或 startFrame + duration）
  * @param outputPath 输出视频相对路径（assert/ 下，.mp4）
- * @returns 服务端执行结果（含输出相对路径）
+ * @param target 任务画布定位（可选）
+ * @returns 任务提交结果（taskId）
  */
 export async function trimVideo(
   project: string,
   videoPath: string,
   params: TrimVideoParams,
   outputPath: string,
-): Promise<{ success: boolean; path: string }> {
-  const { data } = await client.post<{ success: boolean; path: string }>('/canvas/trim-video', {
+  target?: CanvasTaskTarget,
+): Promise<{ taskId: string }> {
+  const { data } = await client.post<{ taskId: string }>('/canvas/trim-video', {
     project,
     videoPath,
     outputPath,
     duration: params.duration,
     startTime: params.startTime,
     startFrame: params.startFrame,
+    ...(target ?? {}),
   })
   return data
 }
@@ -368,24 +422,27 @@ export interface TrimAudioResult {
 }
 
 /**
- * 裁剪音频：调用服务端 ffmpeg 接口，把输入音频按起点与持续时长剪切为单个音频文件。
+ * 裁剪音频：提交服务端 ffmpeg **异步任务**，把输入音频按起点与持续时长剪切为单个音频文件。
  *
  * 服务端重编码输出（不用 -c copy），保证小数秒切口准确；输出格式由 params.format
  * 与 outputPath 扩展名决定（「原格式」时扩展名须与输入一致）。
+ * 进度与终态经 WebSocket（/llm-ws）推送；中断走 `POST /api/tasks/:taskId/cancel`。
  *
  * @param project 项目名
  * @param audioPath 输入音频相对路径（assert/ 下）
  * @param params 裁剪参数（startTime + duration，以及可选的 format/mp3Bitrate）
  * @param outputPath 输出音频相对路径（assert/ 下，画布节点固定 output.{ext}）
- * @returns 服务端执行结果（含输出相对路径与实际时长）
+ * @param target 任务画布定位（可选）
+ * @returns 任务提交结果（taskId）
  */
 export async function trimAudio(
   project: string,
   audioPath: string,
   params: TrimAudioParams,
   outputPath: string,
-): Promise<TrimAudioResult> {
-  const { data } = await client.post<TrimAudioResult>('/canvas/trim-audio', {
+  target?: CanvasTaskTarget,
+): Promise<{ taskId: string }> {
+  const { data } = await client.post<{ taskId: string }>('/canvas/trim-audio', {
     project,
     audioPath,
     outputPath,
@@ -393,6 +450,7 @@ export async function trimAudio(
     duration: params.duration,
     format: params.format,
     mp3Bitrate: params.mp3Bitrate,
+    ...(target ?? {}),
   })
   return data
 }

@@ -85,6 +85,8 @@ export interface LlmSession {
   persistPatch?: { output?: string; outputHistory?: LlmTextHistoryEntry[] };
   /** 服务端持有的上游中止控制器（cancel 即 abort 上游流） */
   abortController: AbortController;
+  /** 统一任务注册表生命周期回调（可选；由 routes/llm.ts 注入） */
+  lifecycle?: LlmSessionLifecycle;
 }
 
 /** begin() 登记参数（路由层校验后传入） */
@@ -97,6 +99,34 @@ export interface LlmSessionBeginInput {
   canvas: CanvasDefTarget;
   input: string;
   snapshot: LlmSessionSnapshot;
+  /**
+   * 统一任务注册表生命周期回调（可选）。
+   *
+   * 会话管理器**不直接依赖** tasks 模块（避免模块环），由调用方（`routes/llm.ts`）
+   * 注入 `llmExecutor.lifecycleOf(taskId)`：阶段切换与终态时同步到统一任务注册表，
+   * 使 LLM 会话出现在全局任务管理器中。
+   */
+  lifecycle?: LlmSessionLifecycle;
+}
+
+/**
+ * LLM 会话生命周期回调（统一任务注册表同步用）。
+ *
+ * 由 `tasks/llm-executor.ts` 构造并注入，会话管理器只在关键节点调用，不感知注册表实现。
+ */
+export interface LlmSessionLifecycle {
+  /**
+   * 会话阶段变化（thinking → responding）。
+   *
+   * @param phase 新阶段
+   */
+  onPhase?: (phase: LlmSessionPhase) => void;
+  /**
+   * 会话终态（已移除出活跃区）。
+   *
+   * @param status 终态
+   */
+  onFinish?: (status: 'completed' | 'failed' | 'cancelled') => void;
 }
 
 /** 会话事件（wsHub 订阅用）：begin = 新会话登记；update = 阶段/警告/错误变化；finish = 终态移除 */
@@ -207,6 +237,7 @@ class LlmSessionManager {
       startedAt: now,
       cancelled: false,
       abortController: new AbortController(),
+      ...(input.lifecycle ? { lifecycle: input.lifecycle } : {}),
     };
     this.sessions.set(session.taskId, session);
     this.emit({ type: 'begin', session });
@@ -241,6 +272,14 @@ class LlmSessionManager {
         if (s.phase !== 'responding') {
           s.phase = 'responding';
           this.emit({ type: 'update', session: s });
+          // 同步统一任务注册表（阶段切换；任务管理器展示「正在响应…」）
+          try {
+            s.lifecycle?.onPhase?.(s.phase);
+          } catch (err) {
+            console.error(
+              `[llm-session] 阶段同步任务注册表失败: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
         }
         s.text += event.delta;
         break;
@@ -312,6 +351,15 @@ class LlmSessionManager {
     }
     this.sessions.delete(taskId);
     this.emit({ type: 'finish', session: s });
+    // 同步统一任务注册表（终态移除）：**在 emit 之后**调用，保证终态广播（task-ws 读会话快照）
+    // 时会话仍在活跃区；回调异常只打日志，不影响会话收敛。
+    try {
+      s.lifecycle?.onFinish?.(effective);
+    } catch (err) {
+      console.error(
+        `[llm-session] 终态同步任务注册表失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     return s;
   }
 

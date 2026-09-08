@@ -1556,6 +1556,8 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
   if (disposed || seq !== fitViewSeq) return
   const st = await store.switchTarget(newTarget, opts)
   if (disposed || seq !== fitViewSeq) return
+  // 节点加载完成后再按 scope 恢复运行中的 ffmpeg 任务（需 nodeMap 过滤已删除节点）
+  void gen.restore(new Set(Object.keys(nodeMap.value)))
   if (st === 'conflict') {
     // 保存版本冲突：未切换，交由用户决定（数据保留在原画布）
     switchConflict.pending = newTarget
@@ -1595,8 +1597,8 @@ onMounted(() => {
     // 首次加载后把视口对准全部节点（fitViewOnInit 只在 Vue Flow 首次初始化时跑一次，这里统一走显式适应）
     scheduleFitCanvas()
     void refreshNodeOutputs()
-    // 恢复持久化的运行中任务：离开画布/刷新前未完成的任务继续显示 loading 并跟踪到终态
-    if (!disposed) void gen.restore()
+    // 恢复运行中的 ffmpeg 任务（服务端统一任务注册表按 scope 过滤；刷新后 loading 保持到终态）
+    if (!disposed) void gen.restore(new Set(Object.keys(nodeMap.value)))
     // 恢复 LLM 活跃会话（服务端会话列表按 scope 过滤；刷新后 Loading 保持、终态 adopt）
     if (!disposed) restoreLlmSessions()
   })
@@ -1617,8 +1619,8 @@ onUnmounted(() => {
   // 取消 LLM 恢复订阅（任务继续在服务端执行；重进画布由会话列表恢复接管）
   resetLlmRestore()
   resetAdoptedLlmRevs()
-  // 停止轮询/清理生成状态（localStorage 记录保留：重新进入画布时由 restore 恢复）
-  gen.reset()
+  // 停止轮询/清理生成状态并退订任务广播（服务端任务继续执行；重进画布由注册表按 scope 恢复）
+  gen.dispose()
 })
 
 // 画布容器尺寸变化 → 更新可视区尺寸（配置面板边界钳制用；面板自身高度由面板组件自测）

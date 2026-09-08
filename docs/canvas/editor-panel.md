@@ -34,6 +34,7 @@
   - `DurationPicker`（`components/DurationPicker.vue`，时长）：**仅生成视频节点显示**；点击触发行弹出菜单——1~15 秒按钮组（点击即选即关）+ 手动输入（支持小数秒，回车/「应用」确认，非法忽略）；写回按生成模式走 `config.director.duration` / `config.duration`；
   - `WorkflowSizePicker`（输出尺寸）：**仅生成图片/视频节点显示**，点击弹出菜单（比例/分辨率/自定义宽高），图片节点直接绑 `config.sizeConfig`；
   - `WorkflowParamsTrigger`（`components/WorkflowParamsTrigger.vue`，工作流参数）：点击触发行弹出菜单，菜单内嵌 `WorkflowParamsForm`；触发行显示「工作流参数」+ 已配置非默认参数数量徽标。
+- **拼接视频节点编辑器**（`editors/ConcatVideoEditor.vue`）在输入预览下方增加：**输入规格探测**（`GET /api/canvas/video-info`，逐段展示 分辨率/帧率/编码/有无音轨）、**编码方式**下拉（重编码 / copy）、**输出尺寸**下拉（取最大的一段 / 取最小的一段 / 自定义；`copy` 时禁用并提示「仅重编码可用」）、`自定义` 时的宽高输入框、目标尺寸提示（`max`/`min` 按像素面积推算）与 copy 规格不一致红字提示（不一致时禁用「拼接」按钮）。
 - **导演台模式例外**：生成视频的 `director` 模式保持内嵌导演台布局（首行工作流/模式/全屏、输出规格、内嵌参数表单、`VideoDirector`），仅把「时长(秒)」输入框换成 `DurationPicker`。
 
 ## 输入预览（`CanvasInputPreview.vue`，生成节点统一输入区）

@@ -1,16 +1,23 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // 模块级 mock：fluent-ffmpeg（默认导出可链式调用）、paths.js 的 pathExists、extract-frame 的视频/音频探测
-const { mockFfmpeg, mockPathExists, mockGetVideoInfo, mockGetAudioInfo, mockMkdir, mockWriteFile, mockUnlink } =
-  vi.hoisted(() => ({
-    mockFfmpeg: vi.fn(),
-    mockPathExists: vi.fn(),
-    mockGetVideoInfo: vi.fn(),
-    mockGetAudioInfo: vi.fn(),
-    mockMkdir: vi.fn(async () => undefined),
-    mockWriteFile: vi.fn(async () => undefined),
-    mockUnlink: vi.fn(async () => undefined),
-  }));
+const {
+  mockFfmpeg,
+  mockPathExists,
+  mockGetVideoInfo,
+  mockGetAudioInfo,
+  mockMkdir,
+  mockWriteFileSync,
+  mockUnlink,
+} = vi.hoisted(() => ({
+  mockFfmpeg: vi.fn(),
+  mockPathExists: vi.fn(),
+  mockGetVideoInfo: vi.fn(),
+  mockGetAudioInfo: vi.fn(),
+  mockMkdir: vi.fn(async () => undefined),
+  mockWriteFileSync: vi.fn(),
+  mockUnlink: vi.fn(async () => undefined),
+}));
 
 vi.mock('fluent-ffmpeg', () => {
   const ffmpegFn = (...args: unknown[]) => mockFfmpeg(...args);
@@ -31,13 +38,28 @@ vi.mock('./extract-frame.js', () => ({
 // fs/promises：显式提供 default（concat-video.ts 用 `import fs from 'fs/promises'`），
 // 避免 importOriginal 展开后 default 指向真实模块导致写盘/建目录
 vi.mock('fs/promises', () => ({
-  default: { mkdir: mockMkdir, writeFile: mockWriteFile, unlink: mockUnlink },
+  default: { mkdir: mockMkdir, unlink: mockUnlink },
   mkdir: mockMkdir,
-  writeFile: mockWriteFile,
   unlink: mockUnlink,
 }));
 
-import { assertConcatCompatible, concatVideos, ConcatError } from './concat-video.js';
+// fs（同步）：copy 模式的临时 concat 列表文件用 writeFileSync 同步写入（命令构建阶段）
+vi.mock('fs', () => ({
+  default: { writeFileSync: mockWriteFileSync },
+  writeFileSync: mockWriteFileSync,
+}));
+
+import {
+  assertConcatCompatible,
+  buildConcatCommand,
+  buildReencodeArgs,
+  concatVideos,
+  ConcatError,
+  normalizeConcatParams,
+  resolveOutputFps,
+  resolveOutputSize,
+  toEven,
+} from './concat-video.js';
 
 /** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录输入/输出选项与保存路径 */
 function mockRun() {
@@ -45,11 +67,22 @@ function mockRun() {
     inputs: string[];
     inputOptions: string[];
     outputs: string[];
+    filterComplex: string;
     saved: string;
-    end?: () => void;
-    err?: (e: Error) => void;
+    /** end/error 监听器列表（真实 EventEmitter 语义：多个监听器都要触发） */
+    endHandlers: Array<() => void>;
+    errHandlers: Array<(e: Error) => void>;
     failOnSave?: boolean;
-  } = { inputs: [], inputOptions: [], outputs: [], saved: '', failOnSave: false };
+  } = {
+    inputs: [],
+    inputOptions: [],
+    outputs: [],
+    filterComplex: '',
+    saved: '',
+    endHandlers: [],
+    errHandlers: [],
+    failOnSave: false,
+  };
   const chain = {
     input: (p: string) => {
       state.inputs.push(p);
@@ -63,15 +96,22 @@ function mockRun() {
       state.outputs = o;
       return chain;
     },
+    complexFilter: (f: string) => {
+      state.filterComplex = f;
+      return chain;
+    },
     on: (event: string, cb: (e?: Error) => void) => {
-      if (event === 'end') state.end = cb as () => void;
-      else if (event === 'error') state.err = cb as (e: Error) => void;
+      if (event === 'end') state.endHandlers.push(cb as () => void);
+      else if (event === 'error') state.errHandlers.push(cb as (e: Error) => void);
       return chain;
     },
     save: (out: string) => {
       state.saved = out;
-      if (state.failOnSave) state.err?.(new Error('ffmpeg 执行失败'));
-      else state.end?.();
+      if (state.failOnSave) {
+        for (const cb of [...state.errHandlers]) cb(new Error('ffmpeg 执行失败'));
+      } else {
+        for (const cb of [...state.endHandlers]) cb();
+      }
       return chain;
     },
   };
@@ -90,7 +130,7 @@ beforeEach(() => {
 });
 
 describe('assertConcatCompatible', () => {
-  const base = { codec: 'h264', width: 1280, height: 720, fps: 25, hasAudio: true };
+  const base = { codec: 'h264', width: 1280, height: 720, fps: 25, hasAudio: true, duration: 4 };
 
   it('各段规格一致时不抛错', () => {
     expect(() => assertConcatCompatible([base, { ...base }, { ...base }])).not.toThrow();
@@ -121,12 +161,12 @@ describe('concatVideos', () => {
     mockFfmpeg.mockReturnValue(chain);
     mockCompatibleSegments();
 
-    const result = await concatVideos('p', ['assert/v1.mp4', 'assert/v2.mp4'], 'assert/out.mp4');
+    const result = await concatVideos('p', ['assert/v1.mp4', 'assert/v2.mp4'], 'assert/out.mp4', { mode: 'copy' });
 
     expect(result).toBe('assert/out.mp4');
     // 列表文件写入（UTF-8，含两个 file 行，正斜杠）
-    expect(mockWriteFile).toHaveBeenCalledTimes(1);
-    const [listPath, listBody, opts] = mockWriteFile.mock.calls[0] as unknown as [string, string, { encoding: string }];
+    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+    const [listPath, listBody, opts] = mockWriteFileSync.mock.calls[0] as unknown as [string, string, { encoding: string }];
     expect(opts.encoding).toBe('utf8');
     expect(listBody).toContain("file '");
     expect(listBody.match(/^file '/gm)?.length).toBe(2);
@@ -158,7 +198,7 @@ describe('concatVideos', () => {
     expect(mockFfmpeg).not.toHaveBeenCalled();
   });
 
-  it('规格不一致抛 INVALID，且不执行 ffmpeg', async () => {
+  it('规格不一致（copy）抛 INVALID 并提示改用重编码，且不执行 ffmpeg', async () => {
     const { chain } = mockRun();
     mockFfmpeg.mockReturnValue(chain);
     mockGetVideoInfo
@@ -166,12 +206,15 @@ describe('concatVideos', () => {
       .mockResolvedValueOnce({ duration: 4, fps: 25, width: 1920, height: 1080, codec: 'h264' });
     mockGetAudioInfo.mockResolvedValue({ duration: 4 });
 
-    const err = await concatVideos('p', ['assert/v1.mp4', 'assert/v2.mp4'], 'assert/out.mp4').catch((e: unknown) => e);
+    const err = await concatVideos('p', ['assert/v1.mp4', 'assert/v2.mp4'], 'assert/out.mp4', { mode: 'copy' }).catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(ConcatError);
     expect(err).toMatchObject({
       code: 'INVALID',
       message: expect.stringContaining('分辨率'),
     });
+    expect((err as Error).message).toContain('重编码');
     expect(mockFfmpeg).not.toHaveBeenCalled();
   });
 
@@ -181,11 +224,192 @@ describe('concatVideos', () => {
     mockFfmpeg.mockReturnValue(chain);
     mockCompatibleSegments();
 
-    await expect(concatVideos('p', ['assert/v1.mp4', 'assert/v2.mp4'], 'assert/out.mp4')).rejects.toMatchObject({
+    await expect(
+      concatVideos('p', ['assert/v1.mp4', 'assert/v2.mp4'], 'assert/out.mp4', { mode: 'copy' }),
+    ).rejects.toMatchObject({
       code: 'INVALID',
       message: expect.stringContaining('拼接失败'),
     });
-    const [listPath] = mockWriteFile.mock.calls[0] as unknown as [string];
+    const [listPath] = mockWriteFileSync.mock.calls[0] as unknown as [string];
     expect(mockUnlink).toHaveBeenCalledWith(listPath);
+  });
+});
+
+describe('normalizeConcatParams', () => {
+  it('缺省为 reencode + max', () => {
+    expect(normalizeConcatParams()).toEqual({ mode: 'reencode', sizeMode: 'max' });
+  });
+
+  it('非法枚举回退缺省，custom 保留宽高', () => {
+    // 运行时容错：非法枚举值（如前端旧数据/手工构造）回退缺省 max
+    expect(normalizeConcatParams({ mode: 'copy', sizeMode: 'weird' as unknown as 'max' })).toEqual({
+      mode: 'copy',
+      sizeMode: 'max',
+    });
+    expect(normalizeConcatParams({ sizeMode: 'custom', width: 1920, height: 1080 })).toEqual({
+      mode: 'reencode',
+      sizeMode: 'custom',
+      width: 1920,
+      height: 1080,
+    });
+  });
+});
+
+describe('toEven', () => {
+  it('奇数向上取偶、最小 2', () => {
+    expect(toEven(1920)).toBe(1920);
+    expect(toEven(1921)).toBe(1922);
+    expect(toEven(1)).toBe(2);
+    expect(toEven(1.4)).toBe(2);
+  });
+});
+
+describe('resolveOutputSize', () => {
+  const seg = (width: number, height: number): { codec: string; width: number; height: number; fps: number; hasAudio: boolean; duration: number } => ({
+    codec: 'h264',
+    width,
+    height,
+    fps: 25,
+    hasAudio: true,
+    duration: 4,
+  });
+
+  it('max：按像素面积取最大那一段的完整宽高', () => {
+    const specs = [seg(1280, 720), seg(1920, 1080), seg(640, 480)];
+    expect(resolveOutputSize(specs, normalizeConcatParams({ sizeMode: 'max' }))).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it('min：按像素面积取最小那一段的完整宽高', () => {
+    const specs = [seg(1280, 720), seg(1920, 1080), seg(640, 480)];
+    expect(resolveOutputSize(specs, normalizeConcatParams({ sizeMode: 'min' }))).toEqual({ width: 640, height: 480 });
+  });
+
+  it('竖屏素材不产生奇怪尺寸（整段宽高，而非宽高分别取极值）', () => {
+    const specs = [seg(1920, 1080), seg(1080, 1920)];
+    expect(resolveOutputSize(specs, normalizeConcatParams({ sizeMode: 'max' }))).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it('custom：使用用户宽高并规整为偶数', () => {
+    const specs = [seg(1280, 720)];
+    expect(resolveOutputSize(specs, normalizeConcatParams({ sizeMode: 'custom', width: 1921, height: 1081 }))).toEqual({
+      width: 1922,
+      height: 1082,
+    });
+  });
+
+  it('custom 缺宽高或非法抛 INVALID', () => {
+    const specs = [seg(1280, 720)];
+    expect(() => resolveOutputSize(specs, normalizeConcatParams({ sizeMode: 'custom' }))).toThrowError(
+      expect.objectContaining({ code: 'INVALID' }),
+    );
+    expect(() =>
+      resolveOutputSize(specs, normalizeConcatParams({ sizeMode: 'custom', width: 0, height: 1080 })),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID' }));
+  });
+});
+
+describe('resolveOutputFps', () => {
+  it('取各段最高帧率；全部不可用时回退 30', () => {
+    const specs = [
+      { codec: 'h264', width: 1280, height: 720, fps: 24, hasAudio: true, duration: 4 },
+      { codec: 'h264', width: 1280, height: 720, fps: 30, hasAudio: true, duration: 4 },
+    ];
+    expect(resolveOutputFps(specs)).toBe(30);
+    expect(resolveOutputFps([{ ...specs[0], fps: 0 }])).toBe(30);
+  });
+});
+
+describe('buildReencodeArgs', () => {
+  const seg = (
+    width: number,
+    height: number,
+    fps: number,
+    hasAudio: boolean,
+    duration = 4,
+  ): { codec: string; width: number; height: number; fps: number; hasAudio: boolean; duration: number } => ({
+    codec: 'h264',
+    width,
+    height,
+    fps,
+    hasAudio,
+    duration,
+  });
+
+  it('等比缩放 + 居中黑边 + 统一帧率 + setsar=1', () => {
+    const specs = [seg(1280, 720, 25, true), seg(640, 480, 30, true)];
+    const args = buildReencodeArgs(specs, normalizeConcatParams({ sizeMode: 'max' }));
+    expect(args.width).toBe(1280);
+    expect(args.height).toBe(720);
+    expect(args.fps).toBe(30);
+    expect(args.filterComplex).toContain('scale=1280:720:force_original_aspect_ratio=decrease');
+    expect(args.filterComplex).toContain('pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black');
+    expect(args.filterComplex).toContain('setsar=1');
+    expect(args.filterComplex).toContain('fps=30');
+    expect(args.filterComplex).toContain('[v0][a0][v1][a1]concat=n=2:v=1:a=1[vout][aout]');
+    expect(args.outputOptions).toEqual(
+      expect.arrayContaining(['-map', '[vout]', '[aout]', '-c:v', 'libx264', '-crf', '18', '-c:a', 'aac']),
+    );
+    expect(args.extraInputs).toHaveLength(0);
+    expect(args.withAudio).toBe(true);
+  });
+
+  it('无音轨段用 anullsrc 补齐静音轨（lavfi 输入 + 该段时长）', () => {
+    const specs = [seg(1280, 720, 25, true, 5), seg(1280, 720, 25, false, 3)];
+    const args = buildReencodeArgs(specs, normalizeConcatParams({ sizeMode: 'max' }));
+    expect(args.withAudio).toBe(true);
+    expect(args.extraInputs).toHaveLength(1);
+    expect(args.extraInputs[0]).toEqual([
+      '-f',
+      'lavfi',
+      '-t',
+      '3',
+      '-i',
+      'anullsrc=r=48000:cl=stereo',
+    ]);
+    // 静音源输入下标 = 段数（2）+ 已追加的静音源数（0）
+    expect(args.filterComplex).toContain('[2:a]aformat=channel_layouts=stereo[a1]');
+  });
+
+  it('全部无音轨时只拼视频流并 -an', () => {
+    const specs = [seg(1280, 720, 25, false), seg(1280, 720, 25, false)];
+    const args = buildReencodeArgs(specs, normalizeConcatParams({ sizeMode: 'max' }));
+    expect(args.withAudio).toBe(false);
+    expect(args.extraInputs).toHaveLength(0);
+    expect(args.filterComplex).toContain('[v0][v1]concat=n=2:v=1:a=0[vout]');
+    expect(args.outputOptions).toContain('-an');
+    expect(args.outputOptions).not.toContain('-c:a');
+  });
+});
+
+describe('concatVideos（重编码）', () => {
+  it('异构规格可拼接：走 filter_complex 且不写 concat 列表文件', async () => {
+    const { chain, state } = mockRun();
+    mockFfmpeg.mockReturnValue(chain);
+    mockGetVideoInfo
+      .mockResolvedValueOnce({ duration: 4, fps: 25, width: 1280, height: 720, codec: 'h264' })
+      .mockResolvedValueOnce({ duration: 4, fps: 30, width: 640, height: 480, codec: 'hevc' });
+    mockGetAudioInfo.mockResolvedValue({ duration: 4 });
+
+    await concatVideos('p', ['assert/v1.mp4', 'assert/v2.mp4'], 'assert/out.mp4', { mode: 'reencode' });
+
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(state.inputs).toHaveLength(2);
+    expect(state.filterComplex).toContain('concat=n=2');
+    expect(state.saved).toMatch(/out\.mp4$/);
+  });
+
+  it('buildConcatCommand 返回命令与总时长（供统一任务执行器使用）', async () => {
+    mockGetVideoInfo
+      .mockResolvedValueOnce({ duration: 4, fps: 25, width: 1280, height: 720, codec: 'h264' })
+      .mockResolvedValueOnce({ duration: 6, fps: 25, width: 1280, height: 720, codec: 'h264' });
+    mockGetAudioInfo.mockResolvedValue({ duration: 4 });
+
+    const spec = await buildConcatCommand('p', ['assert/v1.mp4', 'assert/v2.mp4'], 'assert/out.mp4', {
+      mode: 'reencode',
+      sizeMode: 'min',
+    });
+    expect(spec.duration).toBe(10);
+    expect(spec.info).toMatchObject({ mode: 'reencode', sizeMode: 'min', width: 1280, height: 720 });
+    expect(spec.outputAbs).toMatch(/out\.mp4$/);
   });
 });

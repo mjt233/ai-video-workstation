@@ -18,7 +18,8 @@ import { discoverWorkflows, startEngine } from './workflow-engine.js';
 import { syncAllInstances } from './providers/instance-sync.js';
 import { migrateLegacyConfig } from './providers/config-store.js';
 import { apiNotFoundHandler, errorHandler, installProcessErrorHandlers } from './error-handler.js';
-import { wsHub } from './llm/session-ws.js';
+import { wsHub } from './tasks/task-ws.js';
+import { taskRouter } from './tasks/routes.js';
 
 // 进程级兜底：未处理的 Promise 拒绝 / 未捕获同步异常全部打印到控制台，杜绝静默丢失
 installProcessErrorHandlers();
@@ -27,7 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 /** HTTP 服务器（WS 枢纽挂在同一个服务器上：/llm-ws 由 ws 库自行处理 upgrade） */
 const server = http.createServer(app);
-/** LLM 会话 WebSocket 枢纽挂载（连接即推活跃会话全量列表；见 /llm-ws） */
+/** 统一任务 WebSocket 枢纽挂载（连接即推全部活跃任务；见 /llm-ws） */
 wsHub.attach(server);
 /** 服务监听端口，可通过环境变量 PORT 覆盖 */
 const PORT = process.env.PORT || 3001;
@@ -47,6 +48,7 @@ app.use('/api', projectPortRouter);
 app.use('/api', assetsRouter);
 app.use('/api', workflowRouter);
 app.use('/api', canvasRouter);
+app.use('/api', taskRouter);
 app.use('/api', llmRouter);
 app.use('/api', presetsRouter);
 app.use('/api', cleanupRouter);

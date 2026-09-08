@@ -30,16 +30,21 @@ vi.mock('fs/promises', () => ({
 import { resolveAudioTrimWindow, trimAudio } from './trim-audio.js';
 import type { AudioInfo } from './extract-frame.js';
 
-/** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录参数与保存路径。 */
+/** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录输入/参数与保存路径。 */
 function mockRun() {
   const state: {
+    input: string;
     outputs: string[];
     saved: string;
     end?: () => void;
     err?: (e: Error) => void;
     failOnSave: boolean;
-  } = { outputs: [], saved: '', failOnSave: false };
+  } = { input: '', outputs: [], saved: '', failOnSave: false };
   const chain = {
+    input: (p: string) => {
+      state.input = p;
+      return chain;
+    },
     outputOptions: (options: string[]) => {
       state.outputs = options;
       return chain;
@@ -101,7 +106,7 @@ describe('trimAudio', () => {
     const result = await trimAudio('p', 'assert/source.wav', { startTime: 1.25, duration: 0.8 }, OUTPUT);
 
     expect(result).toEqual({ path: OUTPUT, duration: 0.8 });
-    expect(mockFfmpeg).toHaveBeenCalledWith(expect.stringContaining('source.wav'));
+    expect(state.input).toContain('source.wav');
     expect(state.outputs[state.outputs.indexOf('-ss') + 1]).toBe('1.25');
     expect(state.outputs[state.outputs.indexOf('-t') + 1]).toBe('0.8');
     expect(state.outputs).toContain('-map');

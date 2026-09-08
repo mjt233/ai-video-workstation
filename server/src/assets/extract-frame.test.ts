@@ -38,17 +38,22 @@ import {
   resolveFrameNumber,
 } from './extract-frame.js';
 
-/** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录输出选项与保存路径 */
+/** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录输入/输出选项与保存路径 */
 function mockRun() {
   const state: {
+    input: string;
     vf: string;
     saved: string;
     outputs: string[];
     end?: () => void;
     err?: (e: Error) => void;
     failOnSave?: boolean;
-  } = { vf: '', saved: '', outputs: [] };
+  } = { input: '', vf: '', saved: '', outputs: [] };
   const chain = {
+    input: (p: string) => {
+      state.input = p;
+      return chain;
+    },
     outputOptions: (opts: string[]) => {
       state.outputs = opts;
       state.vf = opts[opts.indexOf('-vf') + 1] ?? '';
@@ -245,7 +250,7 @@ describe('extractVideoFrameAtTime', () => {
     });
     const result = await extractVideoFrameAtTime('p', 'assert/video/a.mp4', 1.5, 'assert/frames/f.png');
     expect(result).toBe('assert/frames/f.png');
-    expect(mockFfmpeg).toHaveBeenCalledWith(expect.stringContaining('a.mp4'));
+    expect(state.input).toContain('a.mp4');
     expect(state.outputs).toContain('-ss');
     expect(state.outputs[state.outputs.indexOf('-ss') + 1]).toBe('1.5');
     expect(state.saved).toMatch(/f\.png$/);
@@ -287,7 +292,7 @@ describe('extractVideoFrame', () => {
     mockFfmpeg.mockReturnValue(chain);
     const result = await extractVideoFrame('p', 'assert/video/a.mp4', -1, 'assert/frames/f.png');
     expect(result).toBe('assert/frames/f.png');
-    expect(mockFfmpeg).toHaveBeenCalledWith(expect.stringContaining('a.mp4'));
+    expect(state.input).toContain('a.mp4');
     // -1 → 120 帧的最后一帧（119）
     expect(state.vf).toBe('select=eq(n\\,119)');
     expect(state.saved).toMatch(/f\.png$/);

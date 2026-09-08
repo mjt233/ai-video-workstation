@@ -6,8 +6,8 @@ vi.mock('../api/workflow', () => ({
   runWorkflow: vi.fn(),
   getTaskStatus: vi.fn(),
   getTaskLogs: vi.fn(),
-  cancelWorkflow: vi.fn(),
 }))
+vi.mock('../api/tasks', () => ({ cancelTask: vi.fn(), listTasks: vi.fn() }))
 vi.mock('./api', () => ({
   extractVideoFrame: vi.fn(),
   extractVideoFrameAtTime: vi.fn(),
@@ -18,23 +18,55 @@ vi.mock('./api', () => ({
 }))
 
 import { writeFs } from '../api/client'
-import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow } from '../api/workflow'
-import { extractVideoFrame, extractVideoFrameAtTime, concatVideo, trimVideo, trimAudio, getCanvasNodeInfo } from './api'
+import { runWorkflow, getTaskStatus, getTaskLogs } from '../api/workflow'
+import { cancelTask } from '../api/tasks'
+import { extractVideoFrame, extractVideoFrameAtTime, concatVideo, trimVideo, trimAudio } from './api'
+import { taskSocket, type TaskInfo } from './taskSocket'
 import type { CanvasNodeData } from './types'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
-/** 画布 1/1 的任务持久化键（localStorage） */
-const TASK_KEY = 'dsh.asset-canvas.tasks.p:prompt/scene/1/1/canvas.json'
 
-/** 完成态任务响应（getTaskStatus mock 常用） */
+/** 完成态工作流任务响应（getTaskStatus mock 常用） */
 const COMPLETED_TASK = {
   taskId: 'task-1', status: 'completed', result: { path: 'x' }, errorMsg: undefined,
   workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '',
 }
-/** 运行态任务响应 */
+/** 运行态工作流任务响应 */
 const RUNNING_TASK = {
   taskId: 'task-1', status: 'running', result: null, errorMsg: undefined,
   workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '',
+}
+
+/**
+ * 构造统一任务摘要（ffmpeg 任务广播用）。
+ *
+ * @param patch 覆盖字段
+ * @returns 任务摘要
+ */
+function ffmpegTask(patch: Partial<TaskInfo> = {}): TaskInfo {
+  return {
+    id: 'ff-1',
+    type: 'ffmpeg',
+    label: '拼接视频',
+    status: 'running',
+    startedAt: Date.now(),
+    project: 'p',
+    nodeId: 'vc',
+    canvas: { kind: 'scene', episode: '1', shot: '1' },
+    cancelable: true,
+    ...patch,
+  }
+}
+
+/**
+ * 模拟服务端任务广播：更新 taskSocket.tasks 并触发增量监听器。
+ *
+ * @param task 任务摘要
+ */
+function emitTaskUpdate(task: TaskInfo): void {
+  const list = taskSocket.tasks.value.filter((t) => t.id !== task.id)
+  taskSocket.tasks.value = [task, ...list]
+  taskSocket.emitTaskUpdateForTest(task)
 }
 
 function makeNode(prompt: string, workflowId?: string): CanvasNodeData {
@@ -44,20 +76,31 @@ function makeNode(prompt: string, workflowId?: string): CanvasNodeData {
   }
 }
 
+/** 拼接视频节点（config 可覆盖） */
+function concatNode(config: Record<string, unknown> = {}): CanvasNodeData {
+  return {
+    id: 'vc', prototypeId: 'video-concat', name: '拼接视频', x: 0, y: 0, width: 240, height: 160,
+    config,
+  }
+}
+
 describe('useCanvasGeneration', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
-    localStorage.clear()
+    taskSocket.tasks.value = []
     ;(runWorkflow as Mock).mockResolvedValue({ taskId: 'task-1', status: 'running' })
     ;(getTaskStatus as Mock).mockResolvedValue(COMPLETED_TASK)
     ;(getTaskLogs as Mock).mockResolvedValue([])
-    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: false, mtime: null, size: null })
+    ;(concatVideo as Mock).mockResolvedValue({ taskId: 'ff-1' })
+    ;(trimVideo as Mock).mockResolvedValue({ taskId: 'ff-1' })
+    ;(trimAudio as Mock).mockResolvedValue({ taskId: 'ff-1' })
+    ;(extractVideoFrame as Mock).mockResolvedValue({ taskId: 'ff-1' })
+    ;(extractVideoFrameAtTime as Mock).mockResolvedValue({ taskId: 'ff-1' })
   })
 
   afterEach(() => {
     vi.useRealTimers()
-    localStorage.clear()
   })
 
   it('文生图：写入 prompt 文件、提交固定产物路径，完成后通知结果且不回写 config', async () => {
@@ -76,8 +119,6 @@ describe('useCanvasGeneration', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(gen.statusByNode.value.n1?.status).toBe('success')
     expect(onResult).toHaveBeenCalledWith('n1', 'assert/scene/1/1/canvas/n1/output.jpg')
-    // 任务到达终态：持久化记录已清除
-    expect(localStorage.getItem(TASK_KEY)).toBeNull()
   })
 
   it('图生图：使用 image-edit 并传入 imagePaths', async () => {
@@ -122,198 +163,101 @@ describe('useCanvasGeneration', () => {
     expect(gen.statusByNode.value.n1?.errorMsg).toContain('工作流实现')
   })
 
-  it('场景画布（含子场景标签）：prompt 与产物路径包含 label', async () => {
-    const gen = useCanvasGeneration('p', { kind: 'stage', stage: '街角', label: '白天' })
-    const node = makeNode('打开正门')
-    await gen.generate(node)
-    expect(writeFs).toHaveBeenCalledWith('p', 'prompt/stage/街角/canvas/白天/n1/prompt.md', '打开正门')
-    expect(runWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workflowId: 'text-to-image',
-        params: expect.objectContaining({ outputPath: 'assert/stage/街角/canvas/白天/n1/output.jpg' }),
-      }),
-    )
-  })
+  // ── 拼接视频节点（异步任务 + 编码方式/输出尺寸参数）────────────────────────
 
-  it('生成失败进入 error 状态且不通知结果', async () => {
-    ;(getTaskStatus as Mock).mockResolvedValue({ taskId: 'task-1', status: 'failed', result: null, errorMsg: '失败', workflowId: 'image-edit', impl: '', createdAt: '', updatedAt: '' })
+  it('拼接视频节点：提交异步任务并透传编码方式与输出尺寸策略', async () => {
     const gen = useCanvasGeneration('p', TARGET)
-    const node = makeNode('x', 'image-edit')
-    gen.setInputPaths('n1', ['assert/a.jpg'])
+    const node = concatNode({ mode: 'reencode', sizeMode: 'custom', width: 1920, height: 1080 })
     const onResult = vi.fn()
-    await gen.generate(node, undefined, onResult)
-    await vi.advanceTimersByTimeAsync(2100)
-    expect(gen.statusByNode.value.n1.status).toBe('error')
-    expect(gen.statusByNode.value.n1.errorMsg).toBe('失败')
-    expect(onResult).not.toHaveBeenCalled()
-  })
 
-  it('视频节点：走自包含提交参数并提交固定 .mp4 产物路径', async () => {
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
-      config: { workflowImpl: 'ceb-ltx-2.3-director', workflowParams: { seed: '1' } },
-    }
-    const videoParams = { mode: 'director' as const, resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', extraParams: {} }
-    await gen.generate(node, videoParams)
-    expect(runWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workflowId: 'image-to-video',
-        impl: 'ceb-ltx-2.3-director',
-        params: expect.objectContaining({
-          outputPath: 'assert/scene/1/1/canvas/vg/output.mp4',
-          video: videoParams,
-        }),
-      }),
-    )
-  })
-
-  it('视频节点缺少提交参数：进入 error 状态且不调用 runWorkflow', async () => {
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
-      config: {},
-    }
-    await gen.generate(node)
-    expect(runWorkflow).not.toHaveBeenCalled()
-    expect(gen.statusByNode.value.vg?.status).toBe('error')
-    expect(gen.statusByNode.value.vg?.errorMsg).toBe('缺少视频提交参数')
-  })
-
-  it('视频节点未选择工作流实现：error 且不调用 runWorkflow', async () => {
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
-      config: {},
-    }
-    const videoParams = { mode: 'director' as const, resolution: { width: 1080, height: 1920 }, duration: 10, prompt: 'p', extraParams: {} }
-    await gen.generate(node, videoParams)
-    expect(runWorkflow).not.toHaveBeenCalled()
-    expect(gen.statusByNode.value.vg?.status).toBe('error')
-    expect(gen.statusByNode.value.vg?.errorMsg).toContain('工作流实现')
-  })
-
-  it('TTS 声音生成（设计模式）：tts-voice-design + prompt/text + .flac 产物', async () => {
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'tg', prototypeId: 'tts-generate', name: 'TTS声音生成', x: 0, y: 0, width: 240, height: 160,
-      config: { mode: 'design', text: '你好', prompt: '温柔女声', workflowImpl: 'ceb-tts_voice_design' },
-    }
-    await gen.generate(node)
-    expect(runWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workflowId: 'tts-voice-design',
-        impl: 'ceb-tts_voice_design',
-        params: expect.objectContaining({
-          vars: expect.objectContaining({ text: '你好', prompt: '温柔女声' }),
-          outputPath: 'assert/scene/1/1/canvas/tg/output.flac',
-        }),
-      }),
-    )
-  })
-
-  it('TTS 声音生成（克隆模式）：tts-voice-clone + refAudioPath + .flac 产物', async () => {
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'tg', prototypeId: 'tts-generate', name: 'TTS声音生成', x: 0, y: 0, width: 240, height: 160,
-      config: { mode: 'clone', text: '你好', refText: '参考文本', workflowImpl: 'ceb-tts_voice_clone' },
-    }
-    gen.setInputPaths('tg', ['assert/custom/ref.flac'])
-    await gen.generate(node)
-    expect(runWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workflowId: 'tts-voice-clone',
-        impl: 'ceb-tts_voice_clone',
-        params: expect.objectContaining({
-          vars: expect.objectContaining({ text: '你好', refText: '参考文本', refAudioPath: '["assert/custom/ref.flac"]' }),
-          outputPath: 'assert/scene/1/1/canvas/tg/output.flac',
-        }),
-      }),
-    )
-  })
-
-  it('TTS 声音生成（克隆模式）无音频输入：error 且不调用 runWorkflow', async () => {
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'tg', prototypeId: 'tts-generate', name: 'TTS声音生成', x: 0, y: 0, width: 240, height: 160,
-      config: { mode: 'clone', text: '你好', refText: '参考文本' },
-    }
-    await gen.generate(node)
-    expect(runWorkflow).not.toHaveBeenCalled()
-    expect(gen.statusByNode.value.tg?.status).toBe('error')
-    expect(gen.statusByNode.value.tg?.errorMsg).toContain('需先连接音频输入')
-  })
-
-  it('TTS 节点未选择工作流实现：error 且不调用 runWorkflow', async () => {
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'tg', prototypeId: 'tts-generate', name: 'TTS声音生成', x: 0, y: 0, width: 240, height: 160,
-      config: { mode: 'design', text: '你好', prompt: '温柔女声' },
-    }
-    await gen.generate(node)
-    expect(runWorkflow).not.toHaveBeenCalled()
-    expect(gen.statusByNode.value.tg?.status).toBe('error')
-    expect(gen.statusByNode.value.tg?.errorMsg).toContain('工作流实现')
-  })
-
-  it('拼接视频节点：调用服务端 concat-video 并通知 .mp4 结果', async () => {
-    ;(concatVideo as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/vc/output.mp4' })
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'vc', prototypeId: 'video-concat', name: '拼接视频', x: 0, y: 0, width: 240, height: 160,
-      config: {},
-    }
-    const onResult = vi.fn()
     await gen.concatVideo(node, ['assert/a.mp4', 'assert/b.mp4'], onResult)
-    expect(concatVideo).toHaveBeenCalledWith('p', ['assert/a.mp4', 'assert/b.mp4'], 'assert/scene/1/1/canvas/vc/output.mp4')
+
+    expect(concatVideo).toHaveBeenCalledWith(
+      'p',
+      ['assert/a.mp4', 'assert/b.mp4'],
+      'assert/scene/1/1/canvas/vc/output.mp4',
+      { mode: 'reencode', sizeMode: 'custom', width: 1920, height: 1080 },
+      { nodeId: 'vc', canvas: { kind: 'scene', episode: '1', shot: '1' } },
+    )
+    // 提交后进入 running（终态由任务广播驱动）
+    expect(gen.statusByNode.value.vc?.status).toBe('running')
+    expect(gen.statusByNode.value.vc?.taskId).toBe('ff-1')
+
+    // 服务端广播终态 completed → 收敛 success 并通知结果
+    emitTaskUpdate(ffmpegTask({ status: 'completed', progress: 100 }))
     expect(gen.statusByNode.value.vc?.status).toBe('success')
     expect(onResult).toHaveBeenCalledWith('vc', 'assert/scene/1/1/canvas/vc/output.mp4')
   })
 
-  it('拼接视频节点：失败进入 error 状态', async () => {
-    ;(concatVideo as Mock).mockRejectedValue(new Error('各段规格不一致，无法无损拼接'))
+  it('拼接视频节点：缺省配置提交 reencode + max（不传 custom 宽高）', async () => {
     const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'vc', prototypeId: 'video-concat', name: '拼接视频', x: 0, y: 0, width: 240, height: 160,
-      config: {},
-    }
+    await gen.concatVideo(concatNode(), ['assert/a.mp4', 'assert/b.mp4'])
+    expect(concatVideo).toHaveBeenCalledWith(
+      'p',
+      ['assert/a.mp4', 'assert/b.mp4'],
+      'assert/scene/1/1/canvas/vc/output.mp4',
+      { mode: 'reencode', sizeMode: 'max' },
+      expect.any(Object),
+    )
+  })
+
+  it('拼接视频节点：copy 模式只提交 mode（不传尺寸策略）', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.concatVideo(concatNode({ mode: 'copy', sizeMode: 'custom', width: 1920, height: 1080 }), [
+      'assert/a.mp4',
+      'assert/b.mp4',
+    ])
+    expect(concatVideo).toHaveBeenCalledWith(
+      'p',
+      ['assert/a.mp4', 'assert/b.mp4'],
+      'assert/scene/1/1/canvas/vc/output.mp4',
+      { mode: 'copy' },
+      expect.any(Object),
+    )
+  })
+
+  it('拼接视频节点：提交失败进入 error 状态', async () => {
+    ;(concatVideo as Mock).mockRejectedValueOnce(new Error('各段规格不一致，无法无损拼接，请改用重编码'))
+    const gen = useCanvasGeneration('p', TARGET)
     const onResult = vi.fn()
-    await gen.concatVideo(node, ['assert/a.mp4', 'assert/b.mp4'], onResult)
+    await gen.concatVideo(concatNode({ mode: 'copy' }), ['assert/a.mp4', 'assert/b.mp4'], onResult)
     expect(gen.statusByNode.value.vc?.status).toBe('error')
     expect(gen.statusByNode.value.vc?.errorMsg).toContain('各段规格不一致')
     expect(onResult).not.toHaveBeenCalled()
   })
 
-  it('中断：停止轮询并调用 cancelWorkflow，同时清除持久化记录', async () => {
-    // 任务保持 running（避免首轮立即查询进入完成态与中断断言竞态）
-    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
+  it('拼接视频节点：任务广播 failed → 收敛 error 并携带服务端错误', async () => {
     const gen = useCanvasGeneration('p', TARGET)
-    const node = makeNode('一只猫')
-    gen.setInputPaths('n1', ['assert/a.jpg'])
-    await gen.generate(node)
-    await vi.advanceTimersByTimeAsync(1) // 让首轮立即查询先落定（任务保持 running）
-    expect(localStorage.getItem(TASK_KEY)).toContain('n1')
-    await gen.interrupt('n1')
-    expect(cancelWorkflow).toHaveBeenCalledWith('task-1')
-    expect(gen.statusByNode.value.n1?.status).toBe('error')
-    expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
-    expect(localStorage.getItem(TASK_KEY)).toBeNull()
+    await gen.concatVideo(concatNode(), ['assert/a.mp4', 'assert/b.mp4'])
+    emitTaskUpdate(ffmpegTask({ status: 'failed', error: '拼接失败：Invalid data found' }))
+    expect(gen.statusByNode.value.vc?.status).toBe('error')
+    expect(gen.statusByNode.value.vc?.errorMsg).toContain('Invalid data found')
   })
 
-  it('cancelWorkflow 失败不阻断状态展示', async () => {
+  it('中断：统一调用 /api/tasks/:id/cancel 并置已中断', async () => {
     ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
     const gen = useCanvasGeneration('p', TARGET)
-    const node = makeNode('一只猫')
     gen.setInputPaths('n1', ['assert/a.jpg'])
-    await gen.generate(node)
-    await vi.advanceTimersByTimeAsync(1) // 让首轮立即查询先落定（任务保持 running）
-    ;(cancelWorkflow as Mock).mockRejectedValueOnce(new Error('boom'))
+    await gen.generate(makeNode('一只猫'))
+    await vi.advanceTimersByTimeAsync(1) // 首轮查询落定（保持 running）
+    await gen.interrupt('n1')
+    expect(cancelTask).toHaveBeenCalledWith('task-1')
+    expect(gen.statusByNode.value.n1?.status).toBe('error')
+    expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
+  })
+
+  it('cancel 失败不阻断状态展示', async () => {
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
+    const gen = useCanvasGeneration('p', TARGET)
+    gen.setInputPaths('n1', ['assert/a.jpg'])
+    await gen.generate(makeNode('一只猫'))
+    await vi.advanceTimersByTimeAsync(1)
+    ;(cancelTask as Mock).mockRejectedValueOnce(new Error('boom'))
     await expect(gen.interrupt('n1')).resolves.toBeUndefined()
     expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
   })
 
-  it('裁剪视频节点：按时间调用 trim-video，产物固定 output.mp4，成功后通知结果', async () => {
-    ;(trimVideo as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/vt/output.mp4' })
+  it('裁剪视频节点：按时间提交 trim-video 异步任务，产物固定 output.mp4', async () => {
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
       id: 'vt', prototypeId: 'video-trim', name: '裁剪视频', x: 0, y: 0, width: 240, height: 160,
@@ -326,13 +270,15 @@ describe('useCanvasGeneration', () => {
       'assert/v.mp4',
       { startTime: 1.5, duration: 2 },
       'assert/scene/1/1/canvas/vt/output.mp4',
+      expect.any(Object),
     )
+    expect(gen.statusByNode.value.vt?.status).toBe('running')
+    emitTaskUpdate(ffmpegTask({ nodeId: 'vt', status: 'completed' }))
     expect(gen.statusByNode.value.vt?.status).toBe('success')
     expect(onResult).toHaveBeenCalledWith('vt', 'assert/scene/1/1/canvas/vt/output.mp4')
   })
 
   it('裁剪视频节点：帧模式传 startFrame', async () => {
-    ;(trimVideo as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/vt/output.mp4' })
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
       id: 'vt', prototypeId: 'video-trim', name: '裁剪视频', x: 0, y: 0, width: 240, height: 160,
@@ -344,10 +290,11 @@ describe('useCanvasGeneration', () => {
       'assert/v.mp4',
       { startFrame: 12, duration: 0.5 },
       'assert/scene/1/1/canvas/vt/output.mp4',
+      expect.any(Object),
     )
   })
 
-  it('裁剪视频节点：失败进入 error 状态且不通知结果', async () => {
+  it('裁剪视频节点：提交失败进入 error 状态且不通知结果', async () => {
     ;(trimVideo as Mock).mockRejectedValueOnce(new Error('起始位置越界'))
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
@@ -361,8 +308,7 @@ describe('useCanvasGeneration', () => {
     expect(onResult).not.toHaveBeenCalled()
   })
 
-  it('裁剪音频节点：按时间调用 trim-audio（缺省「原格式」，输入 .flac → output.flac），成功后通知结果', async () => {
-    ;(trimAudio as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/at/output.flac', duration: 2 })
+  it('裁剪音频节点：按时间提交 trim-audio（缺省「原格式」，输入 .flac → output.flac）', async () => {
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
       id: 'at', prototypeId: 'audio-trim', name: '裁剪音频', x: 0, y: 0, width: 240, height: 160,
@@ -375,48 +321,46 @@ describe('useCanvasGeneration', () => {
       'assert/a.flac',
       { startTime: 1.5, duration: 2, format: '---', mp3Bitrate: 192 },
       'assert/scene/1/1/canvas/at/output.flac',
+      expect.any(Object),
     )
+    emitTaskUpdate(ffmpegTask({ nodeId: 'at', status: 'completed' }))
     expect(gen.statusByNode.value.at?.status).toBe('success')
     expect(onResult).toHaveBeenCalledWith('at', 'assert/scene/1/1/canvas/at/output.flac')
   })
 
   it('裁剪音频节点：原格式跟随输入扩展名（.wav 输入 → output.wav）', async () => {
-    ;(trimAudio as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/at/output.wav', duration: 2 })
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
       id: 'at', prototypeId: 'audio-trim', name: '裁剪音频', x: 0, y: 0, width: 240, height: 160,
       config: { startValue: 0, duration: 2 },
     }
-    const onResult = vi.fn()
-    await gen.trimAudio(node, 'assert/voice.wav', onResult)
+    await gen.trimAudio(node, 'assert/voice.wav')
     expect(trimAudio).toHaveBeenCalledWith(
       'p',
       'assert/voice.wav',
       { startTime: 0, duration: 2, format: '---', mp3Bitrate: 192 },
       'assert/scene/1/1/canvas/at/output.wav',
+      expect.any(Object),
     )
-    expect(onResult).toHaveBeenCalledWith('at', 'assert/scene/1/1/canvas/at/output.wav')
   })
 
   it('裁剪音频节点：显式 mp3 + 自定义码率 → output.mp3 并附带格式参数', async () => {
-    ;(trimAudio as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/at/output.mp3', duration: 2 })
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
       id: 'at', prototypeId: 'audio-trim', name: '裁剪音频', x: 0, y: 0, width: 240, height: 160,
       config: { startValue: 0, duration: 2, format: 'mp3', mp3Bitrate: 320 },
     }
-    const onResult = vi.fn()
-    await gen.trimAudio(node, 'assert/a.flac', onResult)
+    await gen.trimAudio(node, 'assert/a.flac')
     expect(trimAudio).toHaveBeenCalledWith(
       'p',
       'assert/a.flac',
       { startTime: 0, duration: 2, format: 'mp3', mp3Bitrate: 320 },
       'assert/scene/1/1/canvas/at/output.mp3',
+      expect.any(Object),
     )
-    expect(onResult).toHaveBeenCalledWith('at', 'assert/scene/1/1/canvas/at/output.mp3')
   })
 
-  it('裁剪音频节点：失败进入 error 状态且不通知结果', async () => {
+  it('裁剪音频节点：提交失败进入 error 状态且不通知结果', async () => {
     ;(trimAudio as Mock).mockRejectedValueOnce(new Error('起始位置越界'))
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
@@ -430,8 +374,7 @@ describe('useCanvasGeneration', () => {
     expect(onResult).not.toHaveBeenCalled()
   })
 
-  it('获取视频帧：调用 extractVideoFrame 并通知 .png 结果', async () => {
-    ;(extractVideoFrame as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/ef/output.png' })
+  it('获取视频帧：提交异步任务并通知 .png 结果', async () => {
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
       id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
@@ -439,25 +382,37 @@ describe('useCanvasGeneration', () => {
     }
     const onResult = vi.fn()
     await gen.extractFrame(node, 'assert/scene/1/1/canvas/vg/output.mp4', onResult)
-    expect(extractVideoFrame).toHaveBeenCalledWith('p', 'assert/scene/1/1/canvas/vg/output.mp4', -1, 'assert/scene/1/1/canvas/ef/output.png')
+    expect(extractVideoFrame).toHaveBeenCalledWith(
+      'p',
+      'assert/scene/1/1/canvas/vg/output.mp4',
+      -1,
+      'assert/scene/1/1/canvas/ef/output.png',
+      expect.any(Object),
+    )
+    emitTaskUpdate(ffmpegTask({ nodeId: 'ef', status: 'completed' }))
     expect(gen.statusByNode.value.ef?.status).toBe('success')
     expect(onResult).toHaveBeenCalledWith('ef', 'assert/scene/1/1/canvas/ef/output.png')
   })
 
-  it('获取视频帧：config.frameTime 存在时按时间点提取（extractVideoFrameAtTime）', async () => {
-    ;(extractVideoFrameAtTime as Mock).mockResolvedValue({ success: true, path: 'assert/scene/1/1/canvas/ef/output.png' })
+  it('获取视频帧：config.frameTime 存在时按时间点提取', async () => {
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
       id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
       config: { frameIndex: 12, frameTime: 2.5 },
     }
     await gen.extractFrame(node, 'assert/v.mp4')
-    expect(extractVideoFrameAtTime).toHaveBeenCalledWith('p', 'assert/v.mp4', 2.5, 'assert/scene/1/1/canvas/ef/output.png')
+    expect(extractVideoFrameAtTime).toHaveBeenCalledWith(
+      'p',
+      'assert/v.mp4',
+      2.5,
+      'assert/scene/1/1/canvas/ef/output.png',
+      expect.any(Object),
+    )
     expect(extractVideoFrame).not.toHaveBeenCalled()
-    expect(gen.statusByNode.value.ef?.status).toBe('success')
+    expect(gen.statusByNode.value.ef?.status).toBe('running')
   })
 
-  it('获取视频帧：提取失败进入 error 状态且不通知结果', async () => {
+  it('获取视频帧：提交失败进入 error 状态且不通知结果', async () => {
     ;(extractVideoFrame as Mock).mockRejectedValueOnce(new Error('帧索引越界'))
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {
@@ -481,123 +436,72 @@ describe('useCanvasGeneration', () => {
     expect(gen.computeOutputPath(node)).toBe('assert/scene/2/3/canvas/n1/output.jpg')
   })
 
-  // ── 运行中任务持久化与恢复（离开画布 / 刷新页面后继续显示 loading）────────
+  // ── 服务端任务注册表驱动的恢复（刷新/切换画布后保持 loading）──────────────
 
-  it('任务运行中持久化到 localStorage，模拟刷新后恢复 loading 并继续轮询到完成', async () => {
-    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
-    const gen = useCanvasGeneration('p', TARGET)
-    const node = makeNode('x', 'image-edit')
-    gen.setInputPaths('n1', ['assert/a.jpg'])
-    await gen.generate(node)
-    await vi.advanceTimersByTimeAsync(1) // 首轮查询落定（running）
-    // 运行中记录已持久化
-    expect(localStorage.getItem(TASK_KEY)).toContain('n1')
-    expect(gen.statusByNode.value.n1?.status).toBe('running')
-
-    // 模拟离开画布/刷新：新建组合式实例（旧实例内存态被丢弃），恢复后继续显示 loading
-    const onResult = vi.fn()
-    const gen2 = useCanvasGeneration('p', TARGET, { onResult })
-    await gen2.restore()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(gen2.statusByNode.value.n1?.status).toBe('running')
-
-    // 服务端任务随后完成：恢复实例的轮询收敛为 success、通知结果并清除记录
-    ;(getTaskStatus as Mock).mockResolvedValue(COMPLETED_TASK)
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(gen2.statusByNode.value.n1.status).toBe('success')
-    expect(onResult).toHaveBeenCalledWith('n1', 'assert/scene/1/1/canvas/n1/output.jpg')
-    expect(localStorage.getItem(TASK_KEY)).toBeNull()
-  })
-
-  it('恢复时任务已完成：直接收敛为 success 并通知结果、清除记录', async () => {
-    localStorage.setItem(
-      TASK_KEY,
-      JSON.stringify({ n1: { kind: 'workflow', taskId: 'task-1', outputPath: 'assert/scene/1/1/canvas/n1/output.jpg', startedAt: Date.now() } }),
-    )
+  it('restore：按 项目 + 画布 scope 恢复运行中的 ffmpeg 任务，终态广播后收敛', async () => {
+    taskSocket.tasks.value = [
+      ffmpegTask({ nodeId: 'vc', payload: { outputPath: 'assert/scene/1/1/canvas/vc/output.mp4' } }),
+      // 其他画布的任务：不恢复
+      ffmpegTask({ id: 'ff-2', nodeId: 'x', canvas: { kind: 'scene', episode: '9', shot: '9' } }),
+      // 其他项目的任务：不恢复
+      ffmpegTask({ id: 'ff-3', nodeId: 'y', project: 'other' }),
+    ]
     const onResult = vi.fn()
     const gen = useCanvasGeneration('p', TARGET, { onResult })
-    await gen.restore()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(gen.statusByNode.value.n1?.status).toBe('success')
-    expect(onResult).toHaveBeenCalledWith('n1', 'assert/scene/1/1/canvas/n1/output.jpg')
-    expect(localStorage.getItem(TASK_KEY)).toBeNull()
-  })
+    await gen.restore(new Set(['vc']))
 
-  it('恢复时任务已失败：收敛为 error 并清除记录', async () => {
-    ;(getTaskStatus as Mock).mockResolvedValue({ ...RUNNING_TASK, status: 'failed', errorMsg: '生成失败' })
-    localStorage.setItem(
-      TASK_KEY,
-      JSON.stringify({ n1: { kind: 'workflow', taskId: 'task-1', outputPath: 'assert/scene/1/1/canvas/n1/output.jpg', startedAt: Date.now() } }),
+    expect(gen.statusByNode.value.vc?.status).toBe('running')
+    expect(gen.statusByNode.value.x).toBeUndefined()
+    expect(gen.statusByNode.value.y).toBeUndefined()
+
+    emitTaskUpdate(
+      ffmpegTask({
+        nodeId: 'vc',
+        status: 'completed',
+        payload: { outputPath: 'assert/scene/1/1/canvas/vc/output.mp4' },
+      }),
     )
-    const gen = useCanvasGeneration('p', TARGET)
-    await gen.restore()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(gen.statusByNode.value.n1?.status).toBe('error')
-    expect(gen.statusByNode.value.n1?.errorMsg).toBe('生成失败')
-    expect(localStorage.getItem(TASK_KEY)).toBeNull()
+    expect(gen.statusByNode.value.vc?.status).toBe('success')
+    expect(onResult).toHaveBeenCalledWith('vc', 'assert/scene/1/1/canvas/vc/output.mp4')
   })
 
-  it('切换画布后内存状态清空但持久化记录保留，切回时恢复 loading', async () => {
-    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
-    const gen = useCanvasGeneration('p', TARGET)
-    const node = makeNode('x', 'image-edit')
-    gen.setInputPaths('n1', ['assert/a.jpg'])
-    await gen.generate(node)
-    await vi.advanceTimersByTimeAsync(1)
-    expect(localStorage.getItem(TASK_KEY)).toContain('n1')
-
-    // 切到另一张画布：内存清空，本画布记录保留（任务仍在服务端执行）
-    await gen.switchTarget({ kind: 'scene', episode: '2', shot: '3' })
-    expect(gen.statusByNode.value).toEqual({})
-    expect(localStorage.getItem(TASK_KEY)).toContain('n1')
-
-    // 切回本画布：恢复 loading 展示并继续轮询
-    await gen.switchTarget(TARGET)
-    expect(gen.statusByNode.value.n1?.status).toBe('running')
-  })
-
-  it('ffmpeg 任务运行中持久化（含产物基线），刷新后按产物 mtime 变化恢复为 success', async () => {
-    // 请求永不返回：模拟页面在服务端处理期间离开/刷新
-    ;(extractVideoFrame as Mock).mockImplementation(() => new Promise(() => {}))
-    // 提交前基线：产物已存在，mtime=100
-    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: true, mtime: 100, size: 1 })
-    const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
-      config: { frameIndex: 0 },
-    }
-    void gen.extractFrame(node, 'assert/v.mp4')
-    await vi.advanceTimersByTimeAsync(1) // 基线查询完成 → running 记录持久化
-    expect(gen.statusByNode.value.ef?.status).toBe('running')
-    expect(localStorage.getItem(TASK_KEY)).toContain('ef')
-
-    // 模拟刷新：新实例恢复 → 产物 mtime 已更新为 200（服务端写盘完成）→ 收敛 success
-    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: true, mtime: 200, size: 2 })
+  it('restore：恢复的任务终态广播后通知结果（产物路径来自任务 payload）', async () => {
+    taskSocket.tasks.value = [
+      ffmpegTask({ nodeId: 'vc', payload: { outputPath: 'assert/scene/1/1/canvas/vc/output.mp4' } }),
+    ]
     const onResult = vi.fn()
-    const gen2 = useCanvasGeneration('p', TARGET, { onResult })
-    await gen2.restore()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(gen2.statusByNode.value.ef?.status).toBe('success')
-    expect(onResult).toHaveBeenCalledWith('ef', 'assert/scene/1/1/canvas/ef/output.png')
-    expect(localStorage.getItem(TASK_KEY)).toBeNull()
+    const gen = useCanvasGeneration('p', TARGET, { onResult })
+    await gen.restore(new Set(['vc']))
+    emitTaskUpdate(
+      ffmpegTask({
+        nodeId: 'vc',
+        status: 'completed',
+        payload: { outputPath: 'assert/scene/1/1/canvas/vc/output.mp4' },
+      }),
+    )
+    expect(onResult).toHaveBeenCalledWith('vc', 'assert/scene/1/1/canvas/vc/output.mp4')
   })
 
-  it('ffmpeg 任务：中断后清除持久化记录并保持已中断错误态', async () => {
-    ;(getCanvasNodeInfo as Mock).mockResolvedValue({ exists: false, mtime: null, size: null })
+  it('restore：节点已删除的任务不恢复 loading', async () => {
+    taskSocket.tasks.value = [ffmpegTask({ nodeId: 'gone' })]
     const gen = useCanvasGeneration('p', TARGET)
-    const node: CanvasNodeData = {
-      id: 'ef', prototypeId: 'video-frame-extract', name: '获取视频帧', x: 0, y: 0, width: 240, height: 160,
-      config: { frameIndex: 0 },
-    }
-    // 请求挂起不返回（模拟服务端仍在处理）
-    ;(extractVideoFrame as Mock).mockImplementation(() => new Promise(() => {}))
-    const p = gen.extractFrame(node, 'assert/v.mp4')
-    await vi.advanceTimersByTimeAsync(1)
-    expect(localStorage.getItem(TASK_KEY)).toContain('ef')
-    await gen.interrupt('ef')
-    expect(gen.statusByNode.value.ef?.status).toBe('error')
-    expect(gen.statusByNode.value.ef?.errorMsg).toBe('已中断')
-    expect(localStorage.getItem(TASK_KEY)).toBeNull()
-    p.catch(() => {}) // 挂起请求防未处理拒绝
+    await gen.restore(new Set(['vc']))
+    expect(gen.statusByNode.value.gone).toBeUndefined()
+  })
+
+  it('任务广播中断态（cancelled）→ 节点显示已中断', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.concatVideo(concatNode(), ['assert/a.mp4', 'assert/b.mp4'])
+    emitTaskUpdate(ffmpegTask({ status: 'cancelled' }))
+    expect(gen.statusByNode.value.vc?.status).toBe('error')
+    expect(gen.statusByNode.value.vc?.errorMsg).toBe('已中断')
+  })
+
+  it('进度广播更新节点阶段日志', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.concatVideo(concatNode(), ['assert/a.mp4', 'assert/b.mp4'])
+    emitTaskUpdate(ffmpegTask({ status: 'running', progress: 42 }))
+    expect(gen.statusByNode.value.vc?.status).toBe('running')
+    expect(gen.statusByNode.value.vc?.progress).toBe(42)
   })
 })

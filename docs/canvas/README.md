@@ -8,7 +8,8 @@
 | [node-types.md](./node-types.md) | 节点类型：原型注册表与全部节点明细 |
 | [interactions.md](./interactions.md) | 连线规则与画布交互：类型兼容/成环检测、选中与多选、群组、右键菜单、快捷键、资产拖拽入画布 |
 | [editor-panel.md](./editor-panel.md) | 配置面板与输入预览：悬浮面板布局、编辑器组件约定、生成节点统一布局 |
-| [generation.md](./generation.md) | 生成流程：工作流/ffmpeg 任务、轮询与状态机、中断、运行中任务持久化 |
+| [generation.md](./generation.md) | 生成流程：工作流/ffmpeg 任务、轮询与状态机、中断、任务状态来源 |
+| [task-architecture.md](./task-architecture.md) | **统一异步任务架构与任务管理器**：任务注册表/执行器门面、三类任务接入、WS 广播、ffmpeg 异步化与中断 |
 | [autobuild.md](./autobuild.md) | 自动搭画布：分镜/场景（按子场景）幂等搭建 |
 | [asset-outputs.md](./asset-outputs.md) | 产物历史、设为分镜场景图、保存为（含 AI 文本节点文本历史版本） |
 | [target-switching.md](./target-switching.md) | 切换分镜跟随加载：switchTarget 与视口对准 |

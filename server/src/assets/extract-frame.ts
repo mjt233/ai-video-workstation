@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import Ffmpeg from 'fluent-ffmpeg';
 import { pathExists, resolveProjectPath } from './paths.js';
+import type { FfmpegCommandSpec } from './ffmpeg-command.js';
 
 /**
  * 视频帧索引越界错误：携带 HTTP 400 语义，路由层据此映射响应。
@@ -230,6 +231,34 @@ export async function extractVideoFrame(
   frameIndex: number,
   outputPath: string,
 ): Promise<string> {
+  const spec = await buildExtractFrameCommand(project, videoPath, { frameIndex }, outputPath);
+  await new Promise<void>((resolve, reject) => {
+    spec.build(Ffmpeg())
+      .on('end', () => resolve())
+      .on('error', (err: Error) => reject(err))
+      .save(spec.outputAbs);
+  });
+  return outputPath;
+}
+
+/**
+ * 构建帧提取 ffmpeg 命令（校验 + 探测 + 选项装配，不执行）。
+ *
+ * 路由层用它拿到命令后交给统一任务执行器异步执行（进度/中断由执行器接管）。
+ *
+ * @param project 项目名
+ * @param videoPath 视频相对路径（assert/ 下）
+ * @param params 提取方式（frameIndex 或 timeSec，二选一，frameIndex 优先）
+ * @param outputPath 输出图片相对路径（assert/ 下，.png）
+ * @returns 命令构建结果（产物绝对路径 / build / 附加信息）
+ * @throws FrameIndexError 视频不存在、帧索引/时间越界或 ffprobe 失败
+ */
+export async function buildExtractFrameCommand(
+  project: string,
+  videoPath: string,
+  params: { frameIndex?: number; timeSec?: number },
+  outputPath: string,
+): Promise<FfmpegCommandSpec> {
   const videoAbs = resolveProjectPath(project, videoPath);
   const outputAbs = resolveProjectPath(project, outputPath);
   if (!(await pathExists(videoAbs))) {
@@ -237,12 +266,41 @@ export async function extractVideoFrame(
   }
   await fs.mkdir(path.dirname(outputAbs), { recursive: true });
 
-  const totalFrames = await getTotalFrames(videoAbs);
-  const frameNo = resolveFrameNumber(frameIndex, totalFrames);
+  if (typeof params.timeSec === 'number') {
+    const timeSec = params.timeSec;
+    // 校验时间在时长范围内（ffprobe 探测失败视为无法校验）
+    let info: VideoInfo;
+    try {
+      info = await getVideoInfo(videoAbs);
+    } catch {
+      throw new FrameIndexError('无法读取视频信息');
+    }
+    if (!(info.duration > 0) || timeSec < 0 || timeSec > info.duration) {
+      throw new FrameIndexError(`时间越界：时长 ${info.duration}s，时间 ${timeSec}s 不可用`);
+    }
+    return {
+      outputAbs,
+      info: { mode: 'time', timeSec },
+      build: (cmd) =>
+        cmd.input(videoAbs).outputOptions([
+          // -ss（输出端）：从时间点起输出，第一帧 PTS ≥ time 即目标帧（帧精确、按呈现序）
+          `-ss`,
+          String(timeSec),
+          `-frames:v`,
+          `1`,
+          `-vsync`,
+          `vfr`,
+        ]),
+    };
+  }
 
-  await new Promise<void>((resolve, reject) => {
-    Ffmpeg(videoAbs)
-      .outputOptions([
+  const totalFrames = await getTotalFrames(videoAbs);
+  const frameNo = resolveFrameNumber(params.frameIndex ?? 0, totalFrames);
+  return {
+    outputAbs,
+    info: { mode: 'frame', frameIndex: params.frameIndex ?? 0, frameNo },
+    build: (cmd) =>
+      cmd.input(videoAbs).outputOptions([
         // select=eq(n,N)：n 为解码帧序号（0 基），帧精确选取第 N 帧
         `-vf`,
         `select=eq(n\\,${frameNo})`,
@@ -250,13 +308,8 @@ export async function extractVideoFrame(
         `1`,
         `-vsync`,
         `vfr`,
-      ])
-      .on('end', () => resolve())
-      .on('error', (err: Error) => reject(err))
-      .save(outputAbs);
-  });
-
-  return outputPath;
+      ]),
+  };
 }
 
 /**
@@ -278,39 +331,12 @@ export async function extractVideoFrameAtTime(
   timeSec: number,
   outputPath: string,
 ): Promise<string> {
-  const videoAbs = resolveProjectPath(project, videoPath);
-  const outputAbs = resolveProjectPath(project, outputPath);
-  if (!(await pathExists(videoAbs))) {
-    throw Object.assign(new Error('视频文件不存在'), { code: 'NOT_FOUND' });
-  }
-  await fs.mkdir(path.dirname(outputAbs), { recursive: true });
-
-  // 校验时间在时长范围内（ffprobe 探测失败视为无法校验）
-  let info: VideoInfo;
-  try {
-    info = await getVideoInfo(videoAbs);
-  } catch {
-    throw new FrameIndexError('无法读取视频信息');
-  }
-  if (!(info.duration > 0) || timeSec < 0 || timeSec > info.duration) {
-    throw new FrameIndexError(`时间越界：时长 ${info.duration}s，时间 ${timeSec}s 不可用`);
-  }
-
+  const spec = await buildExtractFrameCommand(project, videoPath, { timeSec }, outputPath);
   await new Promise<void>((resolve, reject) => {
-    Ffmpeg(videoAbs)
-      .outputOptions([
-        // -ss（输出端）：从时间点起输出，第一帧 PTS ≥ time 即目标帧（帧精确、按呈现序）
-        `-ss`,
-        String(timeSec),
-        `-frames:v`,
-        `1`,
-        `-vsync`,
-        `vfr`,
-      ])
+    spec.build(Ffmpeg())
       .on('end', () => resolve())
       .on('error', (err: Error) => reject(err))
-      .save(outputAbs);
+      .save(spec.outputAbs);
   });
-
   return outputPath;
 }

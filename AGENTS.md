@@ -48,6 +48,7 @@ overview.md
 - `design` 目录下的整体资产约定见 [./docs/asset-layout.md](./docs/asset-layout.md)（含 **3.0.3 系统全局回收站 `design/.trash/` 与存储清理**）
 - **存储清理**：项目设置面板「存储清理」页签扫描「无引用自定义资产」与「久远历史记录」（阈值默认 7 天），勾选后移入**系统全局回收站** `design/.trash/{批次}/{项目名}/...`；回收站的查看/恢复/彻底删除与定时自动清理（默认每 7 天执行一次、回收站保留期 7 天，配置落盘 `server/config/system.json`，日志前缀 `[trash-auto-clean]`）在**系统设置 → 系统设置 → 回收站**子类中管理。`.trash` 为保留目录，不出现在项目列表，也不允许创建/导入同名项目
 - **资产画布**（分镜/场景详情页「资产画布」Tab）的业务逻辑、数据模型与开发指南见 [./docs/canvas/README.md](./docs/canvas/README.md)（按主题拆分为多个文档）：包括节点类型、连线规则、画布交互、配置面板、输入图拖拽排序、生成流程、自动搭画布、设为分镜场景图、切换分镜跟随加载及常见坑
+- **统一异步任务架构**（工作流 / LLM 会话 / ffmpeg 三类任务同一注册表 + 全局任务管理器 + ffmpeg 接口异步化）见 [./docs/canvas/task-architecture.md](./docs/canvas/task-architecture.md)：新增本地 ffmpeg 操作必须导出 `buildXxxCommand()` 交给 `tasks/ffmpeg-executor.ts` 执行（否则无进度、无法中断）；任务中断统一走 `POST /api/tasks/:taskId/cancel`；不要再引入 localStorage 任务记录
 - **画布节点媒体输入预览规则**：任何节点主体需要展示已连接的媒体输入（图片/音频/视频）时，必须复用生成图片/生成视频节点使用的统一输入预览组件 `frontend/src/components/canvas/editors/CanvasInputPreview.vue`（现有实例：AI文本生成节点），禁止为节点单独实现一套预览/徽标 UI。具体做法：
   1. 输入条目使用 `CanvasInputInfo`（`nodeId/path/label/version`），`version` = 来源节点产物 mtime（`nodeOps.withVersions` 经 `getOutputMtime` 提供），作为预览 URL 缓存键——源资产未变化时预览 URL 稳定，避免无关重渲染导致媒体反复重新加载；
   2. 按来源节点输出类型拆成 `images-inputs` / `videos-inputs` / `audios-inputs` 三组传入（某类型无输入时该组不渲染），各组标题/数量上限/占位文案按能力传参；

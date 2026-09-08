@@ -6,7 +6,9 @@ import { getAllWorkflows } from '../workflow-engine.js';
 import { getAllWorkflowTypes, getImpl, unregisterByInstance } from '../workflows/registry.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks, type DiscoveredTask } from '../workflows/discovery.js';
-import { markCancelRequested, stripCancelRequested } from '../workflows/cancel.js';
+import { stripCancelRequested } from '../workflows/cancel.js';
+import { getRemoteTaskId, parseTaskParams } from '../workflows/task-params.js';
+import { cancelWorkflowTask, workflowExecutor } from '../tasks/workflow-executor.js';
 import {
   MASKED_SECRET,
   createInstance,
@@ -402,49 +404,10 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
 /**
  * 解析任务 params（JSON 字符串）为结构化对象。
  *
- * @param paramsJson - 任务 params 的 JSON 字符串
- * @returns 结构化 params：vars 业务变量、promptPaths 提示词路径、outputPath 输出路径；
- *          video 为视频自包含提交参数（wire 形态，可选）；
- *          sizeConfig 为统一尺寸配置（可选）；
- *          comfyuiProviderId 为本次执行的 Easy Bridge 提供商实例 ID（可选，仅 comfyui-bridge 工作流）；
- *          remoteTaskId 为提交成功后持久化的远端（Bridge）任务 ID（可选，供中断使用）
+ * 实现已抽到 `workflows/task-params.ts`（供 `tasks/workflow-executor.ts` 复用，避免模块环）；
+ * 此处再导出保持既有调用方（测试与路由内部）不变。
  */
-export function parseTaskParams(paramsJson: string): {
-  vars: Record<string, string>
-  promptPaths: string[]
-  outputPath: string
-  video?: VideoWorkflowSubmitParams
-  /** 统一尺寸配置（用户选择的原始完整尺寸，可选） */
-  sizeConfig?: WorkflowSizeConfig
-  /** 本次执行的 Easy Bridge 提供商实例 ID（用户在工作流表单选择，可选） */
-  comfyuiProviderId?: string
-  /** 提交成功后持久化的远端（Bridge）任务 ID，供中断使用 */
-  remoteTaskId?: string
-} {
-  try {
-    const parsed = JSON.parse(paramsJson) as {
-      vars?: Record<string, string>
-      promptPaths?: string[]
-      outputPath?: string
-      video?: VideoWorkflowSubmitParams
-      sizeConfig?: WorkflowSizeConfig
-      comfyuiProviderId?: string
-      remoteTaskId?: string
-    };
-    return {
-      vars: parsed.vars ?? {},
-      promptPaths: parsed.promptPaths ?? [],
-      outputPath: parsed.outputPath ?? '',
-      video: parsed.video,
-      sizeConfig: parsed.sizeConfig,
-      comfyuiProviderId: parsed.comfyuiProviderId,
-      remoteTaskId: parsed.remoteTaskId,
-    };
-  } catch {
-    // 任务 params 非法 JSON 时回退空结构（任务详情展示容错，不阻断接口）
-    return { vars: {}, promptPaths: [], outputPath: '' };
-  }
-}
+export { parseTaskParams, getRemoteTaskId };
 
 function toTaskResponse(task: db.TaskRecord) {
   return {
@@ -458,11 +421,6 @@ function toTaskResponse(task: db.TaskRecord) {
     updatedAt: task.updated_at,
     params: parseTaskParams(task.params),
   };
-}
-
-/** 从任务 params 解析远端（Bridge）任务 ID */
-export function getRemoteTaskId(task: TaskRecord): string | undefined {
-  return parseTaskParams(task.params).remoteTaskId;
 }
 
 /**
@@ -554,6 +512,7 @@ workflowRouter.post('/workflow/retry/:taskId', (req: Request, res: Response) => 
 });
 
 // POST /api/workflow/tasks/:taskId/cancel — 中断任务（本地排队直接失败 / 运行中调 Bridge cancel）
+// 实际中断实现已抽到 tasks/workflow-executor.ts 的 cancelWorkflowTask（统一任务管理器共用同一实现）
 workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: Response) => {
   const task = db.getTask(req.params.taskId as string);
   if (!task) {
@@ -566,36 +525,12 @@ workflowRouter.post('/workflow/tasks/:taskId/cancel', async (req: Request, res: 
     res.status(decision.status).json({ error: decision.code, message: decision.message });
     return;
   }
-
+  const deferred = task.status === 'running' && wf?.capabilities?.deferredCancel;
   try {
-    if (task.status === 'running') {
-      // 同步执行 provider（deferredCancel）：无法中止在途请求 → 写取消标记，
-      // 由引擎在 execute 完成后检查并持久化为失败（用户中断）；不立即标记 failed（避免引擎完成后覆盖）
-      if (wf?.capabilities?.deferredCancel) {
-        db.updateTaskParams(task.id, markCancelRequested(JSON.parse(task.params)));
-        db.addLog(task.id, 'info', '已请求取消，将在执行完成后生效');
-        res.json({ taskId: task.id, status: 'cancelling' });
-        return;
-      }
-      const providerId = wf?.provider ?? 'comfyui-bridge';
-      const providerDef = getProvider(providerId);
-      if (!providerDef) {
-        throw new Error(`provider 未注册: ${providerId}`);
-      }
-      const instances = await listInstances();
-      // 优先按工作流绑定的服务商实例 ID 定位（多实例时避免把取消请求发错实例）；
-      // 兼容旧数据：未绑定实例 ID 时回退取该类型第一个实例
-      const inst = wf?.providerInstanceId
-        ? instances.find((i) => i.id === wf.providerInstanceId && i.type === providerId)
-        : instances.find((i) => i.type === providerId);
-      if (!inst) throw new Error(`未配置 ${providerId} 实例`);
-      await providerDef
-        .createClient(resolveInstanceConfig(inst))
-        .cancel(getRemoteTaskId(task)!);
-    }
-    db.updateTaskStatus(task.id, 'failed', { error_msg: '用户中断' });
-    db.addLog(task.id, 'info', 'Task cancelled by user');
-    res.json({ taskId: task.id, status: 'failed' });
+    await cancelWorkflowTask(task.id);
+    // 统一注册表收敛（任务管理器立即移除；deferredCancel 场景由引擎执行完成后收敛）
+    if (!deferred) workflowExecutor.finish(task.id, 'failed');
+    res.json({ taskId: task.id, status: deferred ? 'cancelling' : 'failed' });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(502).json({ error: 'cancel_failed', message: msg });

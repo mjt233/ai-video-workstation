@@ -32,16 +32,21 @@ vi.mock('fs/promises', () => ({
 import { resolveTrimWindow, trimVideo } from './trim-video.js';
 import type { VideoInfo } from './extract-frame.js';
 
-/** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录输出选项与保存路径 */
+/** 构造可链式调用、可触发 end/error 的 ffmpeg 假对象，并记录输入/输出选项与保存路径 */
 function mockRun() {
   const state: {
+    input: string;
     outputs: string[];
     saved: string;
     end?: () => void;
     err?: (e: Error) => void;
     failOnSave?: boolean;
-  } = { outputs: [], saved: '', failOnSave: false };
+  } = { input: '', outputs: [], saved: '', failOnSave: false };
   const chain = {
+    input: (p: string) => {
+      state.input = p;
+      return chain;
+    },
     outputOptions: (o: string[]) => {
       state.outputs = o;
       return chain;
@@ -153,7 +158,7 @@ describe('trimVideo', () => {
     );
 
     expect(result).toBe('assert/out.mp4');
-    expect(mockFfmpeg).toHaveBeenCalledWith(expect.stringContaining('v.mp4'));
+    expect(state.input).toContain('v.mp4');
     expect(state.outputs).toContain('-ss');
     expect(state.outputs[state.outputs.indexOf('-ss') + 1]).toBe('1.25');
     expect(state.outputs).toContain('-t');

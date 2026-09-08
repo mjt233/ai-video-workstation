@@ -261,6 +261,13 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     defaultConfig: {
       inputOrder: [],
       history: [],
+      // 编码方式：copy=无损（各段规格须一致）/ reencode=重编码（允许异构规格）；缺省重编码
+      mode: 'reencode',
+      // 输出尺寸策略（仅重编码生效）：custom / max（面积最大段）/ min（面积最小段）
+      sizeMode: 'max',
+      // 自定义输出宽高（sizeMode=custom 时生效；服务端自动规整为偶数）
+      width: 1920,
+      height: 1080,
     },
   },
   {
