@@ -78,7 +78,7 @@ assert/character/{角色名}/variants/{变体id}.jpg
 - 不出现在资产浏览器树中，仅在角色详情「衍生变体」页管理
 - 生成使用 **图片编辑** 工作流（`image-edit`，purpose=`variant-edit`）
 - 分镜引用：`{角色名}@{变体id}`
-- 已生成图片的变体在资产选择器「角色」页签可选，也可从资产浏览器拖拽角色到资产画布的拖放菜单中选择（见 `docs/asset-canvas.md` §5.1）
+- 已生成图片的变体在资产选择器「角色」页签可选，也可从资产浏览器拖拽角色到资产画布的拖放菜单中选择（见 `docs/canvas/interactions.md`）
 
 #### 声音变体（角色，单层）
 
@@ -163,7 +163,7 @@ API：
 
 - 加载图片/视频/音频节点的资产选择器新增「道具」页签，按节点类型过滤（图片→道具图片、视频→道具视频、音频→道具音频）
 - 节点右键「保存为」新增道具目标：图片节点→道具图片（`assert/prop/{分类}/{道具}/image.jpg`）、视频节点→道具视频（`video.mp4`）、音频节点→道具音频（`audio.flac`）；分类/道具不存在时自动创建
-- 资产浏览器拖拽道具到资产画布时，拖放菜单按图片/音频/视频列出道具产物（见 `docs/asset-canvas.md` §5.1）
+- 资产浏览器拖拽道具到资产画布时，拖放菜单按图片/音频/视频列出道具产物（见 `docs/canvas/interactions.md`）
 
 ### 2.4 分镜 `prompt/scene/{集数}/{分镜}/`
 
@@ -394,7 +394,7 @@ assert/.../history/{stem}/{YYYYMMDD-HHmmss}.ext
 
 - 图片接受 jpg/png/webp（统一落盘 `output.jpg`）；视频**仅接受 mp4**（不转码）
 - 目标已有产物时**先归档进 `history/output/` 再覆盖**（与重复生成同一套历史机制，可在节点「历史」对话框查看/激活）；归档失败中断上传
-- 详见 `docs/asset-canvas.md` §2.3 / §12
+- 详见 `docs/canvas/data-model.md` / `docs/canvas/module-structure.md`
 
 ### 3.0.2 自定义资产（实体映射）
 

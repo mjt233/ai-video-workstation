@@ -46,7 +46,7 @@ overview.md
 - 图片/音频文件以二进制流传输；文本/markdown/JSON 以 UTF-8 传输
 - 资产管理 Python 脚本位于 `.agents/skills/create-video-script/scripts/`
 - `design` 目录下的整体资产约定见 [./docs/asset-layout.md](./docs/asset-layout.md)
-- **资产画布**（分镜/场景详情页「资产画布」Tab）的业务逻辑、数据模型与开发指南见 [./docs/asset-canvas.md](./docs/asset-canvas.md)：包括节点类型、连线规则、画布交互、配置面板、输入图拖拽排序、生成流程、自动搭画布、设为分镜场景图、切换分镜跟随加载及常见坑
+- **资产画布**（分镜/场景详情页「资产画布」Tab）的业务逻辑、数据模型与开发指南见 [./docs/canvas/README.md](./docs/canvas/README.md)（按主题拆分为多个文档）：包括节点类型、连线规则、画布交互、配置面板、输入图拖拽排序、生成流程、自动搭画布、设为分镜场景图、切换分镜跟随加载及常见坑
 - **画布节点媒体输入预览规则**：任何节点主体需要展示已连接的媒体输入（图片/音频/视频）时，必须复用生成图片/生成视频节点使用的统一输入预览组件 `frontend/src/components/canvas/editors/CanvasInputPreview.vue`（现有实例：AI文本生成节点），禁止为节点单独实现一套预览/徽标 UI。具体做法：
   1. 输入条目使用 `CanvasInputInfo`（`nodeId/path/label/version`），`version` = 来源节点产物 mtime（`nodeOps.withVersions` 经 `getOutputMtime` 提供），作为预览 URL 缓存键——源资产未变化时预览 URL 稳定，避免无关重渲染导致媒体反复重新加载；
   2. 按来源节点输出类型拆成 `images-inputs` / `videos-inputs` / `audios-inputs` 三组传入（某类型无输入时该组不渲染），各组标题/数量上限/占位文案按能力传参；
