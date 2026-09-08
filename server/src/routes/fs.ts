@@ -5,6 +5,7 @@ import path from 'path';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import { FsRouteError, isUnderAssert, validateCopyRequest } from './fs-path.js';
+import { isReservedProjectName } from '../assets/paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 项目资产根目录（所有项目位于 design/{project}/ 下），供项目导出/导入路由复用 */
@@ -56,7 +57,8 @@ fsRouter.get('/projects', async (_req: Request, res: Response) => {
   try {
     const entries = await fs.readdir(DESIGN_DIR, { withFileTypes: true });
     const projects: ProjectEntry[] = entries
-      .filter(e => e.isDirectory())
+      // 排除保留目录（design/.trash 全局回收站与其它以 . 开头的系统目录）
+      .filter(e => e.isDirectory() && !isReservedProjectName(e.name))
       .map(e => ({ name: e.name }));
     res.json(projects);
   } catch (err) {
@@ -83,6 +85,10 @@ fsRouter.post('/projects', async (req: Request, res: Response) => {
     }
     if (projectName === '.' || projectName === '..' || /[\\/]/.test(projectName) || projectName.length > 64) {
       res.status(400).json({ error: '项目名不合法：不能包含 / 或 \\，长度不超过 64 个字符' });
+      return;
+    }
+    if (isReservedProjectName(projectName)) {
+      res.status(400).json({ error: `项目名不合法：「${projectName}」为系统保留目录（全局回收站）` });
       return;
     }
     const projectDir = path.resolve(DESIGN_DIR, projectName);
@@ -136,6 +142,10 @@ fsRouter.delete('/projects/:name', async (req: Request, res: Response) => {
     const name = ((req.params.name as string) ?? '').trim();
     if (!name || name === '.' || name === '..' || /[\\/]/.test(name) || name.length > 64) {
       res.status(400).json({ error: '项目名不合法：不能包含 / 或 \\，长度不超过 64 个字符' });
+      return;
+    }
+    if (isReservedProjectName(name)) {
+      res.status(400).json({ error: `不允许删除系统保留目录「${name}」` });
       return;
     }
     const projectDir = path.resolve(DESIGN_DIR, name);

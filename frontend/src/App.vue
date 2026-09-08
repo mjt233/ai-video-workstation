@@ -55,7 +55,10 @@
     <v-main>
       <router-view />
     </v-main>
-    <SystemSettingsDialog v-model="showSystemSettings" />
+    <SystemSettingsDialog
+      v-model="showSystemSettings"
+      :initial-section="targetSection"
+    />
     <LlmSessionsDialog
       v-model="sessionsOpen"
       :sessions="llmSocket.sessions.value"
@@ -79,9 +82,11 @@ import { downloadProjectExport } from './api/client'
 import { llmSocket } from './canvas/llmSocket'
 import SystemSettingsDialog from './components/SystemSettingsDialog.vue'
 import LlmSessionsDialog from './components/LlmSessionsDialog.vue'
+import { useSystemSettings } from './composables/useSystemSettings'
 
 const route = useRoute()
-const showSystemSettings = ref(false)
+// 系统设置对话框开关与定位状态提升到 composable，供任意页面（如存储清理页）打开并定位子类
+const { dialogOpen: showSystemSettings, targetSection } = useSystemSettings()
 /** LLM 活跃会话面板开关 */
 const sessionsOpen = ref(false)
 

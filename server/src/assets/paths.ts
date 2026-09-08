@@ -42,6 +42,19 @@ export function assertPositiveIntId(id: string, label: string): void {
   }
 }
 
+/**
+ * 判断目录名是否为**保留目录**（不是用户项目）。
+ *
+ * 全局回收站位于 `design/.trash/`，与用户项目同级；以 `.` 开头的目录一律视为
+ * 系统保留目录（不参与项目列表、不允许创建/删除/导入同名项目）。
+ *
+ * @param name 目录名
+ * @returns 保留目录返回 true
+ */
+export function isReservedProjectName(name: string): boolean {
+  return name.startsWith('.');
+}
+
 export async function pathExists(fullPath: string): Promise<boolean> {
   try {
     await fs.access(fullPath);

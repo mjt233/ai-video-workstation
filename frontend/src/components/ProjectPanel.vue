@@ -7,6 +7,9 @@
       <v-tab value="config">
         项目配置
       </v-tab>
+      <v-tab value="cleanup">
+        存储清理
+      </v-tab>
     </v-tabs>
 
     <v-tabs-window v-model="tab">
@@ -147,6 +150,11 @@
           </v-card-text>
         </v-card>
       </v-tabs-window-item>
+
+      <!-- 存储清理：扫描无引用自定义资产 / 久远历史记录并移入系统全局回收站 -->
+      <v-tabs-window-item value="cleanup">
+        <CleanupPanel :project="props.project" />
+      </v-tabs-window-item>
     </v-tabs-window>
 
     <!-- overview 编辑弹窗 -->
@@ -242,6 +250,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { readFs, writeFs } from '../api/client'
 import MarkdownView from './MarkdownView.vue'
+import CleanupPanel from './cleanup/CleanupPanel.vue'
 
 const props = defineProps<{ project: string }>()
 

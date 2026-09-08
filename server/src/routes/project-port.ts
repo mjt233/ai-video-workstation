@@ -7,6 +7,7 @@ import { openPromise, type Entry } from 'yauzl';
 import { ZipArchive } from 'archiver';
 import { DESIGN_DIR } from './fs.js';
 import { FsRouteError, isUnsafeZipEntry } from './fs-path.js';
+import { isReservedProjectName } from '../assets/paths.js';
 import { extractZipTo } from './zip-extract.js';
 
 export { isUnsafeZipEntry };
@@ -26,7 +27,8 @@ export const projectPortRouter = Router();
 
 /**
  * 校验导入/导出的项目名合法性（与新建项目规则保持一致）：
- * 必填、不得为 . 或 ..、不得包含 / 或 \、长度不超过 64。
+ * 必填、不得为 . 或 ..、不得包含 / 或 \、长度不超过 64、不得为系统保留目录
+ * （如 `design/.trash` 全局回收站）。
  *
  * @param name 待校验的项目名
  * @throws FsRouteError(400) 当名称非法时
@@ -38,6 +40,9 @@ export function validateImportName(name: string): void {
   }
   if (trimmed === '.' || trimmed === '..' || /[\\/]/.test(trimmed) || trimmed.length > 64) {
     throw new FsRouteError(400, '项目名不合法：不能包含 / 或 \\，长度不超过 64 个字符');
+  }
+  if (isReservedProjectName(trimmed)) {
+    throw new FsRouteError(400, `项目名不合法：「${trimmed}」为系统保留目录（全局回收站）`);
   }
 }
 

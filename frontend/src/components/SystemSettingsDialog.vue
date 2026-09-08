@@ -46,6 +46,10 @@
         <div class="system-settings__content">
           <ProviderSettingsPanel v-if="activeTab === 'providers'" />
           <PresetPromptsPanel v-if="activeTab === 'presets'" />
+          <SystemSettingsPanel
+            v-if="activeTab === 'system'"
+            :initial-section="initialSection"
+          />
         </div>
       </v-card-text>
     </v-card>
@@ -53,12 +57,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import ProviderSettingsPanel from './provider-settings/ProviderSettingsPanel.vue'
 import PresetPromptsPanel from './preset-prompts/PresetPromptsPanel.vue'
+import SystemSettingsPanel from './system-settings/SystemSettingsPanel.vue'
+import type { SystemSettingsSection } from '../composables/useSystemSettings'
 
-defineProps<{
+const props = defineProps<{
   modelValue: boolean
+  /** 打开时要定位的系统设置子类（如 'trash'）；null 表示不改变当前页签 */
+  initialSection?: SystemSettingsSection | null
 }>()
 
 const emit = defineEmits<{
@@ -66,13 +74,23 @@ const emit = defineEmits<{
 }>()
 
 /** 页签定义（功能模块 + 显示名 + 图标） */
-const TABS: { key: 'providers' | 'presets'; label: string; icon: string }[] = [
+const TABS: { key: 'providers' | 'presets' | 'system'; label: string; icon: string }[] = [
   { key: 'providers', label: '服务商配置', icon: 'mdi-server-outline' },
   { key: 'presets', label: '预设提示词', icon: 'mdi-text-box-multiple-outline' },
+  { key: 'system', label: '系统设置', icon: 'mdi-tune-variant' },
 ]
 
 /** 当前激活页签 */
-const activeTab = ref<'providers' | 'presets'>('providers')
+const activeTab = ref<'providers' | 'presets' | 'system'>('providers')
+
+// 外部带子类定位打开对话框时，自动切到「系统设置」页签（如项目存储清理页的「回收站设置」按钮）
+watch(
+  () => [props.modelValue, props.initialSection] as const,
+  ([open, section]) => {
+    if (open && section) activeTab.value = 'system'
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>

@@ -33,6 +33,11 @@ describe('validateImportName', () => {
     expect(() => validateImportName('x'.repeat(65))).toThrow(FsRouteError);
     expect(() => validateImportName('x'.repeat(64))).not.toThrow();
   });
+
+  it('系统保留目录（design/.trash 全局回收站）抛出 FsRouteError(400)', () => {
+    expect(() => validateImportName('.trash')).toThrow(FsRouteError);
+    expect(() => validateImportName('.hidden')).toThrow(FsRouteError);
+  });
 });
 
 describe('deriveProjectName', () => {

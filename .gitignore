@@ -8,6 +8,7 @@ __pycache__/
 .worktrees/
 server/config/providers.json*
 server/config/presets.json
+server/config/system.json
 .agents
 .trae/
 skills-lock.json

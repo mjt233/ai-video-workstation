@@ -10,6 +10,9 @@ import { workflowRouter } from './routes/workflow.js';
 import { canvasRouter } from './routes/canvas.js';
 import { llmRouter } from './routes/llm.js';
 import { presetsRouter } from './routes/presets.js';
+import { cleanupRouter } from './routes/cleanup.js';
+import { systemRouter } from './routes/system.js';
+import { startTrashAutoCleanScheduler } from './system/trash-scheduler.js';
 import { discoverProviders } from './providers/index.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
 import { syncAllInstances } from './providers/instance-sync.js';
@@ -46,6 +49,8 @@ app.use('/api', workflowRouter);
 app.use('/api', canvasRouter);
 app.use('/api', llmRouter);
 app.use('/api', presetsRouter);
+app.use('/api', cleanupRouter);
+app.use('/api', systemRouter);
 
 // /api 未匹配任何路由的请求统一返回 JSON 404（404 属正常业务反馈，不打日志）
 app.use('/api', apiNotFoundHandler);
@@ -98,6 +103,8 @@ function printAccessUrls(port: string | number): void {
 discoverProviders().then(() =>
   discoverWorkflows().then(async () => {
     startEngine();
+    // 回收站自动清理调度器（默认每 7 天一次；配置见 系统设置 → 系统设置 → 回收站）
+    startTrashAutoCleanScheduler();
     server.listen(Number(PORT), HOST, () => {
       printAccessUrls(PORT);
     });
