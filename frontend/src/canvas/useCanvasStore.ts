@@ -296,6 +296,41 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
+   * 纯内存视图补丁（AI 文本节点流式期间显示用）：
+   * 合并进节点 config，但**不入撤销栈、不置脏、不触发保存**。
+   *
+   * 流式期间的内容仅内存显示（下游文本消费者读取同一 store 数据，保持实时联动）；
+   * 终态由后端一次性落盘（result-persist），前端经 adoptExternalChange 做视图同步。
+   *
+   * @param nodeId 节点 id
+   * @param configPatch 配置补丁（合并写入节点 config）
+   */
+  function viewOnlyUpdate(nodeId: string, configPatch: Record<string, unknown>): void {
+    const node = data.value.nodes.find((n) => n.id === nodeId)
+    if (!node) return
+    node.config = { ...node.config, ...configPatch }
+  }
+
+  /**
+   * 终态视图同步（AI 文本节点完成后的 adopt）：合并后端已落盘的补丁
+   * （config.output / outputHistory）+ 入撤销栈（保持「单次撤销可回退到生成前
+   * 状态」语义）+ savedRev 对齐服务端新 rev。
+   *
+   * **不触发写盘**：内容已在画布定义文件中（后端终态已写），仅做内存同步。
+   *
+   * @param nodeId 节点 id
+   * @param configPatch 终态补丁（后端持久化的 output/outputHistory 原值）
+   * @param newRev 服务端写入后的新版本号（savedRev 对齐基准）
+   */
+  function adoptExternalChange(nodeId: string, configPatch: Record<string, unknown>, newRev: number): void {
+    const node = data.value.nodes.find((n) => n.id === nodeId)
+    if (!node) return
+    pushHistory()
+    node.config = { ...node.config, ...configPatch }
+    savedRev.value = newRev
+  }
+
+  /**
    * 建立连线（自动校验类型兼容与防循环，成功后触发 connect 事件）。
    *
    * @param fromNodeId 输出节点 id
@@ -757,6 +792,8 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     removeNodes,
     updateNode,
     updateNodeQuiet,
+    viewOnlyUpdate,
+    adoptExternalChange,
     updateNodes,
     updateDirectorAudioClipDuration,
     removeInputOrderEntry,

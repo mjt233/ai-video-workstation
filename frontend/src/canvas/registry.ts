@@ -13,6 +13,7 @@ import TrimVideoNode from '../components/canvas/nodes/TrimVideoNode.vue'
 import AudioTrimNode from '../components/canvas/nodes/AudioTrimNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
 import AiTextGenerateNode from '../components/canvas/nodes/AiTextGenerateNode.vue'
+import AiTextStatusOverlay from '../components/canvas/nodes/AiTextStatusOverlay.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
@@ -46,6 +47,15 @@ export interface NodePrototype {
   bodyComponent?: Component
   /** 节点被选中后渲染在节点下方的配置组件 */
   editorComponent?: Component
+  /**
+   * 节点自定义状态遮罩组件（可选；未声明时 CanvasNodeCard 渲染默认通用遮罩）。
+   *
+   * 供需要「非阻塞轻量遮罩」的节点自行声明（如 AI 文本生成节点：流式输出与
+   * 节点内「停止」按钮不能被整体遮罩拦截）。组件接收
+   * props：{ status: GenerateStatus; node: CanvasNodeData; project: string }，
+   * emits：interrupt(nodeId) / retry(nodeId)（与默认遮罩一致）。
+   */
+  statusOverlay?: Component
   /** 创建节点时的默认配置（可选） */
   defaultConfig?: NodeConfig
   /** 创建节点时的默认尺寸（可选；未声明时使用全局兜底 240×160，见 useCanvasStore.DEFAULT_NODE_SIZE） */
@@ -170,6 +180,9 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,
     bodyComponent: AiTextGenerateNode,
+    // 自定义非阻塞轻量遮罩：仅接入标准状态机，遮罩不拦截流式输出与节点内「停止」按钮
+    // （默认整体遮罩会盖住内容，与「不修改原有 UI 交互效果」冲突，见 docs/plans/ai-text-loading-llm-session.md）
+    statusOverlay: AiTextStatusOverlay,
     // 有文本历史版本（右键「历史」打开的是 AiTextHistoryDialog —— config.outputHistory
     // 纯文本快照历史，非资产文件历史；与产物节点的 CanvasAssertHistoryDialog 不同，
     // AssetCanvas 按原型分支渲染对应对话框）

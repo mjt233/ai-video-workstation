@@ -56,16 +56,33 @@
         :upstream-updated="upstreamUpdated"
         :inputs="inputs"
         :text-inputs="textInputs"
+        :is-running="isRunning"
+        :active-task-id="status?.taskId"
+        :running-log="status?.lastLog"
+        :canvas-target="canvasTarget"
         @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
         @update:config-quiet="(patch: Record<string, unknown>) => emit('update:config-quiet', patch)"
+        @update:output-view="(patch: Record<string, unknown>) => emit('update:output-view', patch)"
+        @stream-state="(payload: CanvasStreamStatePayload) => emit('stream-state', node.id, payload)"
         @open-picker="emit('open-picker', node.id)"
         @upload-file="(payload: CanvasUploadFilePayload) => emit('upload-file', { ...payload, nodeId: node.id })"
         @disconnect-input="(sourceNodeId: string) => emit('disconnect-input', node.id, sourceNodeId)"
         @open-history="emit('open-history', node.id)"
       />
-      <!-- 节点状态遮罩（通用能力）：running 显示加载动画 + 统一中断入口；error 显示错误与重试 -->
+      <!-- 节点状态遮罩（通用能力）：running 显示加载动画 + 统一中断入口；error 显示错误与重试。
+           原型声明 statusOverlay 时渲染自定义遮罩（如 AI 文本节点的非阻塞轻量遮罩），
+           未声明时保持默认整体遮罩（其余节点行为与视觉零变化）。 -->
+      <component
+        :is="proto?.statusOverlay"
+        v-if="customStatusOverlay"
+        :status="status"
+        :node="node"
+        :project="project"
+        @interrupt="emit('interrupt', node.id)"
+        @retry="emit('retry', node.id)"
+      />
       <div
-        v-if="status?.status === 'running'"
+        v-else-if="status?.status === 'running'"
         class="canvas-node__status canvas-node__status--running"
       >
         <v-progress-circular
@@ -195,6 +212,34 @@ import type { CanvasNodeData } from '../../canvas/types'
 import type { GenerateStatus } from '../../canvas/useCanvasGeneration'
 import { formatBytes, type CanvasUploadFilePayload, type CanvasUploadState } from './composables/useCanvasUpload'
 
+/** AI 文本生成节点的画布定位（生成请求携带；服务端 CanvasDefTarget） */
+export interface CanvasCardTarget {
+  kind: 'scene' | 'stage'
+  episode?: string
+  shot?: string
+  stage?: string
+  label?: string
+}
+
+/** AI 文本生成节点上抛的生成流状态（父级按此驱动标准 Loading 状态机） */
+export interface CanvasStreamStatePayload {
+  /** 是否在运行（true = 进入标准 Loading；false = 终态收敛 + result） */
+  running: boolean
+  /** running 时的阶段日志（Thinking… / 正在响应…） */
+  log?: string
+  /** running 时的会话 id（中断凭据） */
+  taskId?: string
+  /** 终态收敛结果（running=false 时携带） */
+  result?: {
+    status: 'completed' | 'failed' | 'cancelled'
+    errorMsg?: string
+    /** 后端实际落盘的 config 补丁（output / outputHistory；completed 必有） */
+    patch?: Record<string, unknown>
+    /** 后端写入后的画布新版本号（savedRev 对齐） */
+    rev?: number
+  }
+}
+
 /**
  * 资产画布节点卡片：渲染单个节点的头部（名称/内联重命名）、输入/输出端口、
  * 原型主体组件与缩放控制点。
@@ -226,6 +271,10 @@ const props = defineProps<{
   inputs?: unknown[]
   /** AI 文本生成节点：文本输入内容（来源为「文本」节点，取其 config.text） */
   textInputs?: string[]
+  /** AI 文本生成节点：是否在运行（父级按 statusByNode 下发；恢复态据此禁用控件、显示 Thinking 条） */
+  isRunning?: boolean
+  /** AI 文本生成节点：画布定位（生成请求携带；服务端会话落盘定位） */
+  canvasTarget?: CanvasCardTarget
   /** 是否处于名称内联编辑 */
   renaming: boolean
   /** 内联编辑输入框临时值 */
@@ -237,6 +286,10 @@ const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
   /** 主体组件高频流式配置补丁（静默更新，不入撤销栈） */
   (e: 'update:config-quiet', patch: Record<string, unknown>): void
+  /** AI 文本生成节点流式输出补丁（纯内存显示：不入撤销栈、不触发保存） */
+  (e: 'update:output-view', patch: Record<string, unknown>): void
+  /** AI 文本生成节点生成流状态（父级驱动标准 Loading 状态机 + 终态 adopt） */
+  (e: 'stream-state', nodeId: string, payload: CanvasStreamStatePayload): void
   /** 主体组件快捷断开输入（AI 文本生成节点媒体徽标 x 触发） */
   (e: 'disconnect-input', nodeId: string, sourceNodeId: string): void
   /** 主体组件打开资产选择器 */
@@ -272,6 +325,11 @@ const MIN_NODE_HEIGHT = 80
 
 /** 节点原型（端口/主体组件/可缩放性） */
 const proto = computed(() => getPrototype(props.node.prototypeId))
+
+/** 是否渲染原型自定义状态遮罩（仅 running/error 态；原型未声明时走默认整体遮罩） */
+const customStatusOverlay = computed(
+  () => !!proto.value?.statusOverlay && (props.status?.status === 'running' || props.status?.status === 'error'),
+)
 
 /** 鼠标悬浮中（悬浮时显示缩放控制点） */
 const hovered = ref(false)

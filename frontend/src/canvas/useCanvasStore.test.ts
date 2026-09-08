@@ -582,4 +582,66 @@ describe('useCanvasStore', () => {
     expect(node.width).toBe(360)
     expect(node.height).toBe(240)
   })
+
+  // ── LLM 会话视图同步（viewOnlyUpdate / adoptExternalChange）───────────
+
+  /** 构造带 AI 文本节点的画布 store（跳过 api 依赖） */
+  function makeTextAiStore(output = '') {
+    const store = useCanvasStore('p', TARGET)
+    store.data.value = {
+      ...store.data.value,
+      nodes: [{
+        id: 'n1',
+        prototypeId: 'text-ai',
+        name: 'AI文本生成',
+        x: 0,
+        y: 0,
+        width: 360,
+        height: 240,
+        config: { input: '你好', output },
+      }],
+    }
+    return store
+  }
+
+  it('viewOnlyUpdate：纯内存合并 config，不入撤销栈、不置脏、不触发保存', async () => {
+    const store = makeTextAiStore('')
+    const beforeDirty = store.dirty.value
+    store.viewOnlyUpdate('n1', { output: '流式部分' })
+    expect(store.nodes.value[0].config.output).toBe('流式部分')
+    expect(store.dirty.value).toBe(beforeDirty)
+    expect(store.canUndo.value).toBe(false)
+    await vi.runAllTimersAsync()
+    expect(saveCanvas).not.toHaveBeenCalled()
+  })
+
+  it('viewOnlyUpdate：节点不存在时安全跳过', () => {
+    const store = makeTextAiStore()
+    store.viewOnlyUpdate('missing', { output: 'x' })
+    expect(store.nodes.value).toHaveLength(1)
+  })
+
+  it('adoptExternalChange：合并终态补丁 + 入撤销栈（单次撤销回退生成前状态）+ savedRev 对齐，不触发写盘', async () => {
+    const store = makeTextAiStore('')
+    store.savedRev.value = 3
+    store.adoptExternalChange('n1', {
+      output: '完整答案',
+      outputHistory: [{ id: 'h1', createdAt: '2024-01-01T00:00:00.000Z', input: '你好', output: '完整答案' }],
+    }, 8)
+    expect(store.nodes.value[0].config.output).toBe('完整答案')
+    expect((store.nodes.value[0].config.outputHistory as unknown[])).toHaveLength(1)
+    expect(store.savedRev.value).toBe(8)
+    expect(store.dirty.value).toBe(false)
+    await vi.runAllTimersAsync()
+    expect(saveCanvas).not.toHaveBeenCalled() // 内容已在文件，不重复写盘
+    // 撤销一次回到生成前状态
+    store.undo()
+    expect(store.nodes.value[0].config.output).toBe('')
+  })
+
+  it('adoptExternalChange：节点不存在时安全跳过', () => {
+    const store = makeTextAiStore()
+    store.adoptExternalChange('missing', { output: 'x' }, 5)
+    expect(store.canUndo.value).toBe(false)
+  })
 })

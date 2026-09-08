@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -14,12 +15,17 @@ import { discoverWorkflows, startEngine } from './workflow-engine.js';
 import { syncAllInstances } from './providers/instance-sync.js';
 import { migrateLegacyConfig } from './providers/config-store.js';
 import { apiNotFoundHandler, errorHandler, installProcessErrorHandlers } from './error-handler.js';
+import { wsHub } from './llm/session-ws.js';
 
 // 进程级兜底：未处理的 Promise 拒绝 / 未捕获同步异常全部打印到控制台，杜绝静默丢失
 installProcessErrorHandlers();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+/** HTTP 服务器（WS 枢纽挂在同一个服务器上：/llm-ws 由 ws 库自行处理 upgrade） */
+const server = http.createServer(app);
+/** LLM 会话 WebSocket 枢纽挂载（连接即推活跃会话全量列表；见 /llm-ws） */
+wsHub.attach(server);
 /** 服务监听端口，可通过环境变量 PORT 覆盖 */
 const PORT = process.env.PORT || 3001;
 /** 监听所有网络接口（0.0.0.0），允许局域网内其他设备访问 */
@@ -92,7 +98,7 @@ function printAccessUrls(port: string | number): void {
 discoverProviders().then(() =>
   discoverWorkflows().then(async () => {
     startEngine();
-    app.listen(Number(PORT), HOST, () => {
+    server.listen(Number(PORT), HOST, () => {
       printAccessUrls(PORT);
     });
     // 旧格式配置自动迁移为实例数组（幂等；已是新格式则跳过）

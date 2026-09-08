@@ -1,8 +1,8 @@
 <template>
   <div class="ai-text-node">
-    <!-- 生成中状态条（节点顶部） -->
+    <!-- 生成中状态条（节点顶部；生成中/恢复态运行中均显示，恢复态由父级 statusByNode 下发 isRunning） -->
     <div
-      v-if="generating"
+      v-if="active"
       class="ai-text-node__thinking"
     >
       <v-progress-circular
@@ -11,7 +11,7 @@
         indeterminate
         color="primary"
       />
-      <span class="ml-1">Thinking...</span>
+      <span class="ml-1">{{ thinkingLabel }}</span>
     </div>
 
     <!-- 首行：模型下拉（v-select，按服务商分组）+ 思考强度 -->
@@ -28,7 +28,7 @@
         hide-details
         prepend-inner-icon="mdi-robot-outline"
         class="ai-text-node__model-select"
-        :disabled="generating"
+        :disabled="active"
         @update:model-value="onModelSelect"
       >
         <template #item="{ item, props: itemProps }">
@@ -70,7 +70,7 @@
             size="small"
             variant="outlined"
             class="ai-text-node__pick"
-            :disabled="generating || effortOptions.length === 0"
+            :disabled="active || effortOptions.length === 0"
             :title="effortBtnTitle"
           >
             <v-icon
@@ -113,7 +113,7 @@
         variant="outlined"
         hide-details
         prepend-inner-icon="mdi-text-box-multiple-outline"
-        :disabled="generating"
+        :disabled="active"
         @update:model-value="onPresetSelect"
       >
         <template #item="{ item, props: itemProps }">
@@ -218,7 +218,7 @@
         size="small"
         variant="tonal"
         color="primary"
-        :disabled="generating || !canGenerate"
+        :disabled="active || !canGenerate"
         title="生成"
         @click="onGenerate"
       />
@@ -227,7 +227,7 @@
         size="small"
         variant="tonal"
         color="error"
-        :disabled="!generating"
+        :disabled="!active"
         title="停止"
         class="ml-1"
         @click="onStop"
@@ -241,13 +241,14 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
 import { mergeInputOrder as mergeGlobalInputOrder } from '../../../canvas/generate'
-import { chatLlmStream } from '../../../api/llm'
+import { startLlmTask } from '../../../api/llm'
 import { useLlmProviders } from '../../../composables/useLlmProviders'
 import { usePresetPrompts } from '../../../composables/usePresetPrompts'
 import { formatContextWindow } from '../../../utils/llmContextWindow'
 import { MODALITY_ICONS, MODALITY_LABELS } from '../../../utils/llmModality'
 import { composePresetPrompt } from '../../../utils/presetPrompt'
-import { appendTextHistory, createTextHistoryEntry, readTextHistory } from '../../../canvas/aiTextHistory'
+import { llmSocket, type LlmCanvasTarget, type LlmTaskEvent } from '../../../canvas/llmSocket'
+import { applyLlmEvent, createLlmStreamState, createThrottledCommit, type LlmStreamState, type ThrottledCommit } from '../../../canvas/llmEvents'
 import type { LlmMediaInputItem } from '../composables/useCanvasNodeOps'
 import CanvasInputPreview from '../editors/CanvasInputPreview.vue'
 
@@ -258,11 +259,33 @@ const props = defineProps<{
   inputs?: LlmMediaInputItem[]
   /** 文本输入内容（来源为「文本」节点，取其 config.text） */
   textInputs?: string[]
+  /** 是否在运行（父级按 statusByNode 下发；刷新/切换后恢复态据此禁用控件、显示 Thinking 条） */
+  isRunning?: boolean
+  /** 运行中会话 id（恢复态「停止」按钮凭据；父级按 statusByNode 下发） */
+  activeTaskId?: string
+  /** 运行中阶段日志（恢复态由父级在阶段切换时更新；本地节点显示用） */
+  runningLog?: string
+  /** 画布定位（生成请求携带；服务端会话终态落盘定位） */
+  canvasTarget?: LlmCanvasTarget
 }>()
 
 const emit = defineEmits<{
   (e: 'update:config', patch: Record<string, unknown>): void
   (e: 'update:config-quiet', patch: Record<string, unknown>): void
+  /** 流式输出纯内存显示补丁（父级路由到 store.viewOnlyUpdate：不写盘、不入撤销栈） */
+  (e: 'update:output-view', patch: Record<string, unknown>): void
+  /** 生成流状态（父级驱动标准 Loading 状态机：running → beginClientRun；终态 → adopt + endClientRun） */
+  (e: 'stream-state', payload: {
+    running: boolean
+    log?: string
+    taskId?: string
+    result?: {
+      status: 'completed' | 'failed' | 'cancelled'
+      errorMsg?: string
+      patch?: Record<string, unknown>
+      rev?: number
+    }
+  }): void
   (e: 'disconnect-input', sourceNodeId: string): void
   /** 打开该节点的文本历史版本对话框（父级经 CanvasNodeCard 转发到画布层） */
   (e: 'open-history'): void
@@ -277,7 +300,7 @@ const presetPrompts = usePresetPrompts()
 /** 流式输出节流间隔（毫秒；流式期间写入 config 的限流） */
 const STREAM_COMMIT_THROTTLE_MS = 500
 
-/** 生成中（禁用用户控件） */
+/** 生成中（禁用用户控件；本地发起路径） */
 const generating = ref(false)
 /** 生成错误信息（响应区红字） */
 const errorMsg = ref('')
@@ -289,19 +312,28 @@ const warnings = ref<string[]>([])
 const effortMenuOpen = ref(false)
 /** 用户输入文本 */
 const inputText = ref('')
-/** AI 响应文本（流式累积；节流落盘） */
+/** AI 响应文本（流式累积；仅内存显示 + 节流 update:output-view 到父级 store） */
 const outputText = ref('')
 /** AI 响应 textarea DOM（自动滚动） */
 const outputEl = ref<HTMLTextAreaElement | null>(null)
 /** 是否贴近底部（用户上滚后暂停自动滚动） */
 const stickToBottom = ref(true)
 
-/** 当前中止控制器（停止按钮） */
-let controller: AbortController | null = null
-/** 流式落盘节流定时器 */
-let commitTimer: ReturnType<typeof setTimeout> | null = null
-/** 上次节流提交时间 */
-let lastCommitAt = 0
+/** 生成流状态（事件应用器输出；thinking 仅内部展示，不写入 config.output） */
+const stream = ref<LlmStreamState>(createLlmStreamState())
+/** 停止收敛超时（毫秒）：HTTP 兜底已确认但 WS 断连时本地结束 Loading（幂等） */
+const LLM_STOP_TIMEOUT_MS = 3000
+
+/** 当前会话 id（停止/退订凭据；仅在线发起路径有值） */
+let taskIdRef = ''
+/** 当前订阅退订函数 */
+let unsubscribeTask: (() => void) | null = null
+/** 停止收敛超时定时器 */
+let stopTimer: ReturnType<typeof setTimeout> | null = null
+/** 任务创建期间用户已点停止（创建成功后立即取消，避免残留无主会话） */
+let cancelPending = false
+/** 流式节流提交器（纯内存显示：update:output-view → 父级 viewOnlyUpdate） */
+let throttled: ThrottledCommit = createThrottledCommit(() => {})
 
 /** 配置快捷读取 */
 const config = computed(() => props.node.config as Record<string, unknown>)
@@ -451,7 +483,19 @@ const mediaByType = computed<{ images: CanvasInputInfo[]; videos: CanvasInputInf
 const textInputCount = computed(() => props.textInputs?.length ?? 0)
 
 /** 是否禁用用户输入（生成中 / 已连接文本输入时禁用，输入内容来自外部连线） */
-const userInputDisabled = computed(() => generating.value || textInputCount.value > 0)
+const userInputDisabled = computed(() => active.value || textInputCount.value > 0)
+
+/** 节点是否处于运行态（本会话生成中 或 父级下发恢复态运行中）：禁用控件、显示 Thinking 条 */
+const active = computed(() => generating.value || props.isRunning === true)
+
+/**
+ * Thinking 条文案：本地发起路径按流状态阶段切换（thinking → responding）；
+ * 恢复态（父级接管订阅）按父级下发的 runningLog（阶段切换时更新）。
+ */
+const thinkingLabel = computed(() => {
+  if (!generating.value) return props.runningLog || 'Thinking...'
+  return stream.value.phase === 'responding' ? '正在响应…' : 'Thinking...'
+})
 
 /**
  * 输出区是否只读：
@@ -460,7 +504,7 @@ const userInputDisabled = computed(() => generating.value || textInputCount.valu
  * 其余时刻（响应结束后/加载历史输出）允许手动编辑 AI 响应。
  */
 const outputAreaReadonly = computed(
-  () => generating.value || (outputText.value.trim().length === 0 && !!errorMsg.value),
+  () => active.value || (outputText.value.trim().length === 0 && !!errorMsg.value),
 )
 
 /** 用户输入占位提示（按文本输入连接情况区分） */
@@ -558,28 +602,9 @@ function onOutputEdit(e: Event): void {
   emit('update:config', { output: v })
 }
 
-/**
- * 生成正常结束且输出非空时，追加一条文本历史版本（记录「当时的输入与输出」快照）。
- *
- * 走静默更新（update:config-quiet，不入撤销栈），且须在最终输出正常提交之前调用：
- * 最终提交的撤销快照此时已包含本条历史，撤销生成不会连带丢失已存档的版本。
- * 输入快照取本次实际发送的用户侧文本（外部文本连线取连线内容，否则取输入框文本；
- * 不含预设提示词替换后的完整发送内容），另附模型名/预设名/媒体输入名称供历史对话框对照。
- *
- * @param sentText 本次生成实际发送的用户侧文本（已 trim）
- */
-function saveOutputHistoryVersion(sentText: string): void {
-  const entry = createTextHistoryEntry(sentText, outputText.value, {
-    modelName: selectedModel.value?.name || selectedModel.value?.modelId || modelId.value || undefined,
-    presetName: activePreset.value?.name ?? undefined,
-    mediaLabels: (props.inputs ?? []).map((i) => i.label).filter((s) => s.length > 0),
-  })
-  emit('update:config-quiet', { outputHistory: appendTextHistory(readTextHistory(config.value), entry) })
-}
-
 /** 生成 */
 async function onGenerate(): Promise<void> {
-  if (generating.value) return
+  if (active.value) return
   if (textInputCount.value > 1) {
     hint.value = '存在多个文本连线输入，无法执行生成，请仅保留一个'
     return
@@ -613,90 +638,171 @@ async function onGenerate(): Promise<void> {
   warnings.value = []
   hint.value = presetNotice
   outputText.value = ''
-  controller = new AbortController()
-  generating.value = true
+  stream.value = createLlmStreamState()
+  throttled = createThrottledCommit((t) => emit('update:output-view', { output: t }))
   stickToBottom.value = true
-  // 本次生成是否「正常结束」（未被停止、无错误）：为真且输出非空时流结束后自动存档历史版本
-  let finishedOk = false
+  generating.value = true // 先置运行态：控件立即禁用（点击守卫 active），创建失败时恢复
+  cancelPending = false
   // 生成前先提交一次输入快照
   emit('update:config', { input: inputText.value })
   try {
-    for await (const ev of chatLlmStream(
-      {
-        project: props.project,
-        providerInstanceId: instId,
-        modelId: mId,
-        reasoningEffort: selectedEffort.value || undefined,
-        input: finalInput,
-        media: (props.inputs ?? []).map((i) => ({ path: i.path, type: i.type })),
+    const { taskId } = await startLlmTask({
+      project: props.project,
+      providerInstanceId: instId,
+      modelId: mId,
+      reasoningEffort: selectedEffort.value || undefined,
+      input: finalInput,
+      media: (props.inputs ?? []).map((i) => ({ path: i.path, type: i.type })),
+      nodeId: props.node.id,
+      label: props.node.name,
+      canvas: props.canvasTarget ?? { kind: 'scene' },
+      snapshot: {
+        modelName: selectedModel.value?.name || selectedModel.value?.modelId || mId || undefined,
+        presetName: activePreset.value?.name ?? undefined,
+        mediaLabels: (props.inputs ?? []).map((i) => i.label).filter((s) => s.length > 0),
+        // 用户原始输入（未拼入预设提示词）：历史「当时的输入」归档用
+        userInput: text,
       },
-      controller.signal,
-    )) {
-      if (ev.type === 'text' && typeof ev.delta === 'string') {
-        outputText.value += ev.delta
-        void scheduleCommit()
-        void scrollToBottom()
-      } else if (ev.type === 'warning' && ev.message) {
-        warnings.value.push(ev.message)
-      } else if (ev.type === 'error' && ev.message) {
-        errorMsg.value = ev.message
-        break
-      }
+    })
+    // 任务创建期间用户已点停止：立即取消该会话（避免残留无主会话），不再进入 Loading
+    if (cancelPending) {
+      cancelPending = false
+      generating.value = false
+      llmSocket.cancel(taskId)
+      emit('stream-state', { running: false, result: { status: 'cancelled' } })
+      return
     }
-    await flushCommit()
-    // 正常结束判定：未收到错误事件且未被「停止」中止（controller 在 finally 置空前仍可用）
-    finishedOk = !errorMsg.value && !controller.signal.aborted
+    taskIdRef = taskId
+    // 进入标准 Loading（父级置 statusByNode running + 记录会话 id）
+    emit('stream-state', { running: true, log: 'Thinking…', taskId })
+    unsubscribeTask = llmSocket.subscribe(taskId, onTaskEvent)
   } catch (e) {
-    if (!controller.signal.aborted) {
-      errorMsg.value = e instanceof Error ? e.message : String(e)
-      console.error('[llm] 对话流异常:', e)
-    }
-  } finally {
+    const msg = e instanceof Error ? e.message : String(e)
     generating.value = false
-    controller = null
-    // 空响应且无错误时给占位提示
-    if (!outputText.value && !errorMsg.value) {
-      hint.value = '模型未返回内容（响应为空）'
-    }
-    // 正常结束且输出非空 → 先静默追加历史版本（在最终提交前，撤销生成不会丢失存档）
-    if (finishedOk && outputText.value.trim().length > 0) {
-      saveOutputHistoryVersion(text)
-    }
-    // 流结束后提交最终输出（走可撤销的正常更新路径）
-    emit('update:config', { output: outputText.value })
+    errorMsg.value = msg
+    console.error('[llm] 创建会话失败:', e)
+    // 创建失败：终态 failed（父级置错误态，遮罩红字；无 Loading 残留）
+    emit('stream-state', { running: false, result: { status: 'failed', errorMsg: msg } })
   }
 }
 
-/** 停止生成（中止上游请求） */
-function onStop(): void {
-  controller?.abort()
+/**
+ * 会话事件处理器（在线发起路径）：状态经 applyLlmEvent 累计；
+ * 正文节流显示（update:output-view → 父级 viewOnlyUpdate 纯内存）；
+ * 终态（finished/not-found）收敛并通知父级 adopt（后端已完成落盘）。
+ *
+ * @param event 服务端推送的会话事件
+ */
+function onTaskEvent(event: LlmTaskEvent): void {
+  const prevPhase = stream.value.phase
+  stream.value = applyLlmEvent(stream.value, event)
+  switch (event.type) {
+    case 'text':
+      outputText.value = stream.value.text
+      throttled.push(stream.value.text)
+      void scrollToBottom()
+      // 首条正文到达 → 阶段切换（Thinking… → 正在响应…）
+      if (prevPhase !== 'responding') emit('stream-state', { running: true, log: '正在响应…' })
+      break
+    case 'thinking':
+      // 思考内容仅内部展示（不进 config.output）；阶段信号由父级遮罩日志反映
+      break
+    case 'warning':
+      warnings.value = [...stream.value.warnings]
+      break
+    case 'snapshot':
+      // 重连/恢复订阅的快照补齐：进度整体覆盖显示（正文仍纯内存）
+      outputText.value = stream.value.text
+      warnings.value = [...stream.value.warnings]
+      if (stream.value.text) void scrollToBottom()
+      if (stream.value.phase === 'responding') emit('stream-state', { running: true, log: '正在响应…' })
+      break
+    case 'finished':
+    case 'not-found':
+      settle(event)
+      break
+  }
 }
 
-/** 节流提交流式输出（不入撤销栈的静默更新） */
-async function scheduleCommit(): Promise<void> {
-  const now = Date.now()
-  if (now - lastCommitAt >= STREAM_COMMIT_THROTTLE_MS) {
-    lastCommitAt = now
-    emit('update:config-quiet', { output: outputText.value })
+/**
+ * 终态收敛（finished / not-found）：
+ * 节流收口 → 结束本地 generating → 通知父级（completed：adopt 后端落盘的
+ * output/outputHistory + savedRev 对齐；failed：错误红字 + 遮罩错误态；
+ * cancelled/not-found：静默结束）→ 退订。
+ *
+ * @param event 终态事件
+ */
+function settle(event: Extract<LlmTaskEvent, { type: 'finished' | 'not-found' }>): void {
+  if (stopTimer) {
+    clearTimeout(stopTimer)
+    stopTimer = null
+  }
+  throttled.flush()
+  generating.value = false
+  const status = event.type === 'not-found' ? 'cancelled' : event.info.status
+  if (status === 'failed') {
+    errorMsg.value = event.type === 'finished' ? (event.info.error ?? '生成失败') : '生成失败'
+  }
+  const info = event.type === 'finished' ? event.info : undefined
+  const patch =
+    info && (info.output !== undefined || info.outputHistory)
+      ? {
+          ...(info.output !== undefined ? { output: info.output } : {}),
+          ...(info.outputHistory ? { outputHistory: info.outputHistory } : {}),
+        }
+      : undefined
+  emit('stream-state', {
+    running: false,
+    result: {
+      status,
+      ...(status === 'failed' ? { errorMsg: errorMsg.value } : {}),
+      ...(patch ? { patch } : {}),
+      ...(typeof info?.rev === 'number' ? { rev: info.rev } : {}),
+    },
+  })
+  unsubscribe()
+  // 空响应且无错误时给占位提示
+  if (!outputText.value && !errorMsg.value && status === 'completed') {
+    hint.value = '模型未返回内容（响应为空）'
+  }
+}
+
+/**
+ * 停止生成：取消会话（WS 优先 + HTTP 兜底，服务端收敛后写部分输出并广播 finished）；
+ * 3 秒收敛超时兜底——WS 断连时本地结束 Loading（幂等，服务端仍会完成取消与落盘）。
+ * 恢复态（父级接管订阅）同样可停止（activeTaskId 为会话凭据）。
+ */
+function onStop(): void {
+  const taskId = taskIdRef || props.activeTaskId || ''
+  if (!taskId) {
+    // 任务创建期间（无会话凭据）：标记取消，创建成功后立即取消该会话
+    if (generating.value) {
+      cancelPending = true
+      generating.value = false
+      emit('stream-state', { running: false, result: { status: 'cancelled' } })
+      return
+    }
+    // 异常态（无凭据且非生成中）：直接本地结束
+    emit('stream-state', { running: false, result: { status: 'cancelled' } })
     return
   }
-  if (commitTimer) return
-  commitTimer = setTimeout(() => {
-    commitTimer = null
-    lastCommitAt = Date.now()
-    emit('update:config-quiet', { output: outputText.value })
-  }, STREAM_COMMIT_THROTTLE_MS - (now - lastCommitAt))
+  llmSocket.cancel(taskId)
+  if (stopTimer) clearTimeout(stopTimer)
+  stopTimer = setTimeout(() => {
+    // 收敛超时兜底：HTTP 兜底已确认但 WS 已断时本地结束 Loading（幂等，重连后快照对账）
+    if (!stream.value.finished) {
+      generating.value = false
+      emit('stream-state', { running: false, result: { status: 'cancelled' } })
+      unsubscribe()
+    }
+  }, LLM_STOP_TIMEOUT_MS)
 }
 
-/** 停止节流并立即提交当前文本（最后一段，先走静默再走最终提交） */
-async function flushCommit(): Promise<void> {
-  if (commitTimer) {
-    clearTimeout(commitTimer)
-    commitTimer = null
-  }
-  if (outputText.value) {
-    emit('update:config-quiet', { output: outputText.value })
-  }
+/** 退订当前会话（终态收敛/卸载时调用；任务继续由服务端执行） */
+function unsubscribe(): void {
+  unsubscribeTask?.()
+  unsubscribeTask = null
+  taskIdRef = ''
 }
 
 /** AI 响应自动滚动到底部（用户上滚后暂停跟随） */
@@ -714,9 +820,11 @@ async function scrollToBottom(): Promise<void> {
 }
 
 onBeforeUnmount(() => {
-  // 卸載时中止进行中的流
-  controller?.abort()
-  if (commitTimer) clearTimeout(commitTimer)
+  // 卸载/切换画布：仅退订（不是取消）——任务在服务端继续执行，
+  // 回到画布时由服务端会话列表按 scope 过滤恢复（快照补齐 + 终态 adopt）
+  unsubscribe()
+  if (stopTimer) clearTimeout(stopTimer)
+  throttled.flush()
 })
 </script>
 

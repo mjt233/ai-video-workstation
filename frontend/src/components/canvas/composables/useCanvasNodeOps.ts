@@ -101,6 +101,12 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     const node = nodeMap.value[nodeId]
     if (!node) return
     gen.clearStatus(nodeId)
+    if (node.prototypeId === 'text-ai') {
+      // AI 文本生成节点：生成入口在节点体内（「生成」按钮，无右键「重新生成」）。
+      // 此处仅作防御提示（自定义遮罩 failed 态不提供重试按钮，用户点击节点内「生成」）。
+      showSnackbar('请在 AI 文本生成节点内点击「生成」按钮执行生成', 'primary')
+      return
+    }
     if (node.prototypeId === 'video-frame-extract') {
       // 获取视频帧：本地 ffmpeg 提取（不走工作流）
       await extractNodeFrame(nodeId)
@@ -169,8 +175,13 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     await gen.generate(node, undefined, applyResult)
   }
 
-  /** 中断生成 */
+  /** 中断生成：AI 文本节点走 LLM 会话取消（标准 Loading 遮罩「中断」按钮）；其余走通用中断 */
   function onInterrupt(nodeId: string): void {
+    const node = nodeMap.value[nodeId]
+    if (node?.prototypeId === 'text-ai') {
+      void gen.interruptLlm(nodeId)
+      return
+    }
     void gen.interrupt(nodeId)
   }
 

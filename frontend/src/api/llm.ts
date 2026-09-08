@@ -1,4 +1,5 @@
 import client from './client'
+import type { LlmCanvasTarget } from '../canvas/llmSocket'
 
 /** 大语言模型协议类型（与服务端 protocol.ts 一致） */
 export type LlmProtocol = 'openai-chat' | 'openai-responses' | 'anthropic' | 'grok' | 'gemini'
@@ -32,11 +33,28 @@ export interface LlmConfiguredModel {
   meta?: LlmModelMeta
 }
 
-/** SSE 流式事件（服务端 /api/llm/chat 转发） */
-export interface LlmStreamEvent {
-  type: 'thinking' | 'text' | 'warning' | 'error' | 'done'
-  delta?: string
-  message?: string
+/** 创建 LLM 会话的请求（POST /api/llm/chat） */
+export interface StartLlmTaskRequest {
+  /** 项目名 */
+  project: string
+  /** 服务商实例 id */
+  providerInstanceId: string
+  /** 模型 id */
+  modelId: string
+  /** 思考强度挡位（模型不支持时省略） */
+  reasoningEffort?: string
+  /** 用户输入文本（预设提示词替换后的最终发送内容） */
+  input: string
+  /** 媒体输入（来源节点产物相对路径 + 类型；服务端按能力过滤） */
+  media?: { path: string; type: 'image' | 'audio' | 'video' }[]
+  /** 发起节点 id（画布恢复过滤与终态落盘定位用） */
+  nodeId: string
+  /** 节点名（会话列表展示） */
+  label: string
+  /** 画布定位（CanvasDefTarget） */
+  canvas: LlmCanvasTarget
+  /** 终态历史归档凭据快照（模型名/预设名/媒体标签/用户原始输入） */
+  snapshot: { modelName?: string; presetName?: string; mediaLabels?: string[]; userInput?: string }
 }
 
 /**
@@ -56,73 +74,32 @@ export async function fetchLlmModels(input: {
 }
 
 /**
- * POST /api/llm/chat — SSE 流式对话（一次性输入/输出）。
+ * POST /api/llm/chat — 创建 LLM 活跃会话（服务端登记后立即返回 taskId，不等结果）。
  *
- * 用 fetch + ReadableStream 解析 SSE 事件（axios 不便流式）；以异步生成器逐条产出事件，
- * 供 UI 边收边显示。错误响应（非 2xx/无法解析）抛出 Error（含服务端错误文案）。
+ * 后续流式事件（thinking/text/warning/error/finished）经 WebSocket（/llm-ws）
+ * 按 taskId 订阅广播，见 canvas/llmSocket.ts。
  *
- * @param req 对话请求
- * @param signal 中止信号（停止按钮/组件卸载）
- * @returns 流式事件生成器
+ * @param req 会话创建请求
+ * @returns 会话 id（订阅/取消凭据）
  */
-export async function* chatLlmStream(
-  req: {
-    project: string
-    providerInstanceId: string
-    modelId: string
-    reasoningEffort?: string
-    input: string
-    media?: { path: string; type: 'image' | 'audio' | 'video' }[]
-  },
-  signal?: AbortSignal,
-): AsyncGenerator<LlmStreamEvent> {
-  const res = await fetch('/api/llm/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-    signal,
-  })
-  if (!res.ok) {
-    let message = `请求失败（HTTP ${res.status}）`
-    try {
-      const data = (await res.json()) as { error?: unknown }
-      if (typeof data.error === 'string' && data.error) message = data.error
-    } catch {
-      // 响应体非 JSON：保留默认错误文案
-    }
-    throw new Error(message)
-  }
-  if (!res.body) throw new Error('服务端未返回流式响应')
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
+export async function startLlmTask(req: StartLlmTaskRequest): Promise<{ taskId: string }> {
+  const { data } = await client.post<{ taskId: string }>('/llm/chat', req)
+  return data
+}
+
+/**
+ * POST /api/llm/chat/tasks/:taskId/cancel — HTTP 兜底取消（WS 断连时停止仍可用）。
+ *
+ * 幂等：会话不存在/已终态返回 404，调用方视为已终态即可（不抛错）。
+ *
+ * @param taskId 会话 id
+ */
+export async function cancelLlmTask(taskId: string): Promise<void> {
   try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      let sep: number
-      while ((sep = buffer.indexOf('\n\n')) >= 0) {
-        const chunk = buffer.slice(0, sep)
-        buffer = buffer.slice(sep + 2)
-        for (const line of chunk.split('\n')) {
-          if (!line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (!payload) continue
-          try {
-            yield JSON.parse(payload) as LlmStreamEvent
-          } catch (e) {
-            // 单条事件解析失败：跳过（不影响后续事件）
-            console.error('[llm] SSE 事件解析失败（已跳过）:', e)
-          }
-        }
-      }
-    }
-  } finally {
-    try {
-      reader.releaseLock()
-    } catch {
-      // 流已结束/释放异常可忽略
-    }
+    await client.post(`/llm/chat/tasks/${encodeURIComponent(taskId)}/cancel`)
+  } catch (e) {
+    // 404 = 会话已结束（终态由服务端落盘），符合取消预期；其余异常向上抛出
+    if ((e as { response?: { status?: number } }).response?.status === 404) return
+    throw e
   }
 }

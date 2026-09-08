@@ -60,12 +60,14 @@
 > **异步结果可靠性**：任务由服务端 SQLite 队列独立执行，产物落盘与页面无关；离开画布 / 切换项目 / 关闭浏览器后任务完成，重新进入画布时按固定路径直接可见（无任何元数据回写依赖）。前端轮询（`useCanvasGeneration.poll`）仅负责实时状态展示，纯体验层。
 >
 > **loading 展示跨页面存活**：节点进入 loading 后，运行中任务会持久化到 localStorage（键 `dsh.asset-canvas.tasks.{project}:{画布定义文件路径}`，记录 nodeId → `{ kind, outputPath, startedAt, taskId? }`）；离开资产画布 / 刷新页面 / 切换画布再回来时 `useCanvasGeneration.restore()` 恢复 loading 展示并继续跟踪：workflow 任务按 taskId 恢复轮询（终态直接收敛），本地 ffmpeg 同步任务按产物 mtime 相对提交前基线的变化探测完成（超时 10 分钟判定中断）。任务到达终态（成功/失败/中断）时删除记录。
+>
+> **AI 文本节点（LLM 会话）loading 跨页面存活（与上述 localStorage 机制不同）**：AI 文本节点不产生文件产物，其运行态恢复由**服务端活跃会话注册表**驱动（`server/src/llm/session-manager.ts`，**仅内存不持久化**；会话携带 nodeId + 画布 scope）。画布加载/切换/WS 重连时 `AssetCanvas` 按「项目 + 画布 scope」过滤 `llmSocket.sessions` 恢复 loading（subscribe → 快照补齐 → 增量实时显示 → 终态收敛）；**流式期间前端纯内存显示（不写盘、不入撤销栈）**，终态由后端独占写入画布定义文件（`config.output` + `outputHistory` 追加，CAS + 路径锁，历史单写者无重复），前端 finished 时经 `adoptExternalChange` 仅做视图同步（入撤销栈 + savedRev 对齐）。传输通道为 **WebSocket（/llm-ws）替换原 SSE**（客户端断开不再中止上游）；服务重启后注册表清空 → 无幽灵 loading（未终态部分输出丢失为内存方案预期取舍）。详见 §14。
 
 ---
 
 ## 3. 节点类型（`frontend/src/canvas/registry.ts`）
 
-节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / outputExt / defaultConfig / defaultSize / bodyComponent / editorComponent / getOutputAssetPath`。其中 `defaultSize`（可选）指定创建节点时的默认尺寸（宽×高），未声明时使用全局兜底 240×160（`useCanvasStore.DEFAULT_NODE_SIZE`）——目前仅 AI文本生成节点声明更大默认尺寸 360×240（内容多：模型/预设下拉 + 输入预览 + 双栏文本区）。
+节点原型 `NodePrototype`：`id / name / inputPorts / outputPorts / resizeable / canGenerate / hasHistory / outputExt / defaultConfig / defaultSize / bodyComponent / editorComponent / statusOverlay / getOutputAssetPath`。其中 `defaultSize`（可选）指定创建节点时的默认尺寸（宽×高），未声明时使用全局兜底 240×160（`useCanvasStore.DEFAULT_NODE_SIZE`）——目前仅 AI文本生成节点声明更大默认尺寸 360×240（内容多：模型/预设下拉 + 输入预览 + 双栏文本区）。`statusOverlay`（可选）为节点**自定义状态遮罩组件**（见 §14）：声明后 `CanvasNodeCard` 在 running/error 态渲染该组件替代默认整体遮罩（非阻塞轻量形态，如 AI 文本节点——流式输出与节点内「停止」按钮不被拦截）；未声明时默认遮罩原样（其余节点行为与视觉零变化）。
 其中端口 `type` 支持**单一类型或多类型数组**（`DataType | DataType[]`，如 AI文本生成节点的 `['media','text']` —— 任一匹配即可连接）；输出端口均为单一类型（v1 每节点单输出）。
 其中 `canGenerate`（是否支持「重新生成」）与 `hasHistory`（是否有**历史对话框入口**）驱动右键菜单入口显隐：`image-generate`/`video-generate`/`tts-generate` 两者皆真；`text-ai` 仅 `hasHistory`（无「重新生成」菜单项，其生成按钮在节点内部，历史为文本版本对话框见 §10.1）；`video-frame-extract`/`video-concat`/`video-trim`/`audio-trim` 仅 `canGenerate`（无历史对话框入口；但重复执行时旧产物仍会被服务端归档进 history 目录，只是没有 UI 入口查看）。`outputExt`（生成类节点产物扩展名，如 jpg/mp4/png/flac）决定固定产物文件名 `output.{ext}`（裁剪音频节点例外：扩展名随 `config.format` 动态解析，`'flac'` 仅为兜底声明，见该节点条目与 `canvas/audioTrim.ts`）。
 
@@ -92,7 +94,7 @@
 - **生成图片**：配置组件采用统一生成节点布局——`CanvasInputPreview` 输入预览（图片类型；无输入时显示「无输入图，默认使用文生图工作流」）+ 提示词字段 + 参数行（工作流类型/工作流实现两个紧凑下拉、输出尺寸 `WorkflowSizePicker`、工作流参数 `WorkflowParamsTrigger`，后两者均为点击弹出菜单式配置，见 §6.1）。`config` 含 `prompt`（提示词）、`workflowId` / `workflowImpl`（有输入图用 `image-edit`，否则 `text-to-image`；`workflowImpl` **须显式选择**，未选择时生成被前端校验拦截，后端也不再兜底）、`workflowParams`（用户参数）、`sizeConfig`（输出尺寸）、`inputOrder`（输入图顺序，见 §7）。产物固定 `output.jpg`。配置面板提供「上传产物」按钮（jpg/png/webp → 统一落盘 `output.jpg`，旧产物自动归档历史，见 §2.3）。
 - **生成视频**：`config` 含 `workflowId`（默认 `image-to-video`）、`workflowImpl`（**须显式选择**，未选择时生成被前端校验拦截）、`mode`（`director` / `first-last-frame` / `reference`）、`prompt`、`director`（导演台工程，见 `videoTypes.ts`）、`duration`（首尾帧/参考模式时长，秒）、`resolution` / `sizeConfig`（输出尺寸）、`workflowParams`、`inputOrder`。单一 `media` 输入口，素材类型由来源节点自动归类（媒体进输入预览分组）；**文本来源作为外部提示词输入**——「文本」节点（`config.text`）与「AI文本生成」节点（`config.output`）的输出文本均可（见 `generate.ts: collectTextContents`）：存在文本输入时 prompt 字段（含导演台内嵌 prompt 文本域）禁用并显示「（已连接外部输入）」，生成请求的 prompt 使用连接文本（优先于 `config.prompt`）；连接**多个**文本输入时编辑器报错「存在多个文本连线输入（N 个），生成已禁用，请仅保留一个」且生成按钮禁用（右键菜单/节点重试等入口由 `useCanvasNodeOps.generateNode` 校验拦截并 snackbar 提示）。**非导演台模式（首尾帧/参考）采用统一布局**（见 §6.1）：`CanvasInputPreview` 输入预览（图片/视频/音频分组，无对应输入不显示）+ 提示词 + 参数行（生成模式**位于工作流之前**、工作流、时长 `DurationPicker`、输出尺寸、工作流参数、全屏按钮）。`director` 模式保持内嵌导演台布局（首行工作流/模式/全屏 + 输出规格 + 参数表单 + `VideoDirector`），仅把时长输入框换成 `DurationPicker`；分镜画布下提供「设为分镜视频」（把当前产物复制到 `assert/scene/{集}/{分镜}/video/0.mp4`）。产物固定 `output.mp4`。配置面板提供「上传产物」按钮（**仅接受 mp4**，旧产物自动归档历史，见 §2.3）。
 - **TTS声音生成**：`config` 含 `mode`（`clone` 音色克隆 / `design` 音色设计）、`text`（朗读文本）、`refText`（克隆参考文字）/ `prompt`（设计声线描述）、`workflowImpl`（**须显式选择**）、`workflowParams`。配置组件同样采用统一布局——`CanvasInputPreview` 输入预览（音频类型，克隆模式需连接「加载音频」节点）+ 文本字段 + 参数行（工作流实现 + 工作流参数；**TTS 不显示时长与输出尺寸**）。
-- **AI文本生成**：调试用一次性输入/输出节点（调用服务商配置「大语言模型」页签中的 LLM 服务商）。端口：**单一 `in` 输入口**（`type: ['media','text']` —— 同时接受图片/音频/视频任意媒体来源与「文本」节点内容），连接后按**来源节点输出类型自动归类**：媒体来源进输入预览（与生成视频节点同机制），文本来源作为外部用户输入；输出 `text`（`config.output` 为生成结果，可作为文本数据源连接到生成视频等节点充当外部 prompt；`config.text ?? config.output` 的读取规则见 `generate.ts: collectTextContents`）。`config` 含 `providerInstanceId`（服务商实例）、`modelId`、`reasoningLevel`（思考强度挡位，选项来自模型元信息）、`input`、`output`、`inputOrder`（媒体输入顺序）。节点内模型选择为普通 `v-select`（`AiTextGenerateNode`）：条目按服务商分组（Vuetify `type: 'subheader'` 分组头），模型项只显示**名称或 id**，选项 subtitle 显示**输入模态图标 + 上下文大小（K/M 格式）**，来源于 `config.models[].meta`（`inputModalities` / `contextWindow`）。媒体输入复用统一输入预览组件 `CanvasInputPreview`（与生成图片/视频一致：按类型分组缩略图、悬浮放大、组内拖拽排序、悬停红色 x 断开；排序写 `config.inputOrder`，断开经 `nodeOps.disconnectInput`）。文本输入：连接「文本」节点后【用户输入】禁用并提示「（来自外部输入）输入的内容」，生成内容取 `textInputs[0]`；**存在多个文本连线输入时禁止生成**，并在【用户输入】标题栏提示用户。生成经 `POST /api/llm/chat`（SSE 流式）：正文增量流式显示、推理增量显示「Thinking...」，流式期间全部用户控件禁用（**AI 响应输出框只读**，防止手动输入与流式增量互相覆盖）、「停止」按钮中止请求（AbortController）；流式输出按 500ms 节流走**静默更新**（`store.updateNodeQuiet`，不入撤销栈）写入 `config.output`，流结束时正常提交一次（单次撤销）。**响应结束后输出框转为可手动编辑**：编辑内容写入 `config.output`（走正常可撤销更新；出错且无输出时输出框展示错误红字并保持只读，不误存错误文案）。**文本历史版本**：每次 AI 响应**正常结束**（未被停止、无错误）且输出非空时，自动向 `config.outputHistory` 追加一条版本（静默更新、不入撤销栈，且在最终输出提交之前写入——撤销生成不连带丢失存档；记录当时的输入/输出快照与模型/预设/媒体元信息，上限 50 条超出丢弃最旧，详见 §10.1）；手动停止/出错/空响应不存档，手动编辑过的输出不自动存档。媒体输入由服务端读取后按协议能力过滤（协议/模型不支持的类型忽略并提示）；音频/视频仅 Gemini 等原生支持，图片全协议支持。错误以响应区红字 + console 日志呈现。**不注册工作流、无产物文件**（`canGenerate`/`outputExt` 不声明；`hasHistory: true` —— 右键「历史」与节点内标题栏历史按钮打开的是**文本历史对话框** `AiTextHistoryDialog`，见 §10.1，非资产文件历史）。LLM 服务商配置页含「一键获取模型列表」（各协议免费 `/models` 接口 + OpenRouter 元数据匹配，服务端内存缓存 24h）。
+- **AI文本生成**：调试用一次性输入/输出节点（调用服务商配置「大语言模型」页签中的 LLM 服务商）。端口：**单一 `in` 输入口**（`type: ['media','text']` —— 同时接受图片/音频/视频任意媒体来源与「文本」节点内容），连接后按**来源节点输出类型自动归类**：媒体来源进输入预览（与生成视频节点同机制），文本来源作为外部用户输入；输出 `text`（`config.output` 为生成结果，可作为文本数据源连接到生成视频等节点充当外部 prompt；`config.text ?? config.output` 的读取规则见 `generate.ts: collectTextContents`）。`config` 含 `providerInstanceId`（服务商实例）、`modelId`、`reasoningLevel`（思考强度挡位，选项来自模型元信息）、`input`、`output`、`inputOrder`（媒体输入顺序）、`outputHistory`（文本历史版本，见 §10.1）。节点内模型选择为普通 `v-select`（`AiTextGenerateNode`）：条目按服务商分组（Vuetify `type: 'subheader'` 分组头），模型项只显示**名称或 id**，选项 subtitle 显示**输入模态图标 + 上下文大小（K/M 格式）**，来源于 `config.models[].meta`（`inputModalities` / `contextWindow`）。媒体输入复用统一输入预览组件 `CanvasInputPreview`（与生成图片/视频一致：按类型分组缩略图、悬浮放大、组内拖拽排序、悬停红色 x 断开；排序写 `config.inputOrder`，断开经 `nodeOps.disconnectInput`）。文本输入：连接「文本」节点后【用户输入】禁用并提示「（来自外部输入）输入的内容」，生成内容取 `textInputs[0]`；**存在多个文本连线输入时禁止生成**，并在【用户输入】标题栏提示用户。**生成与 Loading（见 §14）**：节点内「生成」按钮 → `POST /api/llm/chat` 创建 LLM 活跃会话（服务端登记后立即返回 `taskId`，后台执行 `createLlmStream`）→ `llmSocket.subscribe(taskId)` 经 **WebSocket（/llm-ws）** 流式消费：thinking 增量仅内部展示（Thinking 条 + 遮罩日志，**不写入 `config.output`**），正文增量流式显示（500ms 节流 `update:output-view` → 父级 `store.viewOnlyUpdate`：**纯内存显示，不写盘、不入撤销栈**），首条正文到达阶段切「正在响应…」；**标准 Loading 状态机**：生成开始 `stream-state(running)` 上抛 → 父级 `gen.beginClientRun`（`statusByNode` running），节点卡片按原型 `statusOverlay` 渲染**自定义非阻塞轻量遮罩**（spinner + 阶段日志 + 「中断」按钮；`pointer-events: none` 容器仅按钮可点，不拦截流式输出与节点内「停止」按钮）。流式期间全部用户控件禁用（**AI 响应输出框只读**，防止手动输入与流式增量互相覆盖），「停止」→ `llmSocket.cancel`（WS 优先 + HTTP 兜底 `/api/llm/chat/tasks/:taskId/cancel`），服务端中止上游并按 **cancelled** 收敛（**后端把部分输出写入 `config.output`，不存历史**），前端 3 秒收敛超时兜底。**终态（completed）由后端独占落盘**：`config.output` + 追加一条 `config.outputHistory`（历史单写者，多页签无重复；详见 §14 与 §10.1），前端 finished 经 `adoptExternalChange` 视图同步（入撤销栈 + `savedRev` 对齐，不触发写盘）。**响应结束后输出框转为可手动编辑**：编辑内容写入 `config.output`（走正常可撤销更新；出错且无输出时输出框展示错误红字并保持只读，不误存错误文案）。**文本历史版本**：由**后端在正常完成（completed）时**自动向 `config.outputHistory` 追加（记录当时的输入/输出快照与模型/预设/媒体元信息，上限 50 条超出丢弃最旧，规则与前端 `canvas/aiTextHistory.ts` 同组单测对齐，详见 §10.1）；手动停止/出错/空响应不存档，手动编辑过的输出不自动存档。媒体输入由服务端读取后按协议能力过滤（协议/模型不支持的类型忽略并提示）；音频/视频仅 Gemini 等原生支持，图片全协议支持。错误以响应区红字 + console 日志呈现。**不注册工作流、无产物文件**（`canGenerate`/`outputExt` 不声明；`hasHistory: true` —— 右键「历史」与节点内标题栏历史按钮打开的是**文本历史对话框** `AiTextHistoryDialog`，见 §10.1，非资产文件历史；`statusOverlay` 声明自定义遮罩 `AiTextStatusOverlay`）。LLM 服务商配置页含「一键获取模型列表」（各协议免费 `/models` 接口 + OpenRouter 元数据匹配，服务端内存缓存 24h）。
 - **拼接视频**：`config` 含 `inputOrder`（拼接顺序，编辑器内 `VideoRefInputGroup` 拖拽排序）。单一 `video` 输入口，同一端口可连多段视频（无输入上限校验）；编辑器「拼接」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/concat-video`（本地 ffmpeg，concat demuxer + `-c copy` 无损拼接，各段编码/分辨率/帧率/音轨结构须一致，不一致返回清晰中文错误）；产物固定 `output.mp4`，重复拼接旧产物自动归档进历史目录。
 - **裁剪视频**：`config` 含 `startMode`（`time` / `frame`）、`startValue`（秒可小数，或帧索引整数 ≥ 0）、`duration`（秒，> 0 可小数）。单一 `video` 输入口（多路只取第一路）；编辑器「裁剪」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/trim-video`（本地 ffmpeg **重编码**，不用 `-c copy`，保证帧索引 / 小数秒切口准确：`libx264 veryfast crf=18`，有音轨则 `aac`）。起点 + 时长超出片尾时截到剩余时长。产物固定覆盖 `output.mp4`，重复裁剪旧产物自动归档（**裁剪也有历史**，与其余节点一致）。节点卡片与配置面板均可预览裁剪结果。
 - **裁剪音频**：`config` 含 `startValue`（起始位置，秒可小数 ≥ 0）、`duration`（裁剪时长，秒 > 0 可小数）、`format`（输出格式：`'---'` = 原格式 [缺省] / `'wav'` / `'flac'` / `'mp3'`，哨兵值与判定见 `canvas/audioTrim.ts`）、`mp3Bitrate`（码率 kbps，白名单 128/192/320，缺省 192，仅实际输出 mp3 编码时生效）、`outputExt`（**镜像字段**：最近一次成功裁剪的真实输出扩展名，由 AssetCanvas 在结果回传时静默写入（不入撤销栈），供「原格式」下无输入链路上下文处推导固定产物路径——画布加载刷新 node-info、保存为/自定义资产、下游输入收集等）。单一 `audio` 输入口（多路只取第一路）；编辑器「裁剪」按钮经父级 `@generate` 路由到服务端 `POST /api/canvas/trim-audio`（本地 ffmpeg **重编码**，不用 `-c copy`，保证小数秒切口准确）。**产物扩展名/编码规则**（服务端 `assets/trim-audio.ts` 扩展名→编码表）：显式格式输出对应扩展名（wav→pcm_s16le、flac→flac、mp3→libmp3lame 按 `mp3Bitrate` 定码率）；「原格式」产物扩展名须与输入一致，按输入扩展名重编码（mp3/wav/flac/m4a[→aac]/ogg[→vorbis]/aac 均支持，其余扩展名裁剪时报错提示选择显式格式）。起点 + 时长超出片尾时截到剩余时长（编辑器在源时长已知时提前给出越界提示；源时长由输入音频 ffprobe 探测）。重复裁剪旧产物（当前扩展名）自动归档，格式切换后上一扩展名的旧产物文件保留在节点目录但不再展示（不删除）。输出 `audio` 可直接接到 TTS/生成视频等音频消费节点；编辑器提供「使用当前播放位置」把预览播放时间写入起始位置，并提供「输出格式」下拉（原格式/wav/flac/mp3）与条件显示的「MP3 码率」下拉（实际输出为 mp3 时出现）。
@@ -238,6 +240,7 @@
 5. 运行中任务持久化（见 §2.3）：`generate` 提交成功后、ffmpeg 同步任务请求发出前，把 `{ kind: 'workflow', taskId, outputPath, startedAt } | { kind: 'ffmpeg', outputPath, startedAt, baselineExists, baselineMtime }` 写入 localStorage；`restore()`（画布加载与 `switchTarget` 时调用）恢复未终态任务的 loading 展示与跟踪，终态收敛时经 `onResult` 刷新产物并删除记录。
 6. 中断 `interrupt`（**统一入口**，节点卡片「中断」/编辑器「中断」均走这里）：workflow 任务清轮询、置已中断并调用服务端 cancel 端点（仅 cancelable 工作流可真正取消）；ffmpeg 同步任务无服务端取消接口，停止本端探测并置已中断（若同会话请求随后成功返回，以真实成功态收敛）。中断同时删除持久化记录。
 7. 获取视频帧 / 拼接 / 裁剪（同步 ffmpeg 路由）：成功后同样只更新状态并回调 `onResult`；重复执行时服务端自动把旧产物归档进历史目录。
+8. **AI 文本节点不走上述流程**（无工作流、无产物文件）：节点内「生成」→ `POST /api/llm/chat` 创建 LLM 活跃会话（立即返回 `taskId`）→ `llmSocket.subscribe` 经 WebSocket 流式消费 → 标准 Loading 由 `stream-state` 上抛（`gen.beginClientRun` / `updateClientRun` / `endClientRun`）；终态由后端写入画布定义文件，前端 `adoptExternalChange` 视图同步；取消经 `gen.interruptLlm` / `llmSocket.cancel`。完整机制见 §14。
 
 ---
 
@@ -256,10 +259,10 @@
 
 ### 10.1 AI 文本生成节点的文本历史版本
 
-AI 文本生成节点不产生资产文件，其历史是**纯文本快照**，存放在节点 `config.outputHistory`（随 `canvas.json` 持久化；类型与纯函数见 `canvas/aiTextHistory.ts`：`AiTextHistoryEntry` 含 id/createdAt/input/output 与可选的 modelName/presetName/mediaLabels 展示快照；数组**末尾为最新**，最多保留 `MAX_TEXT_HISTORY_VERSIONS = 50` 条、超出丢弃最旧；读取时逐条过滤脏数据）。
+AI 文本生成节点不产生资产文件，其历史是**纯文本快照**，存放在节点 `config.outputHistory`（随 `canvas.json` 持久化；类型与纯函数见 `canvas/aiTextHistory.ts`：`AiTextHistoryEntry` 含 id/createdAt/input/output 与可选的 modelName/presetName/mediaLabels 展示快照；数组**末尾为最新**，最多保留 `MAX_TEXT_HISTORY_VERSIONS = 50` 条、超出丢弃最旧；读取时逐条过滤脏数据；**服务端实现见 `server/src/llm/result-persist.ts`，双端同一组单测覆盖防漂移**）。
 
-- **存档时机**：每次 AI 响应**正常结束**（未被「停止」、无错误事件）且输出非空时自动追加一条，记录**当时的输入**（本次实际发送的用户侧文本：外部文本连线取连线内容，否则取输入框文本；不含预设提示词替换后的完整内容）与**当时的输出**，并附模型名/预设名/媒体输入名称快照；手动停止、出错、空响应**不存档**；手动编辑过的当前输出**不自动存档**（再次生成直接覆盖，与需求约定一致）。
-- **写入语义**：追加/删除走**静默更新**（`update:config-quiet`，不入撤销栈）；追加发生在流结束最终输出正常提交**之前**，撤销（Ctrl+Z）生成不会连带丢失已存档版本。「设为当前」走正常更新（可撤销）。
+- **存档时机与写入者**：由**后端独占**（`result-persist.persistLlmResult`）在会话**正常完成（completed）**时写入——`config.output = 会话正文` + 追加一条 `config.outputHistory`（记录**当时的输入**（会话快照 `snapshot.userInput`：**未拼入预设提示词的用户原始输入**；快照未提供时回退 `inputSent`）与**当时的输出**，并附模型名/预设名/媒体输入名称快照）；手动停止（cancelled）/出错（failed）**只写部分输出、不存档**；空响应不写历史。前端在终态 `finished` 时经 `adoptExternalChange` 采用后端已落盘的 `outputHistory` 原值（历史单写者：多页签同时打开同一画布也不会产生重复条目）。
+- **写入语义**：后端写盘走 `saveCanvasDef`（CAS + 路径锁 + 冲突重试 ≤3 次，详见 §2 与 §14）；前端对话框中删除版本仍为**静默更新**（`update:config-quiet`，不入撤销栈）；终态采纳经 `adoptExternalChange`（入撤销栈——单次撤销可回退到生成前状态 + `savedRev` 对齐服务端新 rev，**不触发写盘**，内容已在文件）。
 - **当前值即 `config.output`**：AI 响应结束后输出框转为可手动编辑，编辑内容即当前值；「设为当前」仅把所选版本的输出写回 `config.output`（不恢复输入/模型参数）。
 - **入口**（两个，均打开 `AiTextHistoryDialog.vue`）：① 节点右键菜单「历史」——`text-ai` 原型声明 `hasHistory: true`；② 节点内 AI 响应标题栏右侧历史小按钮——事件链 `AiTextGenerateNode` → `CanvasNodeCard` 转发（带 node.id）→ `AssetCanvas.openHistory`。
 - **对话框交互**（`AiTextHistoryDialog.vue`）：左侧展示所选版本的时间/模型/预设/媒体元信息与「当时的输入」「当时的输出」（只读滚动区）；右侧版本列表最新在前，行操作「设为当前」（仅恢复输出，snackbar 反馈）与「删除」（`confirm` 确认 → 静默移除，删除不可撤销）。数据全部来自 config，打开对话框无任何服务端请求；刷新/切换画布后版本仍随 canvas.json 保留。
@@ -398,7 +401,8 @@ frontend/src/
 3. 新建 `components/canvas/nodes/{Xxx}Node.vue`（卡片主体）。
 4. （可选）新建 `components/canvas/editors/{Xxx}Editor.vue` 并挂 `editorComponent`；编辑器根元素不要自己定宽度（面板宽度由 AssetCanvas 统一控制）。
 5. `config` 字段与既有节点保持兼容（未知字段不影响读取）。
-6. **节点主体不要自行渲染 running/error 遮罩**：loading/错误状态是节点的通用能力，由 `CanvasNodeCard` 按 `status` prop 统一叠加（含「中断」按钮）；生成类节点只要经 `gen.generate` / ffmpeg 同步函数进入 running，即自动获得 loading 展示与中断能力。
+6. **节点主体不要自行渲染 running/error 遮罩**：loading/错误状态是节点的通用能力，由 `CanvasNodeCard` 按 `status` prop 统一叠加（含「中断」按钮）；生成类节点只要经 `gen.generate` / ffmpeg 同步函数进入 running，即自动获得 loading 展示与中断能力。**例外（唯一）**：AI 文本节点声明 `statusOverlay`（`AiTextStatusOverlay.vue`）——自定义**非阻塞轻量遮罩**（容器 `pointer-events: none`、近透明背景，仅「中断」按钮可点），用于不拦截流式输出与节点内「停止」按钮；需要同样形态的节点类型按此扩展点自行声明，**不要**在节点 body 内自绘遮罩（见 §14）。
+7. **LLM 会话节点（text-ai）状态机接入约定**：节点内生成经 `stream-state` emit（running/log/taskId → 父级 `gen.beginClientRun`；终态 result{status/patch/rev} → `adoptExternalChange` + `endClientRun`），`isRunning`/`activeTaskId`/`runningLog`/`canvasTarget` 由父级按 `statusByNode` 下发 prop（恢复态同样禁用控件、「停止」可用）；流式输出走 `update:output-view` → `store.viewOnlyUpdate`（**纯内存，不写盘、不入撤销栈**）。
 
 ### 13.2 测试与验证
 
@@ -433,3 +437,58 @@ frontend/src/
 - **上传并发与日志**：同一节点上传进行中再次点「上传」会被忽略（**不中止进行中的请求**）——大文件请求中途被 abort 后，keep-alive 连接复用时残留字节可能污染下一个请求的 multipart 流，服务端解析出畸形字段（如 `Unexpected field`）；该场景服务端会打印 `[fs-upload] 上传失败` 日志并返回友好文案。接口异常统一打日志：前端 axios 响应拦截器（非 2xx 打印 `[api]` 日志，HEAD 404 存在性探测除外）+ 上传组合式 `console.error`；服务端 multer 错误分支 `console.error`。
 - **删除类操作**：必须走 `confirm` 工具弹窗确认（AGENTS.md 约束）。
 - **提交信息**：中文提交信息在 PowerShell 下用 `-m` 会乱码，用 UTF-8 临时文件 `--amend -F` 方式提交。
+
+---
+
+## 14. LLM 活跃会话机制（AI 文本节点 Loading / WebSocket / 全局面板）
+
+> 设计文档与演进过程见 `docs/plans/ai-text-loading-llm-session.md`（任务需求目标、现状结论、v3.2 最终方案与数据流）。
+
+### 14.1 目标与总体架构
+
+- **标准 Loading**：AI 文本节点思考/响应期间进入标准状态机（`statusByNode`，`CanvasNodeCard` 渲染原型自定义遮罩 `statusOverlay`——非阻塞轻量形态，不修改原有 UI 交互效果）；节点内 Thinking 条/「停止」按钮/禁用控件/流式输出/自动滚动全部保持。
+- **跨页面存活**：Loading 恢复由**服务端活跃会话注册表**驱动（会话携带 nodeId + 画布 scope；**仅内存，不持久化、无 localStorage 参与**）；完成后能结束 Loading 并更新响应内容（终态由后端落盘）。
+- **LLM 活跃会话管理**：所有正在调用 LLM 的异步任务统一登记（当前唯一调用点为 AI 文本节点；**全局上限 8**，同节点单飞）；思考+响应完成后从列表移除。
+- **WebSocket 替换 SSE**：`/llm-ws`（全局单例连接，`ws` 库挂载于 `http.createServer(app)`；upgrade 不经 Express 中间件与 SPA 兜底路由）；客户端断开**不再中止上游**。
+- **全局面板**：Header 右上角独立图标（`mdi-broadcast` + 活跃数徽标）→ `LlmSessionsDialog.vue`（全站可用：节点名/模型名/阶段/耗时（按 `startedAt` 客户端每秒刷新）/状态；每行「中断」（取消非删除，无需 confirm）；空态提示）。
+
+```
+客户端（浏览器）                          服务端（Express，内存）            画布定义文件 / 上游 LLM
+App 启动 ──连接 WS(/llm-ws 全局单例)──▶   session-ws 枢纽（订阅注册表）
+   │  ◀── sessions 全量/增量广播 ────        begin/finish → 广播（含 nodeId + scope）
+节点生成 ──POST /api/llm/chat──────────▶   session-manager.begin()（活跃区登记，立即返回 taskId）
+   │  ──subscribe(taskId)──▶                │ 后台执行 createLlmStream（会话 abortController）──▶ 上游流
+   │  ◀── snapshot / thinking / text ──     │  pushEvent：累计 thinking/text/warnings + phase 切换
+   │  ◀── finished ──                       │  finish：终态 result-persist 写 canvas.json ──▶ config.output / outputHistory
+刷新/切换 ◀── sessions 按 scope 过滤 ────    恢复订阅（快照补齐）→ 纯内存显示；终态 adopt 视图同步
+停止/中断 ──cancel（WS + HTTP 兜底）───▶   取消会话（abort 上游 + cancelled + 写部分输出）
+```
+
+### 14.2 服务端
+
+- **`server/src/llm/session-manager.ts`**（新增）：内存活跃区 `Map<taskId, LlmSession>`（**无完成区/TTL**——终态结果已持久化到文件系统）。`LlmSession` 含 `taskId/nodeId/providerInstanceId/modelId/label/project/canvas/inputSent/snapshot/status/phase/thinking/text/warnings/error/startedAt/completedAt/cancelled/abortController` 与终态写入凭据 `persistRev/persistPatch`。API：`begin`（同节点单飞 NODE_BUSY + 全局上限 SESSION_LIMIT）/`get`/`pushEvent`/`cancel`（幂等）/`finish`（终态落盘后移除）/`listActive`/`on`（begin/update/finish 事件，wsHub 订阅）。`finish` 取消优先（cancel 标记后即使流正常结束也按 cancelled 收敛）；落盘失败时 completed 降级为 failed（广播「结果写入画布失败」+ console 日志，不静默），cancelled/failed 保持原状态。
+- **`server/src/llm/result-persist.ts`**（新增）：终态结果落盘（**后端独占，历史单写者**）——读画布定义文件（不存在/节点已删除 → 跳过仅移除会话）→ completed：`config.output = 正文` + 追加历史（规则镜像前端 `aiTextHistory.ts`：id/createdAt 生成、`input = inputSent`、快照元信息、上限 50 裁剪最旧）；cancelled/failed：`config.output = 累计正文`（若有），**不追加历史**（无累计文本跳过）→ `saveCanvasDef`（CAS + `withPathLock` 进程内串行）+ VERSION_CONFLICT 重读重试（≤3 次）；**思考内容绝不写入 `config.output`**（仅内部展示）。
+- **`server/src/llm/session-ws.ts`**（新增，`ws` + `@types/ws` 依赖）：`wsHub.attach(server)` 挂载 `/llm-ws`；**连接建立即推 `sessions` 全量活跃列表**（`taskId/nodeId/label/modelName/phase/status/startedAt/project/canvas`）；begin/update（阶段切换/警告/错误）/finish 时全量广播；`subscribe`（存在 → snapshot 快照补齐；不存在 → not-found）/`unsubscribe`（任务继续）/`cancel`（命令下发）；socket close 清理该连接全部订阅。
+- **`server/src/routes/llm.ts`** 改造：`POST /api/llm/chat` 请求体扩展 `nodeId/label/canvas/snapshot`（逐字段校验；项目/实例/模型/媒体能力过滤逻辑不变）→ `sessionManager.begin` → 后台执行 `createLlmStream`（会话 `abortController`）→ 立即返回 `{ taskId, status: 'running' }`；后台执行器逐事件 `pushEvent` + `wsHub.taskEvent`；流结束 → `finish(completed)`；取消判定（`abortController.signal.aborted` 或 `cancelled`）→ `finish(cancelled)`（**AbortError 不归类 failed**）；其余异常 → `finish(failed, error)`。删除全部 SSE 代码；新增 `POST /api/llm/chat/tasks/:taskId/cancel`（HTTP 兜底，幂等，不存在 404）。
+- **`server/src/index.ts`**：`app.listen` → `http.createServer(app)` + `wsHub.attach(server)` + `server.listen`。
+
+### 14.3 前端
+
+- **`frontend/src/canvas/llmSocket.ts`**（新增，全局单例）：原生 `WebSocket`；App 挂载即 `connect()`；断线指数退避重连（1s→15s 封顶）；连接建立/重连后**自动重订阅全部已知 taskId**（服务端回 snapshot/not-found 对齐）；`subscribe(taskId, handler)` 未连接入队，同任务多订阅方，返回退订函数；`unsubscribe(taskId)`；`cancel(taskId)`（WS 优先 + `cancelLlmTask` HTTP 兜底，404 视为已终态）；`sessions` 响应式列表（Header 徽标/面板/画布恢复消费）。
+- **`frontend/src/canvas/llmEvents.ts`**（新增）：`applyLlmEvent(state, event)` 纯函数（**连接态节点与恢复态 AssetCanvas 共用同一消费器**，双路径行为严格一致、可单测；thinking 仅内部累计、snapshot 整体替换进度、finished 置终态 / not-found 静默终态）+ `createThrottledCommit`（500ms 节流 helper，两路径共用）。
+- **`frontend/src/canvas/useCanvasGeneration.ts`**：新增 `beginClientRun(nodeId, lastLog?, taskId?)` / `updateClientRun` / `endClientRun` / `setLlmError` / `interruptLlm`（cancel + 3 秒收敛超时兜底）；**无持久化记录、无 restore llm 分支**（LLM 恢复由 AssetCanvas 按服务端会话列表编排）。
+- **`frontend/src/canvas/useCanvasStore.ts`**：`viewOnlyUpdate(nodeId, patch)`——纯内存补丁（**不入撤销栈、不置脏、不触发保存**；流式期间下游文本消费者读取同一 store 数据实时联动）；`adoptExternalChange(nodeId, patch, newRev)`——终态视图同步（合并后端已落盘补丁 + 入撤销栈（单次撤销可回退到生成前状态）+ `savedRev` 对齐，**不触发写盘**）。
+- **`frontend/src/canvas/registry.ts`**：`NodePrototype.statusOverlay?: Component`（自定义状态遮罩扩展点；未声明时 `CanvasNodeCard` 默认遮罩原样）；`text-ai` 注册 `AiTextStatusOverlay.vue`。
+- **`frontend/src/components/canvas/CanvasNodeCard.vue`**：`statusOverlay` 声明时 running/error 渲染自定义组件（props `status/node/project`；emits `interrupt(nodeId)/retry(nodeId)` 一致）；body 组件透传 `isRunning`/`activeTaskId`/`runningLog`/`canvasTarget`；转发 `update:output-view` 与 `stream-state` 事件。
+- **`frontend/src/components/canvas/nodes/AiTextGenerateNode.vue`**：`onGenerate` → `startLlmTask`（携带 `nodeId/label/canvas/snapshot`）→ `llmSocket.subscribe`；事件经 `applyLlmEvent`（thinking 仅展示 / 首条 text 切「正在响应…」/ 500ms 节流 `update:output-view`）；`stream-state` 上抛（进入/更新/终态 Loading）；停止 → `llmSocket.cancel` + 3 秒收敛超时兜底；卸载/切换画布**仅退订（任务继续）**；`active = generating || isRunning`（恢复态同样禁用控件、Thinking 条显示、「停止」可用）；**不再自行追加历史**（后端完成）。
+- **`frontend/src/components/canvas/composables/useCanvasNodeOps.ts`**：`onInterrupt` 分流 text-ai → `gen.interruptLlm`；`generateNode` text-ai 分支防御提示（生成入口在节点内）。
+- **`frontend/src/components/canvas/AssetCanvas.vue`**：`canvasTarget` 透传；`update:output-view` → `store.viewOnlyUpdate`；`stream-state` → `beginClientRun`/`adoptExternalChange`/`endClientRun`/`setLlmError`；**恢复编排** `restoreLlmSessions()`（画布加载/切换/WS 重连时按「项目 + scope」过滤 `llmSocket.sessions` → running 且 nodeId 在 nodeMap → `beginClientRun` + 恢复订阅（`subscribeRestoreTask`，与在线路径共用 `applyLlmEvent`：快照补齐 → text 节流 `viewOnlyUpdate` → 终态 `adoptExternalChange` + `endClientRun`）；`reconcileLlmRestore()` 重连对账（已订阅任务不在活跃列表 → `endClientRun`，无幽灵 Loading）；卸载 `resetLlmRestore()`。
+- **`frontend/src/App.vue` + `frontend/src/components/LlmSessionsDialog.vue`**：Header 右上角图标 + `v-badge` 活跃数徽标（数据来自 `llmSocket.sessions`）+ 面板（阶段/耗时/中断/空态/完成计数提示）；App 挂载 `llmSocket.connect()`。
+- **`frontend/vite.config.ts`**：代理增加 `'/llm-ws': { target: 'ws://localhost:3001', ws: true }`（生产同源无需代理）。
+
+### 14.4 数据流要点
+
+- **一源三出口**：上游增量 → 服务端 `pushEvent`（会话累计）+ `wsHub.taskEvent`（WS 广播给订阅者）+ 阶段信号（首次 text 切 responding，sessions 列表广播）；在线路径与恢复路径都以 `applyLlmEvent` 消费，收敛到同一终态处理（后端落盘 → finished → 前端 adopt）。
+- **思考内容不写 `config.output`**：thinking 仅内存展示（Thinking 条/遮罩日志/snapshot 的 `thinking` 字段），`config.output` 只保存最终正文（终态由后端写入）。
+- **终止路径**：正常完成 → 后端写 `output` + 追加历史 → finished(completed) → `adoptExternalChange`（单次撤销可回退）+ `endClientRun`；停止/中断 → cancel → 后端写部分输出（无历史）→ finished(cancelled) → 静默收敛；上游异常 → 后端写已累计文本（若有）→ finished(failed) → 红字提示；刷新/切换 → 仅退订，服务端继续；服务重启 → 注册表空 → 无幽灵 Loading（未终态部分输出丢失为预期取舍）。
+- **竞态兜底**：生成中再点生成 `active` 双守卫 + 服务端同节点单飞；多页签同画布同 taskId 多订阅广播同步、历史由后端单写者无重复；订阅时会话刚结束 → not-found（仅结束 Loading，结果已在文件）；节点删除后终态到达 → 后端跳过写盘、前端仅移除 running 标记；WS 瞬时不可用 → 自动重连 + 重订阅快照补齐 + 重连对账，停止走 HTTP 兜底；终态写盘 CAS 冲突 → 重试 ≤3 次，仍失败标 failed + 广播 + 日志。

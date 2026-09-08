@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { writeFs } from '../api/client'
 import { runWorkflow, getTaskStatus, getTaskLogs, cancelWorkflow, type WorkflowSizeConfig, type WorkflowUserParamValue } from '../api/workflow'
+import { llmSocket } from './llmSocket'
 import {
   extractVideoFrame,
   extractVideoFrameAtTime,
@@ -74,6 +75,8 @@ export interface UseCanvasGenerationOptions {
 const TASK_STORAGE_PREFIX = 'dsh.asset-canvas.tasks.'
 /** ffmpeg 同步任务完成探测超时（毫秒）：超过后判定任务中断，避免无限 loading */
 const FFMPEG_PROBE_TIMEOUT_MS = 10 * 60 * 1000
+/** LLM 中断收敛超时（毫秒）：HTTP 兜底已确认但 WS 断连时本地结束 Loading */
+const LLM_CONVERGE_TIMEOUT_MS = 3000
 /** 轮询/探测间隔（毫秒） */
 const POLL_INTERVAL_MS = 2000
 
@@ -105,6 +108,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
   const inputPathsRef = ref<Record<string, string[]>>({})
   /** nodeId → 当前 taskId（用于中断） */
   const taskIdByNode = ref<Record<string, string>>({})
+  /** nodeId → LLM 中断收敛超时定时器（3 秒兜底：WS 断连时本地结束 Loading） */
+  const llmConvergeTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 
   /** 默认结果回调（恢复任务完成时刷新产物展示用） */
   const onResultCb = options.onResult
@@ -539,6 +544,84 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     delete statusByNode.value[nodeId]
   }
 
+  // ── LLM 会话状态机（标准 Loading 状态；不含任何持久化记录，恢复由服务端会话列表驱动）────
+
+  /**
+   * 进入标准 Loading（AI 文本节点生成开始 / 恢复订阅时调用）。
+   *
+   * @param nodeId 节点 id
+   * @param lastLog 阶段日志（Thinking… / 正在响应…）
+   * @param taskId 会话 id（中断凭据；可省略）
+   */
+  function beginClientRun(nodeId: string, lastLog?: string, taskId?: string): void {
+    statusByNode.value[nodeId] = { status: 'running', ...(lastLog ? { lastLog } : {}), ...(taskId ? { taskId } : {}) }
+  }
+
+  /**
+   * 更新节点阶段日志（仅 running 态生效；thinking→responding 阶段切换时调用）。
+   *
+   * @param nodeId 节点 id
+   * @param log 阶段日志
+   */
+  function updateClientRun(nodeId: string, log: string): void {
+    const s = statusByNode.value[nodeId]
+    if (s && s.status === 'running') s.lastLog = log
+  }
+
+  /**
+   * 结束节点标准 Loading（终态收敛 / not-found / 重连对账时调用；幂等）。
+   *
+   * @param nodeId 节点 id
+   */
+  function endClientRun(nodeId: string): void {
+    delete statusByNode.value[nodeId]
+    clearLlmConvergeTimeout(nodeId)
+  }
+
+  /**
+   * 置节点失败错误态（AI 文本节点终态 failed：自定义遮罩红字提示）。
+   *
+   * @param nodeId 节点 id
+   * @param errorMsg 错误信息
+   */
+  function setLlmError(nodeId: string, errorMsg: string): void {
+    statusByNode.value[nodeId] = { status: 'error', errorMsg }
+  }
+
+  /**
+   * 中断 AI 文本节点会话（标准 Loading 遮罩「中断」按钮 / 编辑器中断入口）：
+   * llmSocket.cancel（WS 优先 + HTTP 兜底）→ 等待服务端 finished(cancelled) 收敛
+   * （后端写部分输出）；3 秒收敛超时兜底——HTTP 兜底已确认但 WS 已断时本地结束
+   * Loading（幂等，重连后快照对账）。
+   *
+   * @param nodeId 节点 id
+   */
+  function interruptLlm(nodeId: string): void {
+    const status = statusByNode.value[nodeId]
+    if (!status || status.status !== 'running') return
+    const taskId = status.taskId
+    if (taskId) llmSocket.cancel(taskId)
+    clearLlmConvergeTimeout(nodeId)
+    llmConvergeTimers[nodeId] = setTimeout(() => {
+      // 收敛超时兜底：WS 断连时本地结束 Loading（服务端仍会完成取消与落盘）
+      delete llmConvergeTimers[nodeId]
+      endClientRun(nodeId)
+    }, LLM_CONVERGE_TIMEOUT_MS)
+  }
+
+  /**
+   * 清除节点中断收敛超时定时器（终态收敛/重置时调用）。
+   *
+   * @param nodeId 节点 id
+   */
+  function clearLlmConvergeTimeout(nodeId: string): void {
+    const t = llmConvergeTimers[nodeId]
+    if (t) {
+      clearTimeout(t)
+      delete llmConvergeTimers[nodeId]
+    }
+  }
+
   /**
    * 获取视频帧节点的帧提取：调用服务端 ffmpeg 接口，成功后通知结果（产物为固定 output.png）。
    *
@@ -790,6 +873,10 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
       clearInterval(outputProbeTimers[id])
       delete outputProbeTimers[id]
     }
+    for (const id of Object.keys(llmConvergeTimers)) {
+      clearTimeout(llmConvergeTimers[id])
+      delete llmConvergeTimers[id]
+    }
     statusByNode.value = {}
     inputPathsRef.value = {}
     taskIdByNode.value = {}
@@ -807,5 +894,5 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     await restore()
   }
 
-  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, trimVideo, trimAudio, interrupt, clearStatus, computeOutputPath, getScope, reset, restore, switchTarget }
+  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, trimVideo, trimAudio, interrupt, clearStatus, computeOutputPath, getScope, reset, restore, switchTarget, beginClientRun, updateClientRun, endClientRun, setLlmError, interruptLlm }
 }

@@ -82,6 +82,8 @@
               :highlighted="hoveredNodeId === id"
               :adjacent-side="adjacentSideOf(id)"
               :status="statusByNode[id]"
+              :is-running="nodeMap[id]?.prototypeId === 'text-ai' ? statusByNode[id]?.status === 'running' : undefined"
+              :canvas-target="nodeMap[id]?.prototypeId === 'text-ai' ? canvasTarget : undefined"
               :output="outputOf(nodeMap[id])"
               :upload="upload.stateOf(id)"
               :upstream-updated="isUpstreamUpdated(id)"
@@ -91,6 +93,8 @@
               :rename-value="renameInput"
               @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
               @update:config-quiet="(patch: Record<string, unknown>) => onUpdateConfigQuiet(id, patch)"
+              @update:output-view="(patch: Record<string, unknown>) => onUpdateOutputView(id, patch)"
+              @stream-state="(nodeId: string, payload: CanvasStreamStatePayload) => onStreamState(nodeId, payload)"
               @open-history="openHistory"
               @disconnect-input="(nodeId: string, sourceNodeId: string) => disconnectInput(nodeId, sourceNodeId)"
               @open-picker="openAssetPicker"
@@ -497,6 +501,9 @@ import { getCanvasNodeInfo } from '../../canvas/api'
 import { extOfAudioPath } from '../../canvas/audioTrim'
 import { isSyntheticNodeId } from '../../canvas/groupSelection'
 import type { CanvasScope } from '../../canvas/paths'
+import { llmSocket, type LlmCanvasTarget, type LlmSessionInfo, type LlmTaskEvent } from '../../canvas/llmSocket'
+import { applyLlmEvent, createLlmStreamState, createThrottledCommit, type LlmStreamState, type ThrottledCommit } from '../../canvas/llmEvents'
+import type { CanvasStreamStatePayload } from './CanvasNodeCard.vue'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
 import AiTextHistoryDialog from './AiTextHistoryDialog.vue'
@@ -846,6 +853,215 @@ const nodeOps = useCanvasNodeOps({
   onNodeResult: handleNodeResult,
   getOutputMtime,
 })
+
+// ── LLM 活跃会话（AI 文本节点；服务端会话列表驱动恢复 + 后端终态落盘 adopt）─────────
+
+/** 当前画布定位（生成请求携带：服务端会话终态落盘定位 + 会话 scope 过滤） */
+const canvasTarget = computed<LlmCanvasTarget>(() => ({
+  kind: props.kind,
+  episode: props.episode,
+  shot: props.shot,
+  stage: props.stage,
+  label: props.label,
+}))
+
+/** 恢复订阅的本地状态：taskId → 事件状态 + 节流提交器 + 逐处理器退订函数（流式仅内存显示） */
+const llmRestore = new Map<string, { nodeId: string; state: LlmStreamState; commit: ThrottledCommit; unsubscribe: () => void }>()
+
+/** 已采纳的后端终态版本（nodeId → rev）：在线路径与恢复路径可能双订阅同一任务，按 rev 幂等去重 */
+const adoptedLlmRevByNode = new Map<string, number>()
+
+/**
+ * 终态视图同步统一入口（在线路径 stream-state 与恢复路径 onRestoreTaskEvent 共用）：
+ * 后端已完成落盘 → adoptExternalChange（入撤销栈 + savedRev 对齐，不触发写盘）。
+ * 同一任务可能被节点与恢复路径双订阅，按 rev 幂等：已采纳过该版本则跳过
+ * （避免重复入撤销栈造成「多次撤销才回到生成前状态」）。
+ *
+ * @param nodeId 节点 id
+ * @param patch 后端实际落盘的 config 补丁（output / outputHistory）
+ * @param rev 后端写入后的画布新版本号
+ */
+function adoptLlmResult(nodeId: string, patch: Record<string, unknown>, rev: number): void {
+  if (adoptedLlmRevByNode.get(nodeId) === rev) return
+  adoptedLlmRevByNode.set(nodeId, rev)
+  store.adoptExternalChange(nodeId, patch, rev)
+}
+
+/** 清除采纳版本记录（切换画布目标/组件卸载时；各画布各自计数） */
+function resetAdoptedLlmRevs(): void {
+  adoptedLlmRevByNode.clear()
+}
+
+/**
+ * AI 文本节点流式输出补丁（纯内存显示）：合入 store 但**不写盘、不入撤销栈**。
+ * 终态由后端一次性落盘（result-persist），此处仅保证流式期间下游文本消费者
+ * 读取同一 store 数据保持实时联动。
+ *
+ * @param nodeId 节点 id
+ * @param patch 配置补丁（{ output }）
+ */
+function onUpdateOutputView(nodeId: string, patch: Record<string, unknown>): void {
+  store.viewOnlyUpdate(nodeId, patch)
+}
+
+/**
+ * AI 文本节点生成流状态（在线发起路径经节点上抛）→ 驱动标准 Loading 状态机：
+ * - running：beginClientRun（置 statusByNode running + 会话 id，自定义遮罩显示）；
+ * - 终态：completed → adoptExternalChange（undo + savedRev 对齐，不触发写盘）+ endClientRun；
+ *   failed → adopt（部分输出）+ setLlmError（自定义遮罩红字）；cancelled → adopt + endClientRun。
+ *
+ * @param nodeId 节点 id
+ * @param payload 流状态载荷
+ */
+function onStreamState(nodeId: string, payload: CanvasStreamStatePayload): void {
+  if (payload.running) {
+    gen.beginClientRun(nodeId, payload.log ?? 'Thinking…', payload.taskId)
+    return
+  }
+  const r = payload.result
+  if (!r) {
+    gen.endClientRun(nodeId)
+    return
+  }
+  if (r.status === 'completed') {
+    if (r.patch && typeof r.rev === 'number') adoptLlmResult(nodeId, r.patch, r.rev)
+    gen.endClientRun(nodeId)
+    return
+  }
+  if (r.status === 'failed') {
+    // 后端已写部分输出（若有）→ 内存同步；错误红字由节点响应区 + 自定义遮罩展示
+    if (r.patch && typeof r.rev === 'number') adoptLlmResult(nodeId, r.patch, r.rev)
+    gen.setLlmError(nodeId, r.errorMsg ?? '生成失败')
+    return
+  }
+  // cancelled：静默结束（后端已写部分输出；单次撤销可回退到生成前状态）
+  if (r.patch && typeof r.rev === 'number') adoptLlmResult(nodeId, r.patch, r.rev)
+  gen.endClientRun(nodeId)
+}
+
+/**
+ * 判断会话画布 scope 是否与当前画布一致（项目 + scope 双属性过滤恢复）。
+ *
+ * @param a 会话画布定位（服务端）
+ * @param b 当前画布目标
+ * @returns 是否同一张画布
+ */
+function sameCanvasTarget(a: LlmCanvasTarget, b: CanvasTarget): boolean {
+  if (a.kind !== b.kind) return false
+  if (b.kind === 'scene') return a.episode === b.episode && a.shot === b.shot
+  return a.stage === b.stage && a.label === b.label
+}
+
+/**
+ * 按服务端活跃会话列表恢复本画布的 AI 文本节点 Loading：
+ * 会话 running 且 nodeId 存在于 nodeMap → beginClientRun + 恢复订阅
+ * （subscribe → snapshot 补齐 → 增量实时显示 → 终态 adopt 收敛）。
+ * 画布加载 / 切换 / WS 重连（sessions 全量刷新）时调用，已订阅任务幂等跳过。
+ */
+function restoreLlmSessions(): void {
+  if (!store.loaded.value) return
+  for (const s of llmSocket.sessions.value) {
+    if (s.status !== 'running') continue
+    if (s.project !== props.project) continue
+    if (!sameCanvasTarget(s.canvas, target.value)) continue
+    const node = nodeMap.value[s.nodeId]
+    if (!node || node.prototypeId !== 'text-ai') continue
+    // 节点已在本页面接管该会话（在线路径 stream-state 已置 running + taskId）：跳过恢复订阅
+    if (gen.statusByNode.value[s.nodeId]?.taskId === s.taskId) continue
+    if (llmRestore.has(s.taskId)) continue
+    gen.beginClientRun(s.nodeId, s.phase === 'responding' ? '正在响应…' : 'Thinking…', s.taskId)
+    subscribeRestoreTask(s.taskId, s)
+  }
+  reconcileLlmRestore()
+}
+
+/**
+ * 恢复订阅单个会话：注册事件处理器（applyLlmEvent 与在线路径同消费器）。
+ * 快照/增量 → 节流 viewOnlyUpdate（纯内存显示）；终态 → adopt + endClientRun。
+ *
+ * @param taskId 会话 id
+ * @param session 会话信息（nodeId 等）
+ */
+function subscribeRestoreTask(taskId: string, session: LlmSessionInfo): void {
+  if (llmRestore.has(taskId)) return
+  // 流式显示仅内存（viewOnlyUpdate）：最终内容由后端终态落盘，adopt 同步
+  const commit = createThrottledCommit((text) => store.viewOnlyUpdate(session.nodeId, { output: text }))
+  const entry = { nodeId: session.nodeId, state: createLlmStreamState(), commit, unsubscribe: () => {} }
+  // 逐处理器退订：恢复态只退自己的处理器（在线节点路径的订阅不受影响，见 llmSocket.subscribe）
+  entry.unsubscribe = llmSocket.subscribe(taskId, (event) => onRestoreTaskEvent(taskId, event))
+  llmRestore.set(taskId, entry)
+}
+
+/**
+ * 恢复订阅的事件处理器（与在线路径共用 applyLlmEvent）：
+ * text 增量 → 节流纯内存显示；终态（finished/not-found）→ 后端已落盘，
+ * adoptExternalChange 视图同步（入撤销栈 + savedRev 对齐）+ 结束 Loading。
+ *
+ * @param taskId 会话 id
+ * @param event 服务端推送的会话事件
+ */
+function onRestoreTaskEvent(taskId: string, event: LlmTaskEvent): void {
+  const entry = llmRestore.get(taskId)
+  if (!entry) return
+  entry.state = applyLlmEvent(entry.state, event)
+  if (event.type === 'text') {
+    entry.commit.push(entry.state.text)
+    return
+  }
+  if (event.type !== 'finished' && event.type !== 'not-found') return
+  // 终态：后端已完成落盘 → 视图同步（幂等：节点已被删除时 store 操作安全跳过）
+  const status = event.type === 'not-found' ? 'cancelled' : event.info.status
+  const info = event.type === 'finished' ? event.info : undefined
+  const patch =
+    info && (info.output !== undefined || info.outputHistory)
+      ? {
+          ...(info.output !== undefined ? { output: info.output } : {}),
+          ...(info.outputHistory ? { outputHistory: info.outputHistory } : {}),
+        }
+      : undefined
+  if (patch && typeof info?.rev === 'number') {
+    adoptLlmResult(entry.nodeId, patch, info.rev) // 入撤销栈 + savedRev 对齐，不触发写盘（按 rev 幂等）
+  }
+  if (status === 'failed') {
+    gen.setLlmError(entry.nodeId, event.type === 'finished' ? (event.info.error ?? '生成失败') : '生成失败')
+  } else {
+    gen.endClientRun(entry.nodeId)
+  }
+  entry.commit.flush()
+  entry.unsubscribe()
+  llmRestore.delete(taskId)
+}
+
+/**
+ * 重连对账：本端已恢复订阅的任务不在服务端活跃列表 → 结束 Loading
+ * （服务重启后注册表为空 → 无 Loading 恢复、无幽灵 Loading；未终态会话的
+ * 部分输出丢失为内存方案的既定取舍，结果以文件为准）。
+ * 断线期间不做对账（列表可能过期），重连后 sessions 全量刷新时再次执行。
+ */
+function reconcileLlmRestore(): void {
+  if (!llmSocket.connected.value) return
+  const activeTaskIds = new Set(
+    llmSocket.sessions.value.filter((s) => s.status === 'running').map((s) => s.taskId),
+  )
+  for (const [taskId, entry] of [...llmRestore]) {
+    if (activeTaskIds.has(taskId)) continue
+    gen.endClientRun(entry.nodeId)
+    entry.unsubscribe()
+    llmRestore.delete(taskId)
+  }
+}
+
+/** 服务端活跃列表变化（begin/update/finish/重连全量刷新）→ 恢复与对账 */
+watch(
+  () => llmSocket.sessions.value,
+  () => restoreLlmSessions(),
+)
+
+/** 取消全部恢复订阅（组件卸载时：任务继续，重进画布由会话列表恢复接管） */
+function resetLlmRestore(): void {
+  for (const entry of llmRestore.values()) entry.unsubscribe()
+  llmRestore.clear()
+}
 
 /** 加载节点上传组合式：节点级上传进度状态（上传进度/失败遮罩由节点卡片渲染） */
 const upload = useCanvasUpload({
@@ -1298,6 +1514,10 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
   scheduleFitCanvas()
   // 新画布加载后刷新全部节点产物信息（固定路径 + mtime；异步任务已由服务端落盘的结果直接可见）
   await refreshNodeOutputs()
+  // 采纳版本记录按画布隔离（新画布重新计数）
+  resetAdoptedLlmRevs()
+  // 恢复本画布的 LLM 活跃会话（服务端会话列表按 scope 过滤；Loading 跨页面存活）
+  if (!disposed && seq === fitViewSeq) restoreLlmSessions()
 }
 
 /** 切换分镜/场景时：重置各组合式状态，并让 store/生成组合式切换到新目标加载 */
@@ -1323,6 +1543,8 @@ onMounted(() => {
     void refreshNodeOutputs()
     // 恢复持久化的运行中任务：离开画布/刷新前未完成的任务继续显示 loading 并跟踪到终态
     if (!disposed) void gen.restore()
+    // 恢复 LLM 活跃会话（服务端会话列表按 scope 过滤；刷新后 Loading 保持、终态 adopt）
+    if (!disposed) restoreLlmSessions()
   })
 })
 
@@ -1338,6 +1560,9 @@ onUnmounted(() => {
   group.reset()
   // 中止进行中的加载节点上传并清除进度状态
   upload.reset()
+  // 取消 LLM 恢复订阅（任务继续在服务端执行；重进画布由会话列表恢复接管）
+  resetLlmRestore()
+  resetAdoptedLlmRevs()
   // 停止轮询/清理生成状态（localStorage 记录保留：重新进入画布时由 restore 恢复）
   gen.reset()
 })
