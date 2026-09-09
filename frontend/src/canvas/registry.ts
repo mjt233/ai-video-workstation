@@ -241,7 +241,8 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
   {
     id: 'tts-generate',
     name: 'TTS声音生成',
-    icon: 'mdi-voice',
+    // @mdi/font 7.4.0 无 mdi-voice 字形（仅 mdi-voicemail），改用 account-voice
+    icon: 'mdi-account-voice',
     category: 'generate',
     // 音频输入（可选）：音色克隆模式下作为参考音色；音色设计模式无需输入
     inputPorts: [{ id: 'in', type: 'audio', label: '参考音频' }],

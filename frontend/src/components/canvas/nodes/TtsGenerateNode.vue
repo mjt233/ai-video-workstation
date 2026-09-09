@@ -10,7 +10,7 @@
     <template v-else>
       <div class="tts-generate-node__empty">
         <v-icon
-          icon="mdi-voice"
+          icon="mdi-account-voice"
           size="large"
         />
         <div class="text-body-small text-medium-emphasis">
