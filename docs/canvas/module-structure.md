@@ -33,7 +33,7 @@ frontend/src/
     ├── CanvasNodeCard.vue        # 节点卡片（名称头/内联重命名/端口/主体组件/缩放控制点 + 通用 loading/错误遮罩与中断入口 + 成组连接悬停高亮）
     ├── CanvasEditorPanel.vue     # 配置悬浮面板（固定大小、位置联动、边界钳制、淡入淡出；仅单选节点显示）
     ├── CanvasContextMenu.vue     # 节点/连线/群组/分组实体右键菜单（纯展示）
-    ├── CanvasAddNodeMenu.vue     # 添加节点菜单（锚点 + VMenu 列表）
+    ├── CanvasAddNodeMenu.vue     # 添加节点菜单（锚点 + VMenu；三列分类：加载/生成/工具，按 registry category 分组）
     ├── CanvasGroupFrame.vue      # 群组虚线框（合成节点 __group-frame 的展示内容；拖动整组由 Vue Flow 原生拖动承接）
     ├── CanvasGroupDot.vue        # 群组输出连接圆点（合成节点 __group-dot 的展示内容；mousedown 启动成组连接拖拽）
     ├── CanvasGroupConnectMenu.vue# 群组连接目标选择菜单（输出点拖拽超阈值释放后弹出）

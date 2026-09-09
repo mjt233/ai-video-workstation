@@ -60,7 +60,7 @@
       size="small"
       variant="text"
       icon="mdi-plus-thick"
-      title="添加节点（或双击空白处）"
+      title="添加节点（或双击/右键空白处）"
       @click="emit('add', $event)"
     />
     <v-spacer />

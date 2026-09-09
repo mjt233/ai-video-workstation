@@ -24,6 +24,31 @@ import TrimVideoEditor from '../components/canvas/editors/TrimVideoEditor.vue'
 import AudioTrimEditor from '../components/canvas/editors/AudioTrimEditor.vue'
 import TtsGenerateEditor from '../components/canvas/editors/TtsGenerateEditor.vue'
 
+/**
+ * 节点分类：添加节点菜单按此分组为多列展示。
+ * - load：加载类（把项目已有资产载入画布，无输入端口）
+ * - generate：生成类（通过 AI/工作流产出新媒体内容）
+ * - tool：工具类（文本手写/媒体变换处理，如取帧、拼接、裁剪）
+ */
+export type NodeCategory = 'load' | 'generate' | 'tool'
+
+/** 添加节点菜单分类元数据（数组顺序即菜单列顺序） */
+export interface NodeCategoryMeta {
+  /** 分类 id（与 NodePrototype.category 对应） */
+  id: NodeCategory
+  /** 分类标题（菜单列 subheader 文案） */
+  label: string
+  /** 分类图标（Material Design Icons 名称） */
+  icon: string
+}
+
+/** 添加节点菜单的固定分类列：加载 / 生成 / 工具 */
+export const NODE_CATEGORIES: NodeCategoryMeta[] = [
+  { id: 'load', label: '加载', icon: 'mdi-tray-arrow-down' },
+  { id: 'generate', label: '生成', icon: 'mdi-auto-fix' },
+  { id: 'tool', label: '工具', icon: 'mdi-tools' },
+]
+
 /** 节点原型：定义节点类型的端口、能力与渲染组件 */
 export interface NodePrototype {
   /** 该节点类型的唯一标识，代码中硬编码 */
@@ -32,6 +57,8 @@ export interface NodePrototype {
   name: string
   /** 节点图标（Material Design Icons 名称，用于菜单/列表展示） */
   icon: string
+  /** 所属分类（添加节点菜单按此分列展示） */
+  category: NodeCategory
   /** 输入端口定义（可接受的连接类型由此决定） */
   inputPorts: Port[]
   /** 输出端口定义 */
@@ -96,6 +123,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'image-loader',
     name: '加载图片',
     icon: 'mdi-image-outline',
+    category: 'load',
     inputPorts: [],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: true,
@@ -107,6 +135,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'audio-loader',
     name: '加载音频',
     icon: 'mdi-music-note',
+    category: 'load',
     inputPorts: [],
     outputPorts: [{ id: 'out', type: 'audio', label: '音频' }],
     resizeable: true,
@@ -118,6 +147,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'video-loader',
     name: '加载视频',
     icon: 'mdi-video-outline',
+    category: 'load',
     inputPorts: [],
     outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
     resizeable: true,
@@ -129,6 +159,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'image-generate',
     name: '生成图片',
     icon: 'mdi-image-plus',
+    category: 'generate',
     inputPorts: [{ id: 'in', type: 'image', label: '参考图' }],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: true,
@@ -143,6 +174,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'text',
     name: '文本',
     icon: 'mdi-format-text',
+    category: 'tool',
     inputPorts: [],
     outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
     resizeable: true,
@@ -152,6 +184,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'video-generate',
     name: '生成视频',
     icon: 'mdi-video-plus',
+    category: 'generate',
     // 单一 media 输入连接点：素材类型由来源节点类型（图片/视频/音频加载节点）自动归类
     inputPorts: [{ id: 'in', type: 'media', label: '输入' }],
     outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
@@ -176,6 +209,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'text-ai',
     name: 'AI文本生成',
     icon: 'mdi-robot-outline',
+    category: 'generate',
     // 单一输入连接点：同时接受媒体（图片/音频/视频）与文本来源。
     // 连接后按来源节点输出类型自动归类 —— 媒体进输入预览（与生成节点同机制），
     // 「文本」节点内容自动作为用户输入（见 useCanvasNodeOps.llmMediaInputsOf / textInputsOf）。
@@ -208,6 +242,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'tts-generate',
     name: 'TTS声音生成',
     icon: 'mdi-voice',
+    category: 'generate',
     // 音频输入（可选）：音色克隆模式下作为参考音色；音色设计模式无需输入
     inputPorts: [{ id: 'in', type: 'audio', label: '参考音频' }],
     outputPorts: [{ id: 'out', type: 'audio', label: '音频' }],
@@ -231,6 +266,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'video-frame-extract',
     name: '获取视频帧',
     icon: 'mdi-camera-outline',
+    category: 'tool',
     // 输入视频类型、输出图片类型；手动点击提取（服务端 ffmpeg）
     inputPorts: [{ id: 'in', type: 'video', label: '视频' }],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
@@ -249,6 +285,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'video-concat',
     name: '拼接视频',
     icon: 'mdi-video-switch-outline',
+    category: 'tool',
     // 单一 video 输入连接点：同一端口可连接多段视频（无输入上限校验），拼接顺序由 config.inputOrder 决定
     inputPorts: [{ id: 'in', type: 'video', label: '视频' }],
     outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
@@ -278,6 +315,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'video-trim',
     name: '裁剪视频',
     icon: 'mdi-content-cut',
+    category: 'tool',
     // 输入/输出均为 video；手动点击裁剪（服务端 ffmpeg 重编码，保证帧/小数秒精度）
     inputPorts: [{ id: 'in', type: 'video', label: '视频' }],
     outputPorts: [{ id: 'out', type: 'video', label: '视频' }],
@@ -297,6 +335,7 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     id: 'audio-trim',
     name: '裁剪音频',
     icon: 'mdi-scissors-cutting',
+    category: 'tool',
     // 输入/输出均为 audio；手动点击裁剪（服务端 ffmpeg 重编码，小数秒精度）。
     // 产物扩展名随 config.format 变化（默认「原格式」= 跟随输入扩展名，见 canvas/audioTrim.ts）：
     // 本原型 outputExt: 'flac' 仅作为无配置上下文时的兜底声明，实际路径推导走

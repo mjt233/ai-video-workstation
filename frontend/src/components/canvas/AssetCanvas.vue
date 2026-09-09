@@ -58,6 +58,7 @@
           @node-drag="onNodeDragFollow"
           @node-drag-stop="onNodeDragStop"
           @pane-click="onPaneClick"
+          @pane-context-menu="onPaneContextMenu"
           @selection-start="onSelectionStart"
           @selection-end="onSelectionEnd"
         >
@@ -1546,6 +1547,20 @@ function onPaneClick(event: MouseEvent): void {
     const p = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
     menus.openAddMenu(event, Math.round(p.x - 60), Math.round(p.y - 40), flowEl.value)
   }
+}
+
+/**
+ * 空白处右键：弹出添加节点菜单（与双击一致，节点落在右键点击处）。
+ * 阻止浏览器原生右键菜单，并先关闭其余菜单（不清理多选状态）。
+ *
+ * @param event pane 右键事件（VueFlow paneContextMenu，携带原生 MouseEvent）
+ */
+function onPaneContextMenu(event: MouseEvent): void {
+  event.preventDefault()
+  menus.closeAll()
+  group.closeConnectMenu()
+  const p = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
+  menus.openAddMenu(event, Math.round(p.x - 60), Math.round(p.y - 40), flowEl.value)
 }
 
 /** 群组虚线框右键：打开群组菜单（复制/删除整组），不改变当前多选 */
