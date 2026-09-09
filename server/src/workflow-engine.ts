@@ -931,6 +931,9 @@ export async function runTask(taskId: string): Promise<void> {
       : taskParams;
     db.updateTaskParams(taskId, { ...latestParams, remoteTaskId });
     db.addLog(taskId, 'info', `Submitted, remote task ID: ${remoteTaskId}`);
+    // 同步统一注册表可中断性：登记时远端尚未提交 → 不可中断（「任务尚未提交到远端」）；
+    // 现在已可 Bridge cancel，重算为可中断（否则任务管理器中断按钮始终禁用、节点中断被 404 拒绝）
+    workflowExecutor.update(taskId, { remoteTaskId });
 
     // Step 2: Poll
     // 不设轮询时间上限：视频等生成任务可能远超 5 分钟，轮询直到远端返回 done（completed/failed）。

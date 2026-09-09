@@ -349,10 +349,11 @@ class LlmSessionManager {
         s.error = `${s.error ? `${s.error}；` : ''}结果写入画布失败：${msg}`;
       }
     }
-    this.sessions.delete(taskId);
-    this.emit({ type: 'finish', session: s });
-    // 同步统一任务注册表（终态移除）：**在 emit 之后**调用，保证终态广播（task-ws 读会话快照）
-    // 时会话仍在活跃区；回调异常只打日志，不影响会话收敛。
+    // 同步统一任务注册表（终态移除 + 触发 task-ws 终态广播）：**必须在移出活跃区之前**调用——
+    // task-ws 广播 finished 时经 llmSessionLookup 反查会话（读活跃区）提取终态载荷
+    // （persistPatch/persistRev/persistPrevRev），若先删除会话，广播将因查不到会话而静默丢失
+    // （前端在线路径永远等不到 finished，节点 Loading 无法收敛）；该调用链为同步执行
+    // （无 await），广播期间会话仍在活跃区，无并发窗口。回调异常只打日志，不影响会话收敛。
     try {
       s.lifecycle?.onFinish?.(effective);
     } catch (err) {
@@ -360,6 +361,8 @@ class LlmSessionManager {
         `[llm-session] 终态同步任务注册表失败: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    this.sessions.delete(taskId);
+    this.emit({ type: 'finish', session: s });
     return s;
   }
 

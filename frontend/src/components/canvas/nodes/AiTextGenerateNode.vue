@@ -715,6 +715,12 @@ function onTaskEvent(event: LlmTaskEvent): void {
       outputText.value = stream.value.text
       warnings.value = [...stream.value.warnings]
       if (stream.value.text) void scrollToBottom()
+      if (stream.value.finished) {
+        // 终态快照（订阅/重连时任务已结束，如断线期间完成）：快照不携带落盘补丁/rev，
+        // 视图补丁由全局 finished 广播 adopt 或以文件为准；此处仅结束 Loading
+        finalize(stream.value.finishStatus ?? 'cancelled')
+        break
+      }
       if (stream.value.phase === 'responding') emit('stream-state', { running: true, log: '正在响应…' })
       break
     case 'finished':
@@ -725,25 +731,28 @@ function onTaskEvent(event: LlmTaskEvent): void {
 }
 
 /**
- * 终态收敛（finished / not-found）：
- * 节流收口 → 结束本地 generating → 通知父级（completed：adopt 后端落盘的
+ * 终态收敛（finished / not-found / 终态快照共用）：
+ * 节流收口 → 结束本地 generating → 通知父级（completed：携带补丁时 adopt 后端落盘的
  * output/outputHistory + savedRev 对齐；failed：错误红字 + 遮罩错误态；
  * cancelled/not-found：静默结束）→ 退订。
  *
- * @param event 终态事件
+ * @param status 终态状态
+ * @param info 终态信息（finished 事件携带落盘补丁/rev；终态快照/not-found 无补丁，
+ *             视图补丁由全局 finished 广播 adopt 或以文件为准）
  */
-function settle(event: Extract<LlmTaskEvent, { type: 'finished' | 'not-found' }>): void {
+function finalize(
+  status: 'completed' | 'failed' | 'cancelled',
+  info?: Extract<LlmTaskEvent, { type: 'finished' }>['info'],
+): void {
   if (stopTimer) {
     clearTimeout(stopTimer)
     stopTimer = null
   }
   throttled.flush()
   generating.value = false
-  const status = event.type === 'not-found' ? 'cancelled' : event.info.status
   if (status === 'failed') {
-    errorMsg.value = event.type === 'finished' ? (event.info.error ?? '生成失败') : '生成失败'
+    errorMsg.value = info?.error ?? '生成失败'
   }
-  const info = event.type === 'finished' ? event.info : undefined
   const patch =
     info && (info.output !== undefined || info.outputHistory)
       ? {
@@ -765,6 +774,19 @@ function settle(event: Extract<LlmTaskEvent, { type: 'finished' | 'not-found' }>
   if (!outputText.value && !errorMsg.value && status === 'completed') {
     hint.value = '模型未返回内容（响应为空）'
   }
+}
+
+/**
+ * 终态事件收敛（finished / not-found）：转调 finalize（not-found 视为 cancelled 语义
+ * 的静默结束；finished 携带后端落盘补丁，completed 时由父级 adopt）。
+ *
+ * @param event 终态事件
+ */
+function settle(event: Extract<LlmTaskEvent, { type: 'finished' | 'not-found' }>): void {
+  finalize(
+    event.type === 'not-found' ? 'cancelled' : event.info.status,
+    event.type === 'finished' ? event.info : undefined,
+  )
 }
 
 /**

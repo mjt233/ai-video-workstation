@@ -235,27 +235,50 @@ describe('useCanvasGeneration', () => {
     expect(gen.statusByNode.value.vc?.errorMsg).toContain('Invalid data found')
   })
 
-  it('中断：统一调用 /api/tasks/:id/cancel 并置已中断', async () => {
+  it('中断：统一调用 /api/tasks/:id/cancel，受理成功后不预置状态（终态由轮询收敛）', async () => {
     ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
-    const gen = useCanvasGeneration('p', TARGET)
+    const onCancelRejected = vi.fn()
+    const gen = useCanvasGeneration('p', TARGET, { onCancelRejected })
     gen.setInputPaths('n1', ['assert/a.jpg'])
     await gen.generate(makeNode('一只猫'))
     await vi.advanceTimersByTimeAsync(1) // 首轮查询落定（保持 running）
     await gen.interrupt('n1')
     expect(cancelTask).toHaveBeenCalledWith('task-1')
+    // 受理成功：不停轮询、不预置「已中断」——服务端收敛 failed(用户中断) 后由轮询写入终态
+    expect(gen.statusByNode.value.n1?.status).toBe('running')
+    expect(onCancelRejected).not.toHaveBeenCalled()
+    // 轮询继续：服务端终态落定后节点收敛 error（用户中断）
+    ;(getTaskStatus as Mock).mockResolvedValue({ ...RUNNING_TASK, status: 'failed', errorMsg: '用户中断' })
+    await vi.advanceTimersByTimeAsync(2000)
     expect(gen.statusByNode.value.n1?.status).toBe('error')
-    expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
+    expect(gen.statusByNode.value.n1?.errorMsg).toBe('用户中断')
   })
 
-  it('cancel 失败不阻断状态展示', async () => {
+  it('cancel 被拒绝：保持 running 态并上抛原因提示（不静默）', async () => {
     ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
-    const gen = useCanvasGeneration('p', TARGET)
+    const onCancelRejected = vi.fn()
+    const gen = useCanvasGeneration('p', TARGET, { onCancelRejected })
     gen.setInputPaths('n1', ['assert/a.jpg'])
     await gen.generate(makeNode('一只猫'))
     await vi.advanceTimersByTimeAsync(1)
-    ;(cancelTask as Mock).mockRejectedValueOnce(new Error('boom'))
+    ;(cancelTask as Mock).mockRejectedValueOnce({
+      response: { status: 404, data: { error: '任务尚未提交到远端，无法中断' } },
+    })
     await expect(gen.interrupt('n1')).resolves.toBeUndefined()
-    expect(gen.statusByNode.value.n1?.errorMsg).toBe('已中断')
+    // 保持 running 态（不停轮询、不置假「已中断」），错误原因经回调上抛
+    expect(gen.statusByNode.value.n1?.status).toBe('running')
+    expect(onCancelRejected).toHaveBeenCalledWith('n1', '任务尚未提交到远端，无法中断')
+  })
+
+  it('中断时本地无任务凭据：不发起请求并经回调提示', async () => {
+    const onCancelRejected = vi.fn()
+    const gen = useCanvasGeneration('p', TARGET, { onCancelRejected })
+    // 模拟「提交请求尚未返回」：running 态已显示但 taskId 尚未登记
+    gen.statusByNode.value.n1 = { status: 'running' }
+    await gen.interrupt('n1')
+    expect(cancelTask).not.toHaveBeenCalled()
+    expect(onCancelRejected).toHaveBeenCalledWith('n1', '任务尚未取得中断凭据，请稍后重试')
+    expect(gen.statusByNode.value.n1?.status).toBe('running')
   })
 
   it('裁剪视频节点：按时间提交 trim-video 异步任务，产物固定 output.mp4', async () => {

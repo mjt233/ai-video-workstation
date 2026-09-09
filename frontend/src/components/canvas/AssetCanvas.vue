@@ -661,7 +661,11 @@ const store = useCanvasStore(props.project, target.value)
  * 资产生成组合式：跑工作流 + 轮询（纯体验层）+ 结果通知 + 运行中任务持久化恢复。
  * onResult 为恢复任务完成后的默认结果回调（正常生成路径仍按调用传入的回调优先）。
  */
-const gen = useCanvasGeneration(props.project, target.value, { onResult: handleNodeResult })
+const gen = useCanvasGeneration(props.project, target.value, {
+  onResult: handleNodeResult,
+  // 中断被服务端拒绝/失败：snackbar 告知原因（节点保持运行态，任务继续到终态）
+  onCancelRejected: (_nodeId, reason) => showSnackbar(`中断失败：${reason}`, 'error'),
+})
 const { statusByNode } = gen
 const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo, conflict, savedRev, forceSave, reloadFromServer } = store
 const router = useRouter()
@@ -1146,21 +1150,33 @@ function onRestoreTaskEvent(taskId: string, event: LlmTaskEvent): void {
 }
 
 /**
- * 重连对账：本端已恢复订阅的任务不在服务端活跃列表 → 结束 Loading
+ * 重连对账：本端已恢复订阅/在线发起的任务不在服务端活跃列表 → 结束 Loading
  * （服务重启后注册表为空 → 无 Loading 恢复、无幽灵 Loading；未终态会话的
  * 部分输出丢失为内存方案的既定取舍，结果以文件为准）。
  * 断线期间不做对账（列表可能过期），重连后 sessions 全量刷新时再次执行。
+ *
+ * 对账基准为**统一注册表全量活跃列表**（含 pending，各类型任务混合）：
+ * 注册表是运行态唯一事实源，taskId 不在列表 = 已终态收敛（终态即移出活跃区）。
+ * 除恢复订阅条目（llmRestore）外，在线发起路径（statusByNode 持 taskId 的 running
+ * 条目，含 AI 文本节点）一并兜底——finished/not-found 终态事件丢失（如断线错过/
+ * 广播缺失）时本地结束 Loading，防止幽灵 Thinking；ffmpeg/工作流条目同样按此
+ * 收敛是安全的：其终态机制（task-update 广播 / 轮询）随后到达时幂等覆盖，
+ * 且工作流任务轮询的 SQLite 状态先于注册表收敛，不会出现 running 误闪。
  */
 function reconcileLlmRestore(): void {
   if (!llmSocket.connected.value) return
-  const activeTaskIds = new Set(
-    llmSocket.sessions.value.filter((s) => s.status === 'running').map((s) => s.taskId),
-  )
+  const activeTaskIds = new Set(llmSocket.tasks.value.map((t) => t.id))
   for (const [taskId, entry] of [...llmRestore]) {
     if (activeTaskIds.has(taskId)) continue
     gen.endClientRun(entry.nodeId)
     entry.unsubscribe()
     llmRestore.delete(taskId)
+  }
+  // 在线路径兜底：llmRestore 条目已在上方处理，此处跳过避免重复收敛
+  for (const [nodeId, s] of Object.entries(statusByNode.value)) {
+    if (s.status !== 'running' || !s.taskId || llmRestore.has(s.taskId)) continue
+    if (activeTaskIds.has(s.taskId)) continue
+    gen.endClientRun(nodeId)
   }
 }
 

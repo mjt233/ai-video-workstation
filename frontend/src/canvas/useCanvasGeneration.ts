@@ -50,6 +50,11 @@ export interface UseCanvasGenerationOptions {
    * 生成调用传入的 per-call 回调优先于本回调。
    */
   onResult?: (nodeId: string, outputPath: string) => void
+  /**
+   * 中断请求被服务端拒绝或发送失败时的回调（nodeId, 原因文案）：
+   * 由 AssetCanvas 注入（snackbar 提示），保证中断失败对用户可见、不静默。
+   */
+  onCancelRejected?: (nodeId: string, reason: string) => void
 }
 
 /** LLM 中断收敛超时（毫秒）：HTTP 兜底已确认但 WS 断连时本地结束 Loading */
@@ -94,6 +99,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
 
   /** 默认结果回调（恢复任务完成时刷新产物展示用） */
   const onResultCb = options.onResult
+  /** 中断请求被拒绝/失败回调（AssetCanvas 注入，snackbar 提示用） */
+  const onCancelRejectedCb = options.onCancelRejected
 
   /**
    * 统一任务广播监听：ffmpeg 任务进度写节点阶段日志，终态刷新产物并结束 loading。
@@ -488,7 +495,13 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
    *
    * 所有任务类型统一走 `POST /api/tasks/:taskId/cancel`（服务端路由到对应执行器：
    * ffmpeg kill 子进程并删除半截产物、LLM abort 上游、工作流 Bridge 取消/延迟取消标记）；
-   * 本地先置「已中断」并停轮询，终态由服务端广播收敛（任务管理器列表同步移除）。
+   * 任务管理器列表同步由服务端广播收敛。
+   *
+   * **收敛语义**：中断请求受理成功后不停轮询、不预置节点状态——终态（用户中断）
+   * 由服务端执行器收敛后经既有机制更新到节点（工作流轮询 SQLite 终态 / ffmpeg
+   * task-update 广播），避免「取消实际未生效时节点停留假『已中断』态」；
+   * 请求被拒绝（如 404 NOT_CANCELABLE：任务不可中断/已结束）或发送失败时保持
+   * running 态并经 `onCancelRejected` 提示用户，任务继续正常执行到终态。
    *
    * @param nodeId 生成节点 id
    */
@@ -496,17 +509,20 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     const status = statusByNode.value[nodeId]
     if (!status || status.status !== 'running') return
     const taskId = taskIdByNode.value[nodeId]
-    if (pollTimers[nodeId]) {
-      clearInterval(pollTimers[nodeId])
-      delete pollTimers[nodeId]
+    if (!taskId) {
+      // 本地无任务凭据（提交请求尚未返回）：无法向服务端发起中断，保持运行态并告知用户
+      onCancelRejectedCb?.(nodeId, '任务尚未取得中断凭据，请稍后重试')
+      return
     }
-    statusByNode.value[nodeId] = { status: 'error', errorMsg: '已中断', ...(taskId ? { taskId } : {}) }
-    delete taskIdByNode.value[nodeId]
-    if (!taskId) return
     try {
       await cancelTask(taskId)
-    } catch {
-      // cancel 失败不阻断状态展示（后端任务可能已结束）
+    } catch (e) {
+      // 中断被服务端拒绝（404 NOT_CANCELABLE 等）或网络失败：保持 running 态，
+      // 轮询/广播继续到终态；原因上抛给 UI 层提示（不静默吞掉）
+      const ax = e as { response?: { data?: { error?: string } } }
+      const msg = ax?.response?.data?.error ?? (e instanceof Error ? e.message : String(e))
+      console.error(`[canvas-gen] 中断任务失败（${taskId}）: ${msg}`)
+      onCancelRejectedCb?.(nodeId, msg)
     }
   }
 

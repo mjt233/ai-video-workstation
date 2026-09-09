@@ -56,7 +56,9 @@ export function createLlmStreamState(): LlmStreamState {
 /**
  * 应用一条会话事件到状态（纯函数：返回新状态，不修改入参）。
  *
- * - snapshot：用服务端累计进度整体替换（恢复态补齐显示）；
+ * - snapshot：用服务端累计进度整体替换（恢复态补齐显示）；快照携带会话状态，
+ *   已终态（completed/failed/cancelled）时同样置 `finished`（订阅/重连时任务已结束，
+ *   服务端不再推送 finished 事件，消费方须据快照自行收敛）；
  * - thinking / text：增量累计 + 阶段切换；
  * - warning：追加警告；
  * - finished：置终态（failure 时错误信息附到 errorMsg）；
@@ -77,6 +79,13 @@ export function applyLlmEvent(state: LlmStreamState, event: LlmTaskEvent): LlmSt
       next.thinking = s.thinking
       next.warnings = [...s.warnings]
       next.errorMsg = s.error ?? ''
+      // 终态快照（订阅/重连时任务已结束）：置终态语义，消费方据此收敛 Loading。
+      // 注意快照不携带后端落盘补丁（output/outputHistory/rev），视图补丁由全局
+      // finished 广播 adopt 或以文件为准（重进画布可见）
+      if (s.status !== 'running' && s.status !== 'pending') {
+        next.finished = true
+        next.finishStatus = s.status
+      }
       break
     }
     case 'thinking':

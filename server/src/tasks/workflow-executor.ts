@@ -36,6 +36,17 @@ export interface WorkflowTaskRegisterInput {
 }
 
 /**
+ * 读取 SQLite 任务 params 中已落盘的远端任务 id（引擎提交远端成功后写入）。
+ *
+ * @param taskId 任务 id（SQLite tasks 主键）
+ * @returns 远端任务 id；任务不存在或尚未提交到远端时返回 undefined
+ */
+function readPersistedRemoteTaskId(taskId: string): string | undefined {
+  const record = db.getTask(taskId);
+  return record ? parseTaskParams(record.params).remoteTaskId : undefined;
+}
+
+/**
  * 判断工作流任务是否可中断（与 `canCancelTask` 同一语义，此处仅取布尔与原因）。
  *
  * @param workflowId 工作流类型 id
@@ -121,7 +132,7 @@ class WorkflowExecutor {
     const existing = taskRegistry.get(input.taskId);
     if (existing) return existing;
     const record = db.getTask(input.taskId);
-    const remoteTaskId = record ? parseTaskParams(record.params).remoteTaskId : undefined;
+    const remoteTaskId = readPersistedRemoteTaskId(input.taskId);
     const cancelability = workflowCancelability(
       input.workflowId,
       input.impl,
@@ -158,6 +169,13 @@ class WorkflowExecutor {
   /**
    * 任务状态推进（引擎轮询远端后调用）：更新状态与可中断性。
    *
+   * 状态**或**远端任务 id 变化都重算可中断性——引擎提交远端成功后仅传
+   * `remoteTaskId`（无状态变化），也要把登记时「尚未提交到远端」的不可中断
+   * 收敛为可中断；重算入参缺省回退：`status` 回退注册表当前状态、
+   * `remoteTaskId` 回退 SQLite 已落盘值，避免单一字段的更新把另一字段的
+   * 判定依据算丢（例：只传 status 时用 undefined 的 remoteTaskId 重算，
+   * 会把已提交远端的任务重新算回不可中断）。
+   *
    * @param taskId 任务 id
    * @param patch 状态/进度/远端任务 id 变化
    */
@@ -168,8 +186,12 @@ class WorkflowExecutor {
     const impl = record.payload?.impl;
     let cancelable = record.cancelable;
     let reason = record.cancelBlockReason;
-    if (typeof wf === 'string' && typeof impl === 'string' && patch.status) {
-      const c = workflowCancelability(wf, impl, patch.status, patch.remoteTaskId);
+    if (
+      typeof wf === 'string'
+      && typeof impl === 'string'
+      && (patch.status !== undefined || patch.remoteTaskId !== undefined)
+    ) {
+      const c = workflowCancelability(wf, impl, patch.status ?? record.status, patch.remoteTaskId ?? readPersistedRemoteTaskId(taskId));
       cancelable = c.cancelable;
       reason = c.reason;
     }

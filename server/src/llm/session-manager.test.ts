@@ -193,6 +193,30 @@ describe('sessionManager.finish / cancel', () => {
     expect(sessionManager.get(s.taskId)).toBeUndefined();
   });
 
+  it('终态广播时序：onFinish 回调（注册表终态收敛→task-ws 广播反查）执行时会话仍在活跃区', async () => {
+    stubPersister({ wrote: true, rev: 5, prevRev: 4 });
+    let visibleDuringFinish: LlmSession | undefined;
+    const s = sessionManager.begin(
+      beginInput({
+        lifecycle: {
+          onFinish: (status) => {
+            // 模拟 llm-executor.finish → taskRegistry.finish → task-ws finishedInfoOf 的
+            // llmSessionLookup 反查：读活跃区提取终态载荷；若此时会话已被移除，
+            // finished 广播将静默丢失（前端在线路径 Loading 无法收敛）
+            visibleDuringFinish = sessionManager.get(s.taskId);
+            expect(status).toBe('completed');
+          },
+        },
+      }),
+    );
+    await sessionManager.finish(s.taskId, { status: 'completed' });
+    expect(visibleDuringFinish).toBeDefined();
+    expect(visibleDuringFinish?.persistRev).toBe(5);
+    expect(visibleDuringFinish?.persistPrevRev).toBe(4);
+    // 收敛完成后会话移出活跃区
+    expect(sessionManager.get(s.taskId)).toBeUndefined();
+  });
+
   it('cancel 幂等：已终态/不存在返回 false', async () => {
     const s = sessionManager.begin(beginInput());
     await sessionManager.finish(s.taskId, { status: 'completed' });
