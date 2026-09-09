@@ -67,13 +67,16 @@
                单选联动高亮或运行态高亮的关联连线追加沿数据流向移动的箭头动画（单选输入侧绿色/
                输出侧橙色、运行态主色蓝，箭头经 CSS offset-path 沿连线几何（bezier d）运动，
                offset-rotate: auto 随路径切线转向；
-               方向即数据流方向：连线路径从 source→target 生成，无需单独定义） -->
+               方向即数据流方向：连线路径从 source→target 生成，无需单独定义。
+               箭头数量/时长/延迟由 edgeArrows 按连线弧长推导：恒定线速度（约 110 流坐标 px/s）
+               + 等距多箭头（上限 6），使长短连线的视觉速度与箭头密度一致——详见 canvas/edgeFlow.ts -->
           <template #edge-default="edgeProps">
             <BezierEdge v-bind="edgeProps" />
             <path
-              v-if="edgeRelatedSide(edgeProps.id) || edgeRunningRelated(edgeProps.id)"
+              v-for="arrow in edgeArrows(edgeProps)"
+              :key="arrow.key"
               class="canvas-edge__arrow"
-              :style="arrowMotionStyle(edgeProps)"
+              :style="arrow.style"
               d="M10,0 L0,-5 L2.5,0 L0,5 Z"
             />
           </template>
@@ -573,6 +576,7 @@ import type { CanvasGroupData, CanvasNodeData } from '../../canvas/types'
 import { canvasRelPath, type CanvasTarget } from '../../canvas/api'
 import { getNodeCurrentAssetPath } from '../../canvas/generate'
 import { getPrototype } from '../../canvas/registry'
+import { createEdgeFlowCache } from '../../canvas/edgeFlow'
 import { getCanvasNodeInfo } from '../../canvas/api'
 import { extOfAudioPath } from '../../canvas/audioTrim'
 import { isSyntheticNodeId, singleDraggedRealNodeId } from '../../canvas/groupSelection'
@@ -1563,22 +1567,45 @@ function edgeRunningRelated(edgeId: string): boolean {
 }
 
 /**
- * 构建流向箭头的 CSS 运动路径样式（#edge-default 插槽内使用）：
- * 按与 BezierEdge 完全一致的参数计算连线贝塞尔路径 d，注入 `offset-path: path(...)`，
- * 配合 .canvas-edge__arrow 的 offset-rotate/动画：箭头从源端（source）滑向目标端（target），
- * 即数据流方向——输入侧（target=选中节点）流向选中节点，输出侧（source=选中节点）流向输出节点。
- *
- * @param edgeProps Vue Flow 连线插槽 props（含连线几何）
- * @returns 内联样式（offset-path）
+ * 连线箭头时序缓存（按连线 id 记忆动画参数）。
+ * 拖动/缩放节点时连线几何每帧变化，若每帧重算时长会让箭头瞬间跳位；缓存只在弧长
+ * 变化超过阈值时重新计时（见 canvas/edgeFlow.ts）。切换画布时清空，避免旧几何残留。
  */
-function arrowMotionStyle(edgeProps: {
+const edgeFlowCache = createEdgeFlowCache()
+
+/** 流向箭头渲染项：DOM key + 内联样式（offset-path 与按弧长推导的时长/延迟） */
+interface EdgeArrow {
+  /** v-for 索引键：箭头数量变化时已有箭头被 patch 而非 remount，动画不重置 */
+  key: number
+  /** 内联样式：offset-path 沿连线几何运动，animation-duration/-delay 按弧长推导 */
+  style: Record<string, string>
+}
+
+/**
+ * 构建连线流向箭头列表（#edge-default 插槽内使用）。
+ *
+ * 未高亮（非单选联动、非运行态关联）的连线返回空数组（不渲染箭头）；
+ * 高亮连线按与 BezierEdge 完全一致的参数计算连线 d 并注入 `offset-path: path(...)`，
+ * 箭头从源端（source）滑向目标端（target），即数据流方向——输入侧（target=选中节点）
+ * 流向选中节点，输出侧（source=选中节点）流向输出节点。
+ *
+ * 动画时长与箭头数量由连线弧长推导（恒定线速度 ≈110 流坐标 px/s + 沿路径等距多箭头，
+ * 上限 6 个，见 canvas/edgeFlow.ts）：长短连线的视觉速度与箭头密度一致，长连线不再
+ * 快到无法观察；相邻箭头以负 animation-delay 等距预分布，任意时刻都在均匀"流淌"。
+ *
+ * @param edgeProps Vue Flow 连线插槽 props（含连线 id 与连线几何）
+ * @returns 箭头渲染项列表（空数组 = 该连线不渲染箭头）
+ */
+function edgeArrows(edgeProps: {
+  id: string
   sourceX: number
   sourceY: number
   targetX: number
   targetY: number
   sourcePosition?: Position
   targetPosition?: Position
-}): Record<string, string> {
+}): EdgeArrow[] {
+  if (!edgeRelatedSide(edgeProps.id) && !edgeRunningRelated(edgeProps.id)) return []
   const [pathD] = getBezierPath({
     sourceX: edgeProps.sourceX,
     sourceY: edgeProps.sourceY,
@@ -1587,7 +1614,19 @@ function arrowMotionStyle(edgeProps: {
     sourcePosition: edgeProps.sourcePosition ?? Position.Bottom,
     targetPosition: edgeProps.targetPosition ?? Position.Top,
   })
-  return { 'offset-path': `path('${pathD}')` }
+  const { duration, count, delayStep } = edgeFlowCache.get(edgeProps.id, pathD)
+  const arrows: EdgeArrow[] = []
+  for (let i = 0; i < count; i++) {
+    arrows.push({
+      key: i,
+      style: {
+        'offset-path': `path('${pathD}')`,
+        'animation-duration': `${duration.toFixed(3)}s`,
+        'animation-delay': `${(-i * delayStep).toFixed(3)}s`,
+      },
+    })
+  }
+  return arrows
 }
 
 /** 内联重命名输入：写入 rename 组合式的临时值（卡片输入框上抛） */
@@ -1804,6 +1843,8 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
   drop.reset()
   dialogs.resetAll()
   upload.reset()
+  // 连线箭头时序缓存按连线 id 记忆几何，切换画布后 id 复用但几何全新 → 清空避免沿用旧时长
+  edgeFlowCache.clear()
   await gen.switchTarget(newTarget)
   if (disposed || seq !== fitViewSeq) return
   const st = await store.switchTarget(newTarget, opts)
@@ -2029,17 +2070,38 @@ watch(flowEl, (flow) => {
   fill: var(--edge-related-color, #b1b1b7);
   pointer-events: none;
   offset-rotate: auto;
-  /* 箭头沿连线移动（数据流方向，源→目标）：offset-path 由模板按连线几何注入，
-     1.4s 循环，方向随路径切线自动转向 */
+  /* 箭头沿连线移动（数据流方向，源→目标）：offset-path 由模板按连线几何注入；
+     时长与延迟由 edgeArrows 按弧长推导并写入内联 animation-duration/-delay（恒定线速度
+     + 等距多箭头），此处 1.4s 仅作默认兜底（内联长属性优先级更高）。 */
   animation: canvas-edge-arrow-flow 1.4s linear infinite;
 }
 
+/* 端点淡入淡出：箭头在连线两端渐显/渐隐，消除循环回绕（100% → 0%）的瞬间跳变。
+   淡变区占弧长 4%，而箭头数量 ≤6 → 任意时刻最多 1 个箭头处于淡变中，不会出现
+   "半透明长尾"（长连线淡变距离虽更长，但同期可见箭头数量同比例增多）。 */
 @keyframes canvas-edge-arrow-flow {
-  from {
+  0% {
     offset-distance: 0%;
+    opacity: 0;
   }
-  to {
+  4% {
+    opacity: 1;
+  }
+  96% {
+    opacity: 1;
+  }
+  100% {
     offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+/* 无障碍：系统开启「减少动态效果」时不做位移动画，箭头静止在连线中点保留方向语义 */
+@media (prefers-reduced-motion: reduce) {
+  :deep(.vue-flow__edge .canvas-edge__arrow) {
+    animation: none;
+    offset-distance: 50%;
+    opacity: 1;
   }
 }
 

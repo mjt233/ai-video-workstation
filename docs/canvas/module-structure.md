@@ -14,6 +14,7 @@ frontend/src/
 │   ├── groups.ts                 # 持久分组纯逻辑（色板/最小尺寸/重叠与包含判定/跟随集 R2/初始矩形/默认命名/结构校验）
 │   ├── paths.ts                  # 定义文件与产物路径
 │   ├── preview.ts                # 预览 URL
+│   ├── edgeFlow.ts               # 连线流向箭头动画参数（贝塞尔弧长解析 / 恒定线速度 + 等距多箭头 / 拖动期时序缓存）
 │   ├── api.ts                    # loadCanvas / saveCanvas
 │   ├── generate.ts               # 输入收集（collectInputs/collectInputPaths）、节点当前资产推导（固定产物路径）
 │   ├── aiTextHistory.ts          # AI 文本生成节点文本历史版本（类型/上限/追加/删除/读取过滤）
