@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含十二个内置节点', () => {
+  it('包含十三个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'audio-trim',
       'image-generate',
       'image-loader',
+      'input-preview',
       'text',
       'text-ai',
       'tts-generate',
@@ -17,6 +18,21 @@ describe('NODE_PROTOTYPES', () => {
       'video-loader',
       'video-trim',
     ])
+  })
+
+  it('输入预览节点：单一输入端口（media+text 多类型），无输出端口，无配置面板', () => {
+    const p = getPrototype('input-preview')!
+    expect(p.name).toBe('输入预览')
+    expect(p.category).toBe('tool')
+    expect(p.inputPorts).toHaveLength(1)
+    expect(p.inputPorts[0].id).toBe('in')
+    expect(p.inputPorts[0].type).toEqual(['media', 'text'])
+    expect(p.outputPorts).toEqual([])
+    expect(p.editorComponent).toBeUndefined()
+    expect(p.canGenerate ?? false).toBe(false)
+    expect(p.hasHistory ?? false).toBe(false)
+    expect(p.outputExt).toBeUndefined()
+    expect(p.defaultSize).toEqual({ width: 320, height: 300 })
   })
 
   it('AI 文本生成节点：单一输入端口（media+text 多类型），输出 text', () => {
@@ -30,10 +46,12 @@ describe('NODE_PROTOTYPES', () => {
     expect(p.canGenerate ?? false).toBe(false)
   })
 
-  it('AI 文本生成节点声明更大默认尺寸（其余节点未声明走 240×160 兜底）', () => {
+  it('AI 文本生成与输入预览节点声明更大默认尺寸（其余节点未声明走 240×160 兜底）', () => {
     expect(getPrototype('text-ai')!.defaultSize).toEqual({ width: 360, height: 240 })
+    expect(getPrototype('input-preview')!.defaultSize).toEqual({ width: 320, height: 300 })
     for (const p of NODE_PROTOTYPES) {
-      if (p.id !== 'text-ai') expect(p.defaultSize, `${p.id} 不应声明 defaultSize`).toBeUndefined()
+      if (p.id === 'text-ai' || p.id === 'input-preview') continue
+      expect(p.defaultSize, `${p.id} 不应声明 defaultSize`).toBeUndefined()
     }
   })
 

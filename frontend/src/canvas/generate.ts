@@ -156,9 +156,57 @@ export function collectInputPaths(
   return collectInputs(nodeId, connections, nodes, config, portId, scope).map((i) => i.path)
 }
 
+/** 输入预览节点的媒体输入条目（输入资产信息 + 来源节点输出类型） */
+export interface PreviewMediaInput extends CanvasInputInfo {
+  /** 媒体类型（来源节点输出类型；仅 image / video / audio） */
+  type: 'image' | 'video' | 'audio'
+}
+
+/**
+ * 输入预览节点（input-preview）的预览数据：**上游来源节点自身**的全部连线输入。
+ *
+ * 输入预览节点只有一个输入口且无输出端口，本函数先按连线定位其上游来源节点
+ * （同端口多条连线取第一条），再对该来源节点收集：
+ * - 媒体输入：collectInputs（按来源节点 config.inputOrder 排序）后按来源输出类型过滤，
+ *   仅保留 image / video / audio（其余类型不属媒体，见 isMediaOutputType 语义）；
+ * - 文本输入：collectTextContents（「文本」节点读 config.text、「AI 文本生成」节点读
+ *   config.output，空白内容不收集）。
+ *
+ * 媒体条目的 `version`（产物 mtime 作预览 URL 缓存键）由调用方（useCanvasNodeOps
+ * 的 withVersions）补充——本函数保持纯函数，便于单测。
+ *
+ * @param nodeId 输入预览节点 id
+ * @param connections 全部连线
+ * @param nodes 全部节点
+ * @param scope 画布作用域（可选；来源节点为生成类时按固定产物路径推导其输入需要）
+ * @returns 上游来源节点的预览数据；未连接上游/来源节点不存在时返回 null
+ */
+export function collectPreviewSourceInputs(
+  nodeId: string,
+  connections: CanvasConnection[],
+  nodes: CanvasNodeData[],
+  scope?: CanvasScope,
+): { sourceNodeId: string; sourceLabel: string; media: PreviewMediaInput[]; texts: string[] } | null {
+  const conn = connections.find((c) => c.toNodeId === nodeId)
+  if (!conn) return null
+  const source = nodes.find((n) => n.id === conn.fromNodeId)
+  if (!source) return null
+  const media: PreviewMediaInput[] = []
+  for (const info of collectInputs(source.id, connections, nodes, source.config, undefined, scope)) {
+    const type = getNodeOutputType(info.nodeId, nodes)
+    if (type !== 'image' && type !== 'video' && type !== 'audio') continue
+    media.push({ nodeId: info.nodeId, path: info.path, type, label: info.label })
+  }
+  return {
+    sourceNodeId: source.id,
+    sourceLabel: source.name,
+    media,
+    texts: collectTextContents(source.id, connections, nodes),
+  }
+}
+
 /**
  * 组内拖拽重排后合并回全局 inputOrder：保持其他组相对顺序不变，仅把本组新顺序排到末尾。
- *
  * 视频生成/拼接等节点把图片/视频/音频各自分组展示并支持组内拖拽排序，各组共享一个
  * config.inputOrder（全局 nodeId 顺序）。重排本组时，先把本组 nodeId 从原顺序中移除，
  * 再把新顺序追加到末尾，从而只影响本组相对顺序、不影响其他组。

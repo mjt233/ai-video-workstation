@@ -95,8 +95,10 @@
               :output="outputOf(nodeMap[id])"
               :upload="upload.stateOf(id)"
               :upstream-updated="isUpstreamUpdated(id)"
-              :inputs="nodeMap[id]?.prototypeId === 'text-ai' ? llmMediaInputsOf(id) : undefined"
-              :text-inputs="nodeMap[id]?.prototypeId === 'text-ai' ? textInputsOf(id) : undefined"
+              :inputs="cardInputsOf(id)"
+              :text-inputs="cardTextInputsOf(id)"
+              :source-label="nodeMap[id]?.prototypeId === 'input-preview' ? previewInputsOf(id)?.sourceLabel : undefined"
+              :source-input-count="nodeMap[id]?.prototypeId === 'input-preview' ? previewInputCountOf(id) : undefined"
               :renaming="renamingNodeId === id"
               :rename-value="renameInput"
               @update:config="(patch: Record<string, unknown>) => onUpdateConfig(id, patch)"
@@ -609,7 +611,7 @@ import { useCanvasMenus } from './composables/useCanvasMenus'
 import { useCanvasRename } from './composables/useCanvasRename'
 import { useCanvasPaste } from './composables/useCanvasPaste'
 import { useCanvasKeyboard } from './composables/useCanvasKeyboard'
-import { useCanvasNodeOps } from './composables/useCanvasNodeOps'
+import { useCanvasNodeOps, type LlmMediaInputItem } from './composables/useCanvasNodeOps'
 import { useCanvasDialogs } from './composables/useCanvasDialogs'
 import { useCanvasAutobuild } from './composables/useCanvasAutobuild'
 import { useCanvasGroup } from './composables/useCanvasGroup'
@@ -764,6 +766,50 @@ function outputPathOf(node: CanvasNodeData): string | undefined {
 function getOutputMtime(nodeId: string): number | null | undefined {
   const o = nodeOutputs.value[nodeId]
   return o?.exists ? o.mtime : undefined
+}
+
+/**
+ * 节点卡片主体媒体输入（按原型分发，避免模板内重复求值）：
+ * - `text-ai`（AI文本生成）：本节点自身的媒体输入；
+ * - `input-preview`（输入预览）：**上游来源节点**的媒体输入（穿透一层，见 previewInputsOf）；
+ * - 其余原型：undefined（主体组件不接收 inputs）。
+ *
+ * @param nodeId 节点 id
+ * @returns 媒体输入条目；该原型不使用输入预览时 undefined
+ */
+function cardInputsOf(nodeId: string): LlmMediaInputItem[] | undefined {
+  const proto = nodeMap.value[nodeId]?.prototypeId
+  if (proto === 'text-ai') return llmMediaInputsOf(nodeId)
+  if (proto === 'input-preview') return previewInputsOf(nodeId)?.media
+  return undefined
+}
+
+/**
+ * 节点卡片主体文本输入（按原型分发）：
+ * - `text-ai`：本节点自身连接的「文本」节点内容；
+ * - `input-preview`：**上游来源节点**连接的文本输入内容（穿透一层）；
+ * - 其余原型：undefined。
+ *
+ * @param nodeId 节点 id
+ * @returns 文本输入内容数组；该原型不使用文本输入时 undefined
+ */
+function cardTextInputsOf(nodeId: string): string[] | undefined {
+  const proto = nodeMap.value[nodeId]?.prototypeId
+  if (proto === 'text-ai') return textInputsOf(nodeId)
+  if (proto === 'input-preview') return previewInputsOf(nodeId)?.texts
+  return undefined
+}
+
+/**
+ * 输入预览节点：上游来源节点的输入总数（媒体 + 文本），用于来源行「N 个输入」展示。
+ *
+ * @param nodeId 输入预览节点 id
+ * @returns 输入总数；未连接上游节点时 undefined
+ */
+function previewInputCountOf(nodeId: string): number | undefined {
+  const data = previewInputsOf(nodeId)
+  if (!data) return undefined
+  return data.media.length + data.texts.length
 }
 
 /** Vue Flow 视图控制：适应/缩放/屏幕坐标换算/程序化选中与取消选中/命令式移动节点 */
@@ -1433,7 +1479,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 // 组合式导出解构（模板绑定用）
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, isMultiSelected, selectedGroupIds, onEdgeClick, onNodeDragStart: onNodeDragStartBase } = selection
-const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
+const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, previewInputsOf, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, groupEntityMenu, groupEntityRename, groupEntityColor, groupEntityDissolve, addMenu, addNodeAt } = menus

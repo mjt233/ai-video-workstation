@@ -58,6 +58,8 @@
         :upstream-updated="upstreamUpdated"
         :inputs="inputs"
         :text-inputs="textInputs"
+        :source-label="sourceLabel"
+        :source-input-count="sourceInputCount"
         :is-running="isRunning"
         :active-task-id="status?.taskId"
         :running-log="status?.lastLog"
@@ -271,10 +273,16 @@ const props = defineProps<{
   upload?: CanvasUploadState | null
   /** 上游已更新角标 */
   upstreamUpdated: boolean
-  /** AI 文本生成节点：媒体输入条目（来源节点输出类型为图片/音频/视频；单一输入口按来源类型归类） */
+  /** AI 文本生成节点：媒体输入条目（来源节点输出类型为图片/音频/视频；单一输入口按来源类型归类）；
+   *  输入预览节点：上游来源节点的媒体输入（穿透一层预览来源节点的输入） */
   inputs?: unknown[]
-  /** AI 文本生成节点：文本输入内容（来源为「文本」节点，取其 config.text） */
+  /** AI 文本生成节点：文本输入内容（来源为「文本」节点，取其 config.text）；
+   *  输入预览节点：上游来源节点的文本输入内容 */
   textInputs?: string[]
+  /** 输入预览节点：上游来源节点显示名（未连接时 undefined，节点主体显示「未连接上游节点」） */
+  sourceLabel?: string
+  /** 输入预览节点：上游来源节点的输入总数（媒体 + 文本；未连接时 undefined） */
+  sourceInputCount?: number
   /** AI 文本生成节点：是否在运行（父级按 statusByNode 下发；恢复态据此禁用控件、显示 Thinking 条） */
   isRunning?: boolean
   /** AI 文本生成节点：画布定位（生成请求携带；服务端会话落盘定位） */

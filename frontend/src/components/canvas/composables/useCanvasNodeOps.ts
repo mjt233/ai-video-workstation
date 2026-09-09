@@ -6,7 +6,7 @@
 
 import { computed } from 'vue'
 import { buildVideoSubmitParams } from '../../../canvas/videoSubmit'
-import { collectInputPaths, collectInputs, collectTextContents, type CanvasInputInfo } from '../../../canvas/generate'
+import { collectInputPaths, collectInputs, collectPreviewSourceInputs, collectTextContents, type CanvasInputInfo } from '../../../canvas/generate'
 import { getNodeOutputType } from '../../../canvas/connection'
 import type { CanvasNodeData, PortType } from '../../../canvas/types'
 import type { CanvasScope } from '../../../canvas/paths'
@@ -28,6 +28,18 @@ export interface LlmMediaInputItem {
    * 媒体反复重新加载；无 mtime 信息时缺失）。
    */
   version?: number
+}
+
+/** 输入预览节点的预览数据（穿透一层：上游来源节点自身的全部连线输入） */
+export interface PreviewInputsResult {
+  /** 上游来源节点 id */
+  sourceNodeId: string
+  /** 上游来源节点显示名（节点名，用户可双击重命名） */
+  sourceLabel: string
+  /** 上游来源节点的媒体输入（图片/视频/音频，已带产物 mtime 作预览缓存键） */
+  media: LlmMediaInputItem[]
+  /** 上游来源节点的文本输入内容（空白内容不收集） */
+  texts: string[]
 }
 
 /**
@@ -290,9 +302,9 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
    * 视频/音频当作新资源反复下载（浪费带宽 + 配置组件闪烁）。无 mtime 时保持 undefined。
    *
    * @param list 收集到的输入资产信息
-   * @returns 附带版本号的输入资产信息（原对象不可变，返回新引用）
+   * @returns 附带版本号的输入资产信息（原对象不可变，返回新引用；泛型保留输入条目类型）
    */
-  function withVersions(list: CanvasInputInfo[]): CanvasInputInfo[] {
+  function withVersions<T extends CanvasInputInfo>(list: T[]): T[] {
     if (!getOutputMtime) return list
     return list.map((i) => ({ ...i, version: getOutputMtime(i.nodeId) ?? undefined }))
   }
@@ -456,6 +468,36 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   }
 
   /**
+   * 输入预览节点：穿透一层收集「上游来源节点自身的全部连线输入」。
+   *
+   * 输入预览节点只有 1 个输入口（type: ['media','text']），本方法先按连线定位其上游
+   * 来源节点，再对该来源节点复用既有收集逻辑：
+   * - 媒体：collectInputs（按来源节点 config.inputOrder 排序）+ withVersions 附产物 mtime
+   *   作预览 URL 缓存键，再按来源输出类型归入 image/video/audio；
+   * - 文本：collectTextContents（「文本」节点读 config.text、「AI 文本生成」节点读
+   *   config.output，空白内容不收集）。
+   *
+   * 未连接上游（或无来源节点）时返回 null，由节点主体显示「未连接上游节点」占位。
+   *
+   * @param nodeId 输入预览节点 id
+   * @returns 上游来源节点的预览数据；未连接时 null
+   */
+  function previewInputsOf(nodeId: string): PreviewInputsResult | null {
+    // 纯函数负责「穿透一层定位上游来源节点 + 收集其媒体/文本输入」（见 canvas/generate.ts）
+    const data = collectPreviewSourceInputs(nodeId, store.connections.value, store.nodes.value, getScope())
+    if (!data) return null
+    // 附上来源产物 mtime 作预览 URL 缓存键（与生成图片/视频节点预览策略一致）
+    const media = withVersions(data.media).map((i) => ({
+      nodeId: i.nodeId,
+      path: i.path,
+      type: i.type,
+      label: i.label,
+      version: i.version,
+    }))
+    return { sourceNodeId: data.sourceNodeId, sourceLabel: data.sourceLabel, media, texts: data.texts }
+  }
+
+  /**
    * 快捷断开某个输入：删除该来源节点到目标节点的全部连线，并清理 config.inputOrder。
    *
    * 由编辑器输入项右上角红色 x 触发（不弹确认，与右键「断开连接」一致）。
@@ -494,6 +536,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     onUpdateConfigQuiet,
     llmMediaInputsOf,
     textInputsOf,
+    previewInputsOf,
     disconnectInput,
   }
 }

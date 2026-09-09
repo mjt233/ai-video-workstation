@@ -13,6 +13,7 @@ import TrimVideoNode from '../components/canvas/nodes/TrimVideoNode.vue'
 import AudioTrimNode from '../components/canvas/nodes/AudioTrimNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
 import AiTextGenerateNode from '../components/canvas/nodes/AiTextGenerateNode.vue'
+import InputPreviewNode from '../components/canvas/nodes/InputPreviewNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
@@ -262,6 +263,23 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       refText: '',
       prompt: '',
     },
+  },
+  {
+    id: 'input-preview',
+    name: '输入预览',
+    icon: 'mdi-eye-outline',
+    category: 'tool',
+    // 纯展示节点：单一输入口接受任意来源（媒体 + 文本），穿透一层预览「来源节点自身的输入」。
+    // 无输出端口——不参与数据流，不能作为连线源（故也不出现在成组连接目标菜单的兼容判定中）。
+    inputPorts: [{ id: 'in', type: ['media', 'text'], label: '输入' }],
+    outputPorts: [],
+    resizeable: true,
+    // 预览内容需要空间：来源行 + 媒体缩略图组（最多三组）+ 文本块；默认 320×300 可完整容纳
+    // 常见「图片 + 音频/视频」组合而不出现节点内滚动，用户可再手动缩放
+    defaultSize: { width: 320, height: 300 },
+    bodyComponent: InputPreviewNode,
+    // 无 editorComponent：全部内容在节点主体内展示（与 AI 文本生成节点同形态）；
+    // 未声明 canGenerate / hasHistory → 右键菜单自动无「重新生成」「历史」入口
   },
   {
     id: 'video-frame-extract',

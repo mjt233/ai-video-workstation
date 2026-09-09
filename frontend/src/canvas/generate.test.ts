@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasConnection, CanvasNodeData } from './types'
-import { collectInputs, collectInputPaths, collectTextContents, getNodeCurrentAssetPath, mergeInputOrder } from './generate'
+import { collectInputs, collectInputPaths, collectPreviewSourceInputs, collectTextContents, getNodeCurrentAssetPath, mergeInputOrder } from './generate'
 
 const loader: CanvasNodeData = {
   id: 'l1', prototypeId: 'image-loader', name: '加载', x: 0, y: 0, width: 10, height: 10,
@@ -208,5 +208,89 @@ describe('collectTextContents（文本输入内容收集）', () => {
     expect(collectTextContents('other', conns, nodes)).toEqual([])
     expect(collectTextContents('vg', conns, nodes, 'other')).toEqual([])
     expect(collectTextContents('vg', conns, nodes, 'in')).toEqual(['天空是蓝色的'])
+  })
+})
+
+describe('collectPreviewSourceInputs（输入预览节点：穿透一层收集上游来源节点的输入）', () => {
+  const audioNode: CanvasNodeData = {
+    id: 'aud', prototypeId: 'audio-loader', name: '加载音频', x: 0, y: 0, width: 10, height: 10,
+    config: { assetPath: 'assert/custom/b.flac' },
+  }
+  const textNode: CanvasNodeData = {
+    id: 'txt', prototypeId: 'text', name: '文本', x: 0, y: 0, width: 10, height: 10,
+    config: { text: '夕阳下的天台' },
+  }
+  /** 预览节点（无输出端口，仅作为连线目标） */
+  const previewNode: CanvasNodeData = {
+    id: 'pv', prototypeId: 'input-preview', name: '输入预览', x: 0, y: 0, width: 10, height: 10, config: {},
+  }
+  /** 上游来源节点（生成视频，自身连接了图片/音频/文本） */
+  const sourceNode: CanvasNodeData = {
+    id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 10, height: 10,
+    config: { inputOrder: [] },
+  }
+  const nodes = [loader, audioNode, textNode, previewNode, sourceNode]
+  const conns: CanvasConnection[] = [
+    // 上游来源节点自身的输入
+    { id: 'c1', fromNodeId: 'l1', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    { id: 'c2', fromNodeId: 'aud', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    { id: 'c3', fromNodeId: 'txt', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    // 预览节点 ← 上游来源节点
+    { id: 'c4', fromNodeId: 'vg', fromPortId: 'out', toNodeId: 'pv', toPortId: 'in' },
+  ]
+
+  it('返回上游来源节点名 + 其媒体输入（按输出类型归类）+ 文本输入', () => {
+    const r = collectPreviewSourceInputs('pv', conns, nodes)
+    expect(r?.sourceNodeId).toBe('vg')
+    expect(r?.sourceLabel).toBe('生成视频')
+    expect(r?.media.map((m) => [m.nodeId, m.type])).toEqual([['l1', 'image'], ['aud', 'audio']])
+    expect(r?.media[0].path).toBe('assert/character/张三/appearance.jpg')
+    expect(r?.media[0].label).toBe('appearance.jpg')
+    expect(r?.texts).toEqual(['夕阳下的天台'])
+  })
+
+  it('媒体输入遵循来源节点 config.inputOrder 排序', () => {
+    const ordered: CanvasNodeData = { ...sourceNode, config: { inputOrder: ['aud', 'l1'] } }
+    const r = collectPreviewSourceInputs('pv', conns, [loader, audioNode, textNode, previewNode, ordered])
+    expect(r?.media.map((m) => m.nodeId)).toEqual(['aud', 'l1'])
+  })
+
+  it('未连接上游 / 来源节点不存在 → null', () => {
+    expect(collectPreviewSourceInputs('pv', [], nodes)).toBeNull()
+    expect(
+      collectPreviewSourceInputs('pv', [{ id: 'c9', fromNodeId: 'missing', fromPortId: 'out', toNodeId: 'pv', toPortId: 'in' }], nodes),
+    ).toBeNull()
+  })
+
+  it('上游来源节点自身无输入 → 空媒体 + 空文本（非 null）', () => {
+    const loaderAsSource = collectPreviewSourceInputs(
+      'pv',
+      [{ id: 'c1', fromNodeId: 'l1', fromPortId: 'out', toNodeId: 'pv', toPortId: 'in' }],
+      nodes,
+    )
+    expect(loaderAsSource).not.toBeNull()
+    expect(loaderAsSource?.sourceLabel).toBe('加载')
+    expect(loaderAsSource?.media).toEqual([])
+    expect(loaderAsSource?.texts).toEqual([])
+  })
+
+  it('提供 scope 时上游来源节点为生成类，其输入产物按固定路径推导', () => {
+    const scope = { kind: 'scene' as const, primary: '1', secondary: '1' }
+    const genSource: CanvasNodeData = {
+      id: 'gs', prototypeId: 'video-generate', name: '上游生成', x: 0, y: 0, width: 10, height: 10,
+      config: { inputOrder: [] },
+    }
+    const genInput: CanvasNodeData = {
+      id: 'gi', prototypeId: 'image-generate', name: '上游生成图', x: 0, y: 0, width: 10, height: 10,
+      config: { current: { version: 3, path: 'assert/scene/1/1/canvas/gi/v3.jpg', date: 'x' } },
+    }
+    const c: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'gi', fromPortId: 'out', toNodeId: 'gs', toPortId: 'in' },
+      { id: 'c2', fromNodeId: 'gs', fromPortId: 'out', toNodeId: 'pv', toPortId: 'in' },
+    ]
+    const r = collectPreviewSourceInputs('pv', c, [genSource, genInput, previewNode], scope)
+    expect(r?.media).toEqual([
+      { nodeId: 'gi', path: 'assert/scene/1/1/canvas/gi/output.jpg', type: 'image', label: 'output.jpg' },
+    ])
   })
 })
