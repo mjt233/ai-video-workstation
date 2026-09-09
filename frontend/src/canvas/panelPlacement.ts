@@ -79,6 +79,11 @@ export interface PanelPlacementInput {
   designWidth: number
   /**
    * 面板实测高度（屏幕像素，`panelEl.offsetHeight`；内容自然高度，不含外部约束）。
+   *
+   * **必须按设计宽度测量**（组件测量时临时把面板宽度置为设计宽度）：若按面板当前渲染宽度测量，
+   * 实测高度会随贴靠方向变化（贴靠左右侧被收窄 → 内容换行变高），与定位结果互为因果，
+   * 表现为面板在节点右侧与上方之间以帧级频率闪动。
+   *
    * 为 0（首次渲染尚未测量）时按「上方/下方均可放下」处理，等测量完成后再重算。
    */
   panelHeight: number
@@ -335,15 +340,18 @@ function isCandidateViable(candidate: PlacementCandidate): boolean {
 
 /**
  * 同级排序（可行性相同的一组候选之间择优）：
- * 「不遮标题条」→「不裁切」→「不收窄面板高度」→「压住其他节点最少」→ 方向优先级 →
- * 「与选中节点重叠最小」。
+ * 「不遮标题条」→「不裁切」→「不收窄面板高度（都只能收窄时取可见高度更大者）」→
+ * 「压住其他节点最少」→ 方向优先级 →「与选中节点重叠最小」。
  *
- * 两条关键约定：
+ * 三条关键约定：
  * - **标题条优先级最高**：即使用户把节点放大到面板无法完整放下的程度，也要保证节点标题条可见
  *   （用户始终能认出当前配置的是哪个节点）；
  * - **不收窄优先于方向优先级**：下方只需收窄高度就能放下、而左右侧能保持完整高度时，
  *   选左右侧（贴靠只换行不压缩内容，比挤成很矮的滚动条更可用）；上下与左右同为完整高度时，
- *   仍按 下→上→右→左 的顺序保持既有视觉语言。
+ *   仍按 下→上→右→左 的顺序保持既有视觉语言；
+ * - **不收窄也优先于「不压住其他节点」**：都只能收窄时，先比可见高度（滚动更少），再比障碍物重叠。
+ *   否则会出现「为了不压住别的节点，把面板塞进一个只有 200 多像素高的位置」——
+ *   而那个位置恰好在下一帧把实测高度推向另一个方向，引发方向抖动。
  *
  * @param a 候选 A
  * @param b 候选 B
@@ -359,9 +367,10 @@ function compareCandidates(a: PlacementCandidate, b: PlacementCandidate): number
   if (clippedA !== clippedB) return clippedA - clippedB
   if (a.clippedArea !== b.clippedArea) return a.clippedArea - b.clippedArea
   if (a.shrunk !== b.shrunk) return a.shrunk ? 1 : -1
+  // 两者都未收窄时高度恒等于实测高度（相等），此比较仅在「都只能收窄」时生效：
+  // 取可见高度更大的方向（滚动更少）
+  if (a.height !== b.height) return b.height - a.height
   if (a.obstacleOverlapArea !== b.obstacleOverlapArea) return a.obstacleOverlapArea - b.obstacleOverlapArea
-  // 都只能收窄时，取可见高度更大的方向（滚动更少）；都不收窄时由方向优先级决定
-  if (a.shrunk && a.height !== b.height) return b.height - a.height
   const priority = PANEL_SIDE_PRIORITY.indexOf(a.side) - PANEL_SIDE_PRIORITY.indexOf(b.side)
   if (priority !== 0) return priority
   if (a.nodeOverlapArea !== b.nodeOverlapArea) return a.nodeOverlapArea - b.nodeOverlapArea
@@ -375,7 +384,8 @@ function compareCandidates(a: PlacementCandidate, b: PlacementCandidate): number
  * 1. 生成四个方向的候选位置（左右方向需同时满足宽度 ≥ 320px、高度 ≥ 240px）；
  * 2. 取「可行」候选（按原始高度完整可见且完全不遮挡节点），按「压住其他节点最少 → 方向优先级」
  *    择优；上一次的方向仍可行且完全同分时保持不变（滞回，避免平移/缩放时来回跳位）；
- * 3. 无可行候选时按同级排序取最优（不遮标题条 → 不裁切 → 不收窄 → 收窄幅度更小 → 重叠最小）；
+ * 3. 无可行候选时按同级排序取最优（不遮标题条 → 不裁切 → 不收窄（都需收窄时取可见高度更大者）→
+ *    压住其他节点最少 → 方向优先级）；
  * 4. 最终把位置钳制进可视区，保证面板不会跑出画布。
  *
  * 面板高度尚未测量（`panelHeight === 0`）时返回 `unmeasured: true`，组件应隐藏面板等待测量，

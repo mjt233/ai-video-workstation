@@ -200,15 +200,30 @@ function maxPanelHeight(): number {
 }
 
 /**
- * 计算面板定位（left/top/width/max-height）。
+ * 测量面板「自然高度」时使用的宽度（屏幕像素）：设计宽度与可视区可用宽度的较小值。
  *
- * 位置与尺寸全部由 `computePanelPlacement` 给出：优先节点正下方，空间不足时换向、
- * 贴靠左右侧自适应收窄宽度、必要时收窄高度（内容区滚动），始终不遮挡整个节点。
- * 高度尚未测量时返回 null（面板整体透明），等测量完成后再定位。
+ * **必须与贴靠方向无关**。若按面板当前渲染宽度测量，会形成反馈死循环：
+ * 贴靠右侧 → 宽度收窄 → 内容换行变高 → 实测高度变大 → 判定上下放不下 → 改到上方 →
+ * 恢复设计宽度 → 内容变矮 → 又判定右侧可行……面板便在节点右侧与上方之间以帧级频率闪动。
+ * 按设计宽度测量后，实测高度只由内容决定，定位函数成为纯几何函数，结果稳定收敛。
  */
-const panelStyle = computed<Record<string, string> | null>(() => {
+const measureWidth = computed(() => {
+  const available = props.flowWidth > 0
+    ? Math.max(props.flowWidth - PANEL_VIEWPORT_MARGIN * 2, 1)
+    : Number.POSITIVE_INFINITY
+  return Math.min(designWidth.value, available)
+})
+
+/**
+ * 面板定位结果（纯几何计算，算法见 `canvas/panelPlacement.ts`）。
+ *
+ * 全部输入都与「本次采用的贴靠方向」无关（节点矩形、标题条高度、可视区尺寸、设计宽度、
+ * 按设计宽度实测的自然高度、其他节点矩形），因此同一几何下重复计算得到同一结果——
+ * 不会出现「定位决定宽度 → 宽度决定实测高度 → 高度决定定位」的反馈抖动。
+ */
+const placement = computed(() => {
   const node = props.node
-  if (!node) return lastPanelStyle.value?.style ?? null
+  if (!node) return null
   const vp = props.viewport
   const zoom = vp.zoom > 0 ? vp.zoom : 1
   const toScreen = (rect: { x: number; y: number; width: number; height: number }) => ({
@@ -217,7 +232,7 @@ const panelStyle = computed<Record<string, string> | null>(() => {
     width: rect.width * zoom,
     height: rect.height * zoom,
   })
-  const placement = computePanelPlacement({
+  return computePanelPlacement({
     nodeRect: toScreen(node),
     headerHeight: nodeHeaderHeight.value,
     viewWidth: props.flowWidth,
@@ -230,14 +245,33 @@ const panelStyle = computed<Record<string, string> | null>(() => {
     obstacles: (props.otherNodes ?? []).map(toScreen),
     previousSide: lastSide.value,
   })
+})
+
+/**
+ * 面板定位样式（left/top/width/max-height）。
+ *
+ * 位置与尺寸全部由 `computePanelPlacement` 给出：优先节点正下方，空间不足时换向、
+ * 贴靠左右侧自适应收窄宽度、必要时收窄高度（内容区滚动），始终不遮挡整个节点。
+ * 高度尚未测量时返回 null（面板整体透明），等测量完成后再定位；
+ * 面板关闭/不可见时沿用最近一次定位样式（`lastPanelStyle`），避免淡出期间跳位。
+ */
+const panelStyle = computed<Record<string, string> | null>(() => {
+  const result = placement.value
+  if (!result) return lastPanelStyle.value?.style ?? null
   // 高度未测量：不定位（面板整体透明），等测量完成后重算（避免用乐观估计闪现错误位置）
-  if (placement.unmeasured) return null
+  if (result.unmeasured) return null
   return {
-    left: `${placement.left}px`,
-    top: `${placement.top}px`,
-    width: `${placement.width}px`,
-    maxHeight: `${placement.maxHeight}px`,
+    left: `${result.left}px`,
+    top: `${result.top}px`,
+    width: `${result.width}px`,
+    maxHeight: `${result.maxHeight}px`,
   }
+})
+
+// 记录本次实际采用的贴靠方向，作为下次计算的滞回依据（同分时不改向，避免平移/缩放中来回跳位）。
+// 不能写在 computed 内（eslint vue/no-side-effects-in-computed-properties）；写回同值不会触发重算。
+watch(placement, (result) => {
+  if (result && !result.unmeasured) lastSide.value = result.side
 })
 
 /** 面板内容区样式：宽度与高度上限跟随定位结果（贴靠时收窄，超出内部滚动） */
@@ -280,11 +314,15 @@ function measureHeaderHeight(): void {
 }
 
 /**
- * 读取配置面板的**自然高度**（屏幕像素，不受定位下发的高度上限约束），用于判断上下空间是否足够。
+ * 读取配置面板的**自然高度**（屏幕像素，不受定位下发的高度上限与宽度约束），用于判断上下空间是否足够。
  *
- * 直接读 `offsetHeight` 会读到被 `max-height` 钳制后的高度，导致「面板被压缩 → 测量值变小 →
- * 认为空间足够 → 继续压缩」的反馈锁死（表现为面板明明下方有空间却一直很矮）。
- * 因此测量时临时移除面板与内容区的内联 `max-height`，读取布局高度后立即还原；
+ * 两处临时改写都必须还原：
+ * - 移除面板与内容区的内联 `max-height`——直接读 `offsetHeight` 会读到被钳制后的高度，导致
+ *   「面板被压缩 → 测量值变小 → 认为空间足够 → 继续压缩」的反馈锁死（面板明明下方有空间却一直很矮）；
+ * - 把面板与内容区宽度临时置为 `measureWidth`（设计宽度）——否则贴靠左右侧时面板被收窄、
+ *   内容换行变高，实测高度随贴靠方向变化，与定位结果互为因果，形成帧级闪动（见 `measureWidth`）。
+ *
+ * 两次改写均在同一个同步任务内完成并还原，浏览器不会绘制中间态；
  * 面板尚未渲染时置 0（定位函数据此返回 `unmeasured`，面板隐藏等测量）。
  */
 function measurePanelHeight(): void {
@@ -297,14 +335,23 @@ function measurePanelHeight(): void {
   measuringPanel = true
   const body = panel.querySelector<HTMLElement>('.canvas-node-editor-panel__body')
   const prevPanelMaxHeight = panel.style.maxHeight
+  const prevPanelWidth = panel.style.width
   const prevBodyMaxHeight = body?.style.maxHeight ?? ''
+  const prevBodyWidth = body?.style.width ?? ''
+  const width = `${measureWidth.value}px`
   panel.style.maxHeight = 'none'
-  if (body) body.style.maxHeight = 'none'
+  panel.style.width = width
+  if (body) {
+    body.style.maxHeight = 'none'
+    body.style.width = width
+  }
   const height = panel.offsetHeight
-  const dbg = (window as unknown as Record<string, unknown>).__dshHeights as number[] | undefined
-  if (dbg) dbg.push(height)
   panel.style.maxHeight = prevPanelMaxHeight
-  if (body) body.style.maxHeight = prevBodyMaxHeight
+  panel.style.width = prevPanelWidth
+  if (body) {
+    body.style.maxHeight = prevBodyMaxHeight
+    body.style.width = prevBodyWidth
+  }
   measuringPanel = false
   panelHeight.value = height
 }

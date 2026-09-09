@@ -228,6 +228,44 @@ describe('computePanelPlacement', () => {
     expect(constrained.overlapsHeader).toBe(false)
   })
 
+  it('都只能收窄时优先可见高度更大者，而不是「不压住其他节点」的方向', () => {
+    // 视口 1000×800；节点 700,200,100×100：下方可用 480、上方 180、右侧 180（不足最小宽度）、
+    // 左侧可用高度 592 —— 四个方向都放不下 700px 高的面板，只能收窄
+    const input = makeInput({
+      nodeRect: { x: 700, y: 200, width: 100, height: 100 },
+      viewWidth: 1000,
+      viewHeight: 800,
+      designWidth: 440,
+      panelHeight: 700,
+      maxHeight: 700,
+      // 左侧位置被其他节点完全占据：排序若先比障碍物重叠，会退而求其次选更矮的下方位置
+      // （可见高度 480 < 592），而这正是面板方向抖动的成因之一
+      obstacles: [{ x: 200, y: 200, width: 440, height: 592 }],
+    })
+    const result = computePanelPlacement(input)
+    expect(result.side).toBe('left')
+    expect(result.maxHeight).toBe(592)
+  })
+
+  it('滞回稳定：把本次结果回传为 previousSide 后重复计算结果不变（不会来回跳位）', () => {
+    const cases: PanelPlacementInput[] = [
+      makeInput(),
+      makeInput({ nodeRect: { x: 700, y: 200, width: 100, height: 100 }, panelHeight: 700, maxHeight: 700 }),
+      makeInput({ nodeRect: { x: 300, y: 200, width: 280, height: 500 } }),
+      makeInput({ nodeRect: { x: 300, y: 500, width: 400, height: 200 } }),
+      makeInput({ viewHeight: 500, panelHeight: 600, maxHeight: 600 }),
+    ]
+    for (const input of cases) {
+      const first = computePanelPlacement(input)
+      const again = computePanelPlacement({ ...input, previousSide: first.side })
+      expect(again.side).toBe(first.side)
+      expect(again.left).toBeCloseTo(first.left, 5)
+      expect(again.top).toBeCloseTo(first.top, 5)
+      expect(again.width).toBeCloseTo(first.width, 5)
+      expect(again.maxHeight).toBeCloseTo(first.maxHeight, 5)
+    }
+  })
+
   it('高度未测量时返回 unmeasured（组件先隐藏面板）', () => {
     const result = computePanelPlacement(makeInput({ panelHeight: 0 }))
     expect(result.unmeasured).toBe(true)

@@ -10,11 +10,15 @@
 - **智能贴靠定位（保证面板不遮挡整个节点）**：定位算法抽为纯几何模块 **`canvas/panelPlacement.ts`**（`computePanelPlacement`，无 Vue/DOM 依赖，含单测 `panelPlacement.test.ts`），组件只负责测量后传参。规则：
   1. 候选方向优先级 **下方 → 上方 → 右侧 → 左侧**；「可行」＝ 面板**按原始高度**完整落在可视区内 **且不与节点矩形（含标题条）重叠**；
   2. 左右贴靠时宽度取「节点侧边到可视区边缘的空白」，钳制在 `[PANEL_SIDE_MIN_WIDTH=280, 设计宽度]`（空间不足 280px 放弃该侧）；垂直方向**不与节点垂直居中**（居中会白白压缩高度）——默认顶边对齐节点顶边、高度延伸到可视区底部，下方空间不足时改为底边对齐节点底边（两种锚定取可用高度更大者），仅在可用高度不足时才收窄 `maxHeight`（可用高度 < `PANEL_SIDE_MIN_HEIGHT=240` 时不算可行）；
-  3. **可行候选择优**（`compareCandidates`）：不遮标题条 → 不裁切 → **不收窄高度** → 压住其他节点（`obstacles`，由 AssetCanvas 传入除选中节点外的全部节点）面积最小 → 方向优先级。即「下方只需收窄、左右侧能保持完整高度」时选左右侧（贴靠只换行不压缩内容）；上下与左右同为完整高度时仍按 下→上→右→左 保持既有视觉语言；
-  4. **滞回**：上一次的贴靠方向仍可行、且与最优候选完全同分时保持不变（`previousSide`），避免平移/缩放/拖动时面板在方向间来回跳变；一旦出现更优位置（如避开其他节点）立即改向；面板关闭或切换节点时复位；
+  3. **可行候选择优**（`compareCandidates`）：不遮标题条 → 不裁切 → **不收窄高度** → 压住其他节点（`obstacles`，由 AssetCanvas 传入除选中节点外的全部节点）面积最小 → 方向优先级。即「下方只需收窄、左右侧能保持完整高度」时选左右侧（贴靠只换行不压缩内容）；上下与左右同为完整高度时仍按 下→上→右→左 保持既有视觉语言。**都不收窄时高度恒相等**，故「不收窄」这一项实际只在「所有候选都只能收窄」时生效：先取可见高度更大者（滚动更少），再比障碍物重叠——顺序不能颠倒（若先比障碍物，会为了不压住别的节点把面板塞进只有两百多像素高的位置，进而引发方向抖动）；
+  4. **滞回**：上一次的贴靠方向仍可行、且与最优候选完全同分时保持不变（`previousSide`，组件在 `watch(placement)` 中记录本次实际采用的方向，面板关闭/切换节点时复位），避免平移/缩放/拖动时面板在方向间来回跳变；一旦出现更优位置（如避开其他节点）立即改向；
   5. **降级**（无任何可行候选）：按同一排序取最优（都需收窄时取可见高度更大者），并把上下方向的高度收窄到可用空间（`PANEL_MIN_HEIGHT=120` 下限，内容区内部滚动）；
   6. 最终把面板位置钳制进可视区（`PANEL_VIEWPORT_MARGIN=8`），保证永不跑出画布。
-- **测量口径**：画布可视区用 `flowEl.clientHeight/Width`（AssetCanvas 的 ResizeObserver 监听 `flowEl`），勿用 Vue Flow `dimensions`（不可靠）；面板高度由面板组件 ResizeObserver 监听 `panelEl` 实测——**必须测「自然高度」**：测量时临时移除面板与内容区的内联 `max-height` 再读 `offsetHeight`（否则读到被钳制后的高度，会形成「面板被压缩 → 测量变小 → 认为空间足够 → 继续压缩」的反馈锁死）；节点切换时复位为 0（此时 `computePanelPlacement` 返回 `unmeasured`，面板不定位 → 测完再定位，避免用乐观估计闪现错误位置）；**节点标题条高度**由组件按 `[data-id="<nodeId>"] .canvas-node__header` 实测（除以 zoom 换算回流坐标，ResizeObserver 跟随标题条；测不到时兜底 24px），用于保证标题条永不被面板覆盖。
+- **测量口径**：画布可视区用 `flowEl.clientHeight/Width`（AssetCanvas 的 ResizeObserver 监听 `flowEl`），勿用 Vue Flow `dimensions`（不可靠）；面板高度由面板组件 ResizeObserver 监听 `panelEl` 实测——**必须测「自然高度」且宽度固定为设计宽度**：测量时临时移除面板与内容区的内联 `max-height`、并把面板与内容区的宽度临时置为 `measureWidth`（`min(设计宽度, 可视区宽度 - 2×8px)`）再读 `offsetHeight`（两处改写在同一同步任务内还原，浏览器不绘制中间态）。两条都不可省：
+  - 不移除 `max-height` 会读到被钳制后的高度，形成「面板被压缩 → 测量变小 → 认为空间足够 → 继续压缩」的反馈锁死；
+  - 不固定宽度会形成**方向闪动**：贴靠左右侧时面板被收窄 → 内容换行变高 → 实测高度变大 → 判定上下放不下 → 改到上方 → 恢复设计宽度 → 内容变矮 → 又判定右侧可行……面板在节点右侧与上方之间以帧级频率抽搐（实测案例：生成视频节点贴视口右缘，720 宽实测 510px、347 宽实测 627px，两种高度分别选出 `right` 与 `above`，互为正反馈）。按设计宽度测量后实测高度只由内容决定，定位成为纯几何函数，结果稳定收敛。
+
+  节点切换时复位为 0（此时 `computePanelPlacement` 返回 `unmeasured`，面板不定位 → 测完再定位，避免用乐观估计闪现错误位置）；**节点标题条高度**由组件按 `[data-id="<nodeId>"] .canvas-node__header` 实测（除以 zoom 换算回流坐标，ResizeObserver 跟随标题条；测不到时兜底 24px），用于保证标题条永不被面板覆盖。
 - **尺寸下发**：面板内容区 `.canvas-node-editor-panel__body` 的 `width` 与 `max-height` 由定位结果内联下发（左右贴靠时收窄、垂直空间不足时收窄高度并内部滚动）——**高度上限必须同时下发到内容区**，否则面板内容变化长高后会越出定位位置压住节点；编辑器内部本就 `flex-wrap`，收窄后参数行自动换行。
 - **淡入淡出**：`<Transition name="editor-panel">` + CSS（opacity 0.18s + `translateY(6px)`）；关闭淡出期间用 `lastPanelStyle` 缓存保持原位不跳位（缓存写在 `watch(editorPanelStyle)`，勿在 computed 内写副作用，会触发 eslint `vue/no-side-effects-in-computed-properties`）。
 - 拖拽节点时 `suppressEditor=true` 隐藏面板，仅点击节点才显示；**被拖动的真实节点恰好 1 个**时同时把应用级选中切为单选该节点（`useCanvasSelection.focusNodeForDrag`：`setSelectedNodes([id])` + `suppressPanelOnSelect=true`），使单选联动高亮随拖动实时出现；拖动结束保持选中但不弹面板，再次单击节点才打开。多选整组拖动不改变选中集。
