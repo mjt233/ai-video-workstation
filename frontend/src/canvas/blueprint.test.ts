@@ -11,7 +11,8 @@ import {
   migrateBlueprint,
   stripRuntimeConfig,
 } from './blueprint'
-import { DEFAULT_GROUP_COLOR, GROUP_MIN_SIZE } from './groups'
+import { DEFAULT_GROUP_COLOR, GROUP_HEADER_HEIGHT, GROUP_MIN_SIZE } from './groups'
+import { GROUP_FRAME_PADDING } from './groupSelection'
 
 /** 构造最小节点数据 */
 function makeNode(id: string, x: number, y: number, config: Record<string, unknown> = {}): CanvasNodeData {
@@ -196,9 +197,13 @@ describe('instantiateBlueprint', () => {
     expect(outer.name).toBe('角色三视图')
     expect(outer.color).toBe(DEFAULT_GROUP_COLOR)
     expect(outer).toMatchObject({ x: 500, y: 400 })
-    // 内容 + 12px 留白：外包矩形不小于最小尺寸
-    expect(outer.width).toBeGreaterThanOrEqual(GROUP_MIN_SIZE.width)
-    expect(outer.height).toBeGreaterThanOrEqual(GROUP_MIN_SIZE.height)
+    // 内容包围盒 = 节点 ∪ 蓝图内分组：x -20..680（宽 700）、y -20..200（高 220）
+    // 尺寸 = 包围盒 + 左右 12px×2 + 顶部 12 + 28px（标题条）
+    expect(outer.width).toBe(700 + GROUP_FRAME_PADDING * 2)
+    expect(outer.height).toBe(220 + GROUP_FRAME_PADDING * 2 + GROUP_HEADER_HEIGHT)
+    // 最上方内容（此处为蓝图内分组）顶边距分组顶边 = padding + topInset = 40px（不被标题条压住）
+    const contentTop = Math.min(...out.nodes.map((n) => n.y), ...out.groups.slice(1).map((g) => g.y))
+    expect(contentTop - outer.y).toBe(GROUP_FRAME_PADDING + GROUP_HEADER_HEIGHT)
     for (const node of out.nodes) {
       expect(node.x).toBeGreaterThan(outer.x)
       expect(node.y).toBeGreaterThan(outer.y)
@@ -210,6 +215,27 @@ describe('instantiateBlueprint', () => {
     expect(shifted.x - inner.x).toBe(out.nodes[0].x - 0)
     expect(shifted.y - inner.y).toBe(out.nodes[0].y - 0)
     expect(shifted.id).not.toBe(inner.id)
+  })
+
+  it('独立分组：topInset 可覆盖（0 表示不预留标题条空间）', () => {
+    const out = instantiateBlueprint(
+      { nodes: [makeNode('a', 0, 0), makeNode('b', 300, 0)], connections: [], groups: [] },
+      { origin: { x: 0, y: 0 }, asGroup: true, topInset: 0 },
+    )
+    const outer = out.groups[0]
+    expect(outer.height).toBe(160 + GROUP_FRAME_PADDING * 2)
+    expect(Math.min(...out.nodes.map((n) => n.y)) - outer.y).toBe(GROUP_FRAME_PADDING)
+  })
+
+  it('独立分组：内容不足最小尺寸时顶部间距不小于 padding + topInset', () => {
+    const small: CanvasNodeData = { id: 'a', prototypeId: 'text', name: 'a', x: 0, y: 0, width: 40, height: 20, config: {} }
+    const out = instantiateBlueprint(
+      { nodes: [small], connections: [], groups: [] },
+      { origin: { x: 0, y: 0 }, asGroup: true },
+    )
+    const outer = out.groups[0]
+    expect(outer).toMatchObject({ width: GROUP_MIN_SIZE.width, height: GROUP_MIN_SIZE.height })
+    expect(out.nodes[0].y - outer.y).toBeGreaterThanOrEqual(GROUP_FRAME_PADDING + GROUP_HEADER_HEIGHT)
   })
 
   it('未创建独立分组时不产生分组', () => {

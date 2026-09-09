@@ -19,6 +19,7 @@ import type { OnResizeEnd } from '@vue-flow/node-resizer'
 import {
   GROUP_CONTAIN_TOLERANCE,
   GROUP_DRAG_MIN_PX,
+  GROUP_HEADER_HEIGHT,
   GROUP_MIN_SIZE,
   GROUP_PALETTE,
   collectDragFollowSet,
@@ -147,7 +148,9 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
   // ── 创建分组（FR-1）──────────────────────────────────────
 
   /**
-   * 用当前选中节点创建分组：初始矩形 = 选中节点包围盒 + GROUP_FRAME_PADDING。
+   * 用当前选中节点创建分组：初始矩形 = 选中节点包围盒 + 四周 GROUP_FRAME_PADDING 留白
+   * + 顶部额外 GROUP_HEADER_HEIGHT 留白（容纳标题条，保证最上方节点不被标题条压住，
+   * 顶部合计 12 + 28 = 40px）。
    * 创建后保持多选状态（便于连续创建），snackbar 提示节点数量。
    */
   function createGroupFromSelection(): void {
@@ -159,7 +162,7 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
       showSnackbar('请先框选至少 2 个节点再创建分组', 'error')
       return
     }
-    const rect = groupRectFromNodes(nodes, GROUP_FRAME_PADDING)
+    const rect = groupRectFromNodes(nodes, GROUP_FRAME_PADDING, GROUP_HEADER_HEIGHT)
     if (!rect) return
     const group = store.addGroup(rect)
     showSnackbar(`已创建分组「${group.name}」（含 ${nodes.length} 个节点）`, 'success')

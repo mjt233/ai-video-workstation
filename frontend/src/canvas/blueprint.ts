@@ -15,6 +15,7 @@ import type { CanvasConnection, CanvasGroupData, CanvasNodeData, NodeConfig } fr
 import { newId } from './types'
 import {
   DEFAULT_GROUP_COLOR,
+  GROUP_HEADER_HEIGHT,
   GROUP_MIN_SIZE,
   asCanvasGroupData,
   boundingRect,
@@ -187,8 +188,13 @@ export interface InstantiateOptions {
   groupName?: string
   /** 独立分组主题色（缺省色板首色） */
   groupColor?: string
-  /** 独立分组内边距（流坐标像素；缺省与多选群组留白一致 12px） */
+  /** 独立分组左/右/下内边距（流坐标像素；缺省与多选群组留白一致 12px） */
   padding?: number
+  /**
+   * 独立分组顶部额外内边距（流坐标像素；缺省 GROUP_HEADER_HEIGHT = 28）。
+   * 用于容纳分组标题条：顶部内边距合计 `padding + topInset`，保证最上方内容不被标题条压住。
+   */
+  topInset?: number
 }
 
 /**
@@ -201,8 +207,9 @@ export interface InstantiateOptions {
  *    （复用 `remapNodeConfig`）；
  * 3. **剥离运行时字段**：`current` / `history` / `outputHistory`（见 `stripRuntimeConfig`）；
  * 4. **独立分组**：`asGroup=true` 时额外生成一个分组矩形（名称 = `groupName`），
- *    尺寸 = 内容包围盒 + 两倍内边距（不小于分组最小尺寸），内容整体内缩，
- *    从而「所有节点嵌套放置在该分组内」；蓝图内原有分组同时平移，相对关系不变。
+ *    尺寸 = 内容包围盒 + 左右/下内边距 `padding` + 顶部 `padding + topInset`
+ *    （`topInset` 容纳标题条，缺省 28px，故顶部合计 40px），不小于分组最小尺寸，
+ *    内容整体内缩，从而「所有节点嵌套放置在该分组内」；蓝图内原有分组同时平移，相对关系不变。
  *
  * 注意：节点 `config.assetPath` 等资产路径**原样保留**（跨项目插入是否可用由用户自行处理）。
  *
@@ -214,6 +221,7 @@ export function instantiateBlueprint(blueprint: BlueprintPayload, options: Insta
   const bounds = blueprintBounds(blueprint)
   if (!bounds) return { nodes: [], connections: [], groups: [] }
   const padding = options.padding ?? GROUP_FRAME_PADDING
+  const topInset = options.topInset ?? GROUP_HEADER_HEIGHT
   const originX = Math.round(options.origin.x)
   const originY = Math.round(options.origin.y)
 
@@ -224,10 +232,12 @@ export function instantiateBlueprint(blueprint: BlueprintPayload, options: Insta
 
   if (options.asGroup) {
     const width = Math.max(GROUP_MIN_SIZE.width, Math.round(bounds.width + padding * 2))
-    const height = Math.max(GROUP_MIN_SIZE.height, Math.round(bounds.height + padding * 2))
-    // 内容在独立分组内居中（内容未达最小尺寸时上下/左右留白对称）
+    const height = Math.max(GROUP_MIN_SIZE.height, Math.round(bounds.height + padding * 2 + topInset))
+    // 内容在独立分组内居中：顶部至少 padding + topInset（容纳标题条），左右/下至少 padding，
+    // 撑到最小尺寸时的富余空间上下平分。
+    const extraY = height - (bounds.height + padding * 2 + topInset)
     dx = originX + Math.floor((width - bounds.width) / 2) - bounds.x
-    dy = originY + Math.floor((height - bounds.height) / 2) - bounds.y
+    dy = originY + padding + topInset + Math.floor(extraY / 2) - bounds.y
     groups.push({
       id: newId(),
       name: options.groupName?.trim() || '蓝图',

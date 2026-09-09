@@ -95,7 +95,7 @@ import { NodeResizer } from '@vue-flow/node-resizer'
 import type { OnResizeEnd } from '@vue-flow/node-resizer'
 import '@vue-flow/node-resizer/dist/style.css'
 import type { CanvasGroupData } from '../../canvas/types'
-import { GROUP_MIN_SIZE, hexToRgba } from '../../canvas/groups'
+import { GROUP_HEADER_HEIGHT, GROUP_MIN_SIZE, hexToRgba } from '../../canvas/groups'
 
 /**
  * 持久分组框渲染组件（纯展示 + 事件上抛）。
@@ -145,6 +145,7 @@ const nameInputEl = ref<HTMLInputElement | null>(null)
 /**
  * 主题色 CSS 变量（单一颜色来源，三档透明度 + 选中光环）：
  * 填充 8%、边框 70%、标题条 90%、选中光环 35%。
+ * 标题条高度同样经变量下发（单一来源 `GROUP_HEADER_HEIGHT`，创建分组的顶部留白按它计算）。
  */
 const cssVars = computed<Record<string, string>>(() => {
   const color = props.group.color
@@ -154,6 +155,7 @@ const cssVars = computed<Record<string, string>>(() => {
     '--canvas-group-title-bg': hexToRgba(color, 0.9),
     '--canvas-group-ring': hexToRgba(color, 0.35),
     '--canvas-group-color': color,
+    '--canvas-group-header-height': `${GROUP_HEADER_HEIGHT}px`,
   }
 })
 
@@ -244,9 +246,9 @@ watch(
   cursor: move;
 }
 
-/* 顶部拖动条：位于标题条（28px）下方，避免与标题条重叠 */
+/* 顶部拖动条：位于标题条下方，避免与标题条重叠（标题条高度经 CSS 变量下发，见 cssVars） */
 .canvas-group__edge--t {
-  top: 28px;
+  top: var(--canvas-group-header-height);
   left: 8px;
   right: 8px;
   height: 8px;
@@ -273,13 +275,13 @@ watch(
   width: 8px;
 }
 
-/* 顶部标题条（28px）：主题色 90% 透明度背景 + 白字，可拖动 */
+/* 顶部标题条（高度 = --canvas-group-header-height）：主题色 90% 透明度背景 + 白字，可拖动 */
 .canvas-group__title {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 28px;
+  height: var(--canvas-group-header-height);
   display: flex;
   align-items: center;
   gap: 6px;

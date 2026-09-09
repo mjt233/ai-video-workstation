@@ -41,6 +41,17 @@ export const DEFAULT_GROUP_COLOR: string = GROUP_PALETTE[0]
 export const GROUP_MIN_SIZE = { width: 160, height: 100 } as const
 
 /**
+ * 分组标题条高度（流坐标像素）。
+ *
+ * 分组框顶部渲染一条该高度的标题条（拖动 / 双击改名 / 色点改色），故创建分组时顶部留白
+ * 必须在常规四周留白之外**额外**加上该高度，否则组内最上方节点会被标题条压住。
+ *
+ * 单一来源：`CanvasGroupNode.vue` 经 CSS 变量 `--canvas-group-header-height` 引用同一值，
+ * 改这里即可同时生效（勿在 CSS 里写死像素）。
+ */
+export const GROUP_HEADER_HEIGHT = 28
+
+/**
  * 「完全包含」判定容差（流坐标像素）。
  * 用于「框选矩形是否完全包含分组矩形」：允许框选矩形比分组矩形小 2px 仍判定为包含，
  * 避免取整/缩放换算误差导致明明框住了却不选中。
@@ -209,14 +220,19 @@ export function boundingRect(rects: RectLike[], padding = 0): RectLike | null {
 }
 
 /**
- * 由节点列表计算创建分组时的初始矩形（节点包围盒 + 四周留白）。
+ * 由节点列表计算创建分组时的初始矩形（节点包围盒 + 四周留白 + 顶部额外留白）。
  * 结果不小于 GROUP_MIN_SIZE；未达最小尺寸时以包围盒中心为基准对称扩张。
  *
+ * 顶部留白 = `padding + topInset`（`topInset` 用于容纳分组标题条，传 `GROUP_HEADER_HEIGHT`），
+ * 左右/下留白 = `padding`。对称扩张只会让矩形上边缘继续上移，
+ * 故**顶部间距恒 ≥ padding + topInset**（小节点场景间距只会更大，不会被扩张吃掉）。
+ *
  * @param nodes 选中的节点列表（至少一个）
- * @param padding 四周留白（流坐标像素；创建分组用 GROUP_FRAME_PADDING = 12）
+ * @param padding 左/右/下留白（流坐标像素；创建分组用 GROUP_FRAME_PADDING = 12）
+ * @param topInset 顶部额外留白（流坐标像素；创建分组用 GROUP_HEADER_HEIGHT = 28，缺省 0）
  * @returns 初始矩形；节点为空返回 null
  */
-export function groupRectFromNodes(nodes: CanvasNodeData[], padding = 0): RectLike | null {
+export function groupRectFromNodes(nodes: CanvasNodeData[], padding = 0, topInset = 0): RectLike | null {
   if (nodes.length === 0) return null
   let minX = Number.POSITIVE_INFINITY
   let minY = Number.POSITIVE_INFINITY
@@ -229,9 +245,9 @@ export function groupRectFromNodes(nodes: CanvasNodeData[], padding = 0): RectLi
     maxY = Math.max(maxY, n.y + n.height)
   }
   const rawX = Math.round(minX - padding)
-  const rawY = Math.round(minY - padding)
+  const rawY = Math.round(minY - padding - topInset)
   const rawWidth = Math.round(maxX - minX + padding * 2)
-  const rawHeight = Math.round(maxY - minY + padding * 2)
+  const rawHeight = Math.round(maxY - minY + padding * 2 + topInset)
   const width = Math.max(GROUP_MIN_SIZE.width, rawWidth)
   const height = Math.max(GROUP_MIN_SIZE.height, rawHeight)
   return {

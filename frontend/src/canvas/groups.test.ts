@@ -3,6 +3,7 @@ import type { CanvasGroupData, CanvasNodeData } from './types'
 import {
   DEFAULT_GROUP_COLOR,
   GROUP_DRAG_MIN_PX,
+  GROUP_HEADER_HEIGHT,
   GROUP_MIN_SIZE,
   GROUP_PALETTE,
   asCanvasGroupData,
@@ -36,6 +37,10 @@ describe('常量', () => {
   it('最小尺寸与拖动阈值', () => {
     expect(GROUP_MIN_SIZE).toEqual({ width: 160, height: 100 })
     expect(GROUP_DRAG_MIN_PX).toBe(4)
+  })
+
+  it('标题条高度为 28px（创建分组顶部留白依据）', () => {
+    expect(GROUP_HEADER_HEIGHT).toBe(28)
   })
 })
 
@@ -217,6 +222,32 @@ describe('groupRectFromNodes', () => {
       width: GROUP_MIN_SIZE.width,
       height: GROUP_MIN_SIZE.height,
     })
+  })
+
+  it('topInset 只作用于顶部：左右/下留白不变，高度增加 topInset', () => {
+    const rect = groupRectFromNodes(
+      [makeNode('a', 100, 200, 300, 200), makeNode('b', 500, 500, 300, 200)],
+      12,
+      GROUP_HEADER_HEIGHT,
+    )
+    // 顶部 = 200 - 12 - 28 = 160；左右/下仍 12px；高度 = 524 + 28
+    expect(rect).toEqual({ x: 88, y: 160, width: 724, height: 524 + GROUP_HEADER_HEIGHT })
+  })
+
+  it('topInset 下最上方节点顶边距分组顶边 = padding + topInset（创建分组即 40px）', () => {
+    const node = makeNode('a', 100, 200, 300, 200)
+    const rect = groupRectFromNodes([node], 12, GROUP_HEADER_HEIGHT)
+    expect(rect).not.toBeNull()
+    expect(node.y - (rect as { y: number }).y).toBe(12 + GROUP_HEADER_HEIGHT)
+  })
+
+  it('撑到最小尺寸时顶部间距只会更大（对称扩张不吃掉 topInset）', () => {
+    const node = makeNode('a', 100, 100, 40, 20)
+    const rect = groupRectFromNodes([node], 12, GROUP_HEADER_HEIGHT)
+    expect(rect).not.toBeNull()
+    const gap = node.y - (rect as { y: number }).y
+    expect(gap).toBeGreaterThanOrEqual(12 + GROUP_HEADER_HEIGHT)
+    expect(rect).toMatchObject({ width: GROUP_MIN_SIZE.width, height: GROUP_MIN_SIZE.height })
   })
 })
 
