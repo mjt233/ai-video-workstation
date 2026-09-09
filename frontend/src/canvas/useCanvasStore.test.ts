@@ -18,10 +18,11 @@ const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
 function canvasResult(nodes: unknown[] = [], rev = 0) {
   return {
     canvas: {
-      version: 1,
+      version: 2,
       kind: 'scene' as const,
       nodes,
       connections: [],
+      groups: [],
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     },
@@ -419,7 +420,7 @@ describe('useCanvasStore', () => {
     const b = store.addNode('image-generate', 100, 100)
     expect(store.connect(a.id, b.id)).toBe(true)
     store.copyNodes([a.id, b.id])
-    const pasted = store.pasteNodes()
+    const pasted = store.pasteNodes().nodes
     expect(pasted).toHaveLength(2)
     const pastedIds = new Set(pasted.map((n) => n.id))
     expect(pastedIds.has(a.id)).toBe(false)
@@ -441,7 +442,7 @@ describe('useCanvasStore', () => {
     store.updateNode(b.id, { config: { inputOrder: [a.id] } })
     expect(store.connect(a.id, b.id)).toBe(true)
     store.copyNodes([a.id, b.id])
-    const pasted = store.pasteNodes()
+    const pasted = store.pasteNodes().nodes
     const pastedB = pasted.find((n) => n.prototypeId === 'image-generate')!
     expect(pastedB.config.inputOrder).toHaveLength(1)
     expect((pastedB.config.inputOrder as string[])[0]).not.toBe(a.id)
@@ -454,15 +455,16 @@ describe('useCanvasStore', () => {
     const payload = {
       nodes: [{ ...store.addNode('text', 0, 0) }],
       connections: [] as { id: string; fromNodeId: string; fromPortId: string; toNodeId: string; toPortId: string }[],
+      groups: [],
     }
-    const pasted = store.pasteNodes(payload)
+    const pasted = store.pasteNodes(payload).nodes
     expect(pasted).toHaveLength(1)
     expect(store.canPaste.value).toBe(false)
   })
 
-  it('pasteNodes：无剪贴板内容返回空数组', () => {
+  it('pasteNodes：无剪贴板内容返回空节点与空分组', () => {
     const store = useCanvasStore('p', TARGET)
-    expect(store.pasteNodes()).toEqual([])
+    expect(store.pasteNodes()).toEqual({ nodes: [], groups: [] })
   })
 
   it('updateNodes：批量移动位置为单次撤销', () => {
@@ -482,6 +484,31 @@ describe('useCanvasStore', () => {
     const store = useCanvasStore('p', TARGET)
     store.updateNodes([{ id: 'ghost', x: 1, y: 1 }])
     expect(store.nodes.value).toHaveLength(0)
+    expect(store.canUndo.value).toBe(false)
+  })
+
+  it('moveEntities：节点与分组一次回写，单次撤销', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('text', 0, 0)
+    const g = store.addGroup(rect(100, 100))
+    store.moveEntities([{ id: a.id, x: 40, y: 50 }], [{ id: g.id, x: 140, y: 150 }])
+    expect(store.nodes.value.find((n) => n.id === a.id)).toMatchObject({ x: 40, y: 50 })
+    expect(store.groups.value.find((x) => x.id === g.id)).toMatchObject({ x: 140, y: 150 })
+    store.undo()
+    expect(store.nodes.value.find((n) => n.id === a.id)).toMatchObject({ x: 0, y: 0 })
+    expect(store.groups.value.find((x) => x.id === g.id)).toMatchObject({ x: 100, y: 100 })
+  })
+
+  it('moveEntities：仅分组补丁时同样生效（拖动分组）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const g = store.addGroup(rect())
+    store.moveEntities([], [{ id: g.id, x: 10, y: 20 }])
+    expect(store.groups.value[0]).toMatchObject({ x: 10, y: 20 })
+  })
+
+  it('moveEntities：全部 id 不存在时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.moveEntities([{ id: 'ghost', x: 1, y: 1 }], [{ id: 'ghost-g', x: 1, y: 1 }])
     expect(store.canUndo.value).toBe(false)
   })
 
@@ -643,5 +670,171 @@ describe('useCanvasStore', () => {
     const store = makeTextAiStore()
     store.adoptExternalChange('missing', { output: 'x' }, 5)
     expect(store.canUndo.value).toBe(false)
+  })
+
+  // ── 持久分组（groups[]）──────────────────────────────────────
+
+  /** 构造分组矩形 */
+  function rect(x = 0, y = 0, width = 400, height = 300) {
+    return { x, y, width, height }
+  }
+
+  it('addGroup：默认标题与颜色，入撤销栈并可撤销', () => {
+    const store = useCanvasStore('p', TARGET)
+    const g1 = store.addGroup(rect(10, 20, 300, 200))
+    expect(g1.name).toBe('分组 1')
+    expect(g1.color).toBe('#1976D2')
+    expect(g1.x).toBe(10)
+    expect(g1.width).toBe(300)
+    expect(store.groups.value).toHaveLength(1)
+    const g2 = store.addGroup(rect())
+    expect(g2.name).toBe('分组 2')
+    expect(store.groups.value).toHaveLength(2)
+    store.undo()
+    expect(store.groups.value).toHaveLength(1)
+    store.undo()
+    expect(store.groups.value).toHaveLength(0)
+    store.redo()
+    expect(store.groups.value).toHaveLength(1)
+  })
+
+  it('addGroup：可指定标题与颜色', () => {
+    const store = useCanvasStore('p', TARGET)
+    const g = store.addGroup(rect(), { name: '主角区', color: '#2E7D32' })
+    expect(g.name).toBe('主角区')
+    expect(g.color).toBe('#2E7D32')
+  })
+
+  it('updateGroup：更新标题/颜色/几何，单次撤销', () => {
+    const store = useCanvasStore('p', TARGET)
+    const g = store.addGroup(rect())
+    store.updateGroup(g.id, { name: '改名', color: '#C62828', x: 50, y: 60, width: 200, height: 120 })
+    expect(store.groups.value[0]).toMatchObject({ name: '改名', color: '#C62828', x: 50, y: 60, width: 200, height: 120 })
+    store.undo()
+    expect(store.groups.value[0]).toMatchObject({ name: '分组 1', color: '#1976D2', x: 0, y: 0, width: 400, height: 300 })
+  })
+
+  it('updateGroup：分组不存在时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.updateGroup('ghost', { name: 'x' })
+    expect(store.canUndo.value).toBe(false)
+  })
+
+  it('updateGroups：批量平移单次撤销', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addGroup(rect(0, 0))
+    const b = store.addGroup(rect(500, 500))
+    store.updateGroups([{ id: a.id, x: 100, y: 110 }, { id: b.id, x: 600, y: 610 }])
+    expect(store.groups.value.find((g) => g.id === a.id)).toMatchObject({ x: 100, y: 110 })
+    expect(store.groups.value.find((g) => g.id === b.id)).toMatchObject({ x: 600, y: 610 })
+    store.undo()
+    expect(store.groups.value.find((g) => g.id === a.id)).toMatchObject({ x: 0, y: 0 })
+    expect(store.groups.value.find((g) => g.id === b.id)).toMatchObject({ x: 500, y: 500 })
+  })
+
+  it('updateGroups：全部 id 不存在时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.updateGroups([{ id: 'ghost', x: 1, y: 1 }])
+    expect(store.canUndo.value).toBe(false)
+  })
+
+  it('removeGroups：解散分组但保留节点，单次撤销', () => {
+    const store = useCanvasStore('p', TARGET)
+    const node = store.addNode('text', 0, 0)
+    const g = store.addGroup(rect())
+    store.removeGroups([g.id])
+    expect(store.groups.value).toHaveLength(0)
+    expect(store.nodes.value).toHaveLength(1)
+    expect(store.nodes.value[0].id).toBe(node.id)
+    store.undo()
+    expect(store.groups.value).toHaveLength(1)
+  })
+
+  it('removeGroups：空列表/不存在 id 时 no-op', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.removeGroups([])
+    store.removeGroups(['ghost'])
+    expect(store.canUndo.value).toBe(false)
+  })
+
+  it('removeNodes：同时删除节点与分组（单次撤销）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const g = store.addGroup(rect())
+    const events: { type: string }[] = []
+    store.onConnectionsChanged((e) => events.push(e))
+    store.removeNodes([a.id], [g.id])
+    expect(store.nodes.value).toHaveLength(0)
+    expect(store.groups.value).toHaveLength(0)
+    store.undo()
+    expect(store.nodes.value).toHaveLength(1)
+    expect(store.groups.value).toHaveLength(1)
+  })
+
+  it('copyNodes/pasteNodes：分组换新 id 并偏移 30px，成员关系按几何自动成立', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('text', 20, 30)
+    const g = store.addGroup(rect(0, 0, 400, 300))
+    store.copyNodes([a.id], [g.id])
+    const pasted = store.pasteNodes()
+    expect(pasted.nodes).toHaveLength(1)
+    expect(pasted.groups).toHaveLength(1)
+    const newGroup = pasted.groups[0]
+    expect(newGroup.id).not.toBe(g.id)
+    expect(newGroup.name).toBe('分组 1')
+    expect(newGroup.x).toBe(30)
+    expect(newGroup.y).toBe(30)
+    expect(store.groups.value).toHaveLength(2)
+    // 粘贴出的节点（20+30, 30+30）仍落在粘贴出的分组（30,30,400,300）内
+    const newNode = pasted.nodes[0]
+    expect(newNode.x).toBe(50)
+    expect(newNode.y).toBe(60)
+    expect(newGroup.x <= newNode.x && newGroup.x + newGroup.width >= newNode.x + newNode.width).toBe(true)
+    store.undo()
+    expect(store.groups.value).toHaveLength(1)
+    expect(store.nodes.value).toHaveLength(1)
+  })
+
+  it('copyNodes：仅复制分组（无节点）也可粘贴，canPaste 计入分组', () => {
+    const store = useCanvasStore('p', TARGET)
+    const g = store.addGroup(rect())
+    store.copyNodes([], [g.id])
+    expect(store.canPaste.value).toBe(true)
+    const pasted = store.pasteNodes()
+    expect(pasted.nodes).toHaveLength(0)
+    expect(pasted.groups).toHaveLength(1)
+    expect(store.groups.value).toHaveLength(2)
+  })
+
+  it('copyNodes：节点与分组均为空时忽略（不覆盖已有剪贴板）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('text', 0, 0)
+    store.copyNodes([a.id])
+    store.copyNodes([], [])
+    expect(store.canPaste.value).toBe(true)
+    expect(store.pasteNodes().nodes).toHaveLength(1)
+  })
+
+  it('pasteNodes：外部载荷含分组时重建分组', () => {
+    const store = useCanvasStore('p', TARGET)
+    const payload = {
+      nodes: [{ ...store.addNode('text', 0, 0) }],
+      connections: [],
+      groups: [{ id: 'ext-g', name: '外部分组', color: '#0097A7', x: 100, y: 200, width: 300, height: 200 }],
+    }
+    const pasted = store.pasteNodes(payload)
+    expect(pasted.groups).toHaveLength(1)
+    expect(pasted.groups[0].id).not.toBe('ext-g')
+    expect(pasted.groups[0].x).toBe(130)
+    expect(pasted.groups[0].y).toBe(230)
+    expect(store.groups.value).toHaveLength(1)
+  })
+
+  it('switchTarget：切换画布后分组被清空', async () => {
+    const store = useCanvasStore('p', TARGET)
+    store.addGroup(rect())
+    expect(store.groups.value).toHaveLength(1)
+    await store.switchTarget({ kind: 'scene', episode: '1', shot: '2' })
+    expect(store.groups.value).toHaveLength(0)
   })
 })

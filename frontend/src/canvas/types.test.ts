@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CANVAS_SCHEMA_VERSION, createCanvasData, migrateCanvasData, newId, nextVersion } from './types'
 
 describe('createCanvasData', () => {
@@ -8,6 +8,7 @@ describe('createCanvasData', () => {
     expect(data.version).toBe(CANVAS_SCHEMA_VERSION)
     expect(data.nodes).toEqual([])
     expect(data.connections).toEqual([])
+    expect(data.groups).toEqual([])
     expect(data.createdAt).toBeTruthy()
   })
 
@@ -58,6 +59,47 @@ describe('migrateCanvasData', () => {
     expect(data.version).toBe(CANVAS_SCHEMA_VERSION)
     expect(data.nodes).toEqual([])
     expect(data.connections).toEqual([])
+    expect(data.groups).toEqual([])
     expect(data.createdAt).toBeTruthy()
+  })
+
+  // ── schema v2：持久分组（groups[]）─────────────────────────
+
+  it('schema 版本为 2', () => {
+    expect(CANVAS_SCHEMA_VERSION).toBe(2)
+  })
+
+  it('旧数据（无 groups 字段）迁移补空数组', () => {
+    const data = migrateCanvasData({ version: 1, kind: 'scene', nodes: [], connections: [] })
+    expect(data.version).toBe(2)
+    expect(data.groups).toEqual([])
+  })
+
+  it('合法分组原样迁移（只保留已知字段）', () => {
+    const data = migrateCanvasData({
+      kind: 'scene',
+      groups: [{ id: 'g1', name: '分组 1', color: '#1976D2', x: 1, y: 2, width: 3, height: 4, nodeIds: ['n1'] }],
+    })
+    expect(data.groups).toEqual([{ id: 'g1', name: '分组 1', color: '#1976D2', x: 1, y: 2, width: 3, height: 4 }])
+  })
+
+  it('非法分组项被丢弃并输出警告（不抛错）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const data = migrateCanvasData({
+      kind: 'scene',
+      groups: [{ id: 'ok', name: 'n', color: '#000', x: 0, y: 0, width: 10, height: 10 }, { id: 'bad' }, null],
+    })
+    expect(data.groups).toHaveLength(1)
+    expect(data.groups[0].id).toBe('ok')
+    expect(warn).toHaveBeenCalledTimes(2)
+    warn.mockRestore()
+  })
+
+  it('groups 非数组时按空数组处理并输出警告', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const data = migrateCanvasData({ kind: 'scene', groups: 'oops' })
+    expect(data.groups).toEqual([])
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
   })
 })

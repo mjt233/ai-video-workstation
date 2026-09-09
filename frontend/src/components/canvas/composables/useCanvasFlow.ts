@@ -39,8 +39,20 @@ export interface UseCanvasFlowOptions {
   selectedNodeIds: Ref<string[]>
   /** 运行中（Loading）节点 id 集合（运行态高亮数据源：其直接输入连线与上游节点联动高亮） */
   runningNodeIds: Ref<Set<string>>
-  /** 当前多选（≥2 个）节点包围盒（合成节点定位；单选/无选中时为 null） */
+  /** 当前多选（≥2）包围盒（合成节点与多选工具栏定位；单选/无选中时为 null） */
   groupRect: ComputedRef<GroupRect | null>
+  /** Ctrl 键是否按下（持久分组节点穿透类数据源；按下时分组框整体不拦截指针 → Ctrl+拖拽恒为框选） */
+  ctrlHeld: Ref<boolean>
+}
+
+/** 分组/节点位置回写补丁 */
+export interface MovePatch {
+  /** 实体 id（节点 id 或分组 id） */
+  id: string
+  /** 新的流坐标 x */
+  x: number
+  /** 新的流坐标 y */
+  y: number
 }
 
 /** 单选联动高亮连线挂载到 edge wrapper 的 class（输入侧绿色 / 输出侧橙色，样式见 AssetCanvas scoped `:deep` 规则） */
@@ -56,7 +68,7 @@ const EDGE_RUNNING_RELATED_CLASS = 'canvas-edge--related canvas-edge--running'
  * @returns Vue Flow 数据映射、交互处理器与连线右键菜单状态
  */
 export function useCanvasFlow(options: UseCanvasFlowOptions) {
-  const { store, nodeMap, project, selectedEdgeId, selectedNodeIds, runningNodeIds, groupRect } = options
+  const { store, nodeMap, project, selectedEdgeId, selectedNodeIds, runningNodeIds, groupRect, ctrlHeld } = options
 
   /**
    * 单选联动高亮（输入侧）：恰好选中 1 个节点时，收集「指向选中节点」的连线 id
@@ -160,6 +172,32 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   )
 
   /**
+   * 持久分组节点列表（canvas.json groups[] 映射为 Vue Flow 节点，type: canvas-group）：
+   * - `selectable: false`：分组永远进不了 Vue Flow 内部选中集（框选命中由 useCanvasGroups 自行判定）；
+   * - `draggable: false`：原生拖动会连带移动全部选中节点（导致节点被移动两次），分组拖动改为自定义实现；
+   * - `zIndex: -2`：绘制在真实节点（默认 z 0）与多选虚线框（-1）之下；
+   * - `class` 函数按 Ctrl 状态挂穿透类（函数体内部读取 ctrlHeld，故本 computed **不依赖** Ctrl 状态，
+   *   轮询期间不会因高频状态重建节点列表导致动画重置）；
+   * - 尺寸经 `style` 下发（与真实节点一致）：NodeResizer 缩放期间会写入内部节点 style，
+   *   若我们的节点对象不带 style，则 store 回写（缩放结束/撤销）后内部 style 残留旧尺寸，
+   *   框体渲染尺寸与数据不一致。
+   */
+  const flowGroupNodeList = computed(() =>
+    store.groups.value.map((g) => ({
+      id: g.id,
+      type: 'canvas-group',
+      position: { x: g.x, y: g.y },
+      style: { width: `${g.width}px`, height: `${g.height}px` },
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      focusable: false,
+      zIndex: -2,
+      class: () => (ctrlHeld.value ? 'canvas-group-node--passthrough' : ''),
+    })),
+  )
+
+  /**
    * 群组合成节点（多选 ≥2 时追加，不入 store）：
    * - __group-frame：虚线框（置于节点下层 zIndex -1，拖动框体经 Vue Flow 原生拖动整体移动选中节点）；
    * - __group-dot：右侧输出连接点（zIndex 2000，位于全部节点之上，mousedown 由 useCanvasGroup 承接）。
@@ -197,8 +235,8 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
     ]
   })
 
-  /** Vue Flow 节点列表（真实节点 + 群组合成节点） */
-  const flowNodeFullList = computed(() => [...flowNodeList.value, ...syntheticNodeList.value])
+  /** Vue Flow 节点列表（持久分组 + 真实节点 + 多选合成节点；顺序即渲染层级，zIndex 另行控制） */
+  const flowNodeFullList = computed(() => [...flowGroupNodeList.value, ...flowNodeList.value, ...syntheticNodeList.value])
 
   /** Vue Flow 连线列表（type 固定 default；联动高亮时给关联连线挂方向分色 class：
       运行态 canvas-edge--running（蓝，优先级最高）/ 单选输入侧 canvas-edge--input（绿）/
@@ -242,14 +280,19 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
    * 多个节点同时拖（含拖动群组虚线框时 Vue Flow 原生一起移动全部选中节点）批量回写，
    * 单次撤销快照即可整体回退；单个节点保持既有单条撤销语义。
    *
-   * @param dragged 被拖动的节点列表（可能含群组合成节点，需过滤）
+   * 若同时有**选中分组框跟随移动**（多选拖动场景，位置补丁由 useCanvasGroups 计算），
+   * 则节点与分组经 moveEntities 一次回写（单次撤销）。
+   *
+   * @param payload 拖动结束事件（含被拖动的节点列表，可能含群组合成节点，需过滤）
+   * @param groupPatches 同步移动的选中分组位置补丁（缺省为空）
    */
-  function onNodeDragStop({ nodes: dragged }: NodeDragEvent): void {
+  function onNodeDragStop({ nodes: dragged }: NodeDragEvent, groupPatches: MovePatch[] = []): void {
     const real = dragged.filter((n) => !isSyntheticNodeId(n.id))
-    if (real.length === 0) return
-    if (real.length > 1) {
-      store.updateNodes(
+    if (real.length === 0 && groupPatches.length === 0) return
+    if (real.length > 1 || groupPatches.length > 0) {
+      store.moveEntities(
         real.map((n) => ({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) })),
+        groupPatches,
       )
     } else {
       store.updateNode(real[0].id, { x: Math.round(real[0].position.x), y: Math.round(real[0].position.y) })

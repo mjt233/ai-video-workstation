@@ -24,9 +24,20 @@ export interface UseCanvasMenusOptions {
     deleteNode: (nodeId: string) => Promise<void>
     deleteSelected: () => Promise<void>
     getSelectedNodeIds: () => string[]
+    /** 读取当前选中分组 id 列表（群组菜单标题展示节点/分组数量） */
+    getSelectedGroupIds: () => string[]
   }
   /** 内联重命名（右键「重命名」复用） */
   rename: { startRename: (nodeId: string) => void }
+  /** 持久分组实体动作（右键分组框菜单：重命名 / 更改颜色 / 解散分组） */
+  groupActions: {
+    /** 进入分组标题内联编辑 */
+    startRename: (groupId: string) => void
+    /** 在画布容器指定坐标打开预设色板菜单（x/y 相对画布容器） */
+    openColorAt: (groupId: string, x: number, y: number) => void
+    /** 解散分组（弹窗确认，仅删框） */
+    dissolve: (groupId: string) => Promise<void>
+  }
   /** 对话框入口（历史/保存为） */
   dialogs: {
     openHistory: (nodeId: string) => void
@@ -46,7 +57,7 @@ export interface UseCanvasMenusOptions {
  * @returns 菜单状态与操作 API
  */
 export function useCanvasMenus(options: UseCanvasMenusOptions) {
-  const { store, nodeMap, selection, rename, dialogs, getScope, generate } = options
+  const { store, nodeMap, selection, rename, groupActions, dialogs, getScope, generate } = options
 
   // ── 节点右键菜单 ────────────────────────────────────────
 
@@ -193,8 +204,8 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
 
   // ── 群组右键菜单（多选虚线框，复制/删除整组）─────────────
 
-  /** 群组右键菜单状态（x/y 相对画布容器；count 为选中节点数） */
-  const groupMenu = reactive({ show: false, x: 0, y: 0, count: 0 })
+  /** 群组右键菜单状态（x/y 相对画布容器；count 为选中节点数，groupCount 为选中分组数） */
+  const groupMenu = reactive({ show: false, x: 0, y: 0, count: 0, groupCount: 0 })
 
   /**
    * 打开群组右键菜单：不改变当前多选状态。
@@ -204,27 +215,75 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
    */
   function openGroupMenu(event: MouseEvent, flowEl: HTMLElement | null): void {
     const ids = selection.getSelectedNodeIds()
-    if (ids.length < 2) return
+    const groupIds = selection.getSelectedGroupIds()
+    if (ids.length + groupIds.length < 2) return
     event.preventDefault()
     event.stopPropagation()
     const rect = flowEl?.getBoundingClientRect()
     groupMenu.x = Math.round(event.clientX - (rect?.left ?? 0))
     groupMenu.y = Math.round(event.clientY - (rect?.top ?? 0))
     groupMenu.count = ids.length
+    groupMenu.groupCount = groupIds.length
     groupMenu.show = true
   }
 
-  /** 菜单：复制整组 */
+  /** 菜单：复制整组（选中节点 + 选中分组） */
   function groupCopy(): void {
     const ids = selection.getSelectedNodeIds()
+    const groupIds = selection.getSelectedGroupIds()
     groupMenu.show = false
-    if (ids.length > 0) store.copyNodes(ids)
+    if (ids.length + groupIds.length > 0) store.copyNodes(ids, groupIds)
   }
 
-  /** 菜单：删除整组（弹窗确认一次） */
+  /** 菜单：删除整组（弹窗确认一次；含分组时同时解散分组） */
   function groupDelete(): void {
     groupMenu.show = false
     void selection.deleteSelected()
+  }
+
+  // ── 分组实体右键菜单（右键分组框：重命名 / 更改颜色 / 解散分组）──
+
+  /** 分组实体右键菜单状态（x/y 相对画布容器；groupId 为对应分组） */
+  const groupEntityMenu = reactive({ show: false, x: 0, y: 0, groupId: '' })
+
+  /**
+   * 打开分组实体右键菜单（不改变当前选中状态）。
+   *
+   * @param event 鼠标右键事件
+   * @param groupId 分组 id
+   * @param flowEl 画布容器 DOM（定位基准）
+   */
+  function openGroupEntityMenu(event: MouseEvent, groupId: string, flowEl: HTMLElement | null): void {
+    if (!store.groups.value.some((g) => g.id === groupId)) return
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = flowEl?.getBoundingClientRect()
+    groupEntityMenu.x = Math.round(event.clientX - (rect?.left ?? 0))
+    groupEntityMenu.y = Math.round(event.clientY - (rect?.top ?? 0))
+    groupEntityMenu.groupId = groupId
+    groupEntityMenu.show = true
+  }
+
+  /** 菜单：重命名分组（进入标题内联编辑） */
+  function groupEntityRename(): void {
+    const id = groupEntityMenu.groupId
+    groupEntityMenu.show = false
+    if (id) groupActions.startRename(id)
+  }
+
+  /** 菜单：更改分组颜色（在右键菜单处打开预设色板） */
+  function groupEntityColor(): void {
+    const id = groupEntityMenu.groupId
+    const { x, y } = groupEntityMenu
+    groupEntityMenu.show = false
+    if (id) groupActions.openColorAt(id, x, y)
+  }
+
+  /** 菜单：解散分组（弹窗确认，仅删框、节点保留） */
+  function groupEntityDissolve(): void {
+    const id = groupEntityMenu.groupId
+    groupEntityMenu.show = false
+    if (id) void groupActions.dissolve(id)
   }
 
   // ── 添加节点菜单 ────────────────────────────────────────
@@ -255,11 +314,12 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     addMenu.show = false
   }
 
-  /** 关闭全部菜单（节点/连线右键菜单 + 群组菜单 + 添加节点菜单） */
+  /** 关闭全部菜单（节点/连线右键菜单 + 群组菜单 + 分组实体菜单 + 添加节点菜单） */
   function closeAll(): void {
     contextMenu.show = false
     addMenu.show = false
     groupMenu.show = false
+    groupEntityMenu.show = false
   }
 
   /** 关闭节点右键菜单 */
@@ -271,6 +331,7 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
   function reset(): void {
     closeAll()
     contextMenu.nodeId = ''
+    groupEntityMenu.groupId = ''
   }
 
   return {
@@ -293,6 +354,11 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     openGroupMenu,
     groupCopy,
     groupDelete,
+    groupEntityMenu,
+    openGroupEntityMenu,
+    groupEntityRename,
+    groupEntityColor,
+    groupEntityDissolve,
     addMenu,
     openAddMenu,
     addNodeAt,

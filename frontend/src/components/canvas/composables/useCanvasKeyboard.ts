@@ -15,13 +15,15 @@ export interface UseCanvasKeyboardOptions {
   store: {
     undo: () => void
     redo: () => void
-    copyNodes: (nodeIds: string[]) => void
+    copyNodes: (nodeIds: string[], groupIds?: string[]) => void
     disconnect: (connectionId: string) => void
     canPaste: { value: boolean }
   }
-  /** 选中状态（快捷键目标节点/连线） */
+  /** 选中状态（快捷键目标节点/分组/连线） */
   selection: {
     getSelectedNodeIds: () => string[]
+    /** 读取当前选中分组 id 列表（Ctrl+C / Ctrl+D / Delete 覆盖分组） */
+    getSelectedGroupIds: () => string[]
     selectedEdgeId: WritableStringRef
     deleteSelected: () => Promise<void>
   }
@@ -29,6 +31,8 @@ export interface UseCanvasKeyboardOptions {
   menus: { closeAll: () => void }
   /** 内联重命名取消（Esc） */
   rename: { cancelRename: () => void }
+  /** 分组标题内联重命名取消 + 分组色板菜单关闭（Esc） */
+  groups: { cancelRename: () => void; closeColorMenu: () => void }
   /** 配置面板关闭（Esc；仅隐藏面板，保留节点选中与关联高亮） */
   panel: { close: () => void }
   /** Ctrl+V 兜底句柄（由粘贴组合式提供） */
@@ -44,7 +48,7 @@ export interface UseCanvasKeyboardOptions {
  * @returns 全局 keydown 事件处理器
  */
 export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
-  const { store, selection, menus, rename, panel, handleCtrlV, duplicateSelected } = options
+  const { store, selection, menus, rename, groups, panel, handleCtrlV, duplicateSelected } = options
 
   /**
    * 全局键盘快捷键：撤销/重做/复制/粘贴/复制粘贴/删除。
@@ -69,7 +73,8 @@ export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
     if (mod && e.key.toLowerCase() === 'c') {
       e.preventDefault()
       const ids = selection.getSelectedNodeIds()
-      if (ids.length > 0) store.copyNodes(ids)
+      const groupIds = selection.getSelectedGroupIds()
+      if (ids.length + groupIds.length > 0) store.copyNodes(ids, groupIds)
       return
     }
     if (mod && e.key.toLowerCase() === 'v') {
@@ -81,19 +86,21 @@ export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
     }
     if (mod && e.key.toLowerCase() === 'd') {
       e.preventDefault()
-      if (selection.getSelectedNodeIds().length > 0) duplicateSelected()
+      if (selection.getSelectedNodeIds().length + selection.getSelectedGroupIds().length > 0) duplicateSelected()
       return
     }
     if (e.key === 'Escape') {
       menus.closeAll()
       rename.cancelRename()
+      groups.cancelRename()
+      groups.closeColorMenu()
       // 关闭配置面板（仅隐藏，保留节点选中；焦点在输入框内时已被上方 inInput 拦截，不会误触发）
       panel.close()
       return
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
       e.preventDefault()
-      if (selection.getSelectedNodeIds().length > 0) {
+      if (selection.getSelectedNodeIds().length + selection.getSelectedGroupIds().length > 0) {
         void selection.deleteSelected()
       } else if (selection.selectedEdgeId.value) {
         store.disconnect(selection.selectedEdgeId.value)

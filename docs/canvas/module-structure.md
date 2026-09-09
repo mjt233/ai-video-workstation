@@ -11,6 +11,7 @@ frontend/src/
 │   ├── registry.ts               # 节点原型注册表（含 canGenerate/hasHistory 能力标志）
 │   ├── connection.ts             # 连接校验（类型/成环）
 │   ├── groupSelection.ts         # 多选群组纯函数（包围盒/命中测试/原型兼容性过滤/config id 重映射/合成节点 id）
+│   ├── groups.ts                 # 持久分组纯逻辑（色板/最小尺寸/重叠与包含判定/跟随集 R2/初始矩形/默认命名/结构校验）
 │   ├── paths.ts                  # 定义文件与产物路径
 │   ├── preview.ts                # 预览 URL
 │   ├── api.ts                    # loadCanvas / saveCanvas
@@ -19,9 +20,9 @@ frontend/src/
 │   ├── autobuild.ts              # 自动搭画布
 │   │   # 注：autobuild.ts 另含 resolveShotStageRef / resolveCharacterRef / deriveStageRefFromAssetPath / buildSubSceneAutoCanvas
 │   ├── clipboard.ts              # 剪贴板媒体识别（classifyPastedFile/collectPastedMedia/粘贴上传目标路径）
-│   ├── nodeClipboard.ts          # 节点复制标记（单/多节点：NODE_GROUP_CLIPBOARD_PREFIX + { nodes, connections }；兼容旧单节点标记）
+│   ├── nodeClipboard.ts          # 节点复制标记（单/多节点：NODE_GROUP_CLIPBOARD_PREFIX + { nodes, connections, groups }；兼容旧单节点标记与无 groups 字段的旧标记）
 │   ├── sceneFrame.ts             # 设为分镜场景图纯函数（buildSceneFrameOptions/deriveStageFrameBody）
-│   ├── useCanvasStore.ts         # 状态：加载/保存(防抖 800ms)/增删改查/撤销重做/剪贴板/批量操作（applyNodes/updateNodes/removeNodes/connectGroupToNode/createNodeAndConnect）/switchTarget
+│   ├── useCanvasStore.ts         # 状态：加载/保存(防抖 800ms)/增删改查/撤销重做/剪贴板/批量操作（applyNodes/updateNodes/moveEntities/removeNodes/connectGroupToNode/createNodeAndConnect）/持久分组 CRUD（addGroup/updateGroup/updateGroups/removeGroups）/switchTarget
 │   ├── useCanvasGeneration.ts    # 生成：跑工作流/轮询（纯体验层，不回写元数据）/统一中断/结果通知/ffmpeg 异步任务（WS 驱动）+ restore/switchTarget
 │   ├── taskSocket.ts             # 统一任务 WS 客户端（全局单例：tasks 列表/增量/订阅/中断/断线重连）
 │   ├── llmSocket.ts              # 兼容再导出（= taskSocket；新代码请直接用 taskSocket）
@@ -31,19 +32,22 @@ frontend/src/
     ├── CanvasToolbar.vue         # 工具栏（视图缩放/撤销重做/自动搭画布/添加节点/保存状态）
     ├── CanvasNodeCard.vue        # 节点卡片（名称头/内联重命名/端口/主体组件/缩放控制点 + 通用 loading/错误遮罩与中断入口 + 成组连接悬停高亮）
     ├── CanvasEditorPanel.vue     # 配置悬浮面板（固定大小、位置联动、边界钳制、淡入淡出；仅单选节点显示）
-    ├── CanvasContextMenu.vue     # 节点/连线/群组右键菜单（纯展示）
+    ├── CanvasContextMenu.vue     # 节点/连线/群组/分组实体右键菜单（纯展示）
     ├── CanvasAddNodeMenu.vue     # 添加节点菜单（锚点 + VMenu 列表）
     ├── CanvasGroupFrame.vue      # 群组虚线框（合成节点 __group-frame 的展示内容；拖动整组由 Vue Flow 原生拖动承接）
     ├── CanvasGroupDot.vue        # 群组输出连接圆点（合成节点 __group-dot 的展示内容；mousedown 启动成组连接拖拽）
     ├── CanvasGroupConnectMenu.vue# 群组连接目标选择菜单（输出点拖拽超阈值释放后弹出）
+    ├── CanvasGroupNode.vue       # 持久分组框（标题条/半透明主体/四边拖动条/色点/八向缩放控制点；指针事件分层见 interactions.md）
+    ├── CanvasSelectionToolbar.vue# 多选悬浮工具栏（多选框顶部居中，含「创建分组」；选中集含分组时置灰）
     ├── SetAsSceneDialog.vue      # 设为分镜场景图对话框（帧加载/选中/覆盖/新增）
     ├── CanvasAssertHistoryDialog.vue / AiTextHistoryDialog.vue / SaveAssetDialog.vue / SaveAsDialog.vue  # 历史（产物/文本）/保存为自定义资产/保存为（目标选择）对话框
     ├── composables/              # 画布交互组合式（与组件同域，store/gen/VueFlow 工具以参数注入）
     │   ├── types.ts              # 共享类型（CanvasStoreApi/CanvasGenerationApi/NodeMap 等）
-    │   ├── useCanvasFlow.ts      # Vue Flow 数据映射（含群组合成节点）、拖拽/缩放回写（多节点批量）、连线交互
-    │   ├── useCanvasSelection.ts # 选中状态（单/多选 selectedNodeIds）、配置面板信息、整组删除
-    │   ├── useCanvasGroup.ts     # 群组包围盒/输出点拖拽连接/目标原型菜单/成组连接执行与忽略反馈
-    │   ├── useCanvasMenus.ts     # 右键菜单（节点/群组）与添加节点菜单状态/动作
+    │   ├── useCanvasFlow.ts      # Vue Flow 数据映射（含群组合成节点与持久分组节点）、拖拽/缩放回写（多节点批量）、连线交互
+    │   ├── useCanvasSelection.ts # 选中状态（单/多选 selectedNodeIds + 持久分组 selectedGroupIds）、配置面板信息、整组/分组删除
+    │   ├── useCanvasGroup.ts     # 多选包围盒（选中节点 ∪ 选中分组）/输出点拖拽连接/目标原型菜单/成组连接执行与忽略反馈
+    │   ├── useCanvasGroups.ts    # 持久分组交互（创建/自定义拖动 R2/缩放回写/改名/改色/解散/框选完全包含判定/多选拖动跟随/Ctrl 穿透状态）
+    │   ├── useCanvasMenus.ts     # 右键菜单（节点/群组/分组实体）与添加节点菜单状态/动作
     │   ├── useCanvasRename.ts    # 内联重命名状态
     │   ├── useCanvasPaste.ts     # 剪贴板粘贴（文件/文本/画布内复制节点）+ Ctrl+V 兜底 + Ctrl+D 复制粘贴整组
     │   ├── useCanvasKeyboard.ts  # 全局快捷键（撤销/重做/复制/粘贴/删除/Esc；多选整组语义）

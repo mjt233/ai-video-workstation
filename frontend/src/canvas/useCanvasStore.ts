@@ -1,11 +1,12 @@
 import { computed, ref } from 'vue'
-import { createCanvasData, newId, type CanvasConnection, type CanvasData, type CanvasNodeData, type NodeConfig } from './types'
+import { createCanvasData, newId, type CanvasConnection, type CanvasData, type CanvasGroupData, type CanvasNodeData, type NodeConfig } from './types'
 import { loadCanvas, saveCanvas, CanvasVersionError, type CanvasTarget } from './api'
 import { canConnect, canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
 import { getPrototype } from './registry'
 import { applyConnectionSync } from './connectionSync'
 import { serializeNodeClipboard, type NodeClipboardPayload } from './nodeClipboard'
 import { remapNodeConfig } from './groupSelection'
+import { DEFAULT_GROUP_COLOR, defaultGroupName, type RectLike } from './groups'
 import type { CanvasDirectorConfig } from './videoTypes'
 
 /** 自动保存防抖毫秒数 */
@@ -63,6 +64,8 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
 
   const nodes = computed(() => data.value.nodes)
   const connections = computed(() => data.value.connections)
+  /** 持久分组列表（canvas.json groups[]；成员关系由几何重叠实时派生，不在此维护） */
+  const groups = computed(() => data.value.groups ?? [])
 
   /** 连线变化事件：connect（建立）/ disconnect（断开） */
   type ConnectionsChangedEvent = { type: 'connect' | 'disconnect'; connection: CanvasConnection }
@@ -104,7 +107,8 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   async function load(): Promise<void> {
     const existing = await loadCanvas(project, targetRef.value)
     if (existing) {
-      data.value = existing.canvas
+      // groups 兜底：正常路径由 migrateCanvasData 保证存在（schema v2），此处防御非迁移来源的数据
+      data.value = { ...existing.canvas, groups: existing.canvas.groups ?? [] }
       savedRev.value = existing.rev
     } else {
       data.value = createCanvasData(targetRef.value.kind)
@@ -421,11 +425,13 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   /** 复制剪贴板内容（节点列表 + 组内连线） */
   const clipboard = ref<NodeClipboardPayload | null>(null)
 
-  /** 是否可粘贴 */
-  const canPaste = computed(() => clipboard.value !== null && clipboard.value.nodes.length > 0)
+  /** 是否可粘贴（节点或分组任一非空即可） */
+  const canPaste = computed(
+    () => clipboard.value !== null && (clipboard.value.nodes.length > 0 || clipboard.value.groups.length > 0),
+  )
 
   /**
-   * 复制节点到内部剪贴板，并同步写入系统剪贴板（标记前缀 + 节点与连线 JSON）。
+   * 复制节点（可同时复制分组框）到内部剪贴板，并同步写入系统剪贴板（标记前缀 + JSON）。
    *
    * 写入系统剪贴板的目的：让 Ctrl+V 的全局 paste 事件能优先识别节点复制标记
    * 并粘贴节点，而不被剪贴板中残留的旧文本/文件抢占（复制节点会覆盖系统剪贴板，
@@ -433,19 +439,24 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
    * 内部剪贴板仍可用作兜底（剪贴板为空不派发 paste 事件时由 keydown 兜底粘贴）。
    *
    * @param nodeIds 复制的节点 id 列表（组内连线 = 两端都在列表中的连线）
+   * @param groupIds 同时复制的分组 id 列表（缺省为空：只复制节点）
    */
-  function copyNodes(nodeIds: string[]): void {
+  function copyNodes(nodeIds: string[], groupIds: string[] = []): void {
     const idSet = new Set(nodeIds)
+    const groupIdSet = new Set(groupIds)
     const nodes = data.value.nodes
       .filter((n) => idSet.has(n.id))
       .map((n) => JSON.parse(JSON.stringify(n)) as CanvasNodeData)
-    if (nodes.length === 0) return
+    const groups = (data.value.groups ?? [])
+      .filter((g) => groupIdSet.has(g.id))
+      .map((g) => JSON.parse(JSON.stringify(g)) as CanvasGroupData)
+    if (nodes.length === 0 && groups.length === 0) return
     const connections = data.value.connections
       .filter((c) => idSet.has(c.fromNodeId) && idSet.has(c.toNodeId))
       .map((c) => JSON.parse(JSON.stringify(c)) as CanvasConnection)
-    clipboard.value = { nodes, connections }
+    clipboard.value = { nodes, connections, groups }
     try {
-      void navigator.clipboard?.writeText(serializeNodeClipboard(nodes, connections))?.catch(() => {})
+      void navigator.clipboard?.writeText(serializeNodeClipboard(nodes, connections, groups))?.catch(() => {})
     } catch {
       // 剪贴板 API 不可用（非安全上下文等）：静默降级为仅内部剪贴板
     }
@@ -461,19 +472,20 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
-   * 粘贴剪贴板节点（整体偏移 PASTE_OFFSET），生成全新 id 并重映射：
+   * 粘贴剪贴板内容（节点 + 分组，整体偏移 PASTE_OFFSET），生成全新 id 并重映射：
    * - 节点 id 全部更换；
    * - config 内节点引用重映射（inputOrder、导演台素材块 sourceNodeId，见 remapNodeConfig）；
-   * - 组内连线按新 id 重建，并逐条触发 connect 联动（connectionSync，与手动连线行为一致）。
+   * - 组内连线按新 id 重建，并逐条触发 connect 联动（connectionSync，与手动连线行为一致）；
+   * - 分组换新 id 并同偏移平移（成员关系由几何重叠自动成立，无需重映射）。
    * 可传入外部载荷（如从系统剪贴板标记解析出的，支持跨画布/刷新后粘贴）：
    * 未传入时使用内部剪贴板内容。
    *
    * @param source 外部复制载荷（缺省用内部剪贴板）
-   * @returns 新节点列表（可能为空）
+   * @returns 新节点列表与新分组列表（均可能为空）
    */
-  function pasteNodes(source?: NodeClipboardPayload): CanvasNodeData[] {
+  function pasteNodes(source?: NodeClipboardPayload): { nodes: CanvasNodeData[]; groups: CanvasGroupData[] } {
     const base = source ?? clipboard.value
-    if (!base || base.nodes.length === 0) return []
+    if (!base || (base.nodes.length === 0 && base.groups.length === 0)) return { nodes: [], groups: [] }
     // 先建立旧 id → 新 id 映射（两遍扫描：config 重映射需要完整映射）
     const idMap = new Map<string, string>()
     for (const n of base.nodes) idMap.set(n.id, newId())
@@ -485,6 +497,12 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
       copy.config = remapNodeConfig(JSON.parse(JSON.stringify(n.config)) as NodeConfig, idMap)
       return copy
     })
+    const groups = base.groups.map((g) => ({
+      ...g,
+      id: newId(),
+      x: Math.round(g.x + PASTE_OFFSET),
+      y: Math.round(g.y + PASTE_OFFSET),
+    }))
     const connections = base.connections.map((c) => ({
       id: newId(),
       fromNodeId: idMap.get(c.fromNodeId) ?? c.fromNodeId,
@@ -495,24 +513,26 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     pushHistory()
     data.value.nodes.push(...nodes)
     data.value.connections.push(...connections)
+    if (groups.length > 0) data.value.groups = [...(data.value.groups ?? []), ...groups]
     markDirty()
     for (const connection of connections) {
       emitConnectionsChanged({ type: 'connect', connection })
     }
-    return nodes
+    return { nodes, groups }
   }
 
   /**
-   * 粘贴单个节点（兼容旧调用方：等价 pasteNodes(source) 的第一项）。
+   * 粘贴单个节点（兼容旧调用方：等价 pasteNodes(source).nodes 的第一项）。
+   * 分组不被此入口粘贴（单节点语义）。
    *
    * @param source 外部节点源（缺省用内部剪贴板的第一项，均为单节点场景）
    * @returns 新节点或 undefined（无可粘贴内容）
    */
   function pasteNode(source?: CanvasNodeData): CanvasNodeData | undefined {
     const payload: NodeClipboardPayload | undefined = source
-      ? { nodes: [source], connections: [] }
+      ? { nodes: [source], connections: [], groups: [] }
       : (clipboard.value ?? undefined)
-    return pasteNodes(payload)[0]
+    return pasteNodes(payload).nodes[0]
   }
 
   /**
@@ -534,16 +554,128 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
-   * 批量删除节点及其全部连线（单次撤销快照；连带断开的连线触发 disconnect 联动）。
+   * 批量移动节点与分组（**单次撤销快照**）。
+   *
+   * 用于两类场景（拖动过程中仅做视图跟随，结束才调用本方法一次性回写）：
+   * - 拖动分组（R2 跟随集：分组 + 组内节点一起平移）；
+   * - 多选拖动节点时选中分组框同步跟随。
+   *
+   * @param nodePatches 节点位置补丁列表
+   * @param groupPatches 分组位置补丁列表
+   */
+  function moveEntities(
+    nodePatches: { id: string; x: number; y: number }[],
+    groupPatches: { id: string; x: number; y: number }[],
+  ): void {
+    const validNodes = nodePatches.filter((p) => data.value.nodes.some((n) => n.id === p.id))
+    const validGroups = groupPatches.filter((p) => (data.value.groups ?? []).some((g) => g.id === p.id))
+    if (validNodes.length === 0 && validGroups.length === 0) return
+    pushHistory()
+    for (const p of validNodes) {
+      const node = data.value.nodes.find((n) => n.id === p.id)
+      if (!node) continue
+      node.x = Math.round(p.x)
+      node.y = Math.round(p.y)
+    }
+    for (const p of validGroups) {
+      const group = data.value.groups.find((g) => g.id === p.id)
+      if (!group) continue
+      group.x = Math.round(p.x)
+      group.y = Math.round(p.y)
+    }
+    markDirty()
+  }
+
+  // ── 持久分组（canvas.json groups[]；成员由几何重叠实时派生）──────
+
+  /**
+   * 创建持久分组（单次撤销）。
+   *
+   * @param rect 分组矩形（流坐标；通常由 groupRectFromNodes 按选中节点包围盒计算）
+   * @param opts 可选覆盖：name 标题（缺省 `分组 N`）、color 主题色（缺省色板首色）
+   * @returns 新分组
+   */
+  function addGroup(rect: RectLike, opts?: { name?: string; color?: string }): CanvasGroupData {
+    const group: CanvasGroupData = {
+      id: newId(),
+      name: opts?.name ?? defaultGroupName(data.value.groups ?? []),
+      color: opts?.color ?? DEFAULT_GROUP_COLOR,
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    }
+    pushHistory()
+    data.value.groups = [...(data.value.groups ?? []), group]
+    markDirty()
+    return group
+  }
+
+  /**
+   * 更新单个分组（标题 / 颜色 / 几何；单次撤销）。
+   *
+   * @param groupId 分组 id
+   * @param patch 更新字段（id 不可改）
+   */
+  function updateGroup(groupId: string, patch: Partial<Omit<CanvasGroupData, 'id'>>): void {
+    const group = (data.value.groups ?? []).find((g) => g.id === groupId)
+    if (!group) return
+    pushHistory()
+    Object.assign(group, patch)
+    markDirty()
+  }
+
+  /**
+   * 批量更新分组位置（拖动分组 / 多选拖动跟随：单次撤销快照）。
+   *
+   * @param patches 分组位置补丁列表
+   */
+  function updateGroups(patches: { id: string; x: number; y: number }[]): void {
+    const valid = patches.filter((p) => (data.value.groups ?? []).some((g) => g.id === p.id))
+    if (valid.length === 0) return
+    pushHistory()
+    for (const p of valid) {
+      const group = data.value.groups.find((g) => g.id === p.id)
+      if (!group) continue
+      group.x = Math.round(p.x)
+      group.y = Math.round(p.y)
+    }
+    markDirty()
+  }
+
+  /**
+   * 解散分组（仅删除分组框，组内节点保留；单次撤销）。
+   *
+   * @param groupIds 要解散的分组 id 列表
+   */
+  function removeGroups(groupIds: string[]): void {
+    const idSet = new Set(groupIds)
+    if (idSet.size === 0) return
+    const exists = (data.value.groups ?? []).some((g) => idSet.has(g.id))
+    if (!exists) return
+    pushHistory()
+    data.value.groups = data.value.groups.filter((g) => !idSet.has(g.id))
+    markDirty()
+  }
+
+  /**
+   * 批量删除节点及其全部连线，并可同时解散若干分组（单次撤销快照；
+   * 连带断开的连线触发 disconnect 联动）。混合选中（节点 + 分组）的删除走此入口。
    *
    * @param nodeIds 删除的节点 id 列表
+   * @param groupIds 同时解散的分组 id 列表（缺省为空：只删节点）
    */
-  function removeNodes(nodeIds: string[]): void {
+  function removeNodes(nodeIds: string[], groupIds: string[] = []): void {
     const idSet = new Set(nodeIds)
+    const groupIdSet = new Set(groupIds)
+    if (idSet.size === 0 && groupIdSet.size === 0) return
     const removed = data.value.connections.filter((c) => idSet.has(c.fromNodeId) || idSet.has(c.toNodeId))
     pushHistory()
     data.value.nodes = data.value.nodes.filter((n) => !idSet.has(n.id))
     data.value.connections = data.value.connections.filter((c) => !idSet.has(c.fromNodeId) && !idSet.has(c.toNodeId))
+    if (groupIdSet.size > 0) {
+      data.value.groups = (data.value.groups ?? []).filter((g) => !groupIdSet.has(g.id))
+    }
     markDirty()
     for (const connection of removed) {
       emitConnectionsChanged({ type: 'disconnect', connection })
@@ -783,6 +915,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     conflict,
     nodes,
     connections,
+    groups,
     load,
     save,
     forceSave,
@@ -795,6 +928,11 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     viewOnlyUpdate,
     adoptExternalChange,
     updateNodes,
+    moveEntities,
+    addGroup,
+    updateGroup,
+    updateGroups,
+    removeGroups,
     updateDirectorAudioClipDuration,
     removeInputOrderEntry,
     connect,

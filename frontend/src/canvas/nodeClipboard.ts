@@ -4,13 +4,16 @@
  * 粘贴时优先识别该标记 → 粘贴节点，避免被剪贴板中残留的旧文本/文件抢占
  * （全局 paste 事件的文件/文本分支优先级高于内部剪贴板）。
  *
- * 支持单节点与多节点（含组内连线）两种格式：
- * - 多节点格式（当前写入）：`__AVW_NODE_COPY_MULTI_V1__` + `{ nodes, connections }`；
+ * 支持单节点与多节点（含组内连线与持久分组）两种格式：
+ * - 多节点格式（当前写入）：`__AVW_NODE_COPY_MULTI_V1__` + `{ nodes, connections, groups }`；
  * - 单节点旧格式（V1）：`__AVW_NODE_COPY_V1__` + 单节点 JSON，解析时包装为单元素数组（向后兼容）。
- * 纯函数模块：无浏览器依赖，便于单元测试。
+ *
+ * `groups` 为**可选**字段（前缀不升级，向后兼容：旧版本解析器忽略该字段仍能粘贴节点；
+ * 旧标记解析出的载荷 groups 为 []）。纯函数模块：无浏览器依赖，便于单元测试。
  */
 
-import type { CanvasConnection, CanvasNodeData } from './types'
+import type { CanvasConnection, CanvasGroupData, CanvasNodeData } from './types'
+import { asCanvasGroupData } from './groups'
 
 /**
  * 多节点复制标记前缀（text/plain 首部）。
@@ -23,23 +26,30 @@ export const NODE_GROUP_CLIPBOARD_PREFIX = '__AVW_NODE_COPY_MULTI_V1__'
  */
 export const NODE_CLIPBOARD_PREFIX = '__AVW_NODE_COPY_V1__'
 
-/** 画布复制剪贴板载荷：节点列表 + 组内连线列表 */
+/** 画布复制剪贴板载荷：节点列表 + 组内连线列表 + 持久分组列表 */
 export interface NodeClipboardPayload {
   /** 复制的节点（深拷贝） */
   nodes: CanvasNodeData[]
   /** 组内连线（两端都位于 nodes 中） */
   connections: CanvasConnection[]
+  /** 同时复制的持久分组（旧标记/旧调用方无此字段时为 []） */
+  groups: CanvasGroupData[]
 }
 
 /**
- * 序列化节点数据为系统剪贴板文本（多节点标记前缀 + 节点与连线 JSON）。
+ * 序列化节点数据为系统剪贴板文本（多节点标记前缀 + 节点/连线/分组 JSON）。
  *
  * @param nodes 复制的节点列表（至少一个）
  * @param connections 组内连线列表（可为空）
+ * @param groups 同时复制的分组列表（可为空）
  * @returns 写入系统剪贴板（text/plain）的完整标记文本
  */
-export function serializeNodeClipboard(nodes: CanvasNodeData[], connections: CanvasConnection[] = []): string {
-  return NODE_GROUP_CLIPBOARD_PREFIX + JSON.stringify({ nodes, connections })
+export function serializeNodeClipboard(
+  nodes: CanvasNodeData[],
+  connections: CanvasConnection[] = [],
+  groups: CanvasGroupData[] = [],
+): string {
+  return NODE_GROUP_CLIPBOARD_PREFIX + JSON.stringify({ nodes, connections, groups })
 }
 
 /**
@@ -48,7 +58,7 @@ export function serializeNodeClipboard(nodes: CanvasNodeData[], connections: Can
  * 由调用方回退到普通文本粘贴逻辑。
  *
  * @param text 剪贴板 text/plain 内容（可为空）
- * @returns 解析出的复制载荷（节点 + 组内连线）；非节点标记或解析失败返回 null
+ * @returns 解析出的复制载荷（节点 + 组内连线 + 分组）；非节点标记或解析失败返回 null
  */
 export function parseNodeClipboardText(text: string | null | undefined): NodeClipboardPayload | null {
   if (!text) return null
@@ -56,16 +66,17 @@ export function parseNodeClipboardText(text: string | null | undefined): NodeCli
     return parseGroupPayload(text.slice(NODE_GROUP_CLIPBOARD_PREFIX.length))
   }
   if (text.startsWith(NODE_CLIPBOARD_PREFIX)) {
-    // 旧版单节点标记：包装为单元素数组
+    // 旧版单节点标记：包装为单元素数组（无分组）
     const node = parseSingleNode(text.slice(NODE_CLIPBOARD_PREFIX.length))
-    return node ? { nodes: [node], connections: [] } : null
+    return node ? { nodes: [node], connections: [], groups: [] } : null
   }
   return null
 }
 
 /**
- * 解析多节点载荷 JSON（{ nodes, connections }）。
- * 结构校验：nodes 为合法节点数组（升级为单节点格式时兼容）；connections 非法时忽略。
+ * 解析多节点载荷 JSON（{ nodes, connections, groups }）。
+ * 结构校验：nodes 为合法节点数组（升级为单节点格式时兼容）；connections 非法时忽略；
+ * groups 为**可选**字段（缺失 → []），逐项最小结构校验，非法项丢弃（不影响节点粘贴）。
  *
  * @param rawJson 标记后的 JSON 文本
  * @returns 解析出的载荷；非对象/节点数组非法时返回 null
@@ -74,7 +85,7 @@ function parseGroupPayload(rawJson: string): NodeClipboardPayload | null {
   try {
     const parsed: unknown = JSON.parse(rawJson)
     if (typeof parsed !== 'object' || parsed === null) return null
-    const obj = parsed as { nodes?: unknown; connections?: unknown }
+    const obj = parsed as { nodes?: unknown; connections?: unknown; groups?: unknown }
     if (!Array.isArray(obj.nodes) || obj.nodes.length === 0) return null
     const nodes: CanvasNodeData[] = []
     for (const item of obj.nodes) {
@@ -90,7 +101,18 @@ function parseGroupPayload(rawJson: string): NodeClipboardPayload | null {
         connections.push(conn)
       }
     }
-    return { nodes, connections }
+    const groups: CanvasGroupData[] = []
+    if (Array.isArray(obj.groups)) {
+      for (const item of obj.groups) {
+        const group = asCanvasGroupData(item)
+        if (!group) {
+          console.warn('[canvas] 剪贴板载荷中存在结构非法的分组项，已丢弃', item)
+          continue
+        }
+        groups.push(group)
+      }
+    }
+    return { nodes, connections, groups }
   } catch {
     return null
   }

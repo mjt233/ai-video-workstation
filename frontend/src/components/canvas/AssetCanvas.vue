@@ -55,8 +55,10 @@
           @edge-click="onEdgeClick"
           @edge-context-menu="onEdgeContextMenu"
           @node-drag-start="onNodeDragStart"
+          @node-drag="onNodeDragFollow"
           @node-drag-stop="onNodeDragStop"
           @pane-click="onPaneClick"
+          @selection-start="onSelectionStart"
           @selection-end="onSelectionEnd"
         >
           <Background :gap="16" />
@@ -120,7 +122,53 @@
           <template #node-group-dot>
             <CanvasGroupDot @mousedown="onDotMouseDown" />
           </template>
+          <!-- 持久分组框（canvas.json groups[]；标题条/四边拖动、双击改名、色点改色、八向缩放） -->
+          <template #node-canvas-group="{ id, selected }">
+            <CanvasGroupNode
+              v-if="groupMap[id]"
+              :group="groupMap[id]"
+              :selected="selected || selectedGroupIds.includes(id)"
+              :is-empty="emptyGroupIds.has(id)"
+              :renaming="renamingGroupId === id"
+              :rename-value="groupRenameInput"
+              @drag-start="onGroupDragStart"
+              @start-rename="startRenameGroup"
+              @update:rename-value="onGroupRenameInput"
+              @commit-rename="commitRenameGroup"
+              @cancel-rename="cancelRenameGroup"
+              @open-color="openColorMenu"
+              @context-menu="(e: MouseEvent, groupId: string) => openGroupEntityContextMenu(e, groupId)"
+              @resize-end="onGroupResizeEnd"
+            />
+          </template>
         </VueFlow>
+
+        <!-- 多选悬浮工具栏（选中节点数 + 选中分组数 ≥ 2 时在多选框顶部居中；含「创建分组」） -->
+        <CanvasSelectionToolbar
+          :rect="groupRect"
+          :viewport="viewport"
+          :flow-width="flowWidth"
+          :has-group-selected="selectedGroupIds.length > 0"
+          @create-group="createGroupFromSelection"
+        />
+
+        <!-- 分组预设色板（标题条色点 / 右键菜单「更改颜色」触发；坐标相对画布容器） -->
+        <div
+          v-if="colorMenu.show"
+          class="canvas-group-color-menu"
+          :style="{ left: `${colorMenu.x}px`, top: `${colorMenu.y}px` }"
+          @mousedown.stop
+        >
+          <button
+            v-for="color in colorPalette"
+            :key="color"
+            type="button"
+            class="canvas-group-color-menu__swatch"
+            :style="{ background: color }"
+            :title="color"
+            @click="pickGroupColor(color)"
+          />
+        </div>
 
         <!-- 成组连接预览线（输出点 → 鼠标；画布容器相对坐标） -->
         <svg
@@ -180,7 +228,7 @@
           @disconnect-input="disconnectEditorInput"
         />
 
-        <!-- 右键菜单（节点 + 连线 + 群组） -->
+        <!-- 右键菜单（节点 + 连线 + 多选群组 + 分组实体） -->
         <CanvasContextMenu
           :node-menu="contextMenu"
           :can-generate="canGenerateOf(contextMenuNode)"
@@ -190,6 +238,7 @@
           :has-connections="!!contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
           :edge-menu="edgeMenu"
           :group-menu="groupMenu"
+          :group-entity-menu="groupEntityMenu"
           @generate="contextGenerate"
           @history="contextHistory"
           @save-as="contextSaveAs"
@@ -200,6 +249,9 @@
           @disconnect-edge="disconnectEdge"
           @group-copy="groupCopy"
           @group-delete="groupDelete"
+          @group-entity-rename="groupEntityRename"
+          @group-entity-color="groupEntityColor"
+          @group-entity-dissolve="groupEntityDissolve"
         />
 
         <!-- 添加节点菜单（双击空白处/工具栏「＋」在鼠标处弹出） -->
@@ -487,7 +539,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { VueFlow, BezierEdge, SelectionMode, getBezierPath, Position, useVueFlow, type EdgeMouseEvent, type NodeMouseEvent } from '@vue-flow/core'
+import { VueFlow, BezierEdge, SelectionMode, getBezierPath, Position, useVueFlow, type EdgeMouseEvent, type NodeDragEvent, type NodeMouseEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -495,7 +547,7 @@ import { useCanvasStore } from '../../canvas/useCanvasStore'
 import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import { confirm } from '../../utils/confirm'
-import type { CanvasNodeData } from '../../canvas/types'
+import type { CanvasGroupData, CanvasNodeData } from '../../canvas/types'
 import { canvasRelPath, type CanvasTarget } from '../../canvas/api'
 import { getNodeCurrentAssetPath } from '../../canvas/generate'
 import { getPrototype } from '../../canvas/registry'
@@ -519,7 +571,9 @@ import CanvasAddNodeMenu from './CanvasAddNodeMenu.vue'
 import CanvasAssetDropMenu from './CanvasAssetDropMenu.vue'
 import CanvasGroupFrame from './CanvasGroupFrame.vue'
 import CanvasGroupDot from './CanvasGroupDot.vue'
+import CanvasGroupNode from './CanvasGroupNode.vue'
 import CanvasGroupConnectMenu from './CanvasGroupConnectMenu.vue'
+import CanvasSelectionToolbar from './CanvasSelectionToolbar.vue'
 import SetAsSceneDialog from './SetAsSceneDialog.vue'
 import { useCanvasFlow } from './composables/useCanvasFlow'
 import { useCanvasSelection } from './composables/useCanvasSelection'
@@ -531,6 +585,7 @@ import { useCanvasNodeOps } from './composables/useCanvasNodeOps'
 import { useCanvasDialogs } from './composables/useCanvasDialogs'
 import { useCanvasAutobuild } from './composables/useCanvasAutobuild'
 import { useCanvasGroup } from './composables/useCanvasGroup'
+import { useCanvasGroups } from './composables/useCanvasGroups'
 import { useCanvasUpload, type CanvasUploadFilePayload } from './composables/useCanvasUpload'
 import { useCanvasAssetDrop } from './composables/useCanvasAssetDrop'
 import { canvasDragPayload } from '../../canvas/assetDrop'
@@ -679,8 +734,8 @@ function getOutputMtime(nodeId: string): number | null | undefined {
   return o?.exists ? o.mtime : undefined
 }
 
-/** Vue Flow 视图控制：适应/缩放/屏幕坐标换算/程序化选中与取消选中 */
-const { fitView, zoomIn, zoomOut, setViewport, setState, getNodes, screenToFlowCoordinate, viewport, findNode, addSelectedNodes, removeSelectedNodes, onNodesInitialized } = useVueFlow()
+/** Vue Flow 视图控制：适应/缩放/屏幕坐标换算/程序化选中与取消选中/命令式移动节点 */
+const { fitView, zoomIn, zoomOut, setViewport, setState, getNodes, screenToFlowCoordinate, viewport, findNode, addSelectedNodes, removeSelectedNodes, updateNode, onNodesInitialized } = useVueFlow()
 
 /**
  * 适应视图参数：把全部节点包围盒放进可视区并居中。
@@ -805,6 +860,13 @@ const nodeMap = computed<Record<string, CanvasNodeData>>(() => {
   return m
 })
 
+/** 分组 id → 分组数据（持久分组节点插槽内直接索引） */
+const groupMap = computed<Record<string, CanvasGroupData>>(() => {
+  const m: Record<string, CanvasGroupData> = {}
+  for (const g of store.groups.value) m[g.id] = g
+  return m
+})
+
 // ── 组合式组装（依赖顺序：rename → selection → nodeOps → flow → dialogs → menus → paste → keyboard → autobuild）──
 
 /** 节点名称内联重命名 */
@@ -839,9 +901,19 @@ watch(
   { flush: 'post' },
 )
 
-/** 框选结束（Vue Flow 内部已完成选中计算）→ 同步回应用级多选状态 */
-function onSelectionEnd(): void {
+/** 框选开始：记录选框起点（持久分组「完全包含才选中」判定需要，见 useCanvasGroups） */
+function onSelectionStart(event: MouseEvent): void {
+  canvasGroups.onSelectionStart(event)
+}
+
+/**
+ * 框选结束（Vue Flow 内部已完成选中计算）：
+ * 1. 同步回应用级节点多选状态；
+ * 2. 用选框矩形判定「被完全包含的持久分组」并写入分组选中集（FR-7.1 / FR-7.2）。
+ */
+function onSelectionEnd(event: MouseEvent): void {
   selection.syncFromVueFlow(getVueFlowSelectedNodeIds)
+  canvasGroups.onSelectionEnd(event)
 }
 
 /** 生成调度与输入收集 */
@@ -1153,11 +1225,33 @@ const group = useCanvasGroup({
   store,
   nodeMap,
   getSelectedNodeIds: () => selection.selectedNodeIds.value,
+  getSelectedGroupIds: () => selection.selectedGroupIds.value,
   screenToFlowCoordinate,
   viewport,
   flowEl,
   showSnackbar,
   focusNode: (ids) => void focusNodes(ids),
+})
+
+/**
+ * 持久分组交互组合式：创建/拖动（R2 级联）/缩放/改名/改色/解散/框选完全包含判定/
+ * 多选拖动时选中分组跟随。拖动中经 updateNode 命令式移动内部坐标（视图跟随，不写 store）。
+ */
+const canvasGroups = useCanvasGroups({
+  store,
+  nodeMap,
+  screenToFlowCoordinate,
+  viewport,
+  flowEl,
+  updateNodePosition: (nodeId, position) => updateNode(nodeId, { position }),
+  selection: {
+    getSelectedNodeIds: () => selection.selectedNodeIds.value,
+    getSelectedGroupIds: () => selection.selectedGroupIds.value,
+    setSelectedGroups: selection.setSelectedGroups,
+    toggleSelectGroup: selection.toggleSelectGroup,
+    clearNodeSelection: selection.clearNodeSelection,
+  },
+  showSnackbar,
 })
 
 /**
@@ -1187,7 +1281,7 @@ watch(
   { deep: true, immediate: true },
 )
 
-/** Vue Flow 渲染映射、群组合成节点与连线交互（含单选联动高亮与运行态高亮的派生集） */
+/** Vue Flow 渲染映射、群组合成节点、持久分组节点与连线交互（含单选联动高亮与运行态高亮的派生集） */
 const flow = useCanvasFlow({
   store,
   nodeMap,
@@ -1196,12 +1290,13 @@ const flow = useCanvasFlow({
   selectedNodeIds: selection.selectedNodeIds,
   runningNodeIds,
   groupRect: group.groupRect,
+  ctrlHeld: canvasGroups.ctrlHeld,
 })
 
 /** 对话框与资产选择器 */
 const dialogs = useCanvasDialogs({ store, nodeMap, project: props.project, target, getScope: () => scope.value, showSnackbar })
 
-/** 右键菜单、群组菜单与添加节点菜单 */
+/** 右键菜单、群组菜单、分组实体菜单与添加节点菜单 */
 const menus = useCanvasMenus({
   store,
   nodeMap,
@@ -1210,30 +1305,42 @@ const menus = useCanvasMenus({
     deleteNode: selection.deleteNode,
     deleteSelected: selection.deleteSelected,
     getSelectedNodeIds: () => selection.selectedNodeIds.value,
+    getSelectedGroupIds: () => selection.selectedGroupIds.value,
   },
   rename: { startRename: rename.startRename },
+  groupActions: {
+    startRename: canvasGroups.startRenameGroup,
+    openColorAt: canvasGroups.openColorMenuAt,
+    dissolve: canvasGroups.dissolveGroup,
+  },
   dialogs: { openHistory: dialogs.openHistory, openSaveAsset: dialogs.openSaveAsset, openSaveAs: dialogs.openSaveAs },
   getScope: () => scope.value,
   generate: (nodeId: string) => void nodeOps.generateNode(nodeId),
 })
 
-/** 剪贴板粘贴（文件/文本/画布内复制节点）与 Ctrl+D 复制粘贴整组 */
+/** 剪贴板粘贴（文件/文本/画布内复制节点与分组）与 Ctrl+D 复制粘贴整组 */
 const paste = useCanvasPaste({
   store,
   flowEl,
   screenToFlowCoordinate,
   findNode,
   addSelectedNodes,
-  selection: { setSelectedNodes: selection.setSelectedNodes, setSuppressPanelOnSelect: selection.setSuppressPanelOnSelect },
+  selection: {
+    setSelectedNodes: selection.setSelectedNodes,
+    setSelectedGroups: selection.setSelectedGroups,
+    setSuppressPanelOnSelect: selection.setSuppressPanelOnSelect,
+  },
   getSelectedNodeIds: () => selection.selectedNodeIds.value,
+  getSelectedGroupIds: () => selection.selectedGroupIds.value,
   upload,
   showSnackbar,
 })
 
-/** 关闭全部菜单（含群组连接目标菜单） */
+/** 关闭全部菜单（含群组连接目标菜单与分组色板菜单） */
 function closeAllMenus(): void {
   menus.closeAll()
   group.closeConnectMenu()
+  canvasGroups.closeColorMenu()
 }
 
 /** 键盘快捷键 */
@@ -1241,11 +1348,13 @@ const keyboard = useCanvasKeyboard({
   store,
   selection: {
     getSelectedNodeIds: () => selection.selectedNodeIds.value,
+    getSelectedGroupIds: () => selection.selectedGroupIds.value,
     selectedEdgeId: selection.selectedEdgeId,
     deleteSelected: selection.deleteSelected,
   },
   menus: { closeAll: closeAllMenus },
   rename: { cancelRename: rename.cancelRename },
+  groups: { cancelRename: canvasGroups.cancelRenameGroup, closeColorMenu: canvasGroups.closeColorMenu },
   panel: { close: selection.dismissPanel },
   handleCtrlV: paste.handleCtrlV,
   duplicateSelected: () => void paste.duplicateSelected(),
@@ -1256,14 +1365,48 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 
 // 组合式导出解构（模板绑定用）
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
-const { editorPanel, isMultiSelected, onEdgeClick, onNodeDragStart } = selection
+const { editorPanel, isMultiSelected, selectedGroupIds, onEdgeClick, onNodeDragStart } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
-const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeDragStop, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
+const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
-const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, addMenu, addNodeAt } = menus
+const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, groupEntityMenu, groupEntityRename, groupEntityColor, groupEntityDissolve, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
 // 群组组合式导出（顶层解构：模板内自动解包 ref）
-const { connectDrag, connectLine, connectMenu, menuItems, hoveredNodeId, onDotMouseDown, createNodeFromMenu } = group
+const { groupRect, connectDrag, connectLine, connectMenu, menuItems, hoveredNodeId, onDotMouseDown, createNodeFromMenu } = group
+// 持久分组组合式导出（顶层解构：模板内自动解包 ref）
+const { emptyGroupIds, colorMenu, colorPalette, renamingGroupId, groupRenameInput, createGroupFromSelection, onGroupDragStart, onGroupResizeEnd, onNodeDragFollow, startRenameGroup, commitRenameGroup, cancelRenameGroup, openColorMenu, pickGroupColor } = canvasGroups
+
+/**
+ * 节点拖动结束（Vue Flow 原生拖动）：
+ * 先取出「选中分组跟随」的最终位置补丁，再与节点位置经 store.moveEntities 一次性回写（单次撤销）。
+ *
+ * @param payload Vue Flow 节点拖动结束事件
+ */
+function onNodeDragStop(payload: NodeDragEvent): void {
+  flow.onNodeDragStop(payload, canvasGroups.takeNodeDragFollowPatches())
+}
+
+/**
+ * 分组右键：打开分组实体菜单（重命名 / 更改颜色 / 解散分组），并关闭其他菜单。
+ *
+ * @param event 鼠标右键事件
+ * @param groupId 分组 id
+ */
+function openGroupEntityContextMenu(event: MouseEvent, groupId: string): void {
+  flow.closeEdgeMenu()
+  menus.closeNodeMenu()
+  canvasGroups.closeColorMenu()
+  menus.openGroupEntityMenu(event, groupId, flowEl.value)
+}
+
+/**
+ * 分组标题内联编辑输入：写入分组重命名临时值（提交由回车/失焦统一处理）。
+ *
+ * @param value 输入框当前值
+ */
+function onGroupRenameInput(value: string): void {
+  groupRenameInput.value = value
+}
 
 /**
  * 编辑器输入项右上角红色 x：快捷断开当前选中节点与某来源节点的连线（不弹确认）。
@@ -1549,6 +1692,7 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
   flow.closeEdgeMenu()
   paste.reset()
   group.reset()
+  canvasGroups.reset()
   drop.reset()
   dialogs.resetAll()
   upload.reset()
@@ -1591,6 +1735,9 @@ onMounted(() => {
     multiSelectionKeyCode: 'Control',
   })
   window.addEventListener('keydown', keyboard.onKeydown)
+  window.addEventListener('keydown', canvasGroups.onKeyDown)
+  window.addEventListener('keyup', canvasGroups.onKeyUp)
+  window.addEventListener('blur', canvasGroups.onWindowBlur)
   window.addEventListener('paste', paste.onPaste)
   window.addEventListener('resize', updateHeight)
   void store.load().then(() => {
@@ -1608,12 +1755,17 @@ onUnmounted(() => {
   disposed = true
   pendingFitView = false
   window.removeEventListener('keydown', keyboard.onKeydown)
+  window.removeEventListener('keydown', canvasGroups.onKeyDown)
+  window.removeEventListener('keyup', canvasGroups.onKeyUp)
+  window.removeEventListener('blur', canvasGroups.onWindowBlur)
   window.removeEventListener('paste', paste.onPaste)
   window.removeEventListener('resize', updateHeight)
   flowResizeObserver?.disconnect()
   flowResizeObserver = null
   // 取消进行中的成组连接拖拽（window 监听器清理）
   group.reset()
+  // 取消进行中的分组拖动并清理分组菜单/重命名状态（window 监听器清理）
+  canvasGroups.reset()
   // 中止进行中的加载节点上传并清除进度状态
   upload.reset()
   // 取消 LLM 恢复订阅（任务继续在服务端执行；重进画布由会话列表恢复接管）
@@ -1682,6 +1834,62 @@ watch(flowEl, (flow) => {
    改由合成节点 __group-frame 渲染虚线框（本组件自定义样式与整组拖动行为） */
 :deep(.vue-flow__nodesselection) {
   display: none !important;
+}
+
+/* ── 持久分组框（type: canvas-group）关键样式 ──────────────────────────────
+   1) 分组节点 wrapper 必须 pointer-events: none（且需 !important：Vue Flow 会为带
+      节点点击监听的节点内联 style="pointer-events: all"，普通样式规则压不过内联样式）：
+      框选要求指针按下时 event.target 恰为 .vue-flow__pane，而 .vue-flow__node 默认
+      pointer-events: all 会拦截框内空白处的指针 → 组内 Ctrl+拖拽完全失效；
+   2) 仅标题条 / 四边拖动条 / 缩放控制点恢复 auto（拖动抓取与缩放；子元素显式声明优先于继承值）；
+   3) Ctrl 按下时挂 canvas-group-node--passthrough 类，整体穿透 → 「Ctrl+拖拽 = 框选」零例外。 */
+:deep(.vue-flow__node-canvas-group) {
+  pointer-events: none !important;
+}
+
+:deep(.canvas-group__title),
+:deep(.canvas-group__edge) {
+  pointer-events: auto;
+}
+
+/* NodeResizer 控制点位于 pointer-events: none 的容器内，需显式恢复可拖；
+   z-index 高于标题条，保证顶部控制点不被标题条遮挡 */
+:deep(.vue-flow__resize-control) {
+  pointer-events: auto;
+  z-index: 3;
+}
+
+:deep(.canvas-group-node--passthrough),
+:deep(.canvas-group-node--passthrough *) {
+  pointer-events: none !important;
+}
+
+/* 分组预设色板（标题条色点 / 右键菜单「更改颜色」触发；坐标相对画布容器） */
+.canvas-group-color-menu {
+  position: absolute;
+  z-index: 26;
+  display: grid;
+  grid-template-columns: repeat(4, 20px);
+  gap: 6px;
+  padding: 8px;
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+.canvas-group-color-menu__swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.canvas-group-color-menu__swatch:hover {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 1px;
 }
 
 /* 单选联动高亮：与选中节点直接相连的连线按方向分色显示并加粗（2px）——

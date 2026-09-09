@@ -4,9 +4,9 @@
 
 | 文档 | 主题 |
 |------|------|
-| [data-model.md](./data-model.md) | 数据模型与文件布局：canvas.json 结构、节点产物与历史、预览 URL、手动上传、异步任务可靠性 |
+| [data-model.md](./data-model.md) | 数据模型与文件布局：canvas.json 结构、持久分组 groups[]、节点产物与历史、预览 URL、手动上传、异步任务可靠性 |
 | [node-types.md](./node-types.md) | 节点类型：原型注册表与全部节点明细 |
-| [interactions.md](./interactions.md) | 连线规则与画布交互：类型兼容/成环检测、选中与多选、群组、右键菜单、快捷键、资产拖拽入画布 |
+| [interactions.md](./interactions.md) | 连线规则与画布交互：类型兼容/成环检测、选中与多选、群组、**持久分组（节点分组框）**、右键菜单、快捷键、资产拖拽入画布 |
 | [editor-panel.md](./editor-panel.md) | 配置面板与输入预览：悬浮面板布局、编辑器组件约定、生成节点统一布局 |
 | [generation.md](./generation.md) | 生成流程：工作流/ffmpeg 任务、轮询与状态机、中断、任务状态来源 |
 | [task-architecture.md](./task-architecture.md) | **统一异步任务架构与任务管理器**：任务注册表/执行器门面、三类任务接入、WS 广播、ffmpeg 异步化与中断 |

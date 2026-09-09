@@ -13,7 +13,7 @@
 
 ```jsonc
 {
-  "version": 1,                    // CANVAS_SCHEMA_VERSION，读取时用 migrateCanvasData 迁移/校验
+  "version": 2,                    // CANVAS_SCHEMA_VERSION，读取时用 migrateCanvasData 迁移/校验
   "kind": "scene",                 // 'stage' | 'scene'
   "nodes": [
     {
@@ -28,9 +28,25 @@
   "connections": [
     { "id": "uuid", "fromNodeId": "a", "fromPortId": "out", "toNodeId": "b", "toPortId": "in" }
   ],
+  "groups": [
+    {
+      "id": "uuid",                // newId() 生成
+      "name": "分组 1",             // 标题（双击标题条内联重命名；默认「分组 N」）
+      "color": "#1976D2",          // 主题色（8 色预设色板，见 groups.ts: GROUP_PALETTE）
+      "x": 0, "y": 0,              // 分组矩形左上角（流坐标）
+      "width": 624, "height": 524  // 分组矩形尺寸（最小 160×100）
+    }
+  ],
   "createdAt": "ISO", "updatedAt": "ISO"
 }
 ```
+
+### 持久分组（`groups[]`）
+
+- **成员关系不落盘**：分组**没有 `nodeIds` 字段**——节点是否属于某分组，由「节点矩形与分组矩形是否**重叠（面积 > 0，相切不算）**」在运行时实时派生（`groups.ts: rectsOverlap / nodesInGroup / groupsOfNode`）。因此拖动节点进出分组即自动加入/脱离，无需任何显式操作；一个节点可同时属于多个重叠分组。
+- **版本迁移**：`version` 由 `1` 升为 `2`。`migrateCanvasData` 对旧文件补 `groups: []`；`groups` 非法（非数组）或含结构非法项时**丢弃并 `console.warn`**（不抛错，保证旧/损坏文件仍可加载）。
+- **服务端零改动**：`PUT /api/canvas/def`（`server/src/assets/canvas-def.ts`）只校验 `data` 为对象且 `kind` 匹配，随后 `{ ...dataObj, rev, updatedAt }` 落盘，`groups` 作为未知字段原样透传；分镜重编号/移动、存储清理、自动搭画布均只处理 `nodes`/`connections`，不受影响。
+- **撤销/重做**：分组快照与节点同一份 `CanvasData` 深拷贝（`pushHistory`），因此分组增删改与拖动天然可撤销；拖动/缩放**结束时一次性回写**（`store.moveEntities` / `store.updateGroup`），单次撤销即可整体回退。
 
 ## 生成产物与历史
 

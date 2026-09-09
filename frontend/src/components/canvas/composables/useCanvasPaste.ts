@@ -31,10 +31,13 @@ export interface UseCanvasPasteOptions {
   /** 选中控制（粘贴聚焦写入应用级选中并抑制面板弹出） */
   selection: {
     setSelectedNodes: (nodeIds: string[]) => void
+    setSelectedGroups: (groupIds: string[]) => void
     setSuppressPanelOnSelect: (value: boolean) => void
   }
   /** 当前选中节点 id 列表读取（Ctrl+D 复制整组） */
   getSelectedNodeIds: () => string[]
+  /** 当前选中分组 id 列表读取（Ctrl+D 复制整组） */
+  getSelectedGroupIds: () => string[]
   /** 操作反馈提示 */
   showSnackbar: ShowSnackbar
 }
@@ -46,7 +49,7 @@ export interface UseCanvasPasteOptions {
  * @returns 粘贴事件处理器、Ctrl+V 兜底与 Ctrl+D 复制粘贴整组句柄
  */
 export function useCanvasPaste(options: UseCanvasPasteOptions) {
-  const { store, flowEl, screenToFlowCoordinate, findNode, addSelectedNodes, selection, getSelectedNodeIds, upload, showSnackbar } = options
+  const { store, flowEl, screenToFlowCoordinate, findNode, addSelectedNodes, selection, getSelectedNodeIds, getSelectedGroupIds, upload, showSnackbar } = options
 
   /** 粘贴兜底标记：剪贴板为空时浏览器不派发 paste 事件，由 keydown 置位、宏任务兜底粘贴内部复制的节点 */
   let nodePasteFallbackArmed = false
@@ -130,25 +133,28 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
   }
 
   /**
-   * 粘贴画布内复制的节点（单/多节点）并聚焦（选中显示边框，不自动打开配置面板）。
+   * 粘贴画布内复制的节点/分组并聚焦（节点选中显示边框、不自动打开配置面板；分组不进入聚焦）。
    *
    * @param source 外部复制载荷（如系统剪贴板标记解析出的，支持跨画布/刷新后粘贴）；缺省用 store 内部剪贴板
    */
   async function pasteNodeAndFocus(source?: NodeClipboardPayload): Promise<void> {
-    const nodes = store.pasteNodes(source)
-    if (nodes.length === 0) return
+    const { nodes, groups } = store.pasteNodes(source)
+    if (nodes.length === 0 && groups.length === 0) return
+    selection.setSelectedGroups(groups.map((g) => g.id))
     await focusPastedNodes(nodes.map((n) => n.id))
   }
 
   /**
-   * Ctrl+D：复制当前选中的节点（含组内连线）并粘贴，聚焦新节点。
+   * Ctrl+D：复制当前选中的节点与分组（含组内连线）并粘贴，聚焦新节点。
    */
   async function duplicateSelected(): Promise<void> {
-    const ids = getSelectedNodeIds()
-    if (ids.length === 0) return
-    store.copyNodes(ids)
-    const nodes = store.pasteNodes()
-    if (nodes.length === 0) return
+    const nodeIds = getSelectedNodeIds()
+    const groupIds = getSelectedGroupIds()
+    if (nodeIds.length === 0 && groupIds.length === 0) return
+    store.copyNodes(nodeIds, groupIds)
+    const { nodes, groups } = store.pasteNodes()
+    if (nodes.length === 0 && groups.length === 0) return
+    selection.setSelectedGroups(groups.map((g) => g.id))
     await focusPastedNodes(nodes.map((n: CanvasNodeData) => n.id))
   }
 

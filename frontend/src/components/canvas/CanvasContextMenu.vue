@@ -138,7 +138,8 @@
     :style="{ left: `${groupMenu.x}px`, top: `${groupMenu.y}px` }"
   >
     <div class="canvas-context-menu__title">
-      已选 {{ groupMenu.count }} 个节点
+      <span>已选 {{ groupMenu.count }} 个节点</span>
+      <span v-if="groupMenu.groupCount > 0">、{{ groupMenu.groupCount }} 个分组</span>
     </div>
     <div
       class="canvas-context-menu__item"
@@ -165,16 +166,60 @@
       删除
     </div>
   </div>
+
+  <!-- 分组实体右键菜单（右键分组框：重命名 / 更改颜色 / 解散分组） -->
+  <div
+    v-if="groupEntityMenu.show"
+    class="canvas-context-menu"
+    :style="{ left: `${groupEntityMenu.x}px`, top: `${groupEntityMenu.y}px` }"
+  >
+    <div
+      class="canvas-context-menu__item"
+      @click="emit('group-entity-rename')"
+    >
+      <v-icon
+        size="small"
+        class="mr-2"
+      >
+        mdi-pencil-outline
+      </v-icon>
+      重命名
+    </div>
+    <div
+      class="canvas-context-menu__item"
+      @click="emit('group-entity-color')"
+    >
+      <v-icon
+        size="small"
+        class="mr-2"
+      >
+        mdi-palette-outline
+      </v-icon>
+      更改颜色
+    </div>
+    <div
+      class="canvas-context-menu__item canvas-context-menu__item--danger"
+      @click="emit('group-entity-dissolve')"
+    >
+      <v-icon
+        size="small"
+        class="mr-2"
+      >
+        mdi-delete-outline
+      </v-icon>
+      解散分组
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import type { SaveAsType } from './composables/types'
 
 /**
- * 画布右键菜单：节点菜单与连线菜单的纯展示组件。
+ * 画布右键菜单：节点菜单、连线菜单、多选群组菜单与分组实体菜单的纯展示组件。
  * 节点菜单含「保存为」hover 子菜单（按节点输出类型提供目标：图片=角色/场景/道具图片/自定义资产；
  * 视频=道具视频；音频=道具音频），仅节点有当前产物时显示。
- * 菜单状态与动作逻辑由 useCanvasMenus / useCanvasFlow 组合式持有，动作通过事件上抛。
+ * 菜单状态与动作逻辑由 useCanvasMenus / useCanvasFlow / useCanvasGroups 组合式持有，动作通过事件上抛。
  */
 defineProps<{
   /** 节点右键菜单状态（x/y 相对画布容器） */
@@ -191,8 +236,10 @@ defineProps<{
   hasConnections: boolean
   /** 连线右键菜单状态（x/y 相对画布容器） */
   edgeMenu: { show: boolean; x: number; y: number }
-  /** 群组右键菜单状态（x/y 相对画布容器；count 为选中节点数） */
-  groupMenu: { show: boolean; x: number; y: number; count: number }
+  /** 群组右键菜单状态（x/y 相对画布容器；count 为选中节点数，groupCount 为选中分组数） */
+  groupMenu: { show: boolean; x: number; y: number; count: number; groupCount: number }
+  /** 分组实体右键菜单状态（x/y 相对画布容器；groupId 为对应分组） */
+  groupEntityMenu: { show: boolean; x: number; y: number; groupId: string }
 }>()
 
 const emit = defineEmits<{
@@ -216,6 +263,12 @@ const emit = defineEmits<{
   (e: 'group-copy'): void
   /** 删除整组 */
   (e: 'group-delete'): void
+  /** 重命名分组（进入标题内联编辑） */
+  (e: 'group-entity-rename'): void
+  /** 更改分组颜色（打开预设色板） */
+  (e: 'group-entity-color'): void
+  /** 解散分组（弹窗确认，仅删框） */
+  (e: 'group-entity-dissolve'): void
 }>()
 
 /**

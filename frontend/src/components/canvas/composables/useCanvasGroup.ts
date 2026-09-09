@@ -14,7 +14,6 @@
 import { computed, reactive } from 'vue'
 import type { Ref } from 'vue'
 import {
-  computeGroupRect,
   findNodeAt,
   groupConnectOptions,
   groupOutputTypes,
@@ -22,6 +21,7 @@ import {
   GROUP_FRAME_PADDING,
   type GroupRect,
 } from '../../../canvas/groupSelection'
+import { boundingRect } from '../../../canvas/groups'
 import type { GroupConnectResult } from '../../../canvas/useCanvasStore'
 import type { CanvasNodeData } from '../../../canvas/types'
 import type { CanvasStoreApi, NodeMap, ScreenToFlow, ShowSnackbar } from './types'
@@ -34,6 +34,8 @@ export interface UseCanvasGroupOptions {
   nodeMap: NodeMap
   /** 当前选中节点 id 列表读取（getter，避免把 ref 直接跨组合式传递） */
   getSelectedNodeIds: () => string[]
+  /** 当前选中持久分组 id 列表读取（多选包围盒需把选中分组框一并包住，FR-7.4） */
+  getSelectedGroupIds: () => string[]
   /** Vue Flow 屏幕坐标 → 流坐标换算 */
   screenToFlowCoordinate: ScreenToFlow
   /** Vue Flow 视口（pan/zoom 实时更新；预览线/菜单定位用） */
@@ -61,20 +63,28 @@ const SKIP_REASON_LABELS: Record<GroupConnectResult['skipped'][number]['reason']
  * @returns 群组状态与操作 API
  */
 export function useCanvasGroup(options: UseCanvasGroupOptions) {
-  const { store, nodeMap, getSelectedNodeIds, screenToFlowCoordinate, viewport, flowEl, showSnackbar, focusNode } = options
+  const { store, nodeMap, getSelectedNodeIds, getSelectedGroupIds, screenToFlowCoordinate, viewport, flowEl, showSnackbar, focusNode } = options
 
-  // ── 群组包围盒（合成节点定位基准）────────────────────────
+  // ── 多选包围盒（合成节点定位基准）────────────────────────
 
-  /** 当前多选（≥2 个）节点的包围盒（含与边缘节点的留白；单选/无选中时为 null，不渲染合成节点） */
+  /**
+   * 当前多选（选中节点数 + 选中分组数 ≥ 2）的包围盒：
+   * = 选中节点包围盒 ∪ 选中分组矩形，再加 GROUP_FRAME_PADDING 留白（FR-7.4：分组框不得跑出虚线框）。
+   * 单选/无选中时为 null（不渲染合成节点，也不显示多选工具栏）。
+   */
   const groupRect = computed<GroupRect | null>(() => {
-    const ids = getSelectedNodeIds()
-    if (ids.length < 2) return null
-    const nodes = ids
+    const nodeIds = getSelectedNodeIds()
+    const groupIds = getSelectedGroupIds()
+    if (nodeIds.length + groupIds.length < 2) return null
+    const nodes = nodeIds
       .map((id) => nodeMap.value[id])
       .filter((n): n is CanvasNodeData => !!n)
-    if (nodes.length < 2) return null
-    // 虚线框与边缘节点保留留白（GROUP_FRAME_PADDING），便于辨认框选结果与整组拖动
-    return computeGroupRect(nodes, GROUP_FRAME_PADDING)
+    const groups = groupIds
+      .map((id) => store.groups.value.find((g) => g.id === id))
+      .filter((g): g is NonNullable<typeof g> => !!g)
+    if (nodes.length + groups.length < 2) return null
+    // 虚线框与边缘保留留白（GROUP_FRAME_PADDING），便于辨认框选结果与整组拖动
+    return boundingRect([...nodes, ...groups], GROUP_FRAME_PADDING)
   })
 
   // ── 群组输出点连接拖拽状态 ──────────────────────────────
