@@ -766,14 +766,18 @@ function onFitView(): void {
  * @returns 空画布视为就绪；否则要求内部节点集合与 store 一致且均已测量
  */
 function vueFlowMatchesStore(): boolean {
-  const expected = store.nodes.value
-  if (expected.length === 0) return true
+  // 期望集 = 真实节点 + 持久分组框：canvas-group 同样渲染为 Vue Flow 节点，
+  // 若不把 store.groups 计入，含分组框的画布 current.length 永远多出分组数 → 适应视图被永久跳过。
+  const expectedIds = new Set<string>([
+    ...store.nodes.value.map((n) => n.id),
+    ...store.groups.value.map((g) => g.id),
+  ])
+  if (expectedIds.size === 0) return true
   // 过滤群组合成节点（多选时临时渲染，不入 store）
   const current = getNodes.value.filter((n) => !isSyntheticNodeId(n.id))
-  if (current.length !== expected.length) return false
-  const ids = new Set(expected.map((n) => n.id))
+  if (current.length !== expectedIds.size) return false
   for (const n of current) {
-    if (!ids.has(n.id)) return false
+    if (!expectedIds.has(n.id)) return false
     if (!n.dimensions.width || !n.dimensions.height) return false
   }
   return true
@@ -789,7 +793,7 @@ function vueFlowMatchesStore(): boolean {
 function fitCanvasToNodes(seq: number): Promise<void> {
   const task = async (): Promise<void> => {
     if (!pendingFitView || disposed || seq !== fitViewSeq) return
-    if (store.nodes.value.length === 0) {
+    if (store.nodes.value.length === 0 && store.groups.value.length === 0) {
       pendingFitView = false
       await setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 })
       return
