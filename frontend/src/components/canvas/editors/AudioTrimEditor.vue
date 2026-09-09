@@ -116,8 +116,11 @@
       「原格式」按输入音频的扩展名输出（重编码保证小数秒切口精确）
     </div>
 
-    <!-- 裁剪 / 重新裁剪 -->
-    <div class="d-flex align-center ga-2 mt-3">
+    <!-- 裁剪 / 重新裁剪（蓝图模式隐藏：蓝图不产生产物） -->
+    <div
+      v-if="!isBlueprint"
+      class="d-flex align-center ga-2 mt-3"
+    >
       <v-btn
         color="primary"
         size="small"
@@ -162,6 +165,7 @@ import {
   audioTrimFormatOf,
   audioTrimTargetsMp3,
 } from '../../../canvas/audioTrim'
+import { useCanvasMode } from '../../../canvas/canvasMode'
 
 /**
  * 裁剪音频节点配置组件。
@@ -287,6 +291,11 @@ const targetsMp3 = computed(() => audioTrimTargetsMp3(props.node.config, audioIn
 
 /** 节点当前是否已有裁剪结果（按钮文案用；产物为固定路径文件，由服务端落盘） */
 const hasOutput = computed(() => !!(props.output || props.node.config.current))
+
+/** 画布模式上下文：蓝图模式下隐藏「裁剪」执行入口（蓝图不产生产物） */
+const canvasMode = useCanvasMode()
+/** 是否蓝图模式 */
+const isBlueprint = computed(() => canvasMode.mode === 'blueprint')
 
 /** 当前输出音频预览 URL（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
 const currentAudio = computed(() => {

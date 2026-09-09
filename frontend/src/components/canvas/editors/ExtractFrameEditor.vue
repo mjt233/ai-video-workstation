@@ -62,6 +62,7 @@
     >
       <template #append-inner>
         <v-btn
+          v-if="!isBlueprint"
           color="primary"
           size="small"
           variant="flat"
@@ -101,6 +102,7 @@ import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { getVideoInfo } from '../../../canvas/api'
+import { useCanvasMode } from '../../../canvas/canvasMode'
 
 /**
  * 获取视频帧节点配置组件。
@@ -222,6 +224,11 @@ const frameIndex = computed(() => {
 
 /** 节点当前是否已有提取结果（按钮文案用；产物为固定路径文件，由服务端落盘） */
 const hasOutput = computed(() => !!(props.output || props.node.config.current))
+
+/** 画布模式上下文：蓝图模式下隐藏「提取/重新提取」执行入口（蓝图不产生产物） */
+const canvasMode = useCanvasMode()
+/** 是否蓝图模式 */
+const isBlueprint = computed(() => canvasMode.mode === 'blueprint')
 
 /** 当前提取结果图片 URL（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
 const currentImage = computed(() => {

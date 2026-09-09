@@ -190,6 +190,53 @@ describe('scanCleanup', () => {
   });
 });
 
+describe('蓝图引用保护', () => {
+  it('项目级蓝图（prompt/blueprint/*.json）的资产引用计入引用集合', async () => {
+    await write('p1/prompt/blueprint/bp-1.json', JSON.stringify({
+      id: 'bp-1',
+      name: '蓝图',
+      nodes: [
+        { id: 'n1', prototypeId: 'image-loader', name: '图', x: 0, y: 0, width: 1, height: 1, config: { assetPath: 'assert/custom/canvas/used.png' } },
+        { id: 'n2', prototypeId: 'image-loader', name: '图2', x: 0, y: 0, width: 1, height: 1, config: { assetPath: 'assert/custom/orphan.png' } },
+      ],
+    }));
+    const result = await scanUnreferencedCustomAssets('p1');
+    expect(result.items.map((i) => i.path)).toEqual(['assert/custom/orphan-dir/deep.png']);
+  });
+
+  it('全局蓝图按 assetProject 归属到对应项目（其余项目不受影响）', async () => {
+    const globalDir = path.join(state.root, 'global-blueprints');
+    await fs.mkdir(globalDir, { recursive: true });
+    await fs.writeFile(path.join(globalDir, 'bp-2.json'), JSON.stringify({
+      id: 'bp-2',
+      name: '全局蓝图',
+      assetProject: 'p1',
+      nodes: [
+        { id: 'n1', prototypeId: 'image-loader', name: '图', x: 0, y: 0, width: 1, height: 1, config: { assetPath: 'assert/custom/orphan.png' } },
+      ],
+    }), 'utf-8');
+    const checker = await createCustomRefChecker('p1', globalDir);
+    expect(checker('assert/custom/orphan.png')).toBe(true);
+    // 未设置资产项目的全局蓝图不计入任何项目
+    await fs.writeFile(path.join(globalDir, 'bp-3.json'), JSON.stringify({
+      id: 'bp-3',
+      name: '无上下文',
+      assetProject: null,
+      nodes: [
+        { id: 'n1', prototypeId: 'image-loader', name: '图', x: 0, y: 0, width: 1, height: 1, config: { assetPath: 'assert/custom/orphan-dir/deep.png' } },
+      ],
+    }), 'utf-8');
+    const checker2 = await createCustomRefChecker('p1', globalDir);
+    expect(checker2('assert/custom/orphan-dir/deep.png')).toBe(false);
+  });
+
+  it('全局蓝图目录不存在时不影响扫描', async () => {
+    const checker = await createCustomRefChecker('p1', path.join(state.root, 'not-exist'));
+    expect(checker('assert/custom/canvas/used.png')).toBe(true);
+    expect(checker('assert/custom/orphan.png')).toBe(false);
+  });
+});
+
 describe('纯函数', () => {
   it('parseHistoryStamp 解析文件名时间戳（忽略 -N 后缀）', () => {
     expect(parseHistoryStamp('20260101-120000.jpg')?.getFullYear()).toBe(2026);

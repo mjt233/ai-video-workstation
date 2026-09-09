@@ -164,8 +164,11 @@
       各段规格不一致（{{ copyMismatch }}），无法无损拼接，请改用「重编码」。
     </div>
 
-    <!-- 拼接 / 重新拼接 -->
-    <div class="d-flex align-center ga-2 mt-2">
+    <!-- 拼接 / 重新拼接（蓝图模式隐藏：蓝图不产生产物） -->
+    <div
+      v-if="!isBlueprint"
+      class="d-flex align-center ga-2 mt-2"
+    >
       <v-btn
         color="primary"
         size="small"
@@ -206,6 +209,7 @@ import { mergeInputOrder as mergeGlobalInputOrder } from '../../../canvas/genera
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { getVideoInfo, type VideoInfo } from '../../../canvas/api'
 import VideoRefInputGroup from './VideoRefInputGroup.vue'
+import { useCanvasMode } from '../../../canvas/canvasMode'
 
 /** 拼接编码方式 */
 type ConcatMode = 'copy' | 'reencode'
@@ -406,6 +410,11 @@ const copyMismatch = computed<string>(() => {
 
 /** 节点当前是否已有拼接结果（按钮文案用；产物为固定路径文件，由服务端落盘） */
 const hasOutput = computed(() => !!(props.output || props.node.config.current))
+
+/** 画布模式上下文：蓝图模式下隐藏「拼接」执行入口（蓝图不产生产物） */
+const canvasMode = useCanvasMode()
+/** 是否蓝图模式 */
+const isBlueprint = computed(() => canvasMode.mode === 'blueprint')
 
 /** 当前输出视频预览 URL（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
 const currentVideo = computed(() => {

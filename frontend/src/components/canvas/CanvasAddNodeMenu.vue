@@ -46,6 +46,22 @@
           </v-list>
         </div>
       </div>
+      <!-- 底部：插入蓝图（与「添加节点」并列的第二种来源：已有蓝图内容）
+           蓝图编辑器（blueprintMode）内不提供：v1 不支持蓝图嵌套 -->
+      <template v-if="!blueprintMode">
+        <v-divider />
+        <v-list
+          density="compact"
+          nav
+          class="add-menu__footer"
+        >
+          <v-list-item
+            title="插入蓝图…"
+            prepend-icon="mdi-vector-square"
+            @click="emit('insert-blueprint')"
+          />
+        </v-list>
+      </template>
     </div>
   </v-menu>
 </template>
@@ -75,6 +91,11 @@ defineProps<{
   x: number
   /** 菜单锚点 y（相对画布容器） */
   y: number
+  /**
+   * 是否蓝图编辑器（`AssetCanvas` mode='blueprint'）：
+   * 为真时隐藏底部「插入蓝图…」（v1 不支持蓝图嵌套）。
+   */
+  blueprintMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -82,6 +103,8 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   /** 选中节点原型（按原型 id 添加节点） */
   (e: 'select', prototypeId: string): void
+  /** 点击底部「插入蓝图…」（父级关闭菜单并打开蓝图插入对话框） */
+  (e: 'insert-blueprint'): void
 }>()
 
 /** 菜单锚点元素（0×0 隐藏定位点，VMenu 依此在鼠标处弹出） */
@@ -156,6 +179,11 @@ const categoryGroups = computed<CategoryGroup[]>(() =>
 
 /* 分类内原型列表：去掉 v-list 默认纵向内边距，紧凑排布 */
 .add-menu__list {
+  padding: 0;
+}
+
+/* 底部「插入蓝图…」：去掉 v-list 默认内边距 */
+.add-menu__footer {
   padding: 0;
 }
 </style>

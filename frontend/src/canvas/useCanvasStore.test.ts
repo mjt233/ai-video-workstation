@@ -995,4 +995,126 @@ describe('useCanvasStore', () => {
     await store.switchTarget({ kind: 'scene', episode: '1', shot: '2' })
     expect(store.groups.value).toHaveLength(0)
   })
+
+  // ── 蓝图支持：持久化适配器 / applyEntities / syncSavedRev ──────────
+
+  it('持久化适配器：load 返回仅含 nodes/connections/groups 时由 store 兜底补全', async () => {
+    const persistence = {
+      load: vi.fn().mockResolvedValue({
+        canvas: {
+          nodes: [{ id: 'a', prototypeId: 'text', name: 'n', x: 1, y: 2, width: 10, height: 10, config: {} }],
+          connections: [{ id: 'c', fromNodeId: 'a', fromPortId: 'out', toNodeId: 'a', toPortId: 'in' }],
+          groups: [{ id: 'g', name: 'g', color: '#1976D2', x: 0, y: 0, width: 100, height: 100 }],
+        },
+        rev: 7,
+      }),
+      save: vi.fn().mockResolvedValue({ rev: 8 }),
+    }
+    const store = useCanvasStore('p', TARGET, persistence)
+    await store.load()
+    expect(store.loaded.value).toBe(true)
+    expect(store.savedRev.value).toBe(7)
+    expect(store.nodes.value).toHaveLength(1)
+    expect(store.connections.value).toHaveLength(1)
+    expect(store.groups.value).toHaveLength(1)
+    // 缺省字段由 createCanvasData 兜底
+    expect(store.data.value.kind).toBe('scene')
+    expect(store.data.value.version).toBeGreaterThan(0)
+    // 适配器注入后不再走画布定义接口
+    expect(loadCanvas).not.toHaveBeenCalled()
+  })
+
+  it('持久化适配器：save 以 CAS 版本号写入并回写新 rev', async () => {
+    const persistence = {
+      load: vi.fn().mockResolvedValue(null),
+      save: vi.fn().mockResolvedValue({ rev: 5 }),
+    }
+    const store = useCanvasStore('p', TARGET, persistence)
+    await store.load()
+    store.addNode('text', 0, 0)
+    const ok = await store.save()
+    expect(ok).toBe(true)
+    expect(persistence.save).toHaveBeenCalledWith(expect.anything(), { expectedRev: 0 })
+    expect(store.savedRev.value).toBe(5)
+    expect(saveCanvas).not.toHaveBeenCalled()
+  })
+
+  it('applyEntities：一次写入节点/连线/分组，单次撤销可整体回退', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.addNode('text', 0, 0) // 已有节点，确保撤销后仍存在
+    const before = store.nodes.value.length
+    store.applyEntities({
+      nodes: [
+        { id: 'n1', prototypeId: 'text', name: 'a', x: 0, y: 0, width: 10, height: 10, config: {} },
+        { id: 'n2', prototypeId: 'image-generate', name: 'b', x: 100, y: 0, width: 10, height: 10, config: {} },
+      ],
+      connections: [{ id: 'c1', fromNodeId: 'n1', fromPortId: 'out', toNodeId: 'n2', toPortId: 'in' }],
+      groups: [{ id: 'g1', name: '蓝图', color: '#1976D2', x: -12, y: -12, width: 200, height: 120 }],
+    })
+    expect(store.nodes.value).toHaveLength(before + 2)
+    expect(store.connections.value).toHaveLength(1)
+    expect(store.groups.value).toHaveLength(1)
+    store.undo()
+    expect(store.nodes.value).toHaveLength(before)
+    expect(store.connections.value).toHaveLength(0)
+    expect(store.groups.value).toHaveLength(0)
+  })
+
+  it('applyEntities：空载荷不产生撤销条目', () => {
+    const store = useCanvasStore('p', TARGET)
+    store.applyEntities({ nodes: [], connections: [], groups: [] })
+    expect(store.canUndo.value).toBe(false)
+  })
+
+  it('syncSavedRev：对齐外部部分写入后的版本号（不置脏、不触发保存）', async () => {
+    const store = useCanvasStore('p', TARGET)
+    await store.load()
+    store.syncSavedRev(9)
+    expect(store.savedRev.value).toBe(9)
+    expect(store.dirty.value).toBe(false)
+    vi.advanceTimersByTime(2000)
+    expect(saveCanvas).not.toHaveBeenCalled()
+    // 非法值忽略
+    store.syncSavedRev(-1)
+    expect(store.savedRev.value).toBe(9)
+  })
+
+  // ── 手动保存模式（autoSave: false；蓝图编辑器）─────────────────────
+
+  it('autoSave: false：结构改动只置脏、不自动落盘', async () => {
+    const store = useCanvasStore('p', TARGET, undefined, { autoSave: false })
+    await store.load()
+    store.addNode('text', 0, 0)
+    expect(store.nodes.value).toHaveLength(1)
+    expect(store.dirty.value).toBe(true)
+    await vi.runAllTimersAsync()
+    expect(saveCanvas).not.toHaveBeenCalled()
+    expect(store.dirty.value).toBe(true)
+  })
+
+  it('autoSave: false：显式 save() 落盘并清除脏标记（CAS 版本号沿用）', async () => {
+    const persistence = {
+      load: vi.fn().mockResolvedValue(null),
+      save: vi.fn().mockResolvedValue({ rev: 4 }),
+    }
+    const store = useCanvasStore('p', TARGET, persistence, { autoSave: false })
+    await store.load()
+    store.addNode('text', 0, 0)
+    await vi.runAllTimersAsync()
+    expect(persistence.save).not.toHaveBeenCalled()
+    const ok = await store.save()
+    expect(ok).toBe(true)
+    expect(persistence.save).toHaveBeenCalledWith(expect.anything(), { expectedRev: 0 })
+    expect(store.savedRev.value).toBe(4)
+    expect(store.dirty.value).toBe(false)
+  })
+
+  it('autoSave: true（缺省）：仍走防抖自动保存', async () => {
+    const store = useCanvasStore('p', TARGET, undefined, { autoSave: true })
+    await store.load()
+    store.addNode('text', 0, 0)
+    await vi.runAllTimersAsync()
+    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    expect(store.dirty.value).toBe(false)
+  })
 })

@@ -72,6 +72,70 @@ const LLM_CONVERGE_TIMEOUT_MS = 3000
 const POLL_INTERVAL_MS = 2000
 
 /**
+ * 创建「空闲」生成组合式（蓝图编辑器专用）：与 `useCanvasGeneration` **同形状**，
+ * 但不订阅 WebSocket、不轮询、不恢复任务，全部执行类方法为空操作。
+ *
+ * 用途：`AssetCanvas` 在 `mode='blueprint'` 时注入本对象——蓝图不产生产物、不跑工作流，
+ * 节点卡片的运行态/产物刷新/任务恢复逻辑天然为空，无需在模板里到处加分支。
+ *
+ * @returns 与 useCanvasGeneration 相同形状的空实现
+ */
+export function createIdleGeneration(): ReturnType<typeof useCanvasGeneration> {
+  /** 恒为空的状态表（无任何节点处于运行态） */
+  const statusByNode = ref<Record<string, GenerateStatus>>({})
+  /** 空异步操作 */
+  const noopAsync = async (): Promise<void> => {
+    // 蓝图模式不执行生成类操作：有意忽略（调用方在蓝图模式下不会触达这些入口）
+  }
+  return {
+    statusByNode,
+    setInputPaths: () => {
+      // 蓝图模式无输入路径收集：有意忽略
+    },
+    generate: noopAsync,
+    extractFrame: noopAsync,
+    concatVideo: noopAsync,
+    trimVideo: noopAsync,
+    trimAudio: noopAsync,
+    interrupt: noopAsync,
+    clearStatus: () => {
+      // 状态表恒为空：有意忽略
+    },
+    // 产物路径在蓝图模式下不会被使用（产物信息刷新已跳过），保留纯推导以兼容类型
+    computeOutputPath: (node: CanvasNodeData) =>
+      canvasNodeOutputPath({ kind: 'stage', primary: '' }, node.id, getPrototype(node.prototypeId)?.outputExt ?? 'jpg'),
+    getScope: (): CanvasScope => ({ kind: 'stage', primary: '' }),
+    reset: () => {
+      // 无轮询/定时器：有意忽略
+    },
+    dispose: () => {
+      // 无订阅：有意忽略
+    },
+    restore: async () => {
+      // 蓝图模式不恢复任务：有意忽略
+    },
+    switchTarget: async () => {
+      // 蓝图模式不切换目标：有意忽略
+    },
+    beginClientRun: () => {
+      // 蓝图模式无客户端运行态：有意忽略
+    },
+    updateClientRun: () => {
+      // 蓝图模式无客户端运行态：有意忽略
+    },
+    endClientRun: () => {
+      // 蓝图模式无客户端运行态：有意忽略
+    },
+    setLlmError: () => {
+      // 蓝图模式无 LLM 会话：有意忽略
+    },
+    interruptLlm: () => {
+      // 蓝图模式无 LLM 会话：有意忽略
+    },
+  }
+}
+
+/**
  * 生成节点资产生成组合式：跑工作流、轮询状态（纯体验层）、通知结果、中断。
  *
  * **任务状态来源**：

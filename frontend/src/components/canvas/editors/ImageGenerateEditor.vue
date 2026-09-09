@@ -91,7 +91,12 @@
       />
     </div>
 
-    <div class="d-flex align-center ga-2 mb-2">
+    <!-- 执行类操作（生成 / 中断 / 上传产物 / 历史 / 设为分镜场景图）：
+         蓝图模式全部隐藏（蓝图不产生产物，产物在插入画布后生成） -->
+    <div
+      v-if="!isBlueprint"
+      class="d-flex align-center ga-2 mb-2"
+    >
       <v-btn
         color="primary"
         size="small"
@@ -159,6 +164,7 @@ import {
 } from '../../../api/workflow'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
+import { useCanvasMode } from '../../../canvas/canvasMode'
 import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
 import WorkflowParamsTrigger from '../../WorkflowParamsTrigger.vue'
@@ -196,6 +202,11 @@ const workflows = ref<WorkflowInfo[]>([])
 const workflowsLoaded = ref(false)
 /** 工作流实现校验错误（未选择实现时点击生成显示，选择后清除） */
 const implError = ref('')
+
+/** 画布模式上下文：蓝图模式下隐藏生成/中断/上传产物/历史/设为场景图等执行类入口 */
+const canvasMode = useCanvasMode()
+/** 是否蓝图模式 */
+const isBlueprint = computed(() => canvasMode.mode === 'blueprint')
 
 /** 上传产物文件选择框 DOM（隐藏；点「上传产物」触发 click） */
 const uploadInputEl = ref<HTMLInputElement | null>(null)

@@ -66,12 +66,59 @@ export interface RewireOptions {
 }
 
 /**
+ * 画布持久化适配器（可注入）。
+ *
+ * 缺省实现 = 现有画布定义读写（`loadCanvas` / `saveCanvas`，按 project + target 定位 canvas.json）；
+ * 蓝图编辑器（`AssetCanvas` mode='blueprint'）注入蓝图适配器，把同一套 store 能力
+ * （增删改查 / 撤销重做 / 剪贴板 / CAS 保存）复用到蓝图文件上。
+ */
+export interface CanvasPersistence {
+  /**
+   * 读取数据（不存在返回 null）。
+   *
+   * @returns 画布数据（可只含 nodes/connections/groups，缺省字段由 store 兜底）与版本号
+   */
+  load(): Promise<{ canvas: Partial<CanvasData>; rev: number } | null>
+  /**
+   * CAS 保存。
+   *
+   * @param canvas 画布数据（含 nodes/connections/groups 等）
+   * @param opts 版本选项（expectedRev / force）
+   * @returns 保存后的版本号
+   */
+  save(canvas: CanvasData, opts: { expectedRev: number; force?: boolean }): Promise<{ rev: number }>
+}
+
+/**
+ * useCanvasStore 选项。
+ */
+export interface UseCanvasStoreOptions {
+  /**
+   * 是否启用防抖自动保存（缺省 `true`）。
+   *
+   * 设为 `false` 时（蓝图编辑器「手动保存」模式）：结构改动只置脏（`dirty=true`）
+   * 并更新内存数据，**不排定任何落盘**，须由调用方在用户点击「保存」时显式 `save()`；
+   * 关闭编辑器时未保存的改动随组件卸载丢弃。
+   */
+  autoSave?: boolean
+}
+
+/**
  * 画布状态管理：加载/保存（防抖自动保存）、节点与连线的增删改查、连接校验。
  *
  * @param project 项目名
  * @param target 画布目标
+ * @param persistence 持久化适配器（缺省为画布定义文件；蓝图模式注入蓝图适配器）
+ * @param options 选项（`autoSave: false` = 手动保存模式，见 UseCanvasStoreOptions）
  */
-export function useCanvasStore(project: string, target: CanvasTarget) {
+export function useCanvasStore(
+  project: string,
+  target: CanvasTarget,
+  persistence?: CanvasPersistence,
+  options: UseCanvasStoreOptions = {},
+) {
+  /** 是否自动保存（false = 手动保存模式：markDirty 只置脏、不排定落盘） */
+  const autoSave = options.autoSave !== false
   /** 当前画布目标（切换分镜/场景时通过 switchTarget 更新） */
   const targetRef = ref<CanvasTarget>({ ...target })
   const data = ref<CanvasData>(createCanvasData(targetRef.value.kind))
@@ -136,12 +183,23 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   /**
    * 加载画布；不存在时保持空画布（并把版本号归零）。
    * 刷新版本号会同步清除冲突状态（加载到的即服务端最新版本）。
+   *
+   * 注入持久化适配器（蓝图模式）时，适配器返回的数据可只含 nodes/connections/groups，
+   * 其余字段由 createCanvasData 兜底补全。
    */
   async function load(): Promise<void> {
-    const existing = await loadCanvas(project, targetRef.value)
+    const existing = persistence ? await persistence.load() : await loadCanvas(project, targetRef.value)
     if (existing) {
+      const base = createCanvasData(targetRef.value.kind)
       // groups 兜底：正常路径由 migrateCanvasData 保证存在（schema v2），此处防御非迁移来源的数据
-      data.value = { ...existing.canvas, groups: existing.canvas.groups ?? [] }
+      data.value = {
+        ...base,
+        ...existing.canvas,
+        kind: targetRef.value.kind,
+        nodes: existing.canvas.nodes ?? [],
+        connections: existing.canvas.connections ?? [],
+        groups: existing.canvas.groups ?? [],
+      }
       savedRev.value = existing.rev
     } else {
       data.value = createCanvasData(targetRef.value.kind)
@@ -165,6 +223,8 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   function scheduleSave(): void {
+    // 手动保存模式（蓝图编辑器）：不排定防抖保存，等待用户点击「保存」/Ctrl+S
+    if (!autoSave) return
     // 版本冲突期间停止自动保存：保留本地修改，等待用户决定（备份/强制覆盖/重新加载）
     if (conflict.value) return
     if (saveTimer) clearTimeout(saveTimer)
@@ -174,7 +234,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
-   * CAS 保存画布定义（自动保存/切换前落盘共用）。
+   * CAS 保存画布定义（自动保存 / 切换前落盘 / 手动保存共用）。
    *
    * @returns true = 保存成功（或无冲突）；false = 失败（版本冲突 or 其它错误，
    *   冲突详情见 conflict，其它错误见 error）
@@ -187,7 +247,9 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     if (conflict.value) return false
     saving.value = true
     try {
-      const res = await saveCanvas(project, targetRef.value, data.value, { expectedRev: savedRev.value })
+      const res = persistence
+        ? await persistence.save(data.value, { expectedRev: savedRev.value })
+        : await saveCanvas(project, targetRef.value, data.value, { expectedRev: savedRev.value })
       savedRev.value = res.rev
       dirty.value = false
       conflict.value = null
@@ -218,10 +280,15 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     }
     saving.value = true
     try {
-      const res = await saveCanvas(project, targetRef.value, data.value, {
-        expectedRev: conflict.value?.expectedRev ?? savedRev.value,
-        force: true,
-      })
+      const res = persistence
+        ? await persistence.save(data.value, {
+            expectedRev: conflict.value?.expectedRev ?? savedRev.value,
+            force: true,
+          })
+        : await saveCanvas(project, targetRef.value, data.value, {
+            expectedRev: conflict.value?.expectedRev ?? savedRev.value,
+            force: true,
+          })
       savedRev.value = res.rev
       dirty.value = false
       conflict.value = null
@@ -590,6 +657,34 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
       ? { nodes: [source], connections: [], groups: [] }
       : (clipboard.value ?? undefined)
     return pasteNodes(payload).nodes[0]
+  }
+
+  /**
+   * 原子写入一批实体（节点 + 连线 + 分组），**单次撤销快照**。
+   *
+   * 供「插入蓝图」使用：内容由 `canvas/blueprint.ts: instantiateBlueprint` 生成
+   * （节点/连线/分组已换新 id、坐标已按插入点归一化），本方法只负责一次性落库；
+   * 连线逐条触发 connect 联动（与 pasteNodes 一致，使 connectionSync 的节点级联动生效）。
+   *
+   * @param payload 内容载荷（id 须已重映射，坐标为最终坐标）
+   */
+  function applyEntities(payload: {
+    nodes?: CanvasNodeData[]
+    connections?: CanvasConnection[]
+    groups?: CanvasGroupData[]
+  }): void {
+    const nodes = payload.nodes ?? []
+    const connections = payload.connections ?? []
+    const groups = payload.groups ?? []
+    if (nodes.length === 0 && connections.length === 0 && groups.length === 0) return
+    pushHistory()
+    if (nodes.length > 0) data.value.nodes.push(...nodes)
+    if (connections.length > 0) data.value.connections.push(...connections)
+    if (groups.length > 0) data.value.groups = [...(data.value.groups ?? []), ...groups]
+    markDirty()
+    for (const connection of connections) {
+      emitConnectionsChanged({ type: 'connect', connection })
+    }
   }
 
   /**
@@ -1018,6 +1113,19 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
+   * 同步保存版本号（仅用于「外部部分写入」场景，如蓝图编辑器更新名称/资产项目后）。
+   *
+   * 该场景下服务端只更新了元信息字段（不涉及 nodes/connections/groups），
+   * rev 已递增但本地数据未变，直接对齐版本号即可，避免后续自动保存被误判为冲突。
+   * 不触发保存、不置脏。
+   *
+   * @param rev 服务端最新版本号
+   */
+  function syncSavedRev(rev: number): void {
+    if (Number.isInteger(rev) && rev >= 0) savedRev.value = rev
+  }
+
+  /**
    * 切换画布目标（如切换分镜/场景）：先落盘当前未保存修改，再重置全部状态并加载新画布。
    *
    * @param newTarget 新画布目标
@@ -1072,6 +1180,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     saving,
     error,
     savedRev,
+    syncSavedRev,
     conflict,
     nodes,
     connections,
@@ -1113,6 +1222,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     copyNodes,
     pasteNode,
     pasteNodes,
+    applyEntities,
     applyNodes,
     switchTarget,
   }

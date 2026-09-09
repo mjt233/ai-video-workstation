@@ -47,6 +47,7 @@
       class="mx-1"
     />
     <v-btn
+      v-if="!blueprintMode"
       size="small"
       prepend-icon="mdi-auto-fix"
       variant="tonal"
@@ -55,6 +56,16 @@
       @click="emit('auto-build')"
     >
       自动搭画布
+    </v-btn>
+    <v-btn
+      v-if="!blueprintMode"
+      size="small"
+      prepend-icon="mdi-vector-square"
+      variant="tonal"
+      title="从全局或项目级蓝图中插入一段画布内容"
+      @click="emit('insert-blueprint')"
+    >
+      插入蓝图
     </v-btn>
     <v-btn
       size="small"
@@ -108,6 +119,11 @@ defineProps<{
   version: number
   /** 是否处于保存版本冲突态（显示「保存冲突」提示） */
   conflicted: boolean
+  /**
+   * 是否蓝图模式（蓝图编辑器）：隐藏「自动搭画布」与「插入蓝图」
+   * （蓝图不绑定分镜/子场景，且 v1 不支持蓝图嵌套）。
+   */
+  blueprintMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -123,6 +139,8 @@ const emit = defineEmits<{
   (e: 'redo'): void
   /** 自动搭画布 */
   (e: 'auto-build'): void
+  /** 插入蓝图（从全局/项目级蓝图中插入一段画布内容） */
+  (e: 'insert-blueprint'): void
   /** 添加节点（携带触发鼠标事件，供菜单定位） */
   (e: 'add', event: MouseEvent): void
 }>()

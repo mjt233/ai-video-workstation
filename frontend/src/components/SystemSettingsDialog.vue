@@ -46,6 +46,7 @@
         <div class="system-settings__content">
           <ProviderSettingsPanel v-if="activeTab === 'providers'" />
           <PresetPromptsPanel v-if="activeTab === 'presets'" />
+          <BlueprintSettingsPanel v-if="activeTab === 'blueprints'" />
           <SystemSettingsPanel
             v-if="activeTab === 'system'"
             :initial-section="initialSection"
@@ -60,6 +61,7 @@
 import { ref, watch } from 'vue'
 import ProviderSettingsPanel from './provider-settings/ProviderSettingsPanel.vue'
 import PresetPromptsPanel from './preset-prompts/PresetPromptsPanel.vue'
+import BlueprintSettingsPanel from './blueprints/BlueprintSettingsPanel.vue'
 import SystemSettingsPanel from './system-settings/SystemSettingsPanel.vue'
 import type { SystemSettingsSection } from '../composables/useSystemSettings'
 
@@ -74,14 +76,15 @@ const emit = defineEmits<{
 }>()
 
 /** 页签定义（功能模块 + 显示名 + 图标） */
-const TABS: { key: 'providers' | 'presets' | 'system'; label: string; icon: string }[] = [
+const TABS: { key: 'providers' | 'presets' | 'blueprints' | 'system'; label: string; icon: string }[] = [
   { key: 'providers', label: '服务商配置', icon: 'mdi-server-outline' },
   { key: 'presets', label: '预设提示词', icon: 'mdi-text-box-multiple-outline' },
+  { key: 'blueprints', label: '画布蓝图', icon: 'mdi-vector-square' },
   { key: 'system', label: '系统设置', icon: 'mdi-tune-variant' },
 ]
 
 /** 当前激活页签 */
-const activeTab = ref<'providers' | 'presets' | 'system'>('providers')
+const activeTab = ref<'providers' | 'presets' | 'blueprints' | 'system'>('providers')
 
 // 外部带子类定位打开对话框时，自动切到「系统设置」页签（如项目存储清理页的「回收站设置」按钮）
 watch(

@@ -248,8 +248,11 @@
         </div>
       </template>
 
-      <!-- 生成 / 中断 / 历史 / 设为分镜视频 -->
-      <div class="d-flex align-center ga-2">
+      <!-- 生成 / 中断 / 历史 / 设为分镜视频（蓝图模式全部隐藏：蓝图不产生产物） -->
+      <div
+        v-if="!isBlueprint"
+        class="d-flex align-center ga-2"
+      >
         <v-btn
           color="primary"
           size="small"
@@ -328,6 +331,7 @@ import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
 import DurationPicker from '../../DurationPicker.vue'
 import VideoDirector from '../../video-director/VideoDirector.vue'
 import CanvasInputPreview from './CanvasInputPreview.vue'
+import { useCanvasMode } from '../../../canvas/canvasMode'
 import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 
 /**
@@ -436,6 +440,11 @@ const workflows = ref<WorkflowInfo[]>([])
 const workflowsLoaded = ref(false)
 /** 工作流实现校验错误（未选择实现时点击生成显示，选择后清除） */
 const implError = ref('')
+
+/** 画布模式上下文：蓝图模式下隐藏生成/中断/上传产物/历史/设为分镜视频等执行类入口 */
+const canvasMode = useCanvasMode()
+/** 是否蓝图模式 */
+const isBlueprint = computed(() => canvasMode.mode === 'blueprint')
 
 /** 上传产物文件选择框 DOM（隐藏；点「上传产物」触发 click） */
 const uploadInputEl = ref<HTMLInputElement | null>(null)

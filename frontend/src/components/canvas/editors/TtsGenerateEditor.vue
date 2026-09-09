@@ -121,7 +121,11 @@
       />
     </div>
 
-    <div class="d-flex align-center ga-2">
+    <!-- 执行类操作（生成 / 中断 / 历史）：蓝图模式全部隐藏 -->
+    <div
+      v-if="!isBlueprint"
+      class="d-flex align-center ga-2"
+    >
       <v-btn
         color="primary"
         size="small"
@@ -159,6 +163,7 @@ import type { CanvasNodeData } from '../../../canvas/types'
 import type { CanvasInputInfo } from '../../../canvas/generate'
 import WorkflowParamsTrigger from '../../WorkflowParamsTrigger.vue'
 import CanvasInputPreview from './CanvasInputPreview.vue'
+import { useCanvasMode } from '../../../canvas/canvasMode'
 
 const props = defineProps<{
   project: string
@@ -182,6 +187,11 @@ const workflows = ref<WorkflowInfo[]>([])
 const workflowsLoaded = ref(false)
 /** 工作流实现校验错误（未选择实现时点击生成显示，选择后清除） */
 const implError = ref('')
+
+/** 画布模式上下文：蓝图模式下隐藏生成/中断/历史等执行类入口 */
+const canvasMode = useCanvasMode()
+/** 是否蓝图模式 */
+const isBlueprint = computed(() => canvasMode.mode === 'blueprint')
 
 /** 节点当前是否已有产物（生成按钮文案/历史入口用；产物为固定路径文件，由服务端落盘） */
 const hasOutput = computed(() => !!(props.output || props.node.config.current))

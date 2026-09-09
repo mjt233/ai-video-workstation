@@ -34,6 +34,29 @@
         </span>
       </template>
     </v-tooltip>
+    <v-tooltip
+      text="请至少选中 1 个节点"
+      :disabled="hasNodeSelected"
+      location="top"
+    >
+      <template #activator="{ props: activatorProps }">
+        <span
+          v-bind="activatorProps"
+          class="canvas-selection-toolbar__wrap ml-2"
+        >
+          <v-btn
+            size="small"
+            variant="tonal"
+            color="primary"
+            prepend-icon="mdi-vector-square"
+            :disabled="!hasNodeSelected"
+            @click="emit('create-blueprint')"
+          >
+            创建蓝图
+          </v-btn>
+        </span>
+      </template>
+    </v-tooltip>
   </div>
 </template>
 
@@ -61,11 +84,15 @@ const props = defineProps<{
   flowWidth: number
   /** 选中集是否包含分组（包含时禁用创建分组：避免框套框） */
   hasGroupSelected: boolean
+  /** 选中集是否包含至少 1 个节点（为假时禁用「创建蓝图」：蓝图至少需要一个节点） */
+  hasNodeSelected: boolean
 }>()
 
 const emit = defineEmits<{
   /** 点击「创建分组」（父级按选中节点包围盒创建分组） */
   (e: 'create-group'): void
+  /** 点击「创建蓝图」（父级捕获选中集并打开保存对话框） */
+  (e: 'create-blueprint'): void
 }>()
 
 /**

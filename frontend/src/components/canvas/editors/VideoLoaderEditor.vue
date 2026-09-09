@@ -25,13 +25,15 @@
       </div>
     </div>
 
-    <!-- 操作：上传 / 选择资产 -->
+    <!-- 操作：上传 / 选择资产（蓝图模式下需先设置资产项目） -->
     <div class="d-flex align-center ga-2">
       <v-btn
         size="small"
         color="primary"
         variant="tonal"
         prepend-icon="mdi-upload"
+        :disabled="!canvasMode.assetProjectReady"
+        :title="assetDisabledTitle"
         @click="openUpload"
       >
         上传视频
@@ -40,6 +42,8 @@
         size="small"
         variant="tonal"
         prepend-icon="mdi-folder-video"
+        :disabled="!canvasMode.assetProjectReady"
+        :title="assetDisabledTitle"
         @click="openPicker"
       >
         选择资产
@@ -72,6 +76,7 @@ import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { buildLoaderUploadDest } from '../../../canvas/clipboard'
+import { useCanvasMode } from '../../../canvas/canvasMode'
 import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 
 /** 加载视频节点编辑器：上传视频 / 选择资产以加载其他视频 */
@@ -90,6 +95,15 @@ const emit = defineEmits<{
   (e: 'set-as-video', nodeId: string): void
   (e: 'upload-file', payload: CanvasUploadFilePayload): void
 }>()
+
+/**
+ * 画布模式上下文：蓝图模式下若未设置资产项目（无资产上下文），
+ * 上传 / 选择资产入口置灰（主画布恒为可用）。
+ */
+const canvasMode = useCanvasMode()
+
+/** 资产入口禁用时的提示文案（可用时为空） */
+const assetDisabledTitle = computed(() => (canvasMode.assetProjectReady ? '' : '请先在蓝图中选择资产项目'))
 
 const assetUrl = ref('')
 

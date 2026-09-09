@@ -21,6 +21,8 @@ frontend/src/
 │   ├── aiTextHistory.ts          # AI 文本生成节点文本历史版本（类型/上限/追加/删除/读取过滤）
 │   ├── autobuild.ts              # 自动搭画布
 │   │   # 注：autobuild.ts 另含 resolveShotStageRef / resolveCharacterRef / deriveStageRefFromAssetPath / buildSubSceneAutoCanvas
+│   ├── blueprint.ts              # 画布蓝图纯逻辑（捕获选中集 / 实例化（id 重映射+独立分组）/ 迁移 / 命名 / 统计）
+│   ├── canvasMode.ts             # 画布运行模式 provide/inject（'canvas' | 'blueprint'；供节点主体/编辑器门控执行类动作与资产入口）
 │   ├── clipboard.ts              # 剪贴板媒体识别（classifyPastedFile/collectPastedMedia/粘贴上传目标路径）
 │   ├── nodeClipboard.ts          # 节点复制标记（单/多节点：NODE_GROUP_CLIPBOARD_PREFIX + { nodes, connections, groups }；兼容旧单节点标记与无 groups 字段的旧标记）
 │   ├── sceneFrame.ts             # 设为分镜场景图纯函数（buildSceneFrameOptions/deriveStageFrameBody）
@@ -40,7 +42,7 @@ frontend/src/
     ├── CanvasGroupDot.vue        # 群组输出连接圆点（合成节点 __group-dot 的展示内容；mousedown 启动成组连接拖拽）
     ├── CanvasGroupConnectMenu.vue# 群组连接目标选择菜单（输出点拖拽超阈值释放后弹出）
     ├── CanvasGroupNode.vue       # 持久分组框（标题条/半透明主体/四边拖动条/色点/八向缩放控制点；指针事件分层见 interactions.md）
-    ├── CanvasSelectionToolbar.vue# 多选悬浮工具栏（多选框顶部居中，含「创建分组」；选中集含分组时置灰）
+    ├── CanvasSelectionToolbar.vue# 多选悬浮工具栏（多选框顶部居中，含「创建分组」「创建蓝图」；选中集含分组/无节点时分别置灰）
     ├── SetAsSceneDialog.vue      # 设为分镜场景图对话框（帧加载/选中/覆盖/新增）
     ├── CanvasAssertHistoryDialog.vue / AiTextHistoryDialog.vue / SaveAssetDialog.vue / SaveAsDialog.vue  # 历史（产物/文本）/保存为自定义资产/保存为（目标选择）对话框
     ├── composables/              # 画布交互组合式（与组件同域，store/gen/VueFlow 工具以参数注入）
@@ -78,6 +80,17 @@ frontend/src/
 - `POST /canvas/upload`——**生成图片/视频节点手动上传产物**：multipart `{ project, path, file }`；path 须匹配画布节点固定产物路径（`assert/(scene/…|stage/…)/canvas/…/output.jpg|mp4`，见 `assets/canvas-upload.ts` 的 `assertCanvasNodeOutputPath`）；图片接受 jpg/png/webp（统一落盘 `output.jpg`）、视频仅接受 mp4（扩展名或 MIME 任一匹配）；写入前先 `copyExistingAssetToHistory` 归档旧产物（**归档失败中断上传**，历史必须保留），返回 `{ success, path, archived }`。multer diskStorage 临时落盘、上限 8GB（大视频不占内存）。
 - 四个写产物分支（extract/concat/trim-video/trim-audio）在写入前调用 `copyExistingAssetToHistory` 归档旧产物（固定路径重复生成时历史自动保留）。
 其余画布读写仍走既有 `GET/POST /api/fs/:project/*`（读写 `canvas.json`）与 `/assets/.../stage`（设为分镜场景图新增帧）。
+
+## 服务端蓝图路由（`server/src/routes/blueprints.ts`，前缀 `/api/blueprints`）
+
+- `GET /blueprints?scope=global|project&project=`——蓝图摘要列表（按更新时间倒序）；
+- `GET /blueprints/:id?scope=&project=`——蓝图详情（含 `rev`）；
+- `POST /blueprints`——创建（同名 409 EXISTS 携带 existingId；`overwrite: true` 覆盖既有条目）；
+- `PUT /blueprints/:id?scope=&project=`——局部更新（name/description/assetProject/nodes/connections/groups）+ CAS `expectedRev`（409 VERSION_CONFLICT；`force: true` 跳过比对）；
+- `DELETE /blueprints/:id?scope=&project=`——删除；
+- `POST /blueprints/import`——导入蓝图文件内容（服务端换新 id）。
+
+存储：全局 `server/config/blueprints/{id}.json`、项目级 `design/{project}/prompt/blueprint/{id}.json`（一蓝图一文件、原子写、`rev` 由服务端维护）。详见 [blueprint.md](./blueprint.md)。
 
 ## 历史与迁移
 

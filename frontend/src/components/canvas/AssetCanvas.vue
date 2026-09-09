@@ -12,7 +12,60 @@
       请从左侧资产浏览器选择子场景
     </div>
     <template v-else>
-      <!-- 工具栏（视图缩放/撤销重做/自动搭画布/添加节点 + 保存状态与版本号） -->
+      <!-- 蓝图信息条（仅蓝图模式）：蓝图名称/作用域 + 资产项目选择器
+           资产项目决定预览/上传/选择资产的项目上下文；未设置时资产类入口置灰 -->
+      <div
+        v-if="isBlueprint"
+        class="asset-canvas__blueprint-bar"
+      >
+        <v-icon
+          icon="mdi-vector-square"
+          size="small"
+          color="primary"
+          class="mr-1"
+        />
+        <span class="text-body-medium">{{ props.blueprintMeta?.name ?? '蓝图' }}</span>
+        <v-chip
+          size="x-small"
+          variant="tonal"
+          class="ml-2"
+        >
+          {{ props.blueprint?.scope === 'project' ? `项目 ${props.blueprint?.project ?? ''}` : '全局' }}
+        </v-chip>
+        <v-spacer />
+        <span class="text-body-small text-medium-emphasis mr-1">资产项目</span>
+        <v-select
+          :model-value="blueprintAssetProject"
+          :items="assetProjectOptions"
+          item-title="title"
+          item-value="value"
+          density="compact"
+          variant="outlined"
+          hide-details
+          :loading="assetProjectLoading"
+          :disabled="props.blueprint?.scope === 'project'"
+          class="asset-canvas__blueprint-project"
+          @update:model-value="onAssetProjectChange"
+        />
+        <v-tooltip
+          v-if="!assetContextReady"
+          text="未设置资产项目：无法上传/选择资产，节点内的资产预览也不可用"
+          location="bottom"
+        >
+          <template #activator="{ props: tipProps }">
+            <v-icon
+              v-bind="tipProps"
+              icon="mdi-alert-outline"
+              size="small"
+              color="warning"
+              class="ml-2"
+            />
+          </template>
+        </v-tooltip>
+      </div>
+
+      <!-- 工具栏（视图缩放/撤销重做/自动搭画布/添加节点 + 保存状态与版本号；
+           蓝图模式隐藏「自动搭画布」与「插入蓝图」） -->
       <CanvasToolbar
         :can-undo="canUndo"
         :can-redo="canRedo"
@@ -21,6 +74,7 @@
         :dirty="dirty"
         :version="savedRev"
         :conflicted="!!conflict"
+        :blueprint-mode="isBlueprint"
         @fit="onFitView"
         @zoom-in="zoomIn"
         @zoom-out="zoomOut"
@@ -28,6 +82,7 @@
         @redo="redo"
         @auto-build="onAutoBuild"
         @add="(e: MouseEvent) => openAddMenuAt(e, 80, 80)"
+        @insert-blueprint="openBlueprintInsertAtViewport"
       />
 
       <div
@@ -88,13 +143,13 @@
               :selected="selected"
               :highlighted="hoveredNodeId === id"
               :adjacent-side="adjacentSideOf(id)"
-              :running-adjacent="runningInputNodeIds.has(id)"
-              :status="statusByNode[id]"
-              :is-running="nodeMap[id]?.prototypeId === 'text-ai' ? statusByNode[id]?.status === 'running' : undefined"
+              :running-adjacent="isBlueprint ? false : runningInputNodeIds.has(id)"
+              :status="isBlueprint ? undefined : statusByNode[id]"
+              :is-running="isBlueprint ? undefined : (nodeMap[id]?.prototypeId === 'text-ai' ? statusByNode[id]?.status === 'running' : undefined)"
               :canvas-target="nodeMap[id]?.prototypeId === 'text-ai' ? canvasTarget : undefined"
-              :output="outputOf(nodeMap[id])"
-              :upload="upload.stateOf(id)"
-              :upstream-updated="isUpstreamUpdated(id)"
+              :output="isBlueprint ? null : outputOf(nodeMap[id])"
+              :upload="isBlueprint ? null : upload.stateOf(id)"
+              :upstream-updated="isBlueprint ? false : isUpstreamUpdated(id)"
               :inputs="cardInputsOf(id)"
               :text-inputs="cardTextInputsOf(id)"
               :source-label="nodeMap[id]?.prototypeId === 'input-preview' ? previewInputsOf(id)?.sourceLabel : undefined"
@@ -170,13 +225,15 @@
           {{ rewireDrag.connectionIds.length }} 条连线 · {{ rewireDrag.mode === 'copy' ? '复制' : '转移' }}
         </div>
 
-        <!-- 多选悬浮工具栏（选中节点数 + 选中分组数 ≥ 2 时在多选框顶部居中；含「创建分组」） -->
+        <!-- 多选悬浮工具栏（选中节点数 + 选中分组数 ≥ 2 时在多选框顶部居中；含「创建分组」「创建蓝图」） -->
         <CanvasSelectionToolbar
           :rect="groupRect"
           :viewport="viewport"
           :flow-width="flowWidth"
           :has-group-selected="selectedGroupIds.length > 0"
+          :has-node-selected="selectedNodeIds.length > 0"
           @create-group="createGroupFromSelection"
+          @create-blueprint="openBlueprintSave"
         />
 
         <!-- 分组预设色板（标题条色点 / 右键菜单「更改颜色」触发；坐标相对画布容器） -->
@@ -232,8 +289,8 @@
           :node="editorPanel?.node ?? null"
           :editor-component="editorPanel?.editorComponent ?? null"
           :inputs="editorPanel ? inputsOf(editorPanel.node.id) : []"
-          :output="editorPanel ? outputOf(editorPanel.node) : null"
-          :output-path="editorPanel ? outputPathOf(editorPanel.node) : undefined"
+          :output="isBlueprint ? null : (editorPanel ? outputOf(editorPanel.node) : null)"
+          :output-path="isBlueprint ? undefined : (editorPanel ? outputPathOf(editorPanel.node) : undefined)"
           :upload-state="editorPanel ? upload.stateOf(editorPanel.node.id) ?? null : null"
           :video-input-groups="videoInputGroups"
           :text-inputs="videoTextInputs"
@@ -256,12 +313,12 @@
           @disconnect-input="disconnectEditorInput"
         />
 
-        <!-- 右键菜单（节点 + 连线 + 多选群组 + 分组实体） -->
+        <!-- 右键菜单（节点 + 连线 + 多选群组 + 分组实体）；蓝图模式隐藏执行类入口 -->
         <CanvasContextMenu
           :node-menu="contextMenu"
-          :can-generate="canGenerateOf(contextMenuNode)"
-          :has-history="hasHistoryOf(contextMenuNode)"
-          :can-save="canSaveImage(contextMenuNode)"
+          :can-generate="isBlueprint ? false : canGenerateOf(contextMenuNode)"
+          :has-history="isBlueprint ? false : hasHistoryOf(contextMenuNode)"
+          :can-save="isBlueprint ? false : canSaveImage(contextMenuNode)"
           :save-targets="saveTargetsOf(contextMenuNode)"
           :has-connections="!!contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
           :edge-menu="edgeMenu"
@@ -282,19 +339,22 @@
           @group-entity-dissolve="groupEntityDissolve"
         />
 
-        <!-- 添加节点菜单（双击空白处/工具栏「＋」在鼠标处弹出） -->
+        <!-- 添加节点菜单（双击空白处/工具栏「＋」在鼠标处弹出；底部含「插入蓝图…」，蓝图模式隐藏） -->
         <CanvasAddNodeMenu
           :model-value="addMenu.show"
           :x="addMenu.x"
           :y="addMenu.y"
+          :blueprint-mode="isBlueprint"
           @update:model-value="addMenu.show = $event"
           @select="addNodeAt"
+          @insert-blueprint="openBlueprintInsertAtMenu"
         />
 
         <!-- 资产拖放菜单（从左侧资产浏览器拖入角色/子场景/道具后，在释放位置弹出；
              图片/音频/视频各占一行：媒体标签 + 横向滚动条目（缩略图/试听组件 + 条目名），
              点击条目名即在释放位置创建对应加载节点） -->
         <CanvasAssetDropMenu
+          v-if="!isBlueprint"
           :model-value="drop.menu.show"
           :x="drop.menu.x"
           :y="drop.menu.y"
@@ -318,7 +378,7 @@
         />
 
         <!-- 保存版本冲突横幅（右上角）：
-             自动保存已停止，提示用户手动备份当前画布或强制覆盖保存 -->
+             自动保存已停止（蓝图编辑器为手动保存），提示用户手动备份当前内容或强制覆盖保存 -->
         <div
           v-if="conflict"
           class="canvas-conflict-banner"
@@ -330,11 +390,11 @@
               class="mr-1"
               color="error"
             />
-            画布保存冲突
+            {{ isBlueprint ? '蓝图保存冲突' : '画布保存冲突' }}
           </div>
           <div class="canvas-conflict-banner__text">
-            画布已被其他人或引用更新修改（当前版本 {{ conflict.currentRev }}，您基于版本 {{ conflict.expectedRev }}
-            编辑），自动保存已停止。请手动备份当前画布，或选择强制覆盖保存。
+            {{ isBlueprint ? '蓝图' : '画布' }}已被其他人或引用更新修改（当前版本 {{ conflict.currentRev }}，您基于版本 {{ conflict.expectedRev }}
+            编辑），保存已停止。请手动备份当前内容，或选择强制覆盖保存。
           </div>
           <div class="canvas-conflict-banner__actions">
             <v-btn
@@ -343,7 +403,7 @@
               prepend-icon="mdi-download"
               @click="downloadLocalBackup"
             >
-              备份当前画布
+              {{ isBlueprint ? '备份当前蓝图' : '备份当前画布' }}
             </v-btn>
             <v-btn
               size="small"
@@ -378,16 +438,17 @@
         class="asset-canvas__overlay asset-canvas__empty"
       >
         <div class="text-body-medium">
-          画布为空
+          {{ isBlueprint ? '蓝图为空' : '画布为空' }}
         </div>
         <div class="text-body-small text-medium-emphasis">
           双击空白处或点击工具栏「＋」添加节点
         </div>
       </div>
 
-      <!-- 文本历史版本对话框（AI 文本生成节点：config.outputHistory 纯文本快照，无服务端请求） -->
+      <!-- 文本历史版本对话框（AI 文本生成节点：config.outputHistory 纯文本快照，无服务端请求）
+           蓝图模式不提供历史查看 -->
       <AiTextHistoryDialog
-        v-if="historyNode?.prototypeId === 'text-ai'"
+        v-if="!isBlueprint && historyNode?.prototypeId === 'text-ai'"
         v-model="historyDialog.show"
         :project="props.project"
         :node="historyNode"
@@ -398,7 +459,7 @@
 
       <!-- 版本历史对话框（服务端历史 API：列表/激活/删除 + 当前产物预览；适用于有产物文件的生成节点） -->
       <CanvasAssertHistoryDialog
-        v-else
+        v-else-if="!isBlueprint"
         v-model="historyDialog.show"
         :project="props.project"
         :node="historyNode"
@@ -407,8 +468,9 @@
         @notify="(text: string, color: 'success' | 'error' | 'primary') => showSnackbar(text, color)"
       />
 
-      <!-- 保存为自定义资产对话框（场景/分镜双根 + 新建目录 + 文件名可编辑） -->
+      <!-- 保存为自定义资产对话框（场景/分镜双根 + 新建目录 + 文件名可编辑；蓝图模式不可用） -->
       <SaveAssetDialog
+        v-if="!isBlueprint"
         v-model="saveDialog.show"
         :project="props.project"
         :kind="target.kind"
@@ -421,8 +483,9 @@
         @save-error="(msg: string) => showSnackbar(msg, 'error')"
       />
 
-      <!-- 保存为（角色设计/角色设计-衍生变体/场景图/场景图-衍生变体）目标选择对话框 -->
+      <!-- 保存为（角色设计/角色设计-衍生变体/场景图/场景图-衍生变体）目标选择对话框；蓝图模式不可用 -->
       <SaveAsDialog
+        v-if="!isBlueprint"
         v-model="saveAsDialog.show"
         :project="props.project"
         :kind="target.kind"
@@ -446,7 +509,7 @@
           <v-card-title>强制覆盖保存</v-card-title>
           <v-card-text>
             <p class="mb-2">
-              画布已被其他人或引用更新修改。强制覆盖会把<b>当前画布内容整体写入</b>，
+              {{ isBlueprint ? '蓝图' : '画布' }}已被其他人或引用更新修改。强制覆盖会把<b>当前{{ isBlueprint ? '蓝图' : '画布' }}内容整体写入</b>，
               服务端的最新更新（含分镜引用路径修正）将被你的版本<b>覆盖且不可恢复</b>。
             </p>
             <p class="mb-2">
@@ -525,8 +588,9 @@
         </v-card>
       </v-dialog>
 
-      <!-- 设为分镜场景图对话框 -->
+      <!-- 设为分镜场景图对话框（蓝图模式不可用：蓝图不绑定分镜） -->
       <SetAsSceneDialog
+        v-if="!isBlueprint"
         v-model="sceneDialog.show"
         :project="props.project"
         :node="sceneDialogNode ?? null"
@@ -537,7 +601,8 @@
         @done="(msg: string, color: 'success' | 'error') => showSnackbar(msg, color)"
       />
 
-      <!-- 资产选择器（加载图片/音频/视频节点绑定资产；道具页签按节点类型过滤媒体） -->
+      <!-- 资产选择器（加载图片/音频/视频节点绑定资产；道具页签按节点类型过滤媒体）
+           蓝图模式同样可用：项目上下文 = 蓝图资产项目（无分镜上下文） -->
       <AssetPickerDialog
         v-model="picker.show"
         :project="props.project"
@@ -546,9 +611,26 @@
         :tabs="pickerTabs"
         :show-voice="picker.showVoice"
         :media-kind="picker.mediaKind"
-        :context-episode="target.kind === 'scene' ? target.episode : undefined"
-        :context-shot="target.kind === 'scene' ? target.shot : undefined"
+        :context-episode="!isBlueprint && target.kind === 'scene' ? target.episode : undefined"
+        :context-shot="!isBlueprint && target.kind === 'scene' ? target.shot : undefined"
         @update:selected="onPickerConfirm"
+      />
+
+      <!-- 创建画布蓝图对话框（多选工具栏「创建蓝图」触发：名称/描述/保存位置；蓝图编辑器内不提供） -->
+      <BlueprintSaveDialog
+        v-if="!isBlueprint"
+        v-model="blueprintSave.show"
+        :payload="blueprintSave.payload"
+        :default-project="props.project"
+        @saved="onBlueprintSaved"
+      />
+
+      <!-- 插入画布蓝图对话框（工具栏「插入蓝图」/添加节点菜单底部入口触发；v1 不支持蓝图嵌套） -->
+      <BlueprintInsertDialog
+        v-if="!isBlueprint"
+        v-model="blueprintInsert.show"
+        :canvas-project="props.project"
+        @insert="onBlueprintInsert"
       />
 
       <!-- 操作反馈 -->
@@ -565,14 +647,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { VueFlow, BezierEdge, SelectionMode, getBezierPath, Position, useVueFlow, type EdgeMouseEvent, type NodeDragEvent, type NodeMouseEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { useCanvasStore } from '../../canvas/useCanvasStore'
-import { useCanvasGeneration } from '../../canvas/useCanvasGeneration'
+import { createIdleGeneration, useCanvasGeneration } from '../../canvas/useCanvasGeneration'
+import { provideCanvasMode, type CanvasModeContext } from '../../canvas/canvasMode'
+import { blueprintCanvasPersistence } from '../../api/blueprints'
+import { getProjects } from '../../api/client'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import { confirm } from '../../utils/confirm'
 import type { CanvasGroupData, CanvasNodeData } from '../../canvas/types'
@@ -619,6 +704,9 @@ import { useCanvasGroups } from './composables/useCanvasGroups'
 import { useCanvasUpload, type CanvasUploadFilePayload } from './composables/useCanvasUpload'
 import { useCanvasAssetDrop } from './composables/useCanvasAssetDrop'
 import { canvasDragPayload } from '../../canvas/assetDrop'
+import { captureBlueprintFromCanvas, instantiateBlueprint, type BlueprintPayload, type CanvasBlueprint } from '../../canvas/blueprint'
+import BlueprintSaveDialog from '../blueprints/BlueprintSaveDialog.vue'
+import BlueprintInsertDialog from '../blueprints/BlueprintInsertDialog.vue'
 
 /**
  * 资产画布主组件（编排层）：
@@ -628,7 +716,7 @@ import { canvasDragPayload } from '../../canvas/assetDrop'
  * 具体交互行为见 docs/canvas/README.md。
  */
 
-/** 组件 props：定位一张画布 */
+/** 组件 props：定位一张画布（或一张蓝图） */
 const props = defineProps<{
   project: string
   kind: 'stage' | 'scene'
@@ -637,9 +725,34 @@ const props = defineProps<{
   label?: string
   episode?: string
   shot?: string
+  /**
+   * 运行模式：
+   * - `'canvas'`（默认）：分镜/场景资产画布，具备生成、上传产物、历史、自动搭画布等全部能力；
+   * - `'blueprint'`：蓝图编辑器（由 `BlueprintEditDialog` 内嵌），只编辑节点/连线/分组与配置，
+   *   执行类动作（生成/上传产物/历史/保存为/设为场景图/自动搭画布/资产拖入）全部关闭。
+   */
+  mode?: 'canvas' | 'blueprint'
+  /** 蓝图定位（mode='blueprint' 时必填） */
+  blueprint?: { scope: 'global' | 'project'; project?: string; id: string }
+  /**
+   * 蓝图模式下资产上下文是否就绪（宿主根据蓝图 assetProject 是否存在且有效计算）。
+   * 为 false 时加载节点「上传/选择资产」入口置灰；主画布恒为 true。
+   */
+  assetProjectReady?: boolean
+  /** 蓝图元信息（mode='blueprint' 时由宿主传入：名称/描述/资产项目，用于信息条展示） */
+  blueprintMeta?: { name: string; description: string; assetProject: string | null }
 }>()
 
-/** 画布目标（分镜画布需要 episode+shot，场景画布需要 stage+label） */
+/** 组件事件 */
+const emit = defineEmits<{
+  /** 蓝图资产项目变更已保存（宿主同步自身状态，避免 props 回写延迟导致选择器跳动） */
+  (e: 'blueprint-meta-updated', patch: { assetProject: string | null }): void
+}>()
+
+/** 是否蓝图模式（蓝图编辑器：单一画布实现复用，执行类能力关闭） */
+const isBlueprint = computed(() => props.mode === 'blueprint')
+
+/** 画布目标（分镜画布需要 episode+shot，场景画布需要 stage+label；蓝图模式为占位值） */
 const target = computed(() => ({
   kind: props.kind,
   stage: props.stage,
@@ -648,8 +761,8 @@ const target = computed(() => ({
   shot: props.shot,
 }))
 
-/** 场景画布未选择子场景时显示空状态 */
-const stageNoLabel = computed(() => props.kind === 'stage' && !props.label)
+/** 场景画布未选择子场景时显示空状态（蓝图模式无子场景概念，不触发该空状态） */
+const stageNoLabel = computed(() => !isBlueprint.value && props.kind === 'stage' && !props.label)
 
 /** 画布作用域（生成类节点产物固定路径推导/输入收集需要） */
 const scope = computed<CanvasScope>(() => {
@@ -660,23 +773,66 @@ const scope = computed<CanvasScope>(() => {
 })
 
 /**
+ * 蓝图资产项目（信息条选择器）的**编辑器内当前值**。
+ *
+ * 手动保存模式下它只存在于内存：点「保存」/Ctrl+S 时由持久化适配器与内容在同一次
+ * CAS 请求中落盘；「不保存退出」时随组件卸载丢弃。主画布不使用该状态。
+ */
+const blueprintAssetProject = ref<string | null>(props.blueprintMeta?.assetProject ?? null)
+/** 蓝图资产项目的**已落盘值**（判断是否存在未保存的元信息改动） */
+const blueprintAssetProjectSaved = ref<string | null>(props.blueprintMeta?.assetProject ?? null)
+
+/**
  * 画布数据 store：加载/保存（CAS 版本校验）/增删改查/撤销重做。
  * 版本冲突时自动保存停止，由冲突横幅与对话框提示用户处理。
+ *
+ * 蓝图模式注入蓝图持久化适配器：同一套 store 能力（含撤销重做、剪贴板、CAS 保存）
+ * 直接作用于蓝图文件；rev 同样由服务端维护。
+ * 蓝图模式关闭自动保存（`autoSave: false`）：改动只置脏，由编辑器头部「保存」/Ctrl+S 手动落盘。
  */
-const store = useCanvasStore(props.project, target.value)
+const blueprintPersistence = isBlueprint.value && props.blueprint
+  ? blueprintCanvasPersistence(
+      props.blueprint.scope === 'project'
+        ? { scope: 'project', project: props.blueprint.project }
+        : { scope: 'global' },
+      props.blueprint.id,
+      { assetProject: () => blueprintAssetProject.value },
+    )
+  : undefined
+const store = useCanvasStore(props.project, target.value, blueprintPersistence, { autoSave: !isBlueprint.value })
 /**
  * 资产生成组合式：跑工作流 + 轮询（纯体验层）+ 结果通知 + 运行中任务持久化恢复。
  * onResult 为恢复任务完成后的默认结果回调（正常生成路径仍按调用传入的回调优先）。
+ * 蓝图模式使用「空闲」空实现（不订阅 WS / 不轮询 / 不恢复任务：蓝图不产生产物）。
  */
-const gen = useCanvasGeneration(props.project, target.value, {
-  onResult: handleNodeResult,
-  // 中断被服务端拒绝/失败：snackbar 告知原因（节点保持运行态，任务继续到终态）
-  onCancelRejected: (_nodeId, reason) => showSnackbar(`中断失败：${reason}`, 'error'),
-})
+const gen = isBlueprint.value
+  ? createIdleGeneration()
+  : useCanvasGeneration(props.project, target.value, {
+      onResult: handleNodeResult,
+      // 中断被服务端拒绝/失败：snackbar 告知原因（节点保持运行态，任务继续到终态）
+      onCancelRejected: (_nodeId, reason) => showSnackbar(`中断失败：${reason}`, 'error'),
+    })
 const { statusByNode } = gen
 const { loaded, nodes, dirty, saving, canUndo, canRedo, undo, redo, conflict, savedRev, forceSave, reloadFromServer } = store
 const router = useRouter()
 const route = useRoute()
+
+/**
+ * 画布模式上下文（注入给节点主体 / 编辑器组件）：
+ * - 蓝图模式隐藏执行类动作（生成、上传产物、历史、设为场景图等）；
+ * - 资产类入口（上传 / 选择资产）在蓝图模式下依赖「资产项目就绪」。
+ */
+const canvasModeContext = reactive<CanvasModeContext>({
+  mode: isBlueprint.value ? 'blueprint' : 'canvas',
+  assetProjectReady: true,
+  assetProject: '',
+})
+provideCanvasMode(canvasModeContext)
+watchEffect(() => {
+  canvasModeContext.mode = isBlueprint.value ? 'blueprint' : 'canvas'
+  canvasModeContext.assetProjectReady = isBlueprint.value ? props.assetProjectReady !== false && !!props.project : true
+  canvasModeContext.assetProject = isBlueprint.value ? props.project : ''
+})
 
 // ── 节点产物展示状态（固定路径 + 服务端 mtime；"当前结果"为文件系统事实）────────
 
@@ -685,6 +841,8 @@ const nodeOutputs = ref<Record<string, { path: string; mtime: number | null; exi
 
 /** 刷新单个节点产物信息（存在性/mtime） */
 async function refreshNodeOutput(nodeId: string): Promise<void> {
+  // 蓝图模式无产物（蓝图不携带产物文件，插入后由画布重新生成）：跳过产物探测
+  if (isBlueprint.value) return
   const node = nodeMap.value[nodeId]
   if (!node) return
   const path = getNodeCurrentAssetPath(node, scope.value)
@@ -697,6 +855,8 @@ async function refreshNodeOutput(nodeId: string): Promise<void> {
 
 /** 刷新整张画布全部节点的产物信息（加载/切换目标后调用） */
 async function refreshNodeOutputs(): Promise<void> {
+  // 蓝图模式无产物路径（无画布 scope）：跳过批量探测，避免构造无效产物路径
+  if (isBlueprint.value) return
   const scopeVal = scope.value
   const next: Record<string, { path: string; mtime: number | null; exists: boolean }> = {}
   await Promise.all(
@@ -1069,6 +1229,8 @@ function llmFinishedPatch(info: LlmFinishedInfo | undefined): Record<string, unk
  * 不触发写盘）。刷新后恢复路径即使已因 sessions 对账退订，版本对齐也不会丢失。
  */
 const offLlmFinishedGlobal = llmSocket.onFinished((info) => {
+  // 蓝图模式无 AI 文本会话落盘（生成已关闭）：不采纳
+  if (isBlueprint.value) return
   // 切换画布进行中（load 未完成）不采纳：target/savedRev 均处于过渡态
   if (!store.loaded.value) return
   const adopt = buildLlmFinishedAdopt(info, props.project, target.value, store.savedRev.value)
@@ -1133,6 +1295,8 @@ function onStreamState(nodeId: string, payload: CanvasStreamStatePayload): void 
  * 画布加载 / 切换 / WS 重连（sessions 全量刷新）时调用，已订阅任务幂等跳过。
  */
 function restoreLlmSessions(): void {
+  // 蓝图模式无 LLM 会话（生成已关闭）：不恢复
+  if (isBlueprint.value) return
   if (!store.loaded.value) return
   for (const s of llmSocket.sessions.value) {
     if (s.status !== 'running') continue
@@ -1274,6 +1438,8 @@ const assetDragOver = ref(false)
 
 /** 画布 dragover：存在画布载荷时允许 drop 并高亮画布（目录/分类等无载荷拖拽不响应） */
 function onCanvasAssetDragover(event: DragEvent): void {
+  // 蓝图编辑器无左侧资产浏览器：不接受资产拖入
+  if (isBlueprint.value) return
   if (!canvasDragPayload.value) return
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
@@ -1289,6 +1455,8 @@ function onCanvasAssetDragleave(event: DragEvent): void {
 
 /** 画布 drop：换算释放点为流坐标，在释放位置打开资产拖放菜单 */
 function onCanvasAssetDrop(event: DragEvent): void {
+  // 蓝图编辑器无左侧资产浏览器：不接受资产拖入
+  if (isBlueprint.value) return
   const payload = canvasDragPayload.value
   assetDragOver.value = false
   if (!payload) return
@@ -1347,6 +1515,40 @@ const canvasGroups = useCanvasGroups({
   },
   showSnackbar,
 })
+
+/** 创建画布蓝图对话框状态（payload 为捕获到的选中集内容） */
+const blueprintSave = reactive<{ show: boolean; payload: BlueprintPayload | null }>({ show: false, payload: null })
+
+/**
+ * 多选工具栏「创建蓝图」：把选中节点 + 组内连线 + 选中分组捕获为蓝图内容并打开保存对话框。
+ *
+ * 捕获规则见 `canvas/blueprint.ts: captureBlueprintFromCanvas`：
+ * 分组**必须被显式选中**（只选中组内全部节点时不带分组），且组内成员节点须全部在选中集内；
+ * 无选中节点时提示且不打开对话框。
+ */
+function openBlueprintSave(): void {
+  const nodeIds = selection.selectedNodeIds.value
+  if (nodeIds.length === 0) {
+    showSnackbar('请先选中至少 1 个节点再创建蓝图', 'error')
+    return
+  }
+  blueprintSave.payload = captureBlueprintFromCanvas(
+    { nodes: store.nodes.value, connections: store.connections.value, groups: store.groups.value },
+    nodeIds,
+    selection.selectedGroupIds.value,
+  )
+  blueprintSave.show = true
+}
+
+/**
+ * 蓝图保存成功：提示保存位置（全局 / 项目）。
+ *
+ * @param blueprint 已保存的蓝图（取名称）
+ * @param scopeLabel 作用域展示文案（「全局」或「项目 xxx」）
+ */
+function onBlueprintSaved(blueprint: CanvasBlueprint, scopeLabel: string): void {
+  showSnackbar(`已保存蓝图「${blueprint.name}」到 ${scopeLabel}`, 'success')
+}
 
 /**
  * 运行中（Loading）节点 id 集合：statusByNode 中 status === 'running' 的节点
@@ -1447,6 +1649,8 @@ const paste = useCanvasPaste({
   getSelectedGroupIds: () => selection.selectedGroupIds.value,
   upload,
   showSnackbar,
+  // 蓝图模式未设置资产项目时阻止媒体粘贴（无项目上下文无法上传资产）
+  mediaBlockedReason: () => (isBlueprint.value && !assetContextReady.value ? '请先在蓝图中选择资产项目，再粘贴媒体' : null),
 })
 
 /** 关闭全部菜单（含群组连接目标菜单与分组色板菜单） */
@@ -1471,6 +1675,8 @@ const keyboard = useCanvasKeyboard({
   panel: { close: selection.dismissPanel },
   handleCtrlV: paste.handleCtrlV,
   duplicateSelected: () => void paste.duplicateSelected(),
+  // Ctrl+S 仅蓝图编辑器（手动保存）接管；主画布自动保存，不拦截
+  save: isBlueprint.value ? () => void saveBlueprint() : undefined,
 })
 
 /** 自动搭画布 */
@@ -1478,7 +1684,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 
 // 组合式导出解构（模板绑定用）
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
-const { editorPanel, isMultiSelected, selectedGroupIds, onEdgeClick, onNodeDragStart: onNodeDragStartBase } = selection
+const { editorPanel, isMultiSelected, selectedNodeIds, selectedGroupIds, onEdgeClick, onNodeDragStart: onNodeDragStartBase } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, previewInputsOf, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
@@ -1501,6 +1707,161 @@ const rewireCurves = computed<string[]>(() => {
 })
 // 持久分组组合式导出（顶层解构：模板内自动解包 ref）
 const { emptyGroupIds, colorMenu, colorPalette, renamingGroupId, groupRenameInput, createGroupFromSelection, onGroupDragStart, onGroupResizeEnd, onNodeDragFollow, startRenameGroup, commitRenameGroup, cancelRenameGroup, openColorMenu, pickGroupColor } = canvasGroups
+
+// ── 插入画布蓝图（工具栏 / 添加节点菜单入口 → 对话框 → 实例化落盘）────────
+
+/** 插入蓝图对话框状态（origin = 蓝图内容左上角落点，流坐标） */
+const blueprintInsert = reactive<{ show: boolean; origin: { x: number; y: number } }>({
+  show: false,
+  origin: { x: 0, y: 0 },
+})
+
+/**
+ * 打开插入蓝图对话框。
+ *
+ * @param origin 插入锚点（流坐标；蓝图内容包围盒左上角对齐到该点）
+ */
+function openBlueprintInsert(origin: { x: number; y: number }): void {
+  blueprintInsert.origin = { x: Math.round(origin.x), y: Math.round(origin.y) }
+  blueprintInsert.show = true
+}
+
+// ── 蓝图资产项目（信息条选择器）─────────────────────────────
+
+/** 项目列表加载中 */
+const assetProjectLoading = ref(false)
+/** 项目下拉选项（首项为「未设置」） */
+const assetProjectOptions = ref<{ title: string; value: string | null }[]>([{ title: '未设置', value: null }])
+
+/** 资产上下文是否就绪（蓝图模式要求资产项目非空；主画布恒为 true） */
+const assetContextReady = computed(() => !isBlueprint.value || !!blueprintAssetProject.value)
+
+/**
+ * 加载项目列表（蓝图信息条下拉；失败输出日志并保留「未设置」选项）。
+ */
+async function loadAssetProjectOptions(): Promise<void> {
+  assetProjectLoading.value = true
+  try {
+    const entries = await getProjects()
+    assetProjectOptions.value = [
+      { title: '未设置', value: null },
+      ...entries.map((p) => ({ title: p.name, value: p.name })),
+    ]
+  } catch (e) {
+    console.error('[blueprint] 加载项目列表失败', e)
+  } finally {
+    assetProjectLoading.value = false
+  }
+}
+
+/**
+ * 资产项目变更（信息条下拉）：仅写入编辑器内待保存值 + 上抛宿主同步资产上下文。
+ *
+ * **不立即落盘**（手动保存模式）：点「保存」/Ctrl+S 时与画布内容在同一次 CAS 请求中写入；
+ * 「不保存退出」时该选择一并丢弃。
+ *
+ * @param value 新的资产项目名（null 表示清除）
+ */
+function onAssetProjectChange(value: string | null): void {
+  if (!isBlueprint.value) return
+  const next = value ?? null
+  if (next === blueprintAssetProject.value) return
+  blueprintAssetProject.value = next
+  // 宿主据此更新资产上下文（预览/上传/选择资产的项目），与是否落盘无关
+  emit('blueprint-meta-updated', { assetProject: next })
+}
+
+// 蓝图模式进入时加载项目列表（仅一次）
+if (isBlueprint.value) void loadAssetProjectOptions()
+
+// ── 蓝图手动保存（编辑器头部「保存」/ Ctrl+S）───────────────────
+
+/**
+ * 蓝图编辑器的保存状态（经 `defineExpose` 暴露给宿主 `BlueprintEditDialog` 控制头部按钮）。
+ *
+ * `dirty` 同时涵盖画布内容（节点/连线/分组）与资产项目选择——两者都在同一次保存中落盘。
+ */
+const blueprintState = reactive({ dirty: false, saving: false, conflict: false })
+watchEffect(() => {
+  blueprintState.dirty = dirty.value || blueprintAssetProject.value !== blueprintAssetProjectSaved.value
+  blueprintState.saving = saving.value
+  blueprintState.conflict = !!conflict.value
+})
+
+/**
+ * 手动保存蓝图（画布内容 + 资产项目，单次 CAS 请求）。
+ *
+ * 蓝图编辑器关闭了自动保存：本方法是唯一的落盘入口，由编辑器头部「保存」按钮与
+ * Ctrl+S 触发；版本冲突时保留本地修改并显示冲突横幅（备份 / 强制覆盖 / 重新加载）。
+ *
+ * @returns true = 保存成功
+ */
+async function saveBlueprint(): Promise<boolean> {
+  if (!isBlueprint.value) return false
+  // 无改动时不写盘：避免无意义地递增 rev / 刷新 updatedAt（列表按更新时间排序）
+  const dirtyNow = dirty.value || blueprintAssetProject.value !== blueprintAssetProjectSaved.value
+  if (!dirtyNow) return true
+  const ok = await store.save()
+  if (ok) {
+    blueprintAssetProjectSaved.value = blueprintAssetProject.value
+    showSnackbar('蓝图已保存', 'success')
+  } else if (conflict.value) {
+    showSnackbar('蓝图保存冲突：请按画布上的冲突提示处理', 'error')
+  } else {
+    showSnackbar(store.error.value ?? '蓝图保存失败', 'error')
+  }
+  return ok
+}
+
+defineExpose({
+  /** 蓝图模式：手动保存（内容 + 资产项目） */
+  saveBlueprint,
+  /** 蓝图模式：保存状态（dirty/saving/conflict），供宿主控制头部按钮 */
+  blueprintState,
+})
+
+/** 工具栏入口：插入到当前视口中心（减去半个默认节点尺寸，使内容大致居中） */
+function openBlueprintInsertAtViewport(): void {
+  const rect = flowEl.value?.getBoundingClientRect()
+  if (!rect) {
+    openBlueprintInsert({ x: 80, y: 80 })
+    return
+  }
+  const p = screenToFlowCoordinate({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+  openBlueprintInsert({ x: p.x - 120, y: p.y - 80 })
+}
+
+/** 添加节点菜单底部入口：插入到菜单锚点处（右键/双击空白处的位置） */
+function openBlueprintInsertAtMenu(): void {
+  addMenu.show = false
+  openBlueprintInsert({ x: addMenu.flowX, y: addMenu.flowY })
+}
+
+/**
+ * 确认插入蓝图：实例化（id 重映射 / 坐标归一化 / 可选独立分组）→ 原子写入画布 → 聚焦新节点。
+ *
+ * 写入经 `store.applyEntities`（单次撤销快照），Ctrl+Z 可整体回退；
+ * 新节点聚焦时抑制配置面板弹出（仅用户点击节点才打开面板）。
+ *
+ * @param blueprint 蓝图详情
+ * @param asGroup 是否以独立分组插入（分组名 = 蓝图名，内容嵌套在分组内）
+ */
+async function onBlueprintInsert(blueprint: CanvasBlueprint, asGroup: boolean): Promise<void> {
+  const payload = instantiateBlueprint(
+    { nodes: blueprint.nodes, connections: blueprint.connections, groups: blueprint.groups },
+    { origin: blueprintInsert.origin, asGroup, groupName: blueprint.name },
+  )
+  if (payload.nodes.length === 0) {
+    showSnackbar('该蓝图没有节点，无法插入', 'error')
+    return
+  }
+  store.applyEntities(payload)
+  await focusNodes(payload.nodes.map((n) => n.id))
+  showSnackbar(
+    `已插入蓝图「${blueprint.name}」（${payload.nodes.length} 个节点${asGroup ? '，含独立分组' : ''}）`,
+    'success',
+  )
+}
 
 /**
  * 节点拖动开始（Vue Flow 原生拖动）：
@@ -1749,6 +2110,8 @@ function openAddMenuAt(event: MouseEvent, flowX: number, flowY: number): void {
 
 /** 自动搭画布：完成后刷新节点产物展示（复制既有图片到固定产物路径后立即可见） */
 async function onAutoBuild(): Promise<void> {
+  // 蓝图模式不提供自动搭画布（不绑定分镜/子场景）：不执行
+  if (isBlueprint.value) return
   await autoBuild()
   await refreshNodeOutputs()
 }
@@ -1772,14 +2135,16 @@ const switchConflict = reactive({
 let activeTarget: CanvasTarget = { ...target.value }
 
 /**
- * 下载当前画布（本地未保存内容）为 canvas.json 备份文件。
+ * 下载当前未保存内容为 JSON 备份文件（主画布为 canvas.json，蓝图编辑器为 `蓝图名.json`）。
  */
 function downloadLocalBackup(): void {
   const blob = new Blob([JSON.stringify(store.data.value, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = canvasRelPath(target.value).replace(/\//g, '-')
+  a.download = isBlueprint.value
+    ? `blueprint-${(props.blueprintMeta?.name ?? 'blueprint').replace(/[\\/:*?"<>|]/g, '_')}.json`
+    : canvasRelPath(target.value).replace(/\//g, '-')
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -1788,12 +2153,17 @@ function downloadLocalBackup(): void {
 async function reloadFromServerWithConfirm(): Promise<void> {
   const ok = await confirm({
     title: '重新加载服务端版本',
-    content: '将放弃当前画布未保存的修改，重新加载服务端最新版本。确定继续？',
+    content: isBlueprint.value
+      ? '将放弃当前蓝图未保存的修改，重新加载服务端最新版本。确定继续？'
+      : '将放弃当前画布未保存的修改，重新加载服务端最新版本。确定继续？',
     confirmText: '重新加载',
     confirmColor: 'warning',
   })
   if (!ok) return
   await reloadFromServer()
+  // 一并放弃未保存的资产项目改动（回到已落盘值），并同步宿主资产上下文
+  blueprintAssetProject.value = blueprintAssetProjectSaved.value
+  emit('blueprint-meta-updated', { assetProject: blueprintAssetProjectSaved.value })
 }
 
 /** 强制覆盖保存（对话框确认后执行；成功后横幅自动消失） */
@@ -1802,6 +2172,8 @@ async function confirmForceSave(): Promise<void> {
   try {
     const ok = await forceSave()
     if (ok) {
+      // 强制覆盖同样写入资产项目：同步已落盘基准，避免头部一直显示「未保存」
+      blueprintAssetProjectSaved.value = blueprintAssetProject.value
       forceDialog.show = false
       forceDialog.input = ''
       showSnackbar('已强制覆盖保存最新版本', 'success')
@@ -1928,6 +2300,8 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
 
 /** 切换分镜/场景时：重置各组合式状态，并让 store/生成组合式切换到新目标加载 */
 watch(target, (newTarget) => {
+  // 蓝图模式不随分镜/场景切换（目标由宿主固定）：不执行切换
+  if (isBlueprint.value) return
   // 上一个冲突对话框尚未处理时先关闭（保留最新选择的优先级）
   if (switchConflict.show) switchConflict.show = false
   void applySwitch(newTarget)
@@ -2007,6 +2381,21 @@ watch(flowEl, (flow) => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+
+/* 蓝图信息条（仅蓝图模式）：名称/作用域 + 资产项目选择器 */
+.asset-canvas__blueprint-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(var(--v-theme-primary), 0.04);
+}
+
+.asset-canvas__blueprint-project {
+  max-width: 220px;
+  flex: 0 0 auto;
 }
 
 .asset-canvas__flow {

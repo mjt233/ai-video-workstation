@@ -5,8 +5,11 @@
  * 1. **无引用自定义资产**：`assert/custom/**` 下未被项目任何文本文件引用的文件。
  *    引用来源为 `prompt/**` 全部文本文件（stage.json 的 `custom/...` 引用、
  *    canvas.json 的加载节点 `config.assetPath` / 导演台素材路径 / 变体元数据
- *    `refs`、`baseImage`、props 的 refs.json 等），采用**保守策略**：
- *    只要文本中出现该路径（或其目录前缀），即视为被引用（宁可漏删，不可误删）。
+ *    `refs`、`baseImage`、props 的 refs.json 等），以及**全局蓝图**
+ *    （`server/config/blueprints/*.json`，按蓝图 `assetProject` 归属到对应项目；
+ *    项目级蓝图位于 `prompt/blueprint/*.json`，已被 `prompt/**` 扫描覆盖），
+ *    采用**保守策略**：只要文本中出现该路径（或其目录前缀），即视为被引用
+ *    （宁可漏删，不可误删）。
  * 2. **久远历史记录**：覆盖「资产画布节点产物历史」与「角色/场景/道具及其衍生
  *    变体历史」，且归档时间早于阈值（默认 7 天）的条目。
  *    **不含**分镜产物历史（`assert/scene/*​/*​/{stage,voice,video}/history/**`）。
@@ -16,6 +19,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { resolveProjectPath } from './paths.js';
+import { GLOBAL_BLUEPRINT_DIR } from '../blueprints/store.js';
 
 /** 扫描分组（同时作为前端分节 key） */
 export type CleanupCategory =
@@ -245,16 +249,88 @@ async function indexPaths(rootAbs: string, prefix: string): Promise<PathIndex> {
 }
 
 /**
+ * 收集全局蓝图引用的自定义资产（按 `assetProject` 归属到项目）。
+ *
+ * 全局蓝图存放在 `server/config/blueprints/*.json`（**项目目录之外**），
+ * 因此不会被 `prompt/**` 扫描覆盖；若其引用的 `assert/custom/...` 未计入引用，
+ * 会被「无引用自定义资产」误判并移入回收站。本函数按蓝图 `assetProject`
+ * 把命中的 `custom/...` 路径归入对应项目。
+ *
+ * @param globalDir 全局蓝图目录（默认 server/config/blueprints/；测试可注入临时目录）
+ * @returns 项目名 → 该项目被全局蓝图引用的自定义资产路径集合（规范化为 `assert/custom/...`）
+ */
+export async function collectGlobalBlueprintRefs(globalDir: string = GLOBAL_BLUEPRINT_DIR): Promise<Map<string, Set<string>>> {
+  const result = new Map<string, Set<string>>();
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await fs.readdir(globalDir, { withFileTypes: true });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return result;
+    console.error('[cleanup] 读取全局蓝图目录失败:', globalDir, e);
+    return result;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    const full = path.join(globalDir, entry.name);
+    let text: string;
+    try {
+      const stat = await fs.stat(full);
+      if (stat.size > MAX_TEXT_BYTES) {
+        console.warn(`[cleanup] 跳过超大全局蓝图文件（> ${MAX_TEXT_BYTES} 字节）: ${full}`);
+        continue;
+      }
+      text = await fs.readFile(full, 'utf-8');
+    } catch (e) {
+      console.error('[cleanup] 读取全局蓝图文件失败:', full, e);
+      continue;
+    }
+    let project: string | null = null;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const ap = (parsed as { assetProject?: unknown }).assetProject;
+        project = typeof ap === 'string' && ap.trim() ? ap.trim() : null;
+      }
+    } catch (e) {
+      console.warn('[cleanup] 全局蓝图文件不是合法 JSON，已跳过:', full, e);
+      continue;
+    }
+    // 未设置资产项目：无法归属到任何项目，其引用不计入（该蓝图本身也无资产上下文）
+    if (!project) continue;
+    const set = result.get(project) ?? new Set<string>();
+    const re = /(?:assert\/)?custom\/[^"'`<>\n\r\t]+/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      let s = m[0].trim();
+      s = s.replace(/[，。、；：,;:.!?）)】\]}>'"`\s]+$/u, '');
+      if (s.startsWith('assert/')) s = s.slice('assert/'.length);
+      if (!s.startsWith('custom/')) continue;
+      set.add(`assert/${s}`);
+    }
+    if (set.size > 0) result.set(project, set);
+  }
+  return result;
+}
+
+/**
  * 构建项目内被引用的自定义资产路径集合。
  *
- * 遍历 `prompt/**` 下全部文本文件，匹配 `custom/...` 形态的路径串：
- * 命中候选文件本身、或命中其目录前缀（目录引用）即视为被引用。
+ * 引用来源：
+ * 1. `prompt/**` 下全部文本文件（含项目级蓝图 `prompt/blueprint/*.json`）；
+ * 2. 全局蓝图 `server/config/blueprints/*.json` 中 `assetProject` 指向本项目的条目。
+ *
+ * 匹配 `custom/...` 形态的路径串：命中候选文件本身、或命中其目录前缀（目录引用）即视为被引用。
  *
  * @param project 项目名
  * @param candidates 候选自定义资产索引（`assert/custom/**`）
+ * @param globalBlueprintDir 全局蓝图目录（默认 server/config/blueprints/；测试可注入）
  * @returns 被引用的候选文件路径集合
  */
-export async function collectCustomRefs(project: string, candidates: PathIndex): Promise<Set<string>> {
+export async function collectCustomRefs(
+  project: string,
+  candidates: PathIndex,
+  globalBlueprintDir: string = GLOBAL_BLUEPRINT_DIR,
+): Promise<Set<string>> {
   const referenced = new Set<string>();
   const promptRoot = resolveProjectPath(project, 'prompt');
 
@@ -304,6 +380,10 @@ export async function collectCustomRefs(project: string, candidates: PathIndex):
       if (p) mark(p);
     }
   });
+
+  // 全局蓝图（项目目录之外）中 assetProject 指向本项目的引用同样计入，避免被误判为无引用
+  const globalRefs = await collectGlobalBlueprintRefs(globalBlueprintDir);
+  for (const p of globalRefs.get(project) ?? []) mark(p);
 
   return referenced;
 }
@@ -498,10 +578,14 @@ export async function scanCleanup(
  * 构建「引用检查」回调（移入回收站前二次校验用）。
  *
  * @param project 项目名
+ * @param globalBlueprintDir 全局蓝图目录（默认 server/config/blueprints/；测试可注入）
  * @returns 回调：入参为 `assert/custom/...` 相对路径，返回 true 表示仍被引用
  */
-export async function createCustomRefChecker(project: string): Promise<(relPath: string) => boolean> {
+export async function createCustomRefChecker(
+  project: string,
+  globalBlueprintDir: string = GLOBAL_BLUEPRINT_DIR,
+): Promise<(relPath: string) => boolean> {
   const candidates = await indexPaths(resolveProjectPath(project, 'assert/custom'), 'assert/custom');
-  const referenced = await collectCustomRefs(project, candidates);
+  const referenced = await collectCustomRefs(project, candidates, globalBlueprintDir);
   return (relPath: string) => referenced.has(relPath);
 }

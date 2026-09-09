@@ -288,7 +288,26 @@ prompt/script/
 - 无对应 `assert/` 产物（纯文本原型，不参与生成流水线）
 - Agent 侧的读取与写入约定由独立技能 `script-manager` 管理（`.agents/skills/script-manager/SKILL.md`）：默认只读、写入前先读最新内容、发现问题先与用户确认、新建分集取当前最大编号 + 1
 
-### 2.6 资产浏览器元数据（metadata.json）
+### 2.6 画布蓝图 `prompt/blueprint/`
+
+项目级「画布蓝图」（可复用的画布片段：节点配置 + 连线 + 持久分组 + 相对位置）一蓝图一文件：
+
+```
+prompt/blueprint/
+├── {蓝图id}.json          # 单个项目级蓝图（id 为 uuid，名称/描述存文件内）
+└── ...                    # 目录按需创建（新建项目不预置）
+```
+
+| 路径 | 用途 |
+|------|------|
+| `prompt/blueprint/{id}.json` | 项目级蓝图文件（结构见 [canvas/blueprint.md](./canvas/blueprint.md#1-数据模型)）；由 `server/src/blueprints/store.ts` 管理，`rev` + CAS 保存 |
+
+- **全局蓝图**不落在项目内，存于服务端配置目录 `server/config/blueprints/{id}.json`（所有项目共享）
+- 蓝图**不携带产物文件**（插入画布后生成类节点需重新生成）；`assert/` 下无对应目录
+- 蓝图内引用的自定义资产（`assert/custom/...`）会被存储清理的引用扫描保护：项目级蓝图由 `prompt/**` 扫描天然覆盖；全局蓝图由 `assets/cleanup.ts: collectGlobalBlueprintRefs()` 按 `assetProject` 归属到对应项目
+- 随项目复制/删除整体带走；资产浏览器不展示该目录（管理入口为 系统配置 →「画布蓝图」）
+
+### 2.7 资产浏览器元数据（metadata.json）
 
 **不改变物理目录结构**（角色名/集数/分镜目录与编号一概不动），仅在对应位置新增 metadata.json 记录额外定义；项目没有这些文件时，资产浏览器按默认（无别名、角色未分类）展示：
 
@@ -625,6 +644,18 @@ assert/scene/{ep}/{shot}/stage/{i}.jpg
 - 任务提交时 `outputPath` 必须落在 `assert/` 下
 - 工作流脚本负责读 `prompt/`、调用 AI；引擎负责把结果写入 `outputPath`
 - 批量发现任务按上表扫描缺失产物并排队生成
+
+---
+
+## 6.1 画布蓝图存储位置
+
+| 作用域 | 路径 | 说明 |
+|--------|------|------|
+| 项目级 | `design/{project}/prompt/blueprint/{id}.json` | 见 2.6；随项目复制/删除 |
+| 全局 | `server/config/blueprints/{id}.json` | 所有项目共享；不落在 `design/` 下（与 `server/config/presets.json`、`system.json` 同级） |
+
+- 接口：`/api/blueprints`（见 [canvas/module-structure.md](./canvas/module-structure.md)）
+- 全局蓝图的 `assetProject` 字段记录资产上下文（预览/上传/选择资产用），其引用的 `assert/custom/...` 会被存储清理按该项目计入引用（见 3.0.3）
 
 ---
 

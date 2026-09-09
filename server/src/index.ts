@@ -10,6 +10,7 @@ import { workflowRouter } from './routes/workflow.js';
 import { canvasRouter } from './routes/canvas.js';
 import { llmRouter } from './routes/llm.js';
 import { presetsRouter } from './routes/presets.js';
+import { blueprintsRouter } from './routes/blueprints.js';
 import { cleanupRouter } from './routes/cleanup.js';
 import { systemRouter } from './routes/system.js';
 import { startTrashAutoCleanScheduler } from './system/trash-scheduler.js';
@@ -51,6 +52,7 @@ app.use('/api', canvasRouter);
 app.use('/api', taskRouter);
 app.use('/api', llmRouter);
 app.use('/api', presetsRouter);
+app.use('/api', blueprintsRouter);
 app.use('/api', cleanupRouter);
 app.use('/api', systemRouter);
 

@@ -1,5 +1,5 @@
 /**
- * 键盘快捷键组合式：撤销/重做/复制/粘贴兜底/复制粘贴/删除/Esc。
+ * 键盘快捷键组合式：撤销/重做/复制/粘贴兜底/复制粘贴/删除/保存（可选）/Esc。
  * 焦点在输入框/textarea 内时跳过（保留原生编辑行为）。
  * Ctrl+V 不 preventDefault（放行原生 paste 事件），由粘贴组合式统一分派
  * （节点复制标记 → 粘贴节点；文件 → 加载节点；文本 → 文本节点）；
@@ -39,6 +39,13 @@ export interface UseCanvasKeyboardOptions {
   handleCtrlV: () => void
   /** Ctrl+D 复制粘贴整组句柄（由粘贴组合式提供：复制选中 → 粘贴 → 聚焦新节点） */
   duplicateSelected: () => void
+  /**
+   * Ctrl+S 保存句柄（可选）。
+   *
+   * 仅手动保存模式（蓝图编辑器）提供：提供后 Ctrl+S 拦截浏览器默认行为并调用该句柄；
+   * 未提供时不拦截（主画布自动保存，保留浏览器原生「保存网页」行为）。
+   */
+  save?: () => void
 }
 
 /**
@@ -48,21 +55,30 @@ export interface UseCanvasKeyboardOptions {
  * @returns 全局 keydown 事件处理器
  */
 export function useCanvasKeyboard(options: UseCanvasKeyboardOptions) {
-  const { store, selection, menus, rename, groups, panel, handleCtrlV, duplicateSelected } = options
+  const { store, selection, menus, rename, groups, panel, handleCtrlV, duplicateSelected, save } = options
 
   /**
-   * 全局键盘快捷键：撤销/重做/复制/粘贴/复制粘贴/删除。
+   * 全局键盘快捷键：撤销/重做/复制/粘贴/复制粘贴/删除/保存。
    * 焦点在输入框/textarea 内时跳过（保留原生编辑行为）。
    *
    * @param e 键盘事件
    */
   function onKeydown(e: KeyboardEvent): void {
+    const mod = e.ctrlKey || e.metaKey
+
+    // Ctrl+S 保存：在输入框内也生效（手动保存模式下的主要保存路径；
+    // 浏览器原生「保存网页」对文本框没有意义）。未提供保存句柄时不拦截。
+    if (mod && e.key.toLowerCase() === 's') {
+      if (!save) return
+      e.preventDefault()
+      save()
+      return
+    }
+
     const el = e.target as HTMLElement | null
     const tag = el?.tagName
     const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable === true
     if (inInput) return
-
-    const mod = e.ctrlKey || e.metaKey
 
     if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault()

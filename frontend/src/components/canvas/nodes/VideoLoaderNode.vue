@@ -21,6 +21,8 @@
             size="x-small"
             variant="tonal"
             color="primary"
+            :disabled="!canvasMode.assetProjectReady"
+            :title="assetDisabledTitle"
             @click.stop="openUpload"
           >
             上传视频
@@ -28,6 +30,8 @@
           <v-btn
             size="x-small"
             variant="tonal"
+            :disabled="!canvasMode.assetProjectReady"
+            :title="assetDisabledTitle"
             @click.stop="openPicker"
           >
             选择资产
@@ -43,6 +47,7 @@ import { computed, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../../canvas/types'
 import { buildPreviewUrl } from '../../../canvas/preview'
 import { buildLoaderUploadDest } from '../../../canvas/clipboard'
+import { useCanvasMode } from '../../../canvas/canvasMode'
 import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 
 /** 加载视频节点 body：播放视频或提示未选择 */
@@ -58,6 +63,15 @@ const emit = defineEmits<{
   (e: 'open-picker', nodeId: string): void
   (e: 'upload-file', payload: CanvasUploadFilePayload): void
 }>()
+
+/**
+ * 画布模式上下文：蓝图模式下若未设置资产项目（无资产上下文），
+ * 上传 / 选择资产入口置灰（主画布恒为可用）。
+ */
+const canvasMode = useCanvasMode()
+
+/** 资产入口禁用时的提示文案（可用时为空） */
+const assetDisabledTitle = computed(() => (canvasMode.assetProjectReady ? '' : '请先在蓝图中选择资产项目'))
 
 const assetUrl = ref('')
 

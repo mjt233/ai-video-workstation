@@ -40,6 +40,11 @@ export interface UseCanvasPasteOptions {
   getSelectedGroupIds: () => string[]
   /** 操作反馈提示 */
   showSnackbar: ShowSnackbar
+  /**
+   * 媒体粘贴前置校验（可选）：返回非空文案时阻止本次媒体粘贴并提示。
+   * 蓝图编辑器未设置资产项目时使用（无项目上下文无法上传资产）。
+   */
+  mediaBlockedReason?: () => string | null
 }
 
 /**
@@ -98,6 +103,12 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
    * @param unsupportedNames 不支持的文件名列表（仅用于反馈提示）
    */
   async function pasteClipboardAssets(items: PastedMedia[], unsupportedNames: string[]): Promise<void> {
+    // 前置校验（蓝图模式未设置资产项目时阻止：无项目上下文无法上传）
+    const blocked = options.mediaBlockedReason?.()
+    if (blocked) {
+      showSnackbar(blocked, 'error')
+      return
+    }
     const base = viewportCenterNodePosition()
     // 1. 先创建空加载节点：上传期间节点即存在，进度条显示在各节点遮罩上
     const tasks = items.map((m, index) => {
