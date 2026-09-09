@@ -114,6 +114,28 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
     suppressEditor.value = true
   }
 
+  /**
+   * 单节点拖动聚焦：拖动开始时把应用级选中切为**单选**该节点，同时抑制配置面板自动弹出。
+   *
+   * 语义（与「点击节点」的差别仅在面板）：拖动即选中——
+   * - 应用级 `selectedNodeIds` 写入该节点后，`useCanvasFlow` 的单选联动高亮派生集
+   *   （输入侧绿 / 输出侧橙连线 + 沿数据流向箭头动画 + 邻接节点分色描边）自动生效，
+   *   拖动过程中即可看到该节点的输入/输出连接；AssetCanvas 既有的
+   *   `watch(selectedNodeIds) → mirrorSelectionToVueFlow` 会把选中态镜像回 Vue Flow，
+   *   故节点蓝色选中边框同样跟随；
+   * - 拖动结束**保持选中**（Delete / Ctrl+C / 右键菜单等快捷键可用），面板仍不弹出；
+   *   再次**单击**该节点由 `onNodeClick` 复位抑制标志后正常打开面板；
+   * - 仅由 AssetCanvas 在「被拖动的真实节点恰好 1 个」时调用；多选整组拖动、拖动群组
+   *   虚线框/输出点（合成节点）不调用，保持原有整组移动语义。
+   *
+   * @param nodeId 被拖动节点 id（不存在时忽略，不改变任何选中状态）
+   */
+  function focusNodeForDrag(nodeId: string): void {
+    if (!store.nodes.value.some((n) => n.id === nodeId)) return
+    setSelectedNodes([nodeId])
+    suppressPanelOnSelect.value = true
+  }
+
   /** 空白处点击：取消全部选中（节点 + 分组 + 连线）并恢复面板显示；双击加节点由 AssetCanvas 接线统一处理 */
   function onPaneClick(): void {
     suppressEditor.value = false
@@ -304,6 +326,7 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
     editorPanel,
     onNodeClick,
     onNodeDragStart,
+    focusNodeForDrag,
     onPaneClick,
     onEdgeClick,
     setSelectedNode,

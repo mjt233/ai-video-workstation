@@ -553,7 +553,7 @@ import { getNodeCurrentAssetPath } from '../../canvas/generate'
 import { getPrototype } from '../../canvas/registry'
 import { getCanvasNodeInfo } from '../../canvas/api'
 import { extOfAudioPath } from '../../canvas/audioTrim'
-import { isSyntheticNodeId } from '../../canvas/groupSelection'
+import { isSyntheticNodeId, singleDraggedRealNodeId } from '../../canvas/groupSelection'
 import type { CanvasScope } from '../../canvas/paths'
 import { llmSocket, type LlmCanvasTarget, type LlmFinishedInfo, type LlmSessionInfo, type LlmTaskEvent } from '../../canvas/llmSocket'
 import { applyLlmEvent, buildLlmFinishedAdopt, createLlmStreamState, createThrottledCommit, sameCanvasTarget, type LlmStreamState, type ThrottledCommit } from '../../canvas/llmEvents'
@@ -1365,7 +1365,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 
 // 组合式导出解构（模板绑定用）
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
-const { editorPanel, isMultiSelected, selectedGroupIds, onEdgeClick, onNodeDragStart } = selection
+const { editorPanel, isMultiSelected, selectedGroupIds, onEdgeClick, onNodeDragStart: onNodeDragStartBase } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, videoTextInputs, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
@@ -1375,6 +1375,25 @@ const { autoBuilding, autoBuild } = autobuild
 const { groupRect, connectDrag, connectLine, connectMenu, menuItems, hoveredNodeId, onDotMouseDown, createNodeFromMenu } = group
 // 持久分组组合式导出（顶层解构：模板内自动解包 ref）
 const { emptyGroupIds, colorMenu, colorPalette, renamingGroupId, groupRenameInput, createGroupFromSelection, onGroupDragStart, onGroupResizeEnd, onNodeDragFollow, startRenameGroup, commitRenameGroup, cancelRenameGroup, openColorMenu, pickGroupColor } = canvasGroups
+
+/**
+ * 节点拖动开始（Vue Flow 原生拖动）：
+ * 1. 一律抑制配置面板显示（仅点击节点才显示配置）；
+ * 2. **被拖动的真实节点恰好 1 个**时（`singleDraggedRealNodeId` 判定）进入「拖动聚焦」——
+ *    应用级选中切为单选该节点，使其输入/输出关联高亮（连线分色 + 流向箭头 + 邻接节点描边）
+ *    在拖动过程中即出现（高亮派生集以单选为前置条件；选中态经 mirrorSelectionToVueFlow
+ *    镜像回 Vue Flow）；
+ * 3. 多选整组拖动（含拖动群组虚线框：合成节点被过滤后仍剩多个真实节点）不改变选中集，
+ *    保持原有整组移动语义与「多选不高亮」规则。
+ *
+ * @param payload Vue Flow 节点拖动开始事件（含被拖动节点列表）
+ */
+function onNodeDragStart(payload: NodeDragEvent): void {
+  onNodeDragStartBase()
+  const nodeId = singleDraggedRealNodeId(payload.nodes)
+  if (!nodeId) return
+  selection.focusNodeForDrag(nodeId)
+}
 
 /**
  * 节点拖动结束（Vue Flow 原生拖动）：

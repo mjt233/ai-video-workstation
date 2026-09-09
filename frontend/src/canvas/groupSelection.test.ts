@@ -12,6 +12,7 @@ import {
   groupOutputTypes,
   isSyntheticNodeId,
   remapNodeConfig,
+  singleDraggedRealNodeId,
 } from './groupSelection'
 
 /** 构造最小节点数据（按原型默认 240×160） */
@@ -24,6 +25,25 @@ describe('isSyntheticNodeId', () => {
     expect(isSyntheticNodeId(GROUP_FRAME_ID)).toBe(true)
     expect(isSyntheticNodeId(GROUP_DOT_ID)).toBe(true)
     expect(isSyntheticNodeId('n1')).toBe(false)
+  })
+})
+
+describe('singleDraggedRealNodeId', () => {
+  it('单个真实节点拖动 → 返回该节点 id（拖动聚焦生效）', () => {
+    expect(singleDraggedRealNodeId([{ id: 'n1' }])).toBe('n1')
+  })
+
+  it('多选整组拖动（≥2 个真实节点）→ null（不高亮，保持整组移动语义）', () => {
+    expect(singleDraggedRealNodeId([{ id: 'n1' }, { id: 'n2' }])).toBeNull()
+  })
+
+  it('拖动群组虚线框（合成节点 + 多个真实节点）→ null', () => {
+    expect(singleDraggedRealNodeId([{ id: GROUP_FRAME_ID }, { id: 'n1' }, { id: 'n2' }])).toBeNull()
+  })
+
+  it('只拖动合成节点 / 空列表 → null', () => {
+    expect(singleDraggedRealNodeId([{ id: GROUP_DOT_ID }])).toBeNull()
+    expect(singleDraggedRealNodeId([])).toBeNull()
   })
 })
 

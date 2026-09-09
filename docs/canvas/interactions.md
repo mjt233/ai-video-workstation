@@ -18,7 +18,7 @@
 | 交互 | 行为 |
 |------|------|
 | 点击节点 | 选中 + 显示配置面板（有 editorComponent 时）；**多选下普通单击切换为仅选中该节点** |
-| 单选联动高亮（选中 1 个节点时） | 与该节点**直接相连**的全部连线（选中节点作 source 或 target）按**方向分色**并加粗（2px）：输入侧（指向选中节点）= 绿色 `#2E7D32`，输出侧（选中节点发出）= 橙色 `#EF6C00`（`useCanvasFlow` 按单选集在连线上挂 `canvas-edge--related canvas-edge--input/output` class，颜色经 `--edge-related-color` CSS 变量单一来源，样式见 AssetCanvas `:deep` 规则）。关联连线叠加**沿数据流向**移动的箭头动画（`#edge-default` 插槽：与 `BezierEdge` 完全相同的参数经 `getBezierPath` 计算连线 d，注入箭头 `offset-path: path(...)`，`offset-rotate: auto` + `@keyframes canvas-edge-arrow-flow`（1.4s 无限循环）驱动 `offset-distance` 0%→100%——连线路径由 source→target 生成，方向天然即数据流：输入侧箭头从邻接节点流向选中节点，输出侧反向；未关联连线无箭头）。连线另一端点（1 跳邻接节点，剔除选中节点自身）按方向分色描边（`CanvasNodeCard` 的 `canvas-node--adjacent-input/output`：输入绿 `#2E7D32` / 输出橙 `#EF6C00`，半透明外圈、**弱于选中态**，与选中/成组拖拽悬停同现时后两者优先）。纯前端派生：无选中/多选（≥2，群组操作模式）时不高亮；清空选中、切换分镜/场景自动消失 |
+| 单选联动高亮（选中 1 个节点时） | 与该节点**直接相连**的全部连线（选中节点作 source 或 target）按**方向分色**并加粗（2px）：输入侧（指向选中节点）= 绿色 `#2E7D32`，输出侧（选中节点发出）= 橙色 `#EF6C00`（`useCanvasFlow` 按单选集在连线上挂 `canvas-edge--related canvas-edge--input/output` class，颜色经 `--edge-related-color` CSS 变量单一来源，样式见 AssetCanvas `:deep` 规则）。关联连线叠加**沿数据流向**移动的箭头动画（`#edge-default` 插槽：与 `BezierEdge` 完全相同的参数经 `getBezierPath` 计算连线 d，注入箭头 `offset-path: path(...)`，`offset-rotate: auto` + `@keyframes canvas-edge-arrow-flow`（1.4s 无限循环）驱动 `offset-distance` 0%→100%——连线路径由 source→target 生成，方向天然即数据流：输入侧箭头从邻接节点流向选中节点，输出侧反向；未关联连线无箭头）。连线另一端点（1 跳邻接节点，剔除选中节点自身）按方向分色描边（`CanvasNodeCard` 的 `canvas-node--adjacent-input/output`：输入绿 `#2E7D32` / 输出橙 `#EF6C00`，半透明外圈、**弱于选中态**，与选中/成组拖拽悬停同现时后两者优先）。纯前端派生：无选中/多选（≥2，群组操作模式）时不高亮；清空选中、切换分镜/场景自动消失。**数据源**：应用级 `selectedNodeIds` 单选（点击/框选/粘贴聚焦/**单节点拖动聚焦**均写入），拖动单节点时高亮随拖动实时出现 |
 | 运行态高亮（节点 Loading 时） | 节点 `statusByNode[id].status === 'running'`（工作流/ffmpeg/AI 文本统一状态机，刷新/切画布经 restore 恢复后同样生效）时：① 运行节点自身主色蓝 `#1976D2` 边框 + **脉冲呼吸外圈**（`CanvasNodeCard` 的 `canvas-node--running`：`@keyframes canvas-node-running-pulse` box-shadow 2px↔4px 循环，区别于静态选中边框，与选中态同现时脉冲胜出）；② **1 跳上游节点**（直接供数节点）主色弱描边（`canvas-node--running-adjacent`，半透明外圈、弱于选中态，节点自身 running 时让位）；③ **输入连线**（指向运行中节点）主色蓝加粗并叠加与单选联动高亮**共用**的沿数据流向箭头动画（`useCanvasFlow` 的 `runningInputEdgeIds/runningInputNodeIds` 派生集；连线挂 `canvas-edge--related canvas-edge--running` class，颜色经 `--edge-related-color: #1976D2` 变量提供，与单选联动高亮互斥时 **running 优先**）。任务终态（成功/失败/中断）自动消失；上传进度态不属于运行态高亮范围 |
 | `Ctrl`+点击节点 | 增/减选该节点（多选） |
 | `Ctrl`+空白处左键拖动 | **框选多个节点**（Vue Flow 内置框选：selectionKeyCode/multiSelectionKeyCode 经 `setState` 写入 `Control`，避免运行时 prop 类型告警；`selection-mode` 为 Partial——**与节点存在交集（无需完全覆盖）即选中**）；框选结束（`@selection-end`）后应用级多选与 Vue Flow 内部选中态双向同步 |
@@ -38,7 +38,7 @@
 | **空分组** | 标题条显示「空」标记 + 整体不透明度 0.55（提示已被拖空，**不自动删除**） |
 | **拖动节点进出分组** | 自动加入 / 脱离（成员关系由几何重叠实时派生，无显式操作） |
 | 双击节点名称 | 内联重命名（回车/失焦提交、Esc 取消、空名放弃） |
-| 拖拽节点 | 移动位置，结束回写 store（防误触：拖拽中隐藏配置面板）；**拖动选中节点时 Vue Flow 原生把全部选中节点一起移动**（结束批量单次撤销） |
+| 拖拽节点 | 移动位置，结束回写 store（防误触：拖拽中隐藏配置面板）；**被拖动的真实节点恰好 1 个时进入「拖动聚焦」**：拖动开始即把应用级选中切为**单选**该节点（`useCanvasSelection.focusNodeForDrag`），使其输入/输出关联高亮（连线分色 + 流向箭头 + 邻接节点描边）在拖动过程中实时出现，且**不弹出配置面板**；拖动结束保持选中（Delete/复制等快捷键可用），再次**单击**该节点才打开面板。**多选整组拖动**（≥2 个真实节点，含拖动群组虚线框）不改变选中集、不高亮，整组移动语义不变；**拖动选中节点时 Vue Flow 原生把全部选中节点一起移动**（结束批量单次撤销） |
 | 悬浮/选中节点后拖拽边缘或四角 | 调整节点大小（**全部节点类型**可缩放，最小 120×80px，`@vue-flow/node-resizer` 渲染控制点；缩放中控制点保持可见，结束才回写 store） |
 | 右键节点 | 菜单：重新生成 / 历史 / 保存为（hover 子菜单：角色设计 / 角色设计-衍生变体 / 场景图 / 场景图-衍生变体 / 自定义资产，仅输出类型为图片且有产物的节点显示）/ 断开连接 / 重命名 / 复制 / 删除（删除需 `confirm` 确认）。**右键节点时切换为单选该节点** |
 | 右键连线 | 菜单：断开连接 |

@@ -26,6 +26,23 @@ export function isSyntheticNodeId(id: string): boolean {
   return id === GROUP_FRAME_ID || id === GROUP_DOT_ID
 }
 
+/**
+ * 「单节点拖动聚焦」判定：从 Vue Flow 拖动事件携带的节点列表（`payload.nodes`）中
+ * 过滤掉合成节点（群组虚线框 `__group-frame` / 输出点 `__group-dot`）后，
+ * **恰好剩 1 个真实节点**时返回其 id，否则返回 null。
+ *
+ * 用途：AssetCanvas 在 `@node-drag-start` 中据此决定是否让被拖节点进入聚焦状态
+ * （单选该节点 → 输入/输出关联高亮）。多选整组拖动（真实节点 ≥2）与拖动群组虚线框
+ * 都返回 null，从而保持原有整组移动语义与「多选不高亮」规则。
+ *
+ * @param draggedNodes Vue Flow 拖动事件中的节点列表（需含 id）
+ * @returns 唯一被拖动的真实节点 id；真实节点数 ≠ 1 时返回 null
+ */
+export function singleDraggedRealNodeId(draggedNodes: readonly { id: string }[]): string | null {
+  const real = draggedNodes.filter((n) => !isSyntheticNodeId(n.id))
+  return real.length === 1 ? real[0].id : null
+}
+
 /** 群组包围盒（流坐标，单位为纯像素） */
 export interface GroupRect {
   x: number
