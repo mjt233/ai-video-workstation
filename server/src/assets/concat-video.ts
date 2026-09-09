@@ -46,6 +46,10 @@ export interface ConcatParams {
   width?: number;
   /** 自定义输出高度（像素，sizeMode=custom 时必填） */
   height?: number;
+  /** 是否开启自然过渡（相邻段之间交叉淡化；仅 reencode 生效，copy 模式忽略） */
+  transition?: boolean;
+  /** 交叉过渡时长（秒，0.1~5；transition=true 时生效，须小于每段时长） */
+  crossfadeDuration?: number;
 }
 
 /** 单段视频的拼接规格（前置校验 / 尺寸计算 / 音轨补齐用） */
@@ -92,6 +96,10 @@ interface NormalizedConcatParams {
   width?: number;
   /** 自定义高（仅 custom） */
   height?: number;
+  /** 是否开启自然过渡（仅 reencode 生效） */
+  transition: boolean;
+  /** 交叉过渡时长（秒，0.1~5，缺省 0.5） */
+  crossfadeDuration: number;
 }
 
 /** 目标音频采样率（重编码统一） */
@@ -103,6 +111,9 @@ const TARGET_CHANNEL_LAYOUT = 'stereo';
 /**
  * 归一化拼接参数（缺省 reencode + max；非法枚举回退缺省）。
  *
+ * 自然过渡仅 reencode 生效：copy 模式强制关闭（xfade 需重编码）；`crossfadeDuration`
+ * 须为 0.1~5 秒的有限数，非法回退缺省 0.5。
+ *
  * @param params 原始参数（可省略）
  * @returns 归一化后的参数
  */
@@ -110,11 +121,17 @@ export function normalizeConcatParams(params?: ConcatParams): NormalizedConcatPa
   const mode: ConcatMode = params?.mode === 'copy' ? 'copy' : 'reencode';
   const sizeMode: ConcatSizeMode =
     params?.sizeMode === 'custom' || params?.sizeMode === 'min' ? params.sizeMode : 'max';
+  const transition = mode !== 'copy' && params?.transition === true;
+  const rawDur = params?.crossfadeDuration;
+  const dur =
+    typeof rawDur === 'number' && Number.isFinite(rawDur) ? Math.min(5, Math.max(0.1, rawDur)) : 0.5;
   return {
     mode,
     sizeMode,
     ...(typeof params?.width === 'number' ? { width: params.width } : {}),
     ...(typeof params?.height === 'number' ? { height: params.height } : {}),
+    transition,
+    crossfadeDuration: dur,
   };
 }
 
@@ -214,12 +231,16 @@ export function resolveOutputFps(specs: ConcatSegmentSpec[]): number {
  * - 画面：`scale`（等比缩小/放大到目标框内）+ `pad`（居中留黑边）+ `setsar=1`（方形像素）+ `fps`（统一帧率）；
  * - 音轨：任一段含音轨则全部保留音轨结构——无音轨段用 `anullsrc` 静音源补齐，
  *   并统一采样率/声道（`aresample` + `aformat`）；
- * - 拼接：`concat=n=N:v=1:a=1`（全部无音轨时 `a=0`）。
+ * - 拼接：未开启自然过渡时 `concat=n=N:v=1:a=1`（全部无音轨时 `a=0`），各段之间硬切；
+ *   开启过渡时（仅 reencode）改为 xfade（视频）+ acrossfade（音频）链式交叉淡化——
+ *   第 i 次过渡（新增第 i 段，i 从 1 起）的 xfade offset = Σdur(0..i-1) − i·T，
+ *   音频 acrossfade 自动在累积音频末尾 T 秒处与下一段衔接（时间轴与视频链一致）；
+ *   输出总时长为各段时长之和 − 时长×(段数−1)。
  *
  * @param specs 各段视频规格（顺序即拼接顺序）
  * @param params 归一化后的拼接参数
  * @returns ffmpeg 参数（额外输入 / filter_complex / 输出选项 / 目标规格）
- * @throws ConcatError 段数为空或自定义尺寸非法（code=INVALID）
+ * @throws ConcatError 段数为空、自定义尺寸非法（INVALID），或开启过渡时某段时长不足过渡时长（INVALID）
  */
 export function buildReencodeArgs(specs: ConcatSegmentSpec[], params: NormalizedConcatParams): ReencodeArgs {
   if (specs.length === 0) {
@@ -228,10 +249,26 @@ export function buildReencodeArgs(specs: ConcatSegmentSpec[], params: Normalized
   const { width, height } = resolveOutputSize(specs, params);
   const fps = resolveOutputFps(specs);
   const withAudio = specs.some((s) => s.hasAudio);
+  const transition = params.transition;
+  const crossfade = params.crossfadeDuration;
+
+  // 自然过渡前置校验：每段时长必须大于过渡时长，否则 xfade 出现负偏移或整段被过渡吞掉
+  // （ffmpeg 报错晦涩，这里提前给出清晰中文提示）
+  if (transition) {
+    specs.forEach((s, i) => {
+      if (!(Number.isFinite(s.duration) && s.duration > crossfade)) {
+        const durText = Number.isFinite(s.duration) ? `${s.duration.toFixed(1)} 秒` : '未知';
+        throw new ConcatError(
+          `第 ${i + 1} 段时长（${durText}）需大于交叉过渡时长（${crossfade} 秒），请缩短过渡时长或另选视频段`,
+          'INVALID',
+        );
+      }
+    });
+  }
 
   const filters: string[] = [];
   const extraInputs: string[][] = [];
-  /** concat 滤镜的输入标签（按段顺序：[v0][a0][v1][a1]...，无音轨时只有 [vN]） */
+  /** concat 滤镜的输入标签（按段顺序交错：[v0][a0][v1][a1]...，无音轨时只有 [vN]） */
   const concatInputs: string[] = [];
   specs.forEach((s, i) => {
     filters.push(
@@ -245,7 +282,7 @@ export function buildReencodeArgs(specs: ConcatSegmentSpec[], params: Normalized
           `[${i}:a]aresample=${TARGET_AUDIO_RATE},aformat=channel_layouts=${TARGET_CHANNEL_LAYOUT}[a${i}]`,
         );
       } else {
-        // 无音轨段：追加一路 lavfi 静音源（-t 限制为该段时长），补齐音轨结构后参与 concat
+        // 无音轨段：追加一路 lavfi 静音源（-t 限制为该段时长），补齐音轨结构后参与 concat/acrossfade
         const inputIndex = specs.length + extraInputs.length;
         const dur = Number.isFinite(s.duration) && s.duration > 0 ? s.duration : 0;
         extraInputs.push([
@@ -260,11 +297,37 @@ export function buildReencodeArgs(specs: ConcatSegmentSpec[], params: Normalized
       concatInputs.push(`[a${i}]`);
     }
   });
-  // concat 滤镜以各段归一化输出为输入（标签直接串联，无中间段；否则 ffmpeg 报
-  // 「No output pad can be associated to link label 'vN'」/「Cannot find a matching stream」）
-  filters.push(
-    `${concatInputs.join('')}concat=n=${specs.length}:v=1:a=${withAudio ? 1 : 0}[vout]${withAudio ? '[aout]' : ''}`,
-  );
+
+  if (!transition) {
+    // 无过渡：concat 滤镜以各段归一化输出为输入（标签按段交错串联，无中间段；否则 ffmpeg 报
+    // 「No output pad can be associated to link label 'vN'」/「Cannot find a matching stream」）
+    filters.push(
+      `${concatInputs.join('')}concat=n=${specs.length}:v=1:a=${withAudio ? 1 : 0}[vout]${
+        withAudio ? '[aout]' : ''
+      }`,
+    );
+  } else {
+    // 视频：xfade 链（transition=fade 淡入淡出）。第 i 次过渡（新增第 i 段）offset =
+    // 前 i 段累积时长 − 第 i 个过渡重叠时长；链式累积后输出总时长随之递减
+    let prevVideo = '[v0]';
+    let accDur = specs[0].duration;
+    for (let i = 1; i < specs.length; i++) {
+      const offset = accDur - crossfade;
+      const outTag = i === specs.length - 1 ? '[vout]' : `[xf${i}]`;
+      filters.push(`${prevVideo}[v${i}]xfade=transition=fade:duration=${crossfade}:offset=${offset}${outTag}`);
+      prevVideo = outTag;
+      accDur = accDur + specs[i].duration - crossfade;
+    }
+    // 音频：acrossfade 链（自动在累积音频末尾与下一段开头重叠 T 秒，时间轴与 xfade 链一致）
+    if (withAudio) {
+      let prevAudio = '[a0]';
+      for (let i = 1; i < specs.length; i++) {
+        const outTag = i === specs.length - 1 ? '[aout]' : `[af${i}]`;
+        filters.push(`${prevAudio}[a${i}]acrossfade=d=${crossfade}:c1=tri${outTag}`);
+        prevAudio = outTag;
+      }
+    }
+  }
 
   const outputOptions = ['-map', '[vout]'];
   if (withAudio) outputOptions.push('-map', '[aout]');
@@ -380,18 +443,22 @@ export async function buildConcatCommand(
   for (const vp of videoPaths) {
     specs.push(await probeSegmentSpec(project, vp));
   }
-  const totalDuration = specs.reduce((sum, s) => sum + (Number.isFinite(s.duration) ? s.duration : 0), 0);
+  const sumDuration = specs.reduce((sum, s) => sum + (Number.isFinite(s.duration) ? s.duration : 0), 0);
 
   if (normalized.mode === 'copy') {
     assertConcatCompatible(specs);
     return {
       outputAbs,
-      duration: totalDuration > 0 ? totalDuration : undefined,
+      duration: sumDuration > 0 ? sumDuration : undefined,
       info: { mode: 'copy', segments: videoPaths.length },
       build: (cmd) => buildCopyCommand(cmd, project, videoPaths),
     };
   }
 
+  // 自然过渡（仅 reencode）：输出总时长 = 各段时长之和 − 过渡时长×(段数−1)
+  const transition = normalized.transition;
+  const totalDuration =
+    transition && sumDuration > 0 ? sumDuration - normalized.crossfadeDuration * (specs.length - 1) : sumDuration;
   const args = buildReencodeArgs(specs, normalized);
   return {
     outputAbs,
@@ -404,6 +471,7 @@ export async function buildConcatCommand(
       height: args.height,
       fps: args.fps,
       withAudio: args.withAudio,
+      ...(transition ? { transition: true, crossfadeDuration: normalized.crossfadeDuration } : {}),
     },
     build: (cmd) => buildReencodeCommand(cmd, project, videoPaths, args),
   };

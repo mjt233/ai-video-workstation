@@ -120,6 +120,35 @@
       />
     </div>
 
+    <!-- 自然过渡（仅重编码可用）：视频 xfade + 音频 acrossfade 交叉淡化 -->
+    <div class="concat-video-editor__params mt-1">
+      <v-switch
+        :model-value="transition"
+        label="自然过渡"
+        color="primary"
+        density="compact"
+        :disabled="mode === 'copy'"
+        :hint="mode === 'copy' ? '仅重编码可用' : undefined"
+        persistent-hint
+        class="concat-video-editor__transition"
+        @update:model-value="(v: boolean | null) => emit('update:config', { transition: v === true })"
+      />
+      <v-text-field
+        v-if="transition"
+        :model-value="String(crossfadeDuration)"
+        type="number"
+        label="交叉过渡时长（秒）"
+        density="compact"
+        variant="outlined"
+        hide-details
+        min="0.1"
+        max="5"
+        step="0.1"
+        class="concat-video-editor__param"
+        @update:model-value="(v: string) => emit('update:config', { crossfadeDuration: toPositiveNum(v, crossfadeDuration) })"
+      />
+    </div>
+
     <!-- 目标尺寸提示（重编码）与 copy 预检提示 -->
     <div
       v-if="mode === 'reencode' && targetSize && sizeMode !== 'custom'"
@@ -187,9 +216,11 @@ type ConcatSizeMode = 'custom' | 'max' | 'min'
  * 拼接视频节点配置组件。
  *
  * 展示全部视频输入（VideoRefInputGroup，组内拖拽排序写 config.inputOrder，顺序即拼接顺序），
- * 提供两个用户参数：
+ * 提供三个用户参数：
  * - **编码方式**：`copy`（无损流拷贝，各段规格须一致）/ `reencode`（重编码，允许异构规格）；
- * - **输出尺寸**（仅重编码可用）：`custom`（自定义宽高）/ `max`（按像素面积取最大段）/ `min`（取最小段）。
+ * - **输出尺寸**（仅重编码可用）：`custom`（自定义宽高）/ `max`（按像素面积取最大段）/ `min`（取最小段）；
+ * - **自然过渡**（仅重编码可用）：`transition` 开关 + `crossfadeDuration`（秒，0.1~5），相邻视频段间
+ *   做视频 xfade + 音频 acrossfade 交叉淡化；copy 模式下开关禁用并提示。
  *
  * 输入规格经服务端 ffprobe 探测后展示（分辨率/帧率/编码/音轨），copy 模式下规格不一致时
  * 给出红色提示并禁用「拼接」按钮（服务端仍会兜底报错）。
@@ -245,6 +276,10 @@ const sizeMode = computed<ConcatSizeMode>(() => {
 const width = computed(() => numberOrUndefined(props.node.config.width))
 /** 自定义高度（像素） */
 const height = computed(() => numberOrUndefined(props.node.config.height))
+/** 是否开启自然过渡（相邻段交叉淡化；仅重编码生效，copy 模式下开关禁用并提示） */
+const transition = computed<boolean>(() => props.node.config.transition === true)
+/** 交叉过渡时长（秒，0.1~5，缺省 0.5） */
+const crossfadeDuration = computed<number>(() => numberOrUndefined(props.node.config.crossfadeDuration) ?? 0.5)
 
 /** 全部视频输入的预览 URL（nodeId → URL；输入或项目变化时重建） */
 const previewUrls = computed<Record<string, string>>(() => {
@@ -317,6 +352,19 @@ function toPositiveInt(v: string, fallback: number | undefined): number | undefi
   const n = Number(v)
   if (!Number.isFinite(n) || n <= 0) return fallback
   return Math.round(n)
+}
+
+/**
+ * 输入框字符串 → 正数（秒，支持小数）：非法/空值保留原值；合法值规整到 0.1 步长并夹在 0.1~5 秒。
+ *
+ * @param v 输入框值
+ * @param fallback 当前配置值（非法输入时保留，避免输入过程被清空）
+ * @returns 0.1~5 之间的数值
+ */
+function toPositiveNum(v: string, fallback: number): number {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0) return fallback
+  return Math.min(5, Math.max(0.1, Math.round(n * 10) / 10))
 }
 
 /**
@@ -438,6 +486,12 @@ function onRemoveInput(input: CanvasInputInfo): void {
 .concat-video-editor__param {
   flex: 1 1 140px;
   min-width: 120px;
+}
+
+/* 自然过渡开关（与时长输入同排；copy 模式下禁用并展示 hint） */
+.concat-video-editor__transition {
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 .concat-video-editor__result {

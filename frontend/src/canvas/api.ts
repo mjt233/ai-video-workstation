@@ -301,11 +301,13 @@ export async function getAudioInfo(project: string, audioPath: string): Promise<
 }
 
 /**
- * 拼接视频参数（编码方式与输出尺寸策略）。
+ * 拼接视频参数（编码方式、输出尺寸策略与自然过渡）。
  *
  * - `mode=copy`：无损流拷贝，各段编码/分辨率/帧率/音轨结构须一致（否则服务端报错并提示改用重编码）；
  * - `mode=reencode`：重编码（filter_complex 逐段归一化），允许异构规格；
- * - `sizeMode` 仅 reencode 生效：`max`/`min` 按像素面积取那一段的完整宽高，`custom` 用 width/height。
+ * - `sizeMode` 仅 reencode 生效：`max`/`min` 按像素面积取那一段的完整宽高，`custom` 用 width/height；
+ * - `transition`/`crossfadeDuration` 仅 reencode 生效：开启后相邻段之间做视频 xfade + 音频
+ *   acrossfade 交叉淡化（时长须为 0.1~5 秒）。
  */
 export interface ConcatVideoParams {
   /** 编码方式（缺省 reencode） */
@@ -316,6 +318,10 @@ export interface ConcatVideoParams {
   width?: number
   /** 自定义输出高度（像素，sizeMode=custom 时必填） */
   height?: number
+  /** 是否开启自然过渡（仅 reencode 生效；开启后总时长 = 各段时长之和 − 时长×(段数−1)） */
+  transition?: boolean
+  /** 交叉过渡时长（秒，0.1~5；transition=true 时生效） */
+  crossfadeDuration?: number
 }
 
 /** ffmpeg 任务提交目标（任务管理器展示 + 画布刷新后按 scope 恢复 loading） */

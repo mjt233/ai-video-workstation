@@ -457,7 +457,26 @@ canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) =>
     }
     const widthRaw = req.body?.width;
     const heightRaw = req.body?.height;
-    const params: { mode?: 'copy' | 'reencode'; sizeMode?: 'custom' | 'max' | 'min'; width?: number; height?: number } = {};
+    // 自然过渡（仅 reencode 生效）：transition 仅接受布尔；crossfadeDuration 须为 0.1~5 秒的有限数
+    const transitionRaw = req.body?.transition;
+    if (transitionRaw !== undefined && typeof transitionRaw !== 'boolean') {
+      res.status(400).json({ error: 'transition 仅支持布尔值（true / false）' });
+      return;
+    }
+    const crossfadeRaw = req.body?.crossfadeDuration;
+    const crossfadeNum = typeof crossfadeRaw === 'number' && Number.isFinite(crossfadeRaw) ? crossfadeRaw : NaN;
+    if (crossfadeRaw !== undefined && !(crossfadeNum > 0 && crossfadeNum <= 5)) {
+      res.status(400).json({ error: '交叉过渡时长需在 0.1~5 秒之间' });
+      return;
+    }
+    const params: {
+      mode?: 'copy' | 'reencode';
+      sizeMode?: 'custom' | 'max' | 'min';
+      width?: number;
+      height?: number;
+      transition?: boolean;
+      crossfadeDuration?: number;
+    } = {};
     if (modeRaw) params.mode = modeRaw;
     if (sizeModeRaw) params.sizeMode = sizeModeRaw;
     if (sizeModeRaw === 'custom') {
@@ -469,6 +488,10 @@ canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) =>
       }
       params.width = width;
       params.height = height;
+    }
+    if (transitionRaw === true) {
+      params.transition = true;
+      params.crossfadeDuration = crossfadeNum > 0 ? crossfadeNum : 0.5;
     }
     const spec = await buildConcatCommand(project, videoPaths, outputNorm, params);
     await archiveCanvasOutput(project, outputNorm);

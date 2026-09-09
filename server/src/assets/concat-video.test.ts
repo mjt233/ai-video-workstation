@@ -236,8 +236,13 @@ describe('concatVideos', () => {
 });
 
 describe('normalizeConcatParams', () => {
-  it('缺省为 reencode + max', () => {
-    expect(normalizeConcatParams()).toEqual({ mode: 'reencode', sizeMode: 'max' });
+  it('缺省为 reencode + max + 关闭自然过渡（过渡时长缺省 0.5）', () => {
+    expect(normalizeConcatParams()).toEqual({
+      mode: 'reencode',
+      sizeMode: 'max',
+      transition: false,
+      crossfadeDuration: 0.5,
+    });
   });
 
   it('非法枚举回退缺省，custom 保留宽高', () => {
@@ -245,13 +250,48 @@ describe('normalizeConcatParams', () => {
     expect(normalizeConcatParams({ mode: 'copy', sizeMode: 'weird' as unknown as 'max' })).toEqual({
       mode: 'copy',
       sizeMode: 'max',
+      transition: false,
+      crossfadeDuration: 0.5,
     });
     expect(normalizeConcatParams({ sizeMode: 'custom', width: 1920, height: 1080 })).toEqual({
       mode: 'reencode',
       sizeMode: 'custom',
       width: 1920,
       height: 1080,
+      transition: false,
+      crossfadeDuration: 0.5,
     });
+  });
+
+  it('copy 模式忽略自然过渡开关（xfade 需重编码）', () => {
+    expect(normalizeConcatParams({ mode: 'copy', transition: true, crossfadeDuration: 1 })).toEqual({
+      mode: 'copy',
+      sizeMode: 'max',
+      transition: false,
+      crossfadeDuration: 1,
+    });
+  });
+
+  it('reencode 开启自然过渡并规整过渡时长到 0.1~5 秒，非法值回退 0.5', () => {
+    expect(normalizeConcatParams({ transition: true, crossfadeDuration: 1.24 })).toMatchObject({
+      transition: true,
+      crossfadeDuration: 1.24,
+    });
+    // 超过 5 秒 / 非正数 / 非法类型均被夹回合法区间或回退缺省
+    expect(normalizeConcatParams({ transition: true, crossfadeDuration: 8 })).toMatchObject({
+      transition: true,
+      crossfadeDuration: 5,
+    });
+    expect(normalizeConcatParams({ transition: true, crossfadeDuration: -1 })).toMatchObject({
+      transition: true,
+      crossfadeDuration: 0.1,
+    });
+    expect(normalizeConcatParams({ transition: true, crossfadeDuration: 'abc' as unknown as number })).toMatchObject({
+      transition: true,
+      crossfadeDuration: 0.5,
+    });
+    // 未开启过渡时不要求时长合法（前端可能只带 switch 状态）
+    expect(normalizeConcatParams({ transition: false, crossfadeDuration: 8 }).crossfadeDuration).toBe(5);
   });
 });
 
@@ -379,6 +419,46 @@ describe('buildReencodeArgs', () => {
     expect(args.outputOptions).toContain('-an');
     expect(args.outputOptions).not.toContain('-c:a');
   });
+
+  it('开启自然过渡：视频 xfade + 音频 acrossfade 链替代 concat（offset 递增）', () => {
+    const specs = [
+      seg(1280, 720, 25, true, 3),
+      seg(1280, 720, 25, true, 4),
+      seg(1280, 720, 25, true, 5),
+    ];
+    const args = buildReencodeArgs(specs, normalizeConcatParams({ transition: true, crossfadeDuration: 0.5 }));
+    // 第 1 次过渡 offset = 3 − 0.5 = 2.5；中间段标签 [xf1]
+    expect(args.filterComplex).toContain('[v0][v1]xfade=transition=fade:duration=0.5:offset=2.5[xf1]');
+    // 第 2 次过渡 offset = 3 + 4 − 2×0.5 = 6；末段直接输出 [vout]
+    expect(args.filterComplex).toContain('[xf1][v2]xfade=transition=fade:duration=0.5:offset=6[vout]');
+    // 音频 acrossfade 链（末段输出 [aout]）
+    expect(args.filterComplex).toContain('[a0][a1]acrossfade=d=0.5:c1=tri[af1]');
+    expect(args.filterComplex).toContain('[af1][a2]acrossfade=d=0.5:c1=tri[aout]');
+    // 不再有 concat 滤镜
+    expect(args.filterComplex).not.toContain('concat=');
+    expect(args.outputOptions).toEqual(
+      expect.arrayContaining(['-map', '[vout]', '[aout]', '-c:v', 'libx264', '-c:a', 'aac']),
+    );
+  });
+
+  it('开启自然过渡 + 全部无音轨：仅视频 xfade 链并 -an', () => {
+    const specs = [seg(1280, 720, 25, false, 3), seg(1280, 720, 25, false, 4)];
+    const args = buildReencodeArgs(specs, normalizeConcatParams({ transition: true, crossfadeDuration: 1 }));
+    expect(args.withAudio).toBe(false);
+    expect(args.filterComplex).toContain('[v0][v1]xfade=transition=fade:duration=1:offset=2[vout]');
+    expect(args.filterComplex).not.toContain('acrossfade');
+    expect(args.outputOptions).toContain('-an');
+  });
+
+  it('开启自然过渡但某段时长不足过渡时长抛 INVALID 并提示', () => {
+    const specs = [seg(1280, 720, 25, true, 3), seg(1280, 720, 25, true, 0.4)];
+    expect(() => buildReencodeArgs(specs, normalizeConcatParams({ transition: true, crossfadeDuration: 0.5 }))).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID',
+        message: expect.stringContaining('第 2 段时长（0.4 秒）需大于交叉过渡时长（0.5 秒）'),
+      }),
+    );
+  });
 });
 
 describe('concatVideos（重编码）', () => {
@@ -411,5 +491,22 @@ describe('concatVideos（重编码）', () => {
     expect(spec.duration).toBe(10);
     expect(spec.info).toMatchObject({ mode: 'reencode', sizeMode: 'min', width: 1280, height: 720 });
     expect(spec.outputAbs).toMatch(/out\.mp4$/);
+  });
+
+  it('开启自然过渡时总时长 = 各段时长之和 − 过渡时长×(段数−1)，info 携带过渡信息', async () => {
+    mockGetVideoInfo
+      .mockResolvedValueOnce({ duration: 4, fps: 25, width: 1280, height: 720, codec: 'h264' })
+      .mockResolvedValueOnce({ duration: 6, fps: 25, width: 1280, height: 720, codec: 'h264' })
+      .mockResolvedValueOnce({ duration: 6, fps: 25, width: 1280, height: 720, codec: 'h264' });
+    mockGetAudioInfo.mockResolvedValue({ duration: 4 });
+
+    const spec = await buildConcatCommand('p', ['assert/v1.mp4', 'assert/v2.mp4', 'assert/v3.mp4'], 'assert/out.mp4', {
+      mode: 'reencode',
+      transition: true,
+      crossfadeDuration: 1.5,
+    });
+    // 4 + 6 + 6 − 1.5×2 = 13
+    expect(spec.duration).toBe(13);
+    expect(spec.info).toMatchObject({ transition: true, crossfadeDuration: 1.5 });
   });
 });

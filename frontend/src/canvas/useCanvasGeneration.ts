@@ -651,10 +651,17 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     const rawHeight = node.config.height
     const width = typeof rawWidth === 'number' && Number.isFinite(rawWidth) ? rawWidth : undefined
     const height = typeof rawHeight === 'number' && Number.isFinite(rawHeight) ? rawHeight : undefined
-    const params: ConcatVideoParams =
-      mode === 'reencode' && sizeMode === 'custom' && width && height
-        ? { mode, sizeMode, width, height }
-        : { mode, ...(mode === 'reencode' ? { sizeMode } : {}) }
+    // 自然过渡仅重编码生效：copy 模式不提交（服务端忽略，避免白名单误判）
+    const transition = mode === 'reencode' && node.config.transition === true ? true : undefined
+    const rawCrossfade = node.config.crossfadeDuration
+    const crossfadeDuration =
+      transition && typeof rawCrossfade === 'number' && Number.isFinite(rawCrossfade) ? rawCrossfade : undefined
+    const params: ConcatVideoParams = {
+      mode,
+      ...(mode === 'reencode' ? { sizeMode } : {}),
+      ...(transition ? { transition, crossfadeDuration } : {}),
+      ...(mode === 'reencode' && sizeMode === 'custom' && width && height ? { width, height } : {}),
+    }
     try {
       const { taskId } = await requestConcatVideo(project, videoPaths, outputPath, params, taskTarget(nodeId))
       trackFfmpegTask(nodeId, taskId, outputPath, `正在${mode === 'copy' ? '无损' : '重编码'}拼接 ${videoPaths.length} 段视频…`, onResult)

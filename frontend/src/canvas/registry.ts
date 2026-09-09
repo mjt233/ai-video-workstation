@@ -268,6 +268,10 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       // 自定义输出宽高（sizeMode=custom 时生效；服务端自动规整为偶数）
       width: 1920,
       height: 1080,
+      // 是否开启自然过渡（相邻段之间交叉淡化；仅 reencode 生效，copy 无法插入 xfade）
+      transition: false,
+      // 交叉过渡时长（秒，0~5，默认 0.5；音视频同时过渡）
+      crossfadeDuration: 0.5,
     },
   },
   {
