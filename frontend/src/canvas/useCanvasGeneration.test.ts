@@ -6,6 +6,7 @@ vi.mock('../api/workflow', () => ({
   runWorkflow: vi.fn(),
   getTaskStatus: vi.fn(),
   getTaskLogs: vi.fn(),
+  listTasks: vi.fn(),
 }))
 vi.mock('../api/tasks', () => ({ cancelTask: vi.fn(), listTasks: vi.fn() }))
 vi.mock('./api', () => ({
@@ -18,11 +19,12 @@ vi.mock('./api', () => ({
 }))
 
 import { writeFs } from '../api/client'
-import { runWorkflow, getTaskStatus, getTaskLogs } from '../api/workflow'
-import { cancelTask } from '../api/tasks'
+import { runWorkflow, getTaskStatus, getTaskLogs, listTasks as listWorkflowTasks } from '../api/workflow'
+import { cancelTask, listTasks as listActiveTasks } from '../api/tasks'
 import { extractVideoFrame, extractVideoFrameAtTime, concatVideo, trimVideo, trimAudio, getCanvasNodeInfo } from './api'
 import { taskSocket, type TaskInfo } from './taskSocket'
 import type { CanvasNodeData } from './types'
+import type { VideoSubmitParams } from './videoSubmit'
 
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
 
@@ -59,6 +61,55 @@ function ffmpegTask(patch: Partial<TaskInfo> = {}): TaskInfo {
 }
 
 /**
+ * 构造工作流任务摘要（注册表恢复用）。
+ *
+ * @param patch 覆盖字段
+ * @returns 任务摘要
+ */
+function workflowTask(patch: Partial<TaskInfo> = {}): TaskInfo {
+  return {
+    id: 'wf-1',
+    type: 'workflow',
+    label: '生成视频',
+    status: 'running',
+    startedAt: Date.now(),
+    project: 'p',
+    nodeId: 'vg',
+    canvas: { kind: 'scene', episode: '1', shot: '1' },
+    cancelable: true,
+    payload: { outputPath: 'assert/scene/1/1/canvas/vg/output.mp4' },
+    ...patch,
+  }
+}
+
+/**
+ * 构造工作流任务响应（SQLite 补查用）。
+ *
+ * @param patch 覆盖字段
+ * @returns 任务响应（params 携带画布定位）
+ */
+function workflowTaskResponse(patch: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    taskId: 'wf-9',
+    workflowId: 'image-to-video',
+    impl: 'minimax-h3-i2v',
+    status: 'running',
+    result: null,
+    errorMsg: undefined,
+    createdAt: '',
+    updatedAt: '',
+    params: {
+      vars: {},
+      promptPaths: [],
+      outputPath: 'assert/scene/1/1/canvas/vg/output.mp4',
+      nodeId: 'vg',
+      canvas: { kind: 'scene', episode: '1', shot: '1' },
+    },
+    ...patch,
+  }
+}
+
+/**
  * 模拟服务端任务广播：更新 taskSocket.tasks 并触发增量监听器。
  *
  * @param task 任务摘要
@@ -89,9 +140,13 @@ describe('useCanvasGeneration', () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     taskSocket.tasks.value = []
+    // 默认模拟「WS 全量快照已到达」（restore 直接用 taskSocket.tasks；HTTP 兜底另有用例）
+    taskSocket.snapshotReady.value = true
     ;(runWorkflow as Mock).mockResolvedValue({ taskId: 'task-1', status: 'running' })
     ;(getTaskStatus as Mock).mockResolvedValue(COMPLETED_TASK)
     ;(getTaskLogs as Mock).mockResolvedValue([])
+    ;(listWorkflowTasks as Mock).mockResolvedValue([])
+    ;(listActiveTasks as Mock).mockResolvedValue([])
     ;(concatVideo as Mock).mockResolvedValue({ taskId: 'ff-1' })
     ;(trimVideo as Mock).mockResolvedValue({ taskId: 'ff-1' })
     ;(trimAudio as Mock).mockResolvedValue({ taskId: 'ff-1' })
@@ -460,6 +515,37 @@ describe('useCanvasGeneration', () => {
     expect(gen.computeOutputPath(node)).toBe('assert/scene/2/3/canvas/n1/output.jpg')
   })
 
+  it('生成视频节点：提交时携带 nodeId/canvas（切画布/刷新后据此恢复 Loading）', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
+      config: { workflowImpl: 'minimax-h3-i2v' },
+    }
+    const videoParams = {
+      mode: 'director', resolution: { width: 1280, height: 720 }, duration: 5, prompt: '测试', extraParams: {},
+    } as VideoSubmitParams
+    await gen.generate(node, videoParams)
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: 'image-to-video',
+        params: expect.objectContaining({
+          nodeId: 'vg',
+          canvas: { kind: 'scene', episode: '1', shot: '1' },
+        }),
+      }),
+    )
+  })
+
+  it('文生图/图生图节点：提交时同样携带 nodeId/canvas', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.generate(makeNode('一只猫'))
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ nodeId: 'n1', canvas: { kind: 'scene', episode: '1', shot: '1' } }),
+      }),
+    )
+  })
+
   // ── 服务端任务注册表驱动的恢复（刷新/切换画布后保持 loading）──────────────
 
   it('restore：按 项目 + 画布 scope 恢复运行中的 ffmpeg 任务，终态广播后收敛', async () => {
@@ -511,6 +597,102 @@ describe('useCanvasGeneration', () => {
     const gen = useCanvasGeneration('p', TARGET)
     await gen.restore(new Set(['vc']))
     expect(gen.statusByNode.value.gone).toBeUndefined()
+  })
+
+  // ── 工作流任务（AI 生成）恢复：任务未跑完则节点保持加载中 ──────────────────
+
+  it('restore：恢复运行中的工作流任务（注册表）并续跑轮询，终态收敛并刷新产物', async () => {
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
+    taskSocket.tasks.value = [workflowTask()]
+    const onResult = vi.fn()
+    const gen = useCanvasGeneration('p', TARGET, { onResult })
+    await gen.restore(new Set(['vg']))
+
+    expect(gen.statusByNode.value.vg?.status).toBe('running')
+    expect(gen.statusByNode.value.vg?.taskId).toBe('wf-1')
+
+    // 轮询继续到终态：收敛 success 并通知产物刷新（不依赖页面是否重新加载）
+    ;(getTaskStatus as Mock).mockResolvedValue({ ...COMPLETED_TASK, taskId: 'wf-1' })
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(gen.statusByNode.value.vg?.status).toBe('success')
+    expect(onResult).toHaveBeenCalledWith('vg', 'assert/scene/1/1/canvas/vg/output.mp4')
+  })
+
+  it('restore：其他画布/其他项目/已删除节点的工作流任务不恢复', async () => {
+    taskSocket.tasks.value = [
+      workflowTask({ id: 'wf-2', nodeId: 'other-shot', canvas: { kind: 'scene', episode: '9', shot: '9' } }),
+      workflowTask({ id: 'wf-3', nodeId: 'other-project', project: 'other' }),
+      workflowTask({ id: 'wf-4', nodeId: 'deleted' }),
+    ]
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.restore(new Set(['vg']))
+    expect(gen.statusByNode.value).toEqual({})
+  })
+
+  it('restore：注册表无记录时按 SQLite 补查恢复工作流任务（排队窗口/服务重启）', async () => {
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
+    taskSocket.tasks.value = []
+    ;(listWorkflowTasks as Mock).mockImplementation(async (_p: string, status?: string) =>
+      status === 'pending' ? [workflowTaskResponse({ taskId: 'wf-9', status: 'pending' })] : [],
+    )
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.restore(new Set(['vg']))
+
+    expect(listWorkflowTasks).toHaveBeenCalledWith('p', 'running')
+    expect(listWorkflowTasks).toHaveBeenCalledWith('p', 'pending')
+    expect(gen.statusByNode.value.vg?.status).toBe('running')
+    expect(gen.statusByNode.value.vg?.taskId).toBe('wf-9')
+  })
+
+  it('restore：SQLite 补查按 画布 scope / 节点 过滤（无 nodeId 或跨画布不恢复）', async () => {
+    taskSocket.tasks.value = []
+    ;(listWorkflowTasks as Mock).mockImplementation(async (_p: string, status?: string) =>
+      status === 'running'
+        ? [
+            // 其他画布
+            workflowTaskResponse({
+              taskId: 'wf-a',
+              params: {
+                vars: {}, promptPaths: [], outputPath: 'assert/x.mp4', nodeId: 'vg',
+                canvas: { kind: 'scene', episode: '2', shot: '2' },
+              },
+            }),
+            // 无画布定位（非画布节点提交）
+            workflowTaskResponse({
+              taskId: 'wf-b',
+              params: { vars: {}, promptPaths: [], outputPath: 'assert/x.mp4', nodeId: 'vg' },
+            }),
+          ]
+        : [],
+    )
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.restore(new Set(['vg']))
+    expect(gen.statusByNode.value).toEqual({})
+  })
+
+  it('restore：WS 快照未就绪时经 HTTP 兜底读取活跃任务（避免漏恢复）', async () => {
+    taskSocket.snapshotReady.value = false
+    ;(listActiveTasks as Mock).mockResolvedValue([workflowTask()])
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.restore(new Set(['vg']))
+    expect(listActiveTasks).toHaveBeenCalledWith('p')
+    expect(gen.statusByNode.value.vg?.status).toBe('running')
+  })
+
+  it('restore：工作流任务已在本会话跟踪中时不重复接管', async () => {
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
+    const gen = useCanvasGeneration('p', TARGET)
+    const node: CanvasNodeData = {
+      id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 240, height: 160,
+      config: { workflowImpl: 'minimax-h3-i2v' },
+    }
+    await gen.generate(node, {
+      mode: 'director', resolution: { width: 1280, height: 720 }, duration: 5, prompt: '测试', extraParams: {},
+    } as VideoSubmitParams)
+    // 本会话已跟踪（taskId 为本地提交的 task-1）：restore 不覆盖为注册表里的任务
+    taskSocket.tasks.value = [workflowTask()]
+    await gen.restore(new Set(['vg']))
+    expect(gen.statusByNode.value.vg?.taskId).toBe('task-1')
   })
 
   it('订阅收到 not-found（任务已结束）但产物不存在：不误报成功，提示重新执行', async () => {

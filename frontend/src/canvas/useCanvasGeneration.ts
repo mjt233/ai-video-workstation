@@ -1,10 +1,19 @@
 import { ref } from 'vue'
 import { writeFs } from '../api/client'
-import { runWorkflow, getTaskStatus, getTaskLogs, type WorkflowSizeConfig, type WorkflowUserParamValue } from '../api/workflow'
-import { cancelTask } from '../api/tasks'
+import {
+  runWorkflow,
+  getTaskStatus,
+  getTaskLogs,
+  listTasks as listWorkflowTasks,
+  type TaskResponse,
+  type WorkflowSizeConfig,
+  type WorkflowUserParamValue,
+} from '../api/workflow'
+import { cancelTask, listTasks as listActiveTasks } from '../api/tasks'
 import {
   taskSocket,
   type LlmCanvasTarget,
+  type TaskInfo,
   type TaskStatus,
 } from './taskSocket'
 import {
@@ -314,6 +323,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     if (statusByNode.value[nodeId]?.status === 'running') return
     /** 结果回调：per-call 优先，回落到 options.onResult */
     const resultCb = onResult ?? onResultCb
+    /** 画布定位（随任务持久化：画布加载/切换/刷新后据此恢复节点 Loading） */
+    const canvasScope = canvasTarget()
 
     // ── 视频生成节点：走自包含提交参数 ──
     if (node.prototypeId === 'video-generate') {
@@ -338,6 +349,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
             outputPath,
             userParams: (node.config.workflowParams as Record<string, WorkflowUserParamValue> | undefined) ?? {},
             video: videoParams,
+            nodeId,
+            ...(canvasScope ? { canvas: canvasScope } : {}),
           },
         })
         taskIdByNode.value[nodeId] = taskId
@@ -378,7 +391,7 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
           project,
           workflowId,
           impl,
-          params: { vars, outputPath, userParams },
+          params: { vars, outputPath, userParams, nodeId, ...(canvasScope ? { canvas: canvasScope } : {}) },
         })
         taskIdByNode.value[nodeId] = taskId
         poll(taskId, nodeId, outputPath, resultCb)
@@ -424,6 +437,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
           vars,
           outputPath,
           userParams,
+          nodeId,
+          ...(canvasScope ? { canvas: canvasScope } : {}),
           ...(config.sizeConfig ? { sizeConfig: config.sizeConfig as WorkflowSizeConfig } : {}),
         },
       })
@@ -780,41 +795,129 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
 
 
   /**
-   * 恢复运行中的 ffmpeg 任务（画布加载 / 切换目标回到本画布时调用）。
+   * 当前画布上仍在运行的任务（画布恢复 Loading 用）。
+   */
+  interface RestoreEntry {
+    /** 任务 id */
+    taskId: string
+    /** 发起节点 id */
+    nodeId: string
+    /** 任务类型（决定跟踪方式：ffmpeg 走 WS 广播，工作流走 SQLite 轮询） */
+    kind: 'ffmpeg' | 'workflow'
+    /** 产物相对路径（终态刷新产物展示用） */
+    outputPath: string
+  }
+
+  /**
+   * 读取统一任务注册表的活跃任务快照。
    *
-   * 数据源为**服务端统一任务注册表**（`taskSocket.tasks`，WS 连接建立即推送全量）：
-   * 按「项目 + 画布 scope」过滤 ffmpeg 任务，且节点仍在当前画布上 → 恢复 loading 展示
-   * 并重新订阅（进度继续刷新；终态由 WS 广播收敛，无幽灵 loading）。
+   * WS 全量快照尚未到达（连接建立窗口 / 断线重连中）时走 HTTP 兜底 `GET /api/tasks`：
+   * 否则画布加载早于 WS 快照会漏恢复运行中任务（Loading 被误清除）。
+   *
+   * @returns 活跃任务摘要列表
+   */
+  async function activeRegistryTasks(): Promise<TaskInfo[]> {
+    if (taskSocket.snapshotReady.value) return taskSocket.tasks.value
+    try {
+      return await listActiveTasks(project)
+    } catch (e) {
+      // HTTP 兜底失败：回退 WS 已收到的（可能为空）列表并打日志，不阻断画布加载
+      console.error(
+        `[canvas-gen] 活跃任务列表获取失败（回退 WS 快照）: ${e instanceof Error ? e.message : String(e)}`,
+      )
+      return taskSocket.tasks.value
+    }
+  }
+
+  /**
+   * 收集当前画布上仍在运行的任务（restore 的数据源）。
+   *
+   * 两路合并（按 taskId 去重）：
+   * 1. **统一任务注册表**（WS 快照 / HTTP 兜底）：ffmpeg 与工作流任务的运行态；
+   * 2. **SQLite 工作流任务**（pending / running）：工作流任务的持久化权威。注册表只在
+   *    引擎开始执行时登记，本地排队窗口（引擎 2s tick）与服务重启期间注册表为空，
+   *    仅凭注册表会漏恢复 → 补查 SQLite，保证「任务没跑完则节点保持加载中」。
+   *
+   * 统一过滤：项目一致 + 画布 scope 一致 + 节点仍在当前画布上（已删除节点不恢复）。
+   *
+   * @param knownNodeIds 当前画布上的节点 id 集合（过滤已删除节点的任务；可省略）
+   * @returns 运行中任务条目
+   */
+  async function collectRunningTasks(knownNodeIds?: Set<string>): Promise<RestoreEntry[]> {
+    const entries = new Map<string, RestoreEntry>()
+    for (const task of await activeRegistryTasks()) {
+      if (task.type !== 'ffmpeg' && task.type !== 'workflow') continue
+      if (!task.nodeId) continue
+      if (task.status !== 'running' && task.status !== 'pending') continue
+      if (!isCurrentScope(task)) continue
+      if (knownNodeIds && !knownNodeIds.has(task.nodeId)) continue
+      entries.set(task.id, {
+        taskId: task.id,
+        nodeId: task.nodeId,
+        kind: task.type,
+        outputPath: typeof task.payload?.outputPath === 'string' ? task.payload.outputPath : '',
+      })
+    }
+    for (const status of ['running', 'pending'] as const) {
+      let tasks: TaskResponse[]
+      try {
+        tasks = await listWorkflowTasks(project, status)
+      } catch (e) {
+        // 补查失败不影响注册表结果（仅可能漏排队窗口内的任务），打日志继续
+        console.error(
+          `[canvas-gen] 工作流任务补查失败（${status}）: ${e instanceof Error ? e.message : String(e)}`,
+        )
+        continue
+      }
+      for (const task of tasks) {
+        const nodeId = task.params?.nodeId
+        if (!nodeId || entries.has(task.taskId)) continue
+        if (!isCurrentScope({ project, canvas: task.params?.canvas })) continue
+        if (knownNodeIds && !knownNodeIds.has(nodeId)) continue
+        entries.set(task.taskId, {
+          taskId: task.taskId,
+          nodeId,
+          kind: 'workflow',
+          outputPath: task.params?.outputPath ?? '',
+        })
+      }
+    }
+    return [...entries.values()]
+  }
+
+  /**
+   * 恢复当前画布上未结束任务的 Loading 展示（画布加载 / 切换目标回到本画布时调用）。
+   *
+   * 任务未到终态前节点持续保持加载中（工作流任务续跑本地轮询、ffmpeg 任务重订阅 WS 广播），
+   * 终态收敛时刷新产物展示；节点已在本会话跟踪中（本地提交后未离开画布）不重复接管。
    *
    * @param knownNodeIds 当前画布上的节点 id 集合（用于过滤已删除节点的任务）
    */
   async function restore(knownNodeIds?: Set<string>): Promise<void> {
-    for (const task of taskSocket.tasks.value) {
-      if (task.type !== 'ffmpeg' || !task.nodeId) continue
-      if (task.status !== 'running' && task.status !== 'pending') continue
-      if (!isCurrentScope(task)) continue
-      if (knownNodeIds && !knownNodeIds.has(task.nodeId)) continue
-      if (statusByNode.value[task.nodeId]?.status === 'running') continue
-      const outputPath =
-        typeof task.payload?.outputPath === 'string' ? task.payload.outputPath : ''
-      taskIdByNode.value[task.nodeId] = task.id
-      statusByNode.value[task.nodeId] = { status: 'running', lastLog: '任务进行中…', taskId: task.id }
-      // 重新订阅：进度继续刷新；任务已结束则收到 not-found（结束 loading，产物以文件为准）
-      const nodeId = task.nodeId
-      const off = taskSocket.subscribe(task.id, (event) => {
+    for (const entry of await collectRunningTasks(knownNodeIds)) {
+      if (statusByNode.value[entry.nodeId]?.status === 'running') continue
+      const { nodeId, taskId, outputPath } = entry
+      taskIdByNode.value[nodeId] = taskId
+      statusByNode.value[nodeId] = { status: 'running', lastLog: '任务进行中…', taskId }
+      if (entry.kind === 'workflow') {
+        // 工作流任务：续跑本地轮询（SQLite 为权威，含阶段日志与终态）
+        poll(taskId, nodeId, outputPath)
+        continue
+      }
+      // ffmpeg 任务：进度/终态由 WS 广播驱动；重订阅以处理「订阅时任务已结束」竞态
+      const off = taskSocket.subscribe(taskId, (event) => {
         if (event.type !== 'not-found') return
         off()
-        delete taskIdByNode.value[nodeId]
-        statusByNode.value[nodeId] = { status: 'success', lastLog: '任务已完成' }
-        if (outputPath) onResultCb?.(nodeId, outputPath)
+        onFfmpegTaskFinished(nodeId, outputPath, 'completed')
       })
     }
   }
 
   /**
    * 重置全部生成状态与轮询（切换画布目标/卸载组件时调用）：
-   * 仅清内存展示态与定时器——运行中任务在服务端继续执行（统一任务注册表是唯一事实源），
-   * 重新进入本画布时由 restore() 按 scope 恢复 loading 展示与跟踪。
+   * 仅清内存展示态与定时器——运行中任务在服务端继续执行（统一任务注册表 + 工作流
+   * SQLite 记录是运行态事实源），重新进入本画布时由 restore() 按 scope 恢复 loading
+   * 展示与跟踪（任务未结束则一直保持加载中）。
    */
   function reset(): void {
     for (const id of Object.keys(pollTimers)) {

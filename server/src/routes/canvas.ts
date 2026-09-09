@@ -24,6 +24,7 @@ import { readCanvasNodeInfo } from '../canvas/node-info.js';
 import { saveCanvasDef, type CanvasDefTarget } from '../assets/canvas-def.js';
 import { httpError } from '../assets/paths.js';
 import { startFfmpegTask } from '../tasks/ffmpeg-task.js';
+import { parseTaskTarget } from '../tasks/task-target.js';
 import { TaskError } from '../tasks/registry.js';
 
 /**
@@ -45,29 +46,6 @@ const canvasOutputUpload = multer({
   }),
   limits: { fileSize: 8 * 1024 * 1024 * 1024 }, // 8GB
 });
-
-/**
- * 从请求体提取任务画布定位（nodeId / canvas），供任务管理器展示与画布刷新后恢复。
- *
- * @param body 请求体（可为空）
- * @returns 含 nodeId/canvas 的补丁（字段缺失时为空对象）
- */
-function taskTarget(body: unknown): { nodeId?: string; canvas?: CanvasDefTarget } {
-  const b = (body ?? {}) as { nodeId?: unknown; canvas?: unknown };
-  const out: { nodeId?: string; canvas?: CanvasDefTarget } = {};
-  if (typeof b.nodeId === 'string' && b.nodeId) out.nodeId = b.nodeId;
-  const c = b.canvas;
-  if (c && typeof c === 'object') {
-    const raw = c as Record<string, unknown>;
-    const kind = raw.kind === 'scene' || raw.kind === 'stage' ? raw.kind : '';
-    if (kind === 'scene' && typeof raw.episode === 'string' && typeof raw.shot === 'string') {
-      out.canvas = { kind, episode: raw.episode, shot: raw.shot };
-    } else if (kind === 'stage' && typeof raw.stage === 'string' && typeof raw.label === 'string') {
-      out.canvas = { kind, stage: raw.stage, label: raw.label };
-    }
-  }
-  return out;
-}
 
 /**
  * 任务登记冲突响应（同节点单飞 409 / 全局上限 429）。
@@ -286,7 +264,7 @@ canvasRouter.post('/canvas/extract-frame', async (req: Request, res: Response) =
       project,
       label: '获取视频帧',
       spec,
-      ...taskTarget(req.body),
+      ...parseTaskTarget(req.body),
     });
     res.json({ taskId, status: 'running' });
   } catch (err) {
@@ -499,7 +477,7 @@ canvasRouter.post('/canvas/concat-video', async (req: Request, res: Response) =>
       project,
       label: '拼接视频',
       spec,
-      ...taskTarget(req.body),
+      ...parseTaskTarget(req.body),
     });
     res.json({ taskId, status: 'running' });
   } catch (err) {
@@ -580,7 +558,7 @@ canvasRouter.post('/canvas/trim-video', async (req: Request, res: Response) => {
       project,
       label: '裁剪视频',
       spec,
-      ...taskTarget(req.body),
+      ...parseTaskTarget(req.body),
     });
     res.json({ taskId, status: 'running' });
   } catch (err) {
@@ -675,7 +653,7 @@ canvasRouter.post('/canvas/trim-audio', async (req: Request, res: Response) => {
       project,
       label: '裁剪音频',
       spec,
-      ...taskTarget(req.body),
+      ...parseTaskTarget(req.body),
     });
     res.json({ taskId, status: 'running' });
   } catch (err) {

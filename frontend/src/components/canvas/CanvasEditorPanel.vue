@@ -22,7 +22,10 @@
           size="16"
         />
       </v-btn>
-      <div class="canvas-node-editor-panel__body">
+      <div
+        class="canvas-node-editor-panel__body"
+        :style="bodyStyle"
+      >
         <component
           :is="editorComponent"
           :project="project"
@@ -54,15 +57,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import type { CanvasKind, CanvasNodeData } from '../../canvas/types'
 import type { CanvasInputInfo } from '../../canvas/generate'
+import {
+  PANEL_GAP,
+  PANEL_HEADER_FALLBACK_HEIGHT,
+  PANEL_VIEWPORT_MARGIN,
+  computePanelPlacement,
+  type PanelPlacementSide,
+} from '../../canvas/panelPlacement'
 import type { CanvasUploadFilePayload, CanvasUploadState } from './composables/useCanvasUpload'
 
 /**
- * 节点配置悬浮面板：独立于节点渲染在其下方（空间不足时翻转/钳制），
+ * 节点配置悬浮面板：独立于节点渲染（优先正下方，空间不足时智能换向/收窄），
  * 固定屏幕像素大小不随画布缩放，仅位置随节点/视图联动。
+ *
+ * 定位算法见 `canvas/panelPlacement.ts`（纯几何，含单测）：保证面板**永不遮挡整个节点**——
+ * 优先「完整可见且不遮挡节点（含标题条）」的位置，上下放不下时贴靠左右侧并自适应收窄宽度，
+ * 极端场景收窄高度（内容区内部滚动），最终始终保证节点标题条可见。
  *
  * 组件常驻挂载（visible 为假时不渲染内容），离开动画由内部 Transition 播放；
  * 定位样式最近值缓存在 watch 中（离开淡出期间沿用，避免跳位）。
@@ -104,6 +118,11 @@ const props = defineProps<{
   kind: CanvasKind
   /** Vue Flow 视口（位置联动） */
   viewport: { x: number; y: number; zoom: number }
+  /**
+   * 其他节点矩形（流坐标；用于「尽量不压住其他节点」的择优，缺省为空数组）。
+   * 由 AssetCanvas 传入除选中节点外的全部真实节点。
+   */
+  otherNodes?: CanvasNodeData[]
   /** 画布可视区宽度（边界钳制，由父级 ResizeObserver 测量） */
   flowWidth: number
   /** 画布可视区高度（边界钳制，由父级 ResizeObserver 测量） */
@@ -144,69 +163,169 @@ const EDITOR_PANEL_WIDTH = 440
 const EDITOR_PANEL_WIDTH_GENERATE = 560
 /** 生成视频节点配置面板固定宽度（导演台嵌入与参数行需要，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_WIDTH_VIDEO = 720
-/** 配置面板与节点底部之间的垂直间距（像素，屏幕坐标，不随缩放变化） */
-const EDITOR_PANEL_GAP = 12
+/** 面板内容区高度上限占视口高度的比例（与样式表 `.canvas-node-editor-panel__body` 的 65vh 保持一致） */
+const EDITOR_PANEL_MAX_HEIGHT_RATIO = 0.65
+/**
+ * 节点标题条 DOM 选择器（模板字符串，`%s` 替换为节点 id）。
+ * 与 `CanvasNodeCard.vue` 的 `.canvas-node__header` 结构耦合，仅用于测量标题条高度。
+ */
+const NODE_HEADER_SELECTOR = '[data-id="%s"] .canvas-node__header'
 
 /** 配置面板 DOM（用于测量实际高度以做边界钳制） */
 const panelEl = ref<HTMLDivElement | null>(null)
 /** 配置面板最近一次定位样式（离开动画期间沿用，避免跳位） */
-const lastPanelStyle = ref<Record<string, string> | null>(null)
+const lastPanelStyle = ref<{ nodeId: string; style: Record<string, string> } | null>(null)
 /** 配置面板当前实际高度（像素，屏幕坐标） */
 const panelHeight = ref(0)
+/** 节点标题条高度（流坐标像素；测量失败时为兜底估算值） */
+const nodeHeaderHeight = ref(PANEL_HEADER_FALLBACK_HEIGHT)
+/** 上一次采用的贴靠方向（滞回：仍可行时保持不动，避免平移/缩放中来回跳位） */
+const lastSide = ref<PanelPlacementSide | null>(null)
 let panelResizeObserver: ResizeObserver | null = null
+let headerResizeObserver: ResizeObserver | null = null
 
-/** 配置面板定位：与节点水平居中对称（节点本体位于面板上方中间）；大小固定，不随缩放变化 */
+/** 当前节点面板的设计宽度（普通 440 / 生成图片 560 / 生成视频 720，屏幕像素） */
+const designWidth = computed(() => {
+  const proto = props.node?.prototypeId
+  if (proto === 'image-generate') return EDITOR_PANEL_WIDTH_GENERATE
+  if (proto === 'video-generate') return EDITOR_PANEL_WIDTH_VIDEO
+  return EDITOR_PANEL_WIDTH
+})
+
+/** 面板高度上限（屏幕像素，与 CSS 65vh 同源，参与可用空间判定） */
+function maxPanelHeight(): number {
+  return Math.max(window.innerHeight * EDITOR_PANEL_MAX_HEIGHT_RATIO, 0)
+}
+
+/**
+ * 计算面板定位（left/top/width/max-height）。
+ *
+ * 位置与尺寸全部由 `computePanelPlacement` 给出：优先节点正下方，空间不足时换向、
+ * 贴靠左右侧自适应收窄宽度、必要时收窄高度（内容区滚动），始终不遮挡整个节点。
+ * 高度尚未测量时返回 null（面板整体透明），等测量完成后再定位。
+ */
 const panelStyle = computed<Record<string, string> | null>(() => {
   const node = props.node
-  if (!node) return lastPanelStyle.value
+  if (!node) return lastPanelStyle.value?.style ?? null
   const vp = props.viewport
-  const width = node.prototypeId === 'image-generate'
-    ? EDITOR_PANEL_WIDTH_GENERATE
-    : node.prototypeId === 'video-generate'
-      ? EDITOR_PANEL_WIDTH_VIDEO
-      : EDITOR_PANEL_WIDTH
-  // 面板水平中心 = 节点水平中心，保证节点在面板上方正中
-  const nodeCenterX = (node.x + node.width / 2) * vp.zoom + vp.x
-  const left = nodeCenterX - width / 2
-  const gap = EDITOR_PANEL_GAP
-  const belowTop = (node.y + node.height) * vp.zoom + vp.y + gap
-  // 优先放在节点下方；若底部超出可视区（且面板高度已知），则放到节点上方
-  let top = belowTop
-  if (panelHeight.value > 0 && belowTop + panelHeight.value > props.flowHeight) {
-    const aboveTop = node.y * vp.zoom + vp.y - gap - panelHeight.value
-    if (aboveTop >= 0) top = aboveTop
+  const zoom = vp.zoom > 0 ? vp.zoom : 1
+  const toScreen = (rect: { x: number; y: number; width: number; height: number }) => ({
+    x: rect.x * zoom + vp.x,
+    y: rect.y * zoom + vp.y,
+    width: rect.width * zoom,
+    height: rect.height * zoom,
+  })
+  const placement = computePanelPlacement({
+    nodeRect: toScreen(node),
+    headerHeight: nodeHeaderHeight.value,
+    viewWidth: props.flowWidth,
+    viewHeight: props.flowHeight,
+    designWidth: designWidth.value,
+    panelHeight: panelHeight.value,
+    maxHeight: maxPanelHeight(),
+    zoom,
+    // 其他节点作为「尽量不压住」的障碍物（同级排序项，不影响可行性判定）
+    obstacles: (props.otherNodes ?? []).map(toScreen),
+    previousSide: lastSide.value,
+  })
+  // 高度未测量：不定位（面板整体透明），等测量完成后重算（避免用乐观估计闪现错误位置）
+  if (placement.unmeasured) return null
+  return {
+    left: `${placement.left}px`,
+    top: `${placement.top}px`,
+    width: `${placement.width}px`,
+    maxHeight: `${placement.maxHeight}px`,
   }
-  // 最终钳制：面板底部不超出画布可视区（必要时与节点重叠），顶部不小于留白
-  if (panelHeight.value > 0 && props.flowHeight > 0) {
-    top = Math.min(top, Math.max(props.flowHeight - panelHeight.value - 8, 8))
-    top = Math.max(top, 8)
-  }
-  // 水平方向：左侧不超出画布，右侧不超出画布（按可视区钳制）
-  const clampedLeft = Math.min(Math.max(left, 8), Math.max(props.flowWidth - width - 8, 8))
-  return { left: `${clampedLeft}px`, top: `${top}px`, width: `${width}px` }
 })
 
-// 缓存最近一次面板定位（离开动画期间沿用，避免跳位）
+/** 面板内容区样式：宽度与高度上限跟随定位结果（贴靠时收窄，超出内部滚动） */
+const bodyStyle = computed<Record<string, string>>((): Record<string, string> => {
+  const style = panelStyle.value
+  if (!style) return {}
+  // 高度上限同时下发到内容区：面板高度 = 内容区高度，避免面板因内容变化长高后越出定位位置
+  return { width: style.width, maxHeight: style.maxHeight }
+})
+
+// 缓存最近一次面板定位（离开动画期间沿用，避免跳位；缓存绑定节点 id，切换节点立即失效）
 watch(panelStyle, (style) => {
-  if (style) lastPanelStyle.value = style
+  const nodeId = props.node?.id
+  if (style && nodeId) lastPanelStyle.value = { nodeId, style: { ...style } }
 })
 
-// 面板为条件渲染：动态监听自身尺寸用于边界钳制
+// 贴靠方向滞回：面板隐藏（关闭/拖拽）时复位，下次打开按当前位置重新择优
+watch(() => props.visible, (visible) => {
+  if (!visible) lastSide.value = null
+})
+
+/**
+ * 读取当前节点标题条高度（流坐标像素）。
+ * 通过 Vue Flow 节点 wrapper 的 `data-id` 定位标题条；测不到时保持兜底估算值。
+ */
+function measureHeaderHeight(): void {
+  const node = props.node
+  if (!node) {
+    nodeHeaderHeight.value = PANEL_HEADER_FALLBACK_HEIGHT
+    return
+  }
+  const el = document.querySelector<HTMLElement>(NODE_HEADER_SELECTOR.replace('%s', node.id))
+  if (!el) {
+    // 节点尚未渲染（如切画布瞬间）：保留上一次测量值，等节点出现后由 watch 重测
+    return
+  }
+  const zoom = props.viewport.zoom > 0 ? props.viewport.zoom : 1
+  const height = el.getBoundingClientRect().height / zoom
+  if (height > 0) nodeHeaderHeight.value = height
+}
+
+/**
+ * 读取配置面板实际高度（屏幕像素，用于定位时判断上下空间是否足够）。
+ * 面板尚未渲染时置 0（定位函数据此返回 unmeasured，面板隐藏等测量）。
+ */
+function measurePanelHeight(): void {
+  panelHeight.value = panelEl.value?.offsetHeight ?? 0
+}
+
+// 切换选中节点：复位面板高度与贴靠方向，并在 DOM 更新后测量标题条高度 + 绑定观察目标
+// （标题条重命名/字号变化会改变高度，需实时重测以正确避让）
+watch(() => props.node?.id, (id) => {
+  lastSide.value = null
+  panelHeight.value = 0
+  headerResizeObserver?.disconnect()
+  if (!id) {
+    nodeHeaderHeight.value = PANEL_HEADER_FALLBACK_HEIGHT
+    return
+  }
+  void nextTick(() => {
+    measureHeaderHeight()
+    // 面板内容换成新节点后重新测量高度（复位为 0 期间面板隐藏，测完再定位）
+    measurePanelHeight()
+    const el = document.querySelector<HTMLElement>(NODE_HEADER_SELECTOR.replace('%s', id))
+    if (!el) return
+    headerResizeObserver ??= new ResizeObserver(() => measureHeaderHeight())
+    headerResizeObserver.observe(el)
+  })
+}, { immediate: true, flush: 'post' })
+
+// 面板为条件渲染：动态监听自身尺寸用于定位（内容变化 → 高度变化 → 重新定位）
 watch(panelEl, (panel) => {
   panelResizeObserver?.disconnect()
   if (panel) {
-    panelResizeObserver ??= new ResizeObserver(() => {
-      panelHeight.value = panelEl.value?.offsetHeight ?? 0
-    })
+    panelResizeObserver ??= new ResizeObserver(() => measurePanelHeight())
     panelResizeObserver.observe(panel)
+    measurePanelHeight()
   } else {
     panelHeight.value = 0
   }
 })
 
+// 缩放变化时标题条屏幕高度随之变化：重新测量（视口平移不影响标题条高度）
+watch(() => props.viewport.zoom, () => measureHeaderHeight())
+
 onUnmounted(() => {
   panelResizeObserver?.disconnect()
   panelResizeObserver = null
+  headerResizeObserver?.disconnect()
+  headerResizeObserver = null
 })
 </script>
 
@@ -219,9 +338,12 @@ onUnmounted(() => {
   border-radius: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
   box-sizing: border-box;
+  /* 首次测量完成前的透明态淡入（换向/换节点时的位置切换同样平滑） */
+  transition: opacity 0.15s ease;
 }
 
-/* 内容滚动区（原根节点样式迁移至此：面板滚动不影响右上角关闭按钮固定定位） */
+/* 内容滚动区（原根节点样式迁移至此：面板滚动不影响右上角关闭按钮固定定位）；
+   宽度由定位结果下发（贴靠节点左右侧时收窄），高度上限由面板 max-height 约束 */
 .canvas-node-editor-panel__body {
   max-height: 65vh;
   overflow-y: auto;

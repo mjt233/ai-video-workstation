@@ -29,9 +29,6 @@ vi.mock('../providers/config-store.js', () => ({
   resolveInstanceConfig: vi.fn(),
 }));
 vi.mock('../workflows/cancel.js', () => ({ markCancelRequested: vi.fn((p: unknown) => p) }));
-vi.mock('../routes/workflow.js', () => ({
-  parseTaskParams: (params: string) => JSON.parse(params) as Record<string, unknown>,
-}));
 
 /** 构造工作流定义（Bridge 类远端任务：声明可中断但非 deferredCancel，提交远端 + 轮询） */
 const bridgeWf = (): Record<string, unknown> => ({
@@ -98,5 +95,31 @@ describe('workflowExecutor 可中断性同步', () => {
     // 仅状态推进（不带 remoteTaskId）：回退 SQLite 已落盘值，保持可中断
     workflowExecutor.update('task-1', { status: 'running' });
     expect(taskRegistry.get('task-1')?.cancelable).toBe(true);
+  });
+
+  it('登记携带画布定位（nodeId / canvas）：画布加载/切换后按 scope 恢复节点 Loading', () => {
+    mockDb.getTask.mockReturnValue(dbTask());
+    workflowExecutor.create({
+      taskId: 'task-1',
+      project: 'test-project',
+      workflowId: 'image-to-video',
+      impl: 'minimax-h3-i2v',
+      label: '生成视频',
+      outputPath: 'assert/scene/1/1/canvas/vg/output.mp4',
+      nodeId: 'vg',
+      canvas: { kind: 'scene', episode: '1', shot: '1' },
+    });
+    const rec = taskRegistry.get('task-1');
+    expect(rec?.nodeId).toBe('vg');
+    expect(rec?.canvas).toEqual({ kind: 'scene', episode: '1', shot: '1' });
+    expect(rec?.payload?.outputPath).toBe('assert/scene/1/1/canvas/vg/output.mp4');
+  });
+
+  it('登记未携带画布定位：不写入 nodeId/canvas（非画布任务不参与恢复）', () => {
+    mockDb.getTask.mockReturnValue(dbTask());
+    createTask();
+    const rec = taskRegistry.get('task-1');
+    expect(rec?.nodeId).toBeUndefined();
+    expect(rec?.canvas).toBeUndefined();
   });
 });

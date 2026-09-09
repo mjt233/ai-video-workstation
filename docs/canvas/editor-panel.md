@@ -6,8 +6,16 @@
 
 - 独立悬浮于节点下方的面板（不随节点尺寸撑大），渲染选中节点的 `editorComponent`；组件常驻挂载，显隐由 `visible` prop 驱动，`<Transition>` 与定位逻辑在组件内部。
 - **右上角 X 关闭按钮**：关闭面板**仅隐藏面板、保留节点选中与关联高亮**（`selection.dismissPanel`，`panelDismissed` 标志并入 `editorPanelVisible` 判断）；`Esc` 键同样关闭（`useCanvasKeyboard`，输入框聚焦时跳过）。再次点击当前节点或选中其他节点时面板自动重新打开（`onNodeClick` 复位标志）。
-- **固定大小不随缩放**：宽度为固定屏幕像素（普通节点 440px、生成图片节点 560px、生成视频节点 720px，见组件内常量 `EDITOR_PANEL_WIDTH[_GENERATE/_VIDEO]`），上限高度 65vh（超出滚动），间距 12px（`EDITOR_PANEL_GAP`）；仅**位置**随节点/视图联动（水平中心与节点中心对齐），视口与画布可视区尺寸由 AssetCanvas 以 props 传入（`viewport`/`flowWidth`/`flowHeight`）。
-- **边界钳制**：优先放节点下方；放不下且上方有空间则翻转到节点上方；仍放不下则把面板底部钳到画布可视区内（必要时与节点重叠）。钳制用 `flowEl.clientHeight/Width`（AssetCanvas 的 ResizeObserver 监听 `flowEl`）+ 面板自身高度（面板组件 ResizeObserver 监听 `panelEl`）测量，勿用 Vue Flow `dimensions`（不可靠）。
+- **固定大小不随缩放**：宽度为固定屏幕像素（普通节点 440px、生成图片节点 560px、生成视频节点 720px，见组件内常量 `EDITOR_PANEL_WIDTH[_GENERATE/_VIDEO]`），上限高度 65vh（超出滚动），间距 12px（`PANEL_GAP`）；仅**位置**随节点/视图联动（水平中心与节点中心对齐），视口与画布可视区尺寸由 AssetCanvas 以 props 传入（`viewport`/`flowWidth`/`flowHeight`）。
+- **智能贴靠定位（保证面板不遮挡整个节点）**：定位算法抽为纯几何模块 **`canvas/panelPlacement.ts`**（`computePanelPlacement`，无 Vue/DOM 依赖，含单测 `panelPlacement.test.ts`），组件只负责测量后传参。规则：
+  1. 候选方向优先级 **下方 → 上方 → 右侧 → 左侧**；「可行」＝ 面板**按原始高度**完整落在可视区内 **且不与节点矩形（含标题条）重叠**；
+  2. 左右贴靠时宽度取「节点侧边到可视区边缘的空白」，钳制在 `[PANEL_SIDE_MIN_WIDTH=320, 设计宽度]`（空间不足 320px 放弃该侧）；垂直方向取 `min(高度上限, 可用高度)` 作 `maxHeight`（可用高度 < `PANEL_SIDE_MIN_HEIGHT=240` 时不算可行）；
+  3. **可行候选择优**：按「压住其他节点（`obstacles`，由 AssetCanvas 传入除选中节点外的全部节点）的面积最小 → 方向优先级」排序；
+  4. **滞回**：上一次的贴靠方向仍可行、且与最优候选完全同分时保持不变（`previousSide`），避免平移/缩放/拖动时面板在方向间来回跳变；一旦出现更优位置（如避开其他节点）立即改向；面板关闭或切换节点时复位；
+  5. **降级**（无任何可行候选）：按「不遮标题条 → 不裁切 → 不收窄高度 → 收窄幅度更小 → 与选中节点重叠面积最小 → 压住其他节点最少 → 方向优先级」排序取最优，并把上下方向的高度收窄到可用空间（`PANEL_MIN_HEIGHT=120` 下限，内容区内部滚动）；
+  6. 最终把面板位置钳制进可视区（`PANEL_VIEWPORT_MARGIN=8`），保证永不跑出画布。
+- **测量口径**：画布可视区用 `flowEl.clientHeight/Width`（AssetCanvas 的 ResizeObserver 监听 `flowEl`），勿用 Vue Flow `dimensions`（不可靠）；面板高度由面板组件 ResizeObserver 监听 `panelEl` 实测（节点切换时复位为 0，此时 `computePanelPlacement` 返回 `unmeasured`，面板不定位 → 测完再定位，避免用乐观估计闪现错误位置）；**节点标题条高度**由组件按 `[data-id="<nodeId>"] .canvas-node__header` 实测（除以 zoom 换算回流坐标，ResizeObserver 跟随标题条；测不到时兜底 24px），用于保证标题条永不被面板覆盖。
+- **尺寸下发**：面板内容区 `.canvas-node-editor-panel__body` 的 `width` 与 `max-height` 由定位结果内联下发（左右贴靠时收窄、垂直空间不足时收窄高度并内部滚动）——**高度上限必须同时下发到内容区**，否则面板内容变化长高后会越出定位位置压住节点；编辑器内部本就 `flex-wrap`，收窄后参数行自动换行。
 - **淡入淡出**：`<Transition name="editor-panel">` + CSS（opacity 0.18s + `translateY(6px)`）；关闭淡出期间用 `lastPanelStyle` 缓存保持原位不跳位（缓存写在 `watch(editorPanelStyle)`，勿在 computed 内写副作用，会触发 eslint `vue/no-side-effects-in-computed-properties`）。
 - 拖拽节点时 `suppressEditor=true` 隐藏面板，仅点击节点才显示；**被拖动的真实节点恰好 1 个**时同时把应用级选中切为单选该节点（`useCanvasSelection.focusNodeForDrag`：`setSelectedNodes([id])` + `suppressPanelOnSelect=true`），使单选联动高亮随拖动实时出现；拖动结束保持选中但不弹面板，再次单击节点才打开。多选整组拖动不改变选中集。
 - 程序化选中（粘贴自动聚焦等）置 `suppressPanelOnSelect=true` 抑制面板自动弹出；`onNodeClick`/`onPaneClick`/切换目标时复位。粘贴聚焦通过 `addSelectedNodes`（`useVueFlow`）写入 Vue Flow 内部选中态，需先 `await nextTick()` 等内部 nodeLookup 应用新节点。

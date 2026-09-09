@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mimeTypeForFile, runTask, toBase64Object, toBase64Output } from './workflow-engine.js';
+import { taskRegistry, type TaskRecord as TaskRegistryRecord } from './tasks/registry.js';
 import type { TaskRecord } from './db.js';
 import type { WorkflowDefinition } from './workflows/types.js';
 import type { ProviderInstance } from './providers/types.js';
@@ -104,6 +105,7 @@ const instance = (over: Partial<ProviderInstance> = {}): ProviderInstance => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  taskRegistry.clear();
   // 默认 provider 定义：createClient 返回 mockClient
   mockGetProvider.mockReturnValue({
     id: 'volcengine-ark',
@@ -161,6 +163,36 @@ describe('runTask provider 解析（按实例）', () => {
     expect(mockDb.updateTaskStatus).toHaveBeenCalledWith('task-1', 'failed', {
       error_msg: '工作流 text-to-image/seedream-inst-1 未绑定服务商实例',
     });
+  });
+});
+
+describe('runTask 统一注册表登记（画布恢复 Loading 用）', () => {
+  it('params.nodeId/canvas 随登记透传（画布加载/切换后按 项目 + 画布 scope + 节点 恢复）', async () => {
+    mockDb.getTask.mockReturnValue(
+      taskRecord({
+        params: JSON.stringify({
+          outputPath: 'assert/scene/1/1/canvas/vg/output.mp4',
+          nodeId: 'vg',
+          canvas: { kind: 'scene', episode: '1', shot: '1' },
+        }),
+      }),
+    );
+    mockGetImpl.mockReturnValue(wf({ submit: vi.fn().mockRejectedValue(new Error('stop')) }));
+    mockGetInstance.mockResolvedValue(instance());
+    mockResolveInstanceConfig.mockReturnValue({ apiKey: 'resolved-key' });
+
+    // 登记发生在 runTask 开始处，终态 finish 会移出活跃区 → 用事件订阅捕获 begin 快照
+    const begun: TaskRegistryRecord[] = [];
+    const off = taskRegistry.on((e) => {
+      if (e.type === 'begin') begun.push(e.task);
+    });
+    await runTask('task-1');
+    off();
+
+    expect(begun).toHaveLength(1);
+    expect(begun[0].nodeId).toBe('vg');
+    expect(begun[0].canvas).toEqual({ kind: 'scene', episode: '1', shot: '1' });
+    expect(begun[0].payload?.outputPath).toBe('assert/scene/1/1/canvas/vg/output.mp4');
   });
 });
 

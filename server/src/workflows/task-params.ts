@@ -6,6 +6,7 @@
  */
 
 import type { TaskRecord } from '../db.js';
+import type { CanvasDefTarget } from '../assets/canvas-def.js';
 import type { VideoWorkflowSubmitParams, WorkflowSizeConfig } from './types.js';
 
 /** 工作流任务 params 解析结果 */
@@ -24,6 +25,10 @@ export interface ParsedTaskParams {
   comfyuiProviderId?: string;
   /** 提交成功后持久化的远端（Bridge）任务 ID，供中断使用 */
   remoteTaskId?: string;
+  /** 发起节点 id（画布节点提交时持久化；画布恢复 Loading 用） */
+  nodeId?: string;
+  /** 画布定位（画布节点提交时持久化；画布恢复 Loading 用） */
+  canvas?: CanvasDefTarget;
 }
 
 /**
@@ -42,6 +47,8 @@ export function parseTaskParams(paramsJson: string): ParsedTaskParams {
       sizeConfig?: WorkflowSizeConfig;
       comfyuiProviderId?: string;
       remoteTaskId?: string;
+      nodeId?: string;
+      canvas?: CanvasDefTarget;
     };
     return {
       vars: parsed.vars ?? {},
@@ -51,6 +58,8 @@ export function parseTaskParams(paramsJson: string): ParsedTaskParams {
       sizeConfig: parsed.sizeConfig,
       comfyuiProviderId: parsed.comfyuiProviderId,
       remoteTaskId: parsed.remoteTaskId,
+      nodeId: parsed.nodeId,
+      canvas: parsed.canvas,
     };
   } catch {
     // 任务 params 非法 JSON 时回退空结构（任务详情展示容错，不阻断接口）

@@ -32,9 +32,9 @@
 - **钳制结果不自动写回配置**：能力声明变化只更新展示，**不得 `emit` 持久化**——静默改写用户已保存的 `sizeConfig` 会把上一步的错值固化进 `canvas.json`；只有用户主动点选档位/改宽高时才写入（画布两个生成编辑器切换工作流类型或实现时本就会 `sizeConfig: undefined` 重置，不会提交越界档位）。
 - **`readFs` 对 `.json` 返回反序列化对象**：加载 `canvas.json` 需同时兼容 string 与 object 两种形态。
 - **eslint computed 副作用**：`vue/no-side-effects-in-computed-properties` 禁止在 computed 内写缓存/状态，改用 `watch`。
-- **面板钳制**：用 `flowEl.clientHeight/Width` 实测尺寸，勿依赖 Vue Flow `dimensions`。
+- **面板定位走 `canvas/panelPlacement.ts`**：配置面板定位是纯几何函数（含单测），组件只负责测量「画布可视区 `flowEl.clientHeight/Width`、面板高度 `panelEl.offsetHeight`、节点标题条高度 `.canvas-node__header`」后传入。**不要退回「放不下就钳到视口内」的旧逻辑**——那会让面板盖住整个节点。要点：方向优先级 下→上→右→左；「可行」要求按原始高度完整可见且不遮挡节点（含标题条）；左右贴靠宽度下限 320px、高度下限 240px；可行候选择优看「压住其他节点面积最小 → 方向优先级」（`obstacles` 由 AssetCanvas 传入其余节点）；滞回仅在「上次方向仍可行且完全同分」时保持；无解时按「不遮标题条 → 不裁切 → 不收窄 → 收窄幅度更小 → 重叠最小」降级，并保证标题条始终可见。**高度上限要同时下发到面板与内容区**（`.canvas-node-editor-panel__body` 的 `max-height`），否则面板内容变化长高后会越出定位位置压住节点。改算法务必同步更新 `panelPlacement.test.ts`。
 - **切换画布必须显式 fitView**：`fitViewOnInit` 只在 Vue Flow 首次初始化时跑一次，切换分镜/场景节点换了但视口仍停在旧坐标。`fitView` 在节点尚未测出宽高或容器尺寸为 0（画布 Tab 隐藏）时返回 `false`，必须 pending 后由 `onNodesInitialized` / ResizeObserver 再试，且用世代号丢弃过期请求；不要在每次 resize 时无条件 fit，会抢用户手动平移/缩放。
-- **任务状态来源**：工作流任务本地轮询 `/api/workflow/tasks/:id`；ffmpeg/LLM 任务由统一任务注册表经 WS 广播驱动（`taskSocket`）。画布切换只需 `gen.switchTarget()` + `gen.restore(knownNodeIds)`（**不要**再引入 localStorage 任务记录，已移除）。
+- **任务状态来源**：工作流任务本地轮询 `/api/workflow/tasks/:id`；ffmpeg/LLM 任务由统一任务注册表经 WS 广播驱动（`taskSocket`）。画布切换只需 `gen.switchTarget()` + `gen.restore(knownNodeIds)`（**不要**再引入 localStorage 任务记录，已移除）；恢复数据源为注册表 + SQLite 工作流任务补查（见 [task-architecture.md](./task-architecture.md)），画布定位须随提交携带（工作流走 `params.nodeId`/`params.canvas`）。
 - **连线右键**：`@edge-context-menu` 需手动 `event.preventDefault()` 阻止浏览器默认菜单叠加。
 - **节点缩放**：核心包不含缩放组件，控制点由独立包 `@vue-flow/node-resizer` 提供；缩放中的实时尺寸只写在 Vue Flow 内部节点样式上，业务 `width/height`（及左侧/上侧缩放时的 `x/y`）在 `resizeEnd` 事件统一回写 store——勿在 `resize` 事件里回写，会高频压入撤销栈并反复触发保存。
 - **缩放控制点显隐**：`NodeResizer` 的 `isVisible` 需包含「缩放中」状态（悬浮/选中/缩放中任一为真），否则拖出节点边界触发 mouseleave 卸载控制点会中断缩放。
@@ -53,4 +53,4 @@
 - **ffmpeg 命令必须与执行分离**：新增本地 ffmpeg 操作时，模块导出 `buildXxxCommand()`（探测 + 校验 + 装配，返回 `assets/ffmpeg-command.ts` 的 `FfmpegCommandSpec`），由 `tasks/ffmpeg-executor.ts` 统一 `save()` 并接管事件——直接在模块内 `save()` 会绕过执行器，导致无进度、无法中断（见 [task-architecture.md](./task-architecture.md)）。
 - **filter_complex 的 concat 输入标签**：必须写成 `[v0][a0][v1][a1]concat=n=2:v=1:a=1[vout][aout]`（标签串联），漏写或只写 `concat=...` 都会让 ffmpeg 报 `No output pad can be associated to link label` / `Cannot find a matching stream`。
 - **fluent-ffmpeg `inputOptions` 附着于最近一次 `input`**：追加 lavfi 静音源须 `inputOptions([...])` 与 `input('anullsrc=...')` 成对调用；静音源输入下标 = 段数 + 已追加的静音源数。
-- **任务状态只有两个来源**：工作流任务本地轮询 `/api/workflow/tasks/:id`；ffmpeg/LLM 任务由统一任务注册表经 WS 广播驱动（`taskSocket`）。**不要再引入 localStorage 任务记录**（已移除）。
+- **任务状态只有两个来源**：工作流任务本地轮询 `/api/workflow/tasks/:id`；ffmpeg/LLM 任务由统一任务注册表经 WS 广播驱动（`taskSocket`）。**不要再引入 localStorage 任务记录**（已移除）；画布恢复 Loading 读注册表 + SQLite 工作流任务（两者都要求任务携带 `nodeId`/`canvas`，新增任务类型勿漏传）。

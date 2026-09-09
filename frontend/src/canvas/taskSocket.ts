@@ -146,6 +146,14 @@ class TaskSocketClient {
   /** WS 连接是否已建立（重连对账用） */
   readonly connected = ref(false)
   /**
+   * 是否已收到本次连接的 `tasks` 全量快照（画布恢复前对账用）。
+   *
+   * 连接建立到快照到达之间有窗口：此期间 `tasks` 仍为空/旧值，
+   * 画布若在此时按 `tasks` 恢复 Loading 会漏掉运行中任务；
+   * 断线时重置为 false（旧快照可能过期，恢复方改走 HTTP 兜底 `GET /api/tasks`）。
+   */
+  readonly snapshotReady = ref(false)
+  /**
    * LLM 会话列表视图（按 type=llm 过滤，补 taskId 字段）。
    *
    * 兼容既有画布恢复/面板代码（原 `llmSocket.sessions`）；新代码请直接用 `tasks`。
@@ -207,6 +215,8 @@ class TaskSocketClient {
       this.socket = null
       this.connecting = false
       this.connected.value = false
+      // 旧快照可能已过期（断线期间任务可能推进）：标记未就绪，恢复方改走 HTTP 兜底
+      this.snapshotReady.value = false
       this.scheduleReconnect()
     }
     ws.onerror = (e) => {
@@ -235,6 +245,8 @@ class TaskSocketClient {
     }
     if (msg.type === 'tasks') {
       if (Array.isArray(msg.tasks)) this.tasks.value = msg.tasks
+      // 连接建立后的首个全量快照到达：恢复方据此判断 tasks 是否可用于对账
+      this.snapshotReady.value = true
       return
     }
     if (msg.type === 'task-update') {

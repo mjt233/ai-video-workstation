@@ -69,7 +69,7 @@ interface TaskRecord {
 
 | 类型 | 登记点 | 中断实现 | 进度 |
 |------|--------|----------|------|
-| `workflow` | `workflow-engine.ts: runTask` 开始时登记（label = 实现名），完成/失败处 `finish` | `cancelWorkflowTask()`（复用 `canCancelTask` + Bridge cancel / deferredCancel 标记） | 远端 poll / DB（当前不写 progress → 不确定动画） |
+| `workflow` | `workflow-engine.ts: runTask` 开始时登记（label = 实现名 + 画布定位 `nodeId`/`canvas`），完成/失败处 `finish` | `cancelWorkflowTask()`（复用 `canCancelTask` + Bridge cancel / deferredCancel 标记） | 远端 poll / DB（当前不写 progress → 不确定动画） |
 | `llm` | `routes/llm.ts` 会话创建后 `llmExecutor.create`，`lifecycle` 回调同步阶段/终态 | `sessionManager.cancel`（abort 上游） | 无百分比 → 展示阶段（Thinking…/正在响应…） |
 | `ffmpeg` | 四个路由（拼接/裁剪视频/裁剪音频/取帧）经 `startFfmpegTask` | `kill('SIGKILL')` + **删除半截产物** | `-progress` 解析 `timemark` → 真实百分比 |
 
@@ -104,23 +104,30 @@ interface TaskRecord {
 | POST | `/api/canvas/trim-audio` | 裁剪音频：**异步** |
 | POST | `/api/canvas/extract-frame` | 取帧：**异步** |
 
-四个 ffmpeg 接口的请求体均支持可选 `nodeId` / `canvas`（画布定位，供任务管理器展示与刷新后恢复 Loading）。
+四个 ffmpeg 接口的请求体均支持可选 `nodeId` / `canvas`（画布定位，供任务管理器展示与刷新后恢复 Loading）；`POST /api/workflow/run` 的 `params` 同样支持 `nodeId` / `canvas`（随任务 params 持久化，引擎登记注册表时透传）。
 
 ## 前端
 
 | 模块 | 职责 |
 |------|------|
-| `canvas/taskSocket.ts` | 统一任务 WS 客户端（全局单例）：`tasks` 响应式列表、`task-update` 增量合并、`subscribe/unsubscribe/cancel`、断线指数退避重连 + 重订阅、`onFinished`（LLM 终态）、`onTaskUpdate`（任务增量）；`sessions` computed 兼容既有 LLM 视图 |
+| `canvas/taskSocket.ts` | 统一任务 WS 客户端（全局单例）：`tasks` 响应式列表、`task-update` 增量合并、`snapshotReady`（首个全量快照是否到达，恢复对账用）、`subscribe/unsubscribe/cancel`、断线指数退避重连 + 重订阅、`onFinished`（LLM 终态）、`onTaskUpdate`（任务增量）；`sessions` computed 兼容既有 LLM 视图 |
 | `canvas/llmSocket.ts` | **兼容再导出**（既有 `llmSocket.xxx` 调用点无需改动；新代码用 `taskSocket`） |
 | `components/TaskManagerDialog.vue` | 顶栏图标（`mdi-progress-clock` + 活跃任务数徽标）展开的面板：类型标记 / 状态 / 进度条 / 已运行时长 / 画布位置 / 中断（不可中断置灰 + tooltip 原因） |
 | `api/tasks.ts` | `listTasks` / `cancelTask`（HTTP 兜底） |
-| `canvas/useCanvasGeneration.ts` | ffmpeg 任务：提交拿 taskId → `trackFfmpegTask` 订阅；进度与终态由 `onTaskUpdate` 统一消费（进度写节点阶段日志，终态刷新产物）；`restore(knownNodeIds)` 按 项目 + 画布 scope 从注册表恢复 Loading |
+| `canvas/useCanvasGeneration.ts` | 提交时携带 `nodeId`/`canvas`；ffmpeg 任务：提交拿 taskId → `trackFfmpegTask` 订阅，进度与终态由 `onTaskUpdate` 统一消费；`restore(knownNodeIds)` 合并注册表 + SQLite 工作流任务恢复 Loading |
 
 ### 画布 Loading 恢复（已移除 localStorage）
 
-原 ffmpeg 任务用 `localStorage`（`dsh.asset-canvas.tasks.*`）做刷新恢复，**已删除**：恢复数据源改为**服务端任务注册表**（`taskSocket.tasks`），画布加载 / 切换目标时按「项目 + 画布 scope + 节点仍在画布上」过滤恢复；任务终态由 WS 广播收敛，无幽灵 Loading。
+原 ffmpeg 任务用 `localStorage`（`dsh.asset-canvas.tasks.*`）做刷新恢复，**已删除**：恢复数据源改为服务端侧，画布加载 / 切换目标时按「项目 + 画布 scope + 节点仍在画布上」过滤恢复；任务终态由 WS 广播/轮询收敛，无幽灵 Loading。
 
-工作流任务（AI 生成）仍保留本地轮询（`GET /api/workflow/tasks/:id`，引擎为权威），因为其状态推进在服务端队列中。
+| 数据源 | 覆盖 | 说明 |
+|--------|------|------|
+| 统一任务注册表（`taskSocket.tasks`；WS 全量快照未就绪时 HTTP 兜底 `GET /api/tasks`） | ffmpeg + 已登记的工作流任务 | WS 连接建立即推全量；快照到达前画布若已加载会漏恢复，故保留 HTTP 兜底 |
+| SQLite 工作流任务（`GET /api/workflow/tasks?project=&status=pending\|running`） | 工作流任务（图片/视频/TTS 生成） | 注册表**只在引擎开始执行时登记**：本地排队窗口（引擎 2s tick）与服务重启期间注册表为空，仅凭注册表会漏恢复 |
+
+- 画布定位来源：提交时随任务携带 `nodeId` + `canvas`（ffmpeg 走请求体，工作流走 `params`），工作流任务的定位**随 params 持久化在 SQLite**，引擎登记注册表时透传（任务管理器也据此展示画布位置）。
+- 恢复后：工作流任务续跑本地轮询（SQLite 为权威，含阶段日志），ffmpeg 任务重新订阅 WS 广播；**任务未到终态前节点保持加载中**，终态收敛时刷新产物展示。
+- 两路结果按 `taskId` 去重；工作流任务仍保留本地轮询（`GET /api/workflow/tasks/:id`，引擎为权威），因为其状态推进在服务端队列中。
 
 ## 常见坑
 
@@ -131,3 +138,4 @@ interface TaskRecord {
 - **注册表 finish 幂等**：终态快照保留在 `finished` Map 中（重复 `finish` 返回同一对象），避免调用方拿到 `null` 误判。
 - **同一毫秒登记的任务排序**：`listActive` 用 `startedAt` + 内部 `seq` 排序，保证列表稳定。
 - **同节点单飞**：注册表按 `nodeId` 拒绝并发（`NODE_BUSY`），前端提交前也会按节点状态拦截。
+- **工作流任务不能只靠注册表恢复 Loading**：注册表只在引擎领取任务时登记，本地排队窗口（2s tick）与服务重启期间为空；画布恢复必须补查 SQLite `pending|running`，且画布定位要随 `params` 持久化（否则重启后无处可查）。

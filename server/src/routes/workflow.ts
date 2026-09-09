@@ -9,6 +9,8 @@ import { discoverTasks, type DiscoveredTask } from '../workflows/discovery.js';
 import { stripCancelRequested } from '../workflows/cancel.js';
 import { getRemoteTaskId, parseTaskParams } from '../workflows/task-params.js';
 import { cancelWorkflowTask, workflowExecutor } from '../tasks/workflow-executor.js';
+import { parseTaskTarget } from '../tasks/task-target.js';
+import type { CanvasDefTarget } from '../assets/canvas-def.js';
 import {
   MASKED_SECRET,
   createInstance,
@@ -342,6 +344,42 @@ workflowRouter.get('/workflow-types', (_req: Request, res: Response) => {
   res.json({ types: getAllWorkflowTypes() });
 });
 
+/**
+ * 组装工作流任务的入库 params（`/workflow/run` 专用）。
+ *
+ * 画布定位（`nodeId` / `canvas`）随 params 持久化到 SQLite：引擎登记统一任务注册表时透传，
+ * 供任务管理器展示与画布加载/切换/刷新后按「项目 + 画布 scope + 节点仍在画布上」恢复节点
+ * Loading（工作流任务的排队窗口与服务重启期间注册表为空，前端恢复时仍需按 SQLite params 补查）。
+ *
+ * @param params 请求体 params（含 vars/outputPath/video/sizeConfig/nodeId/canvas）
+ * @param userVars 规范化后的用户参数（仅所选实现声明的 key，合并进 vars）
+ * @param comfyuiProviderId Easy Bridge 执行保留键（仅 comfyui-bridge 工作流；不混入 vars）
+ * @returns 入库 params 对象
+ */
+export function buildRunTaskParams(
+  params: {
+    vars?: Record<string, string>;
+    promptPaths?: string[];
+    outputPath: string;
+    video?: VideoWorkflowSubmitParams;
+    sizeConfig?: WorkflowSizeConfig;
+    nodeId?: string;
+    canvas?: CanvasDefTarget;
+  },
+  userVars: Record<string, string>,
+  comfyuiProviderId?: string,
+): Record<string, unknown> {
+  return {
+    vars: { ...(params.vars ?? {}), ...userVars },
+    promptPaths: params.promptPaths ?? [],
+    outputPath: params.outputPath,
+    ...(params.video ? { video: params.video } : {}),
+    ...(params.sizeConfig ? { sizeConfig: params.sizeConfig } : {}),
+    ...(comfyuiProviderId ? { comfyuiProviderId } : {}),
+    ...parseTaskTarget(params),
+  };
+}
+
 // POST /api/workflow/run — submit a generation task
 workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
   const { project, workflowId, impl, params } = req.body as {
@@ -358,6 +396,10 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
       video?: VideoWorkflowSubmitParams;
       /** 统一尺寸配置（用户选择的原始完整尺寸：比例/尺寸档 + 可选自定义宽高） */
       sizeConfig?: WorkflowSizeConfig;
+      /** 发起节点 id（画布节点提交时携带；画布恢复 Loading 用） */
+      nodeId?: string;
+      /** 画布定位（画布节点提交时携带；画布恢复 Loading 用） */
+      canvas?: CanvasDefTarget;
     };
   };
 
@@ -386,14 +428,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     project,
     workflow_id: workflowId,
     impl: validated.impl,
-    params: {
-      vars: { ...(params.vars ?? {}), ...userVars },
-      promptPaths: params.promptPaths ?? [],
-      outputPath: params.outputPath,
-      ...(params.video ? { video: params.video } : {}),
-      ...(params.sizeConfig ? { sizeConfig: params.sizeConfig } : {}),
-      ...(comfyuiProviderId ? { comfyuiProviderId } : {}),
-    },
+    params: buildRunTaskParams(params, userVars, comfyuiProviderId),
   });
 
   db.addLog(taskId, 'info', `Task created: ${workflowId}/${validated.impl}`);

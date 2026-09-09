@@ -21,6 +21,7 @@ import { copyExistingAssetToHistory } from './assets/history.js';
 import { isCancelRequested } from './workflows/cancel.js';
 import { toNativeUserParams } from './workflows/user-params.js';
 import { workflowExecutor } from './tasks/workflow-executor.js';
+import type { CanvasDefTarget } from './assets/canvas-def.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../design');
@@ -607,9 +608,14 @@ export async function runTask(taskId: string): Promise<void> {
     sizeConfig?: WorkflowSizeConfig;
     /** 本次执行的 Easy Bridge 提供商实例 ID（用户选择，仅 comfyui-bridge 工作流入库） */
     comfyuiProviderId?: string;
+    /** 发起节点 id（画布节点提交时持久化；登记统一注册表用于画布恢复 Loading） */
+    nodeId?: string;
+    /** 画布定位（画布节点提交时持久化；登记统一注册表用于画布恢复 Loading） */
+    canvas?: CanvasDefTarget;
   };
 
-  // 登记进统一任务注册表（任务管理器可见/可中断；SQLite 仍是持久化权威）
+  // 登记进统一任务注册表（任务管理器可见/可中断；SQLite 仍是持久化权威）。
+  // nodeId/canvas 一并登记：画布加载/切换后按「项目 + 画布 scope + 节点」恢复节点 Loading。
   try {
     workflowExecutor.create({
       taskId,
@@ -620,6 +626,8 @@ export async function runTask(taskId: string): Promise<void> {
       ...(typeof paramsObj.outputPath === 'string' && paramsObj.outputPath
         ? { outputPath: paramsObj.outputPath }
         : {}),
+      ...(paramsObj.nodeId ? { nodeId: paramsObj.nodeId } : {}),
+      ...(paramsObj.canvas ? { canvas: paramsObj.canvas } : {}),
     });
   } catch (e) {
     // 全局任务上限等登记失败不影响工作流执行（仅任务管理器不显示该任务）

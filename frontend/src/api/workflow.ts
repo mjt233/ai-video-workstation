@@ -1,4 +1,5 @@
 import client from './client'
+import type { CanvasTarget } from '../canvas/api'
 
 /** 工作流用户可手动传入的参数类型 */
 export type WorkflowUserParamType = 'boolean' | 'integer' | 'float' | 'string'
@@ -140,6 +141,10 @@ export interface TaskParams {
   vars: Record<string, string>
   promptPaths: string[]
   outputPath: string
+  /** 发起节点 id（画布节点提交时持久化；画布恢复 Loading 用） */
+  nodeId?: string
+  /** 画布定位（画布节点提交时持久化；画布恢复 Loading 用） */
+  canvas?: CanvasTarget
 }
 
 export interface TaskResponse {
@@ -199,6 +204,15 @@ export interface WorkflowRunParams {
     video?: VideoWorkflowSubmitParams
     /** 统一尺寸配置（用户选择的原始完整尺寸：比例/尺寸档 + 可选自定义宽高） */
     sizeConfig?: WorkflowSizeConfig
+    /**
+     * 发起节点 id（画布节点提交时携带）。
+     *
+     * 随任务 params 持久化并登记进统一任务注册表：画布加载/切换/刷新后按
+     * 「项目 + 画布 scope + 节点仍在画布上」恢复节点 Loading，任务未结束则保持加载中。
+     */
+    nodeId?: string
+    /** 画布定位（画布节点提交时携带；与 nodeId 配对用于恢复过滤） */
+    canvas?: CanvasTarget
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTaskParams, canCancelTask, getRemoteTaskId, validateWorkflowImpl, validateDiscoveredImpls, extractComfyuiProviderId } from './workflow.js';
+import { parseTaskParams, canCancelTask, getRemoteTaskId, validateWorkflowImpl, validateDiscoveredImpls, extractComfyuiProviderId, buildRunTaskParams } from './workflow.js';
 import { register } from '../workflows/registry.js';
 import type { TaskRecord } from '../db.js';
 import type { WorkflowDefinition } from '../workflows/types.js';
@@ -181,9 +181,78 @@ describe('parseTaskParams', () => {
     expect(parsed.comfyuiProviderId).toBeUndefined();
   });
 
+  it('画布定位（nodeId / canvas）透传：画布节点提交后按 params 恢复 Loading', () => {
+    const parsed = parseTaskParams(JSON.stringify({
+      vars: {},
+      outputPath: 'assert/scene/1/1/canvas/vg/output.mp4',
+      nodeId: 'vg',
+      canvas: { kind: 'scene', episode: '1', shot: '1' },
+    }));
+    expect(parsed.nodeId).toBe('vg');
+    expect(parsed.canvas).toEqual({ kind: 'scene', episode: '1', shot: '1' });
+  });
+
+  it('无画布定位时返回 undefined（非画布提交的任务不参与恢复）', () => {
+    const parsed = parseTaskParams(JSON.stringify({ vars: {}, outputPath: 'assert/x.mp4' }));
+    expect(parsed.nodeId).toBeUndefined();
+    expect(parsed.canvas).toBeUndefined();
+  });
+
   it('无 video 时返回 undefined', () => {
     const parsed = parseTaskParams(JSON.stringify({ vars: {}, outputPath: 'assert/x.mp4' }));
     expect(parsed.video).toBeUndefined();
+  });
+});
+
+describe('buildRunTaskParams（入库 params 组装）', () => {
+  it('画布定位（nodeId / canvas）随 params 持久化（画布恢复 Loading 依赖）', () => {
+    const params = buildRunTaskParams(
+      {
+        vars: { prompt: '一只猫' },
+        outputPath: 'assert/scene/1/1/canvas/vg/output.mp4',
+        nodeId: 'vg',
+        canvas: { kind: 'scene', episode: '1', shot: '1' },
+      },
+      {},
+    );
+    expect(params).toMatchObject({
+      vars: { prompt: '一只猫' },
+      outputPath: 'assert/scene/1/1/canvas/vg/output.mp4',
+      nodeId: 'vg',
+      canvas: { kind: 'scene', episode: '1', shot: '1' },
+    });
+  });
+
+  it('非画布提交（无 nodeId/canvas）不写入定位字段', () => {
+    const params = buildRunTaskParams({ outputPath: 'assert/x.png' }, {});
+    expect(params).not.toHaveProperty('nodeId');
+    expect(params).not.toHaveProperty('canvas');
+  });
+
+  it('用户参数合并进 vars，comfyuiProviderId 独立存放不混入 vars', () => {
+    const params = buildRunTaskParams(
+      { vars: { prompt: 'x' }, outputPath: 'assert/x.png' },
+      { width: '1024' },
+      'inst-9',
+    );
+    expect(params.vars).toEqual({ prompt: 'x', width: '1024' });
+    expect(params.comfyuiProviderId).toBe('inst-9');
+  });
+
+  it('video / sizeConfig 透传', () => {
+    const video = {
+      mode: 'director' as const,
+      resolution: { width: 1280, height: 720 },
+      duration: 5,
+      prompt: '测试',
+      extraParams: {},
+    };
+    const params = buildRunTaskParams(
+      { outputPath: 'assert/x.mp4', video, sizeConfig: { ratio: '16:9', size: '2K' } },
+      {},
+    );
+    expect(params.video).toEqual(video);
+    expect(params.sizeConfig).toEqual({ ratio: '16:9', size: '2K' });
   });
 });
 

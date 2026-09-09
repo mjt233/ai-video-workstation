@@ -238,6 +238,7 @@
           :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
           :kind="target.kind"
           :viewport="viewport"
+          :other-nodes="otherCanvasNodes"
           :flow-width="flowWidth"
           :flow-height="flowHeight"
           @close="selection.dismissPanel()"
@@ -1527,6 +1528,16 @@ const editorPanelVisible = computed(
     && !selection.suppressPanelOnSelect.value
     && !selection.panelDismissed.value,
 )
+
+/**
+ * 除选中节点外的其余真实节点（配置面板定位时作为「尽量不压住」的障碍物）。
+ * 仅面板可见时计算，避免无谓重建数组。
+ */
+const otherCanvasNodes = computed(() => {
+  const currentId = editorPanel.value?.node?.id
+  if (!currentId) return []
+  return store.nodes.value.filter((n) => n.id !== currentId)
+})
 
 /**
  * 节点邻接方向（单选联动高亮）：'input' = 数据流入选中节点的输入邻居，'output' = 输出侧邻居，

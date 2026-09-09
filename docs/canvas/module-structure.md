@@ -15,6 +15,7 @@ frontend/src/
 │   ├── paths.ts                  # 定义文件与产物路径
 │   ├── preview.ts                # 预览 URL
 │   ├── edgeFlow.ts               # 连线流向箭头动画参数（贝塞尔弧长解析 / 恒定线速度 + 等距多箭头 / 拖动期时序缓存）
+│   ├── panelPlacement.ts         # 配置面板定位（纯几何：下→上→右→左 智能贴靠 / 左右自适应收窄宽度 / 滞回 / 标题条避让降级）
 │   ├── api.ts                    # loadCanvas / saveCanvas
 │   ├── generate.ts               # 输入收集（collectInputs/collectInputPaths）、节点当前资产推导（固定产物路径）
 │   ├── aiTextHistory.ts          # AI 文本生成节点文本历史版本（类型/上限/追加/删除/读取过滤）
@@ -32,7 +33,7 @@ frontend/src/
     ├── AssetCanvas.vue           # 编排层：组装 store/gen/composables，渲染 VueFlow + 子组件
     ├── CanvasToolbar.vue         # 工具栏（视图缩放/撤销重做/自动搭画布/添加节点/保存状态）
     ├── CanvasNodeCard.vue        # 节点卡片（名称头/内联重命名/端口/主体组件/缩放控制点 + 通用 loading/错误遮罩与中断入口 + 成组连接悬停高亮）
-    ├── CanvasEditorPanel.vue     # 配置悬浮面板（固定大小、位置联动、边界钳制、淡入淡出；仅单选节点显示）
+    ├── CanvasEditorPanel.vue     # 配置悬浮面板（固定大小、智能贴靠定位（panelPlacement.ts）、淡入淡出；仅单选节点显示）
     ├── CanvasContextMenu.vue     # 节点/连线/群组/分组实体右键菜单（纯展示）
     ├── CanvasAddNodeMenu.vue     # 添加节点菜单（锚点 + VMenu；三列分类：加载/生成/工具，按 registry category 分组）
     ├── CanvasGroupFrame.vue      # 群组虚线框（合成节点 __group-frame 的展示内容；拖动整组由 Vue Flow 原生拖动承接）

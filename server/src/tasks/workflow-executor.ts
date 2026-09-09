@@ -15,7 +15,8 @@ import { getImpl } from '../workflows/registry.js';
 import { getProvider } from '../providers/registry.js';
 import { listInstances, resolveInstanceConfig } from '../providers/config-store.js';
 import { markCancelRequested } from '../workflows/cancel.js';
-import { parseTaskParams } from '../routes/workflow.js';
+import { parseTaskParams } from '../workflows/task-params.js';
+import type { CanvasDefTarget } from '../assets/canvas-def.js';
 import { taskRegistry, type TaskRecord } from './registry.js';
 import { createTaskHandle } from './executor.js';
 
@@ -33,6 +34,10 @@ export interface WorkflowTaskRegisterInput {
   label: string;
   /** 产物相对路径（payload 展示用） */
   outputPath?: string;
+  /** 发起节点 id（画布节点提交时携带；画布恢复 Loading 用） */
+  nodeId?: string;
+  /** 画布定位（画布节点提交时携带；画布恢复 Loading 用） */
+  canvas?: CanvasDefTarget;
 }
 
 /**
@@ -145,6 +150,8 @@ class WorkflowExecutor {
       project: input.project,
       status: record?.status === 'pending' ? 'pending' : 'running',
       idOverride: input.taskId,
+      ...(input.nodeId ? { nodeId: input.nodeId } : {}),
+      ...(input.canvas ? { canvas: input.canvas } : {}),
       cancelable: cancelability.cancelable,
       ...(cancelability.reason ? { cancelBlockReason: cancelability.reason } : {}),
       payload: {
