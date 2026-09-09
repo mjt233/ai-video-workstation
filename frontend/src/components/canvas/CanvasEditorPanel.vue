@@ -183,6 +183,8 @@ const nodeHeaderHeight = ref(PANEL_HEADER_FALLBACK_HEIGHT)
 const lastSide = ref<PanelPlacementSide | null>(null)
 let panelResizeObserver: ResizeObserver | null = null
 let headerResizeObserver: ResizeObserver | null = null
+/** 自然高度测量进行中（防止测量期间临时移除 max-height 触发的 ResizeObserver 重入） */
+let measuringPanel = false
 
 /** 当前节点面板的设计宽度（普通 440 / 生成图片 560 / 生成视频 720，屏幕像素） */
 const designWidth = computed(() => {
@@ -278,11 +280,33 @@ function measureHeaderHeight(): void {
 }
 
 /**
- * 读取配置面板实际高度（屏幕像素，用于定位时判断上下空间是否足够）。
- * 面板尚未渲染时置 0（定位函数据此返回 unmeasured，面板隐藏等测量）。
+ * 读取配置面板的**自然高度**（屏幕像素，不受定位下发的高度上限约束），用于判断上下空间是否足够。
+ *
+ * 直接读 `offsetHeight` 会读到被 `max-height` 钳制后的高度，导致「面板被压缩 → 测量值变小 →
+ * 认为空间足够 → 继续压缩」的反馈锁死（表现为面板明明下方有空间却一直很矮）。
+ * 因此测量时临时移除面板与内容区的内联 `max-height`，读取布局高度后立即还原；
+ * 面板尚未渲染时置 0（定位函数据此返回 `unmeasured`，面板隐藏等测量）。
  */
 function measurePanelHeight(): void {
-  panelHeight.value = panelEl.value?.offsetHeight ?? 0
+  const panel = panelEl.value
+  if (!panel) {
+    panelHeight.value = 0
+    return
+  }
+  if (measuringPanel) return
+  measuringPanel = true
+  const body = panel.querySelector<HTMLElement>('.canvas-node-editor-panel__body')
+  const prevPanelMaxHeight = panel.style.maxHeight
+  const prevBodyMaxHeight = body?.style.maxHeight ?? ''
+  panel.style.maxHeight = 'none'
+  if (body) body.style.maxHeight = 'none'
+  const height = panel.offsetHeight
+  const dbg = (window as unknown as Record<string, unknown>).__dshHeights as number[] | undefined
+  if (dbg) dbg.push(height)
+  panel.style.maxHeight = prevPanelMaxHeight
+  if (body) body.style.maxHeight = prevBodyMaxHeight
+  measuringPanel = false
+  panelHeight.value = height
 }
 
 // 切换选中节点：复位面板高度与贴靠方向，并在 DOM 更新后测量标题条高度 + 绑定观察目标

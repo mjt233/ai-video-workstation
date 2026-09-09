@@ -17,8 +17,12 @@ export const PANEL_GAP = 12
 /** 面板与画布可视区边缘的留白（屏幕像素） */
 export const PANEL_VIEWPORT_MARGIN = 8
 
-/** 面板贴靠节点左右侧时允许的最小宽度（屏幕像素；低于该值放弃左右贴靠） */
-export const PANEL_SIDE_MIN_WIDTH = 320
+/**
+ * 面板贴靠节点左右侧时允许的最小宽度（屏幕像素；低于该值放弃左右贴靠）。
+ * 取 280px：足以容纳输入预览缩略图（64px）+ 参数行换行，同时避免因差几十像素就
+ * 放弃贴靠、把面板塞进上下方很小的空间里（那会压缩成很矮的滚动条）。
+ */
+export const PANEL_SIDE_MIN_WIDTH = 280
 
 /** 面板贴靠节点左右侧时允许的最小高度（屏幕像素；垂直空间低于该值放弃左右贴靠） */
 export const PANEL_SIDE_MIN_HEIGHT = 240
@@ -184,7 +188,8 @@ function clamp(value: number, min: number, max: number): number {
  *   由可行性与降级排序决定是否采用；
  * - 上方：可视区顶边到节点顶边（减去间距与留白）；
  * - 右侧/左侧：节点侧边到可视区对应边（减去间距与留白），宽度钳制在
- *   `[PANEL_SIDE_MIN_WIDTH, designWidth]`，垂直方向用 `min(maxHeight, 可用高度)` 收窄高度。
+ *   `[PANEL_SIDE_MIN_WIDTH, designWidth]`；垂直方向**不居中于节点**——默认顶边对齐节点顶边、
+ *   高度延伸到可视区底部，下方空间不足时改为底边对齐节点底边（两种锚定取可用高度更大者）。
  *
  * @param side 贴靠方向
  * @param input 定位输入
@@ -234,29 +239,26 @@ function buildCandidate(
     }
   }
 
-  // 左右贴靠：宽度取「节点侧边到可视区边缘」的可用空白，钳制在 [320, 设计宽度]
+  // 左右贴靠：宽度取「节点侧边到可视区边缘」的可用空白，钳制在 [PANEL_SIDE_MIN_WIDTH, 设计宽度]
   const sideSpace = side === 'right'
     ? viewWidth - (nodeRect.x + nodeRect.width) - gap - margin
     : nodeRect.x - gap - margin
   if (sideSpace < PANEL_SIDE_MIN_WIDTH) return null
   const width = Math.min(input.designWidth, sideSpace)
-  // 垂直空间不足时收窄高度（内容区内部滚动）；低于最小高度时不作为「可行」候选，
-  // 但仍生成候选参与降级排序（此时至少不遮挡节点，优于上下方向的重叠）
-  const verticalSpace = Math.max(
-    Math.min(viewHeight - margin * 2, viewHeight - margin - (nodeRect.y - gap)),
-    0,
-  )
-  const sideMaxHeight = Math.min(maxHeight, verticalSpace)
-  const height = Math.min(panelHeight, sideMaxHeight)
   const left = side === 'right'
     ? nodeRect.x + nodeRect.width + gap
     : nodeRect.x - gap - width
-  // 垂直居中于节点（不越出可视区）
-  const top = clamp(
-    nodeRect.y + (nodeRect.height - height) / 2,
-    margin,
-    Math.max(viewHeight - height - margin, margin),
-  )
+  // 垂直方向：**不与节点垂直居中**（居中会白白压缩面板高度）。
+  // 默认顶边与节点顶边对齐，可用高度一直延伸到可视区底部；若下方空间不足以容纳面板，
+  // 则改用「底边与节点底边对齐」以占用上方空间——两种锚定方式取可用高度更大者。
+  const topAnchor = Math.max(nodeRect.y, margin)
+  const topSpace = Math.max(viewHeight - margin - topAnchor, 0)
+  const bottomAnchor = Math.min(nodeRect.y + nodeRect.height, viewHeight - margin)
+  const bottomSpace = Math.max(bottomAnchor - margin, 0)
+  const topAnchored = topSpace >= Math.min(panelHeight, maxHeight) || topSpace >= bottomSpace
+  const sideMaxHeight = Math.min(maxHeight, topAnchored ? topSpace : bottomSpace)
+  const height = Math.min(panelHeight, sideMaxHeight)
+  const top = topAnchored ? topAnchor : bottomAnchor - height
   return {
     side,
     width,
@@ -333,11 +335,15 @@ function isCandidateViable(candidate: PlacementCandidate): boolean {
 
 /**
  * 同级排序（可行性相同的一组候选之间择优）：
- * 「不遮标题条」→「不裁切」→「不收窄面板高度」→「收窄幅度更小」→「与选中节点重叠最小」→
- * 「压住其他节点最少」→ 方向优先级。
+ * 「不遮标题条」→「不裁切」→「不收窄面板高度」→「压住其他节点最少」→ 方向优先级 →
+ * 「与选中节点重叠最小」。
  *
- * 标题条优先级最高：即使用户把节点放大到面板无法完整放下的程度，
- * 也要保证节点标题条可见（用户始终能认出当前配置的是哪个节点）。
+ * 两条关键约定：
+ * - **标题条优先级最高**：即使用户把节点放大到面板无法完整放下的程度，也要保证节点标题条可见
+ *   （用户始终能认出当前配置的是哪个节点）；
+ * - **不收窄优先于方向优先级**：下方只需收窄高度就能放下、而左右侧能保持完整高度时，
+ *   选左右侧（贴靠只换行不压缩内容，比挤成很矮的滚动条更可用）；上下与左右同为完整高度时，
+ *   仍按 下→上→右→左 的顺序保持既有视觉语言。
  *
  * @param a 候选 A
  * @param b 候选 B
@@ -353,11 +359,13 @@ function compareCandidates(a: PlacementCandidate, b: PlacementCandidate): number
   if (clippedA !== clippedB) return clippedA - clippedB
   if (a.clippedArea !== b.clippedArea) return a.clippedArea - b.clippedArea
   if (a.shrunk !== b.shrunk) return a.shrunk ? 1 : -1
-  // 同为收窄时，优先收窄幅度更小的方向（可见内容更多、滚动更少）
-  if (a.height !== b.height) return b.height - a.height
-  if (a.nodeOverlapArea !== b.nodeOverlapArea) return a.nodeOverlapArea - b.nodeOverlapArea
   if (a.obstacleOverlapArea !== b.obstacleOverlapArea) return a.obstacleOverlapArea - b.obstacleOverlapArea
-  return PANEL_SIDE_PRIORITY.indexOf(a.side) - PANEL_SIDE_PRIORITY.indexOf(b.side)
+  // 都只能收窄时，取可见高度更大的方向（滚动更少）；都不收窄时由方向优先级决定
+  if (a.shrunk && a.height !== b.height) return b.height - a.height
+  const priority = PANEL_SIDE_PRIORITY.indexOf(a.side) - PANEL_SIDE_PRIORITY.indexOf(b.side)
+  if (priority !== 0) return priority
+  if (a.nodeOverlapArea !== b.nodeOverlapArea) return a.nodeOverlapArea - b.nodeOverlapArea
+  return 0
 }
 
 /**

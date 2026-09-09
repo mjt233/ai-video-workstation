@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   PANEL_GAP,
   PANEL_HEADER_FALLBACK_HEIGHT,
-  PANEL_SIDE_MIN_HEIGHT,
   PANEL_SIDE_MIN_WIDTH,
   PANEL_VIEWPORT_MARGIN,
   computePanelPlacement,
@@ -57,22 +56,20 @@ function overlapArea(a: PanelRect, b: PanelRect): number {
 }
 
 describe('computePanelPlacement', () => {
-  it('空间充足时放在节点正下方并水平居中（保持既有视觉语言）', () => {
+  it('下方空间不足时优先贴靠左右侧（贴靠只换行、不压缩面板高度）', () => {
+    // 下方只剩 280px < 面板 300px（需收窄）；右侧空白 292px 足够 → 贴靠右侧保持完整高度
     const input = makeInput()
     const result = computePanelPlacement(input)
-    expect(result.side).toBe('below')
-    expect(result.width).toBe(440)
-    // 下方空间充足（800 - 500 - 12 - 8 = 280 < 面板高度 300）→ 收窄到可用空间并内部滚动
-    expect(result.maxHeight).toBe(280)
-    expect(result.top).toBe(300 + 200 + PANEL_GAP)
-    // 水平中心与节点中心（300 + 200）对齐
-    expect(result.left + result.width / 2).toBe(500)
+    expect(result.side).toBe('right')
+    expect(result.width).toBe(280)
+    // 面板高度用满下方空间（顶边对齐节点顶边，不垂直居中）
+    expect(result.maxHeight).toBe(492)
+    expect(result.top).toBe(300)
     expect(result.overlapsNode).toBe(false)
-    expect(result.overlapsHeader).toBe(false)
   })
 
   it('下方放不下但上方放得下时翻转到节点上方', () => {
-    // 节点贴视口底边：下方只剩 800 - (500 + 200) - 12 - 8 = 80px
+    // 节点贴视口底边：下方只剩 800 - (500 + 200) - 12 - 8 = 80px；上方可用 480px
     const input = makeInput({ nodeRect: { x: 300, y: 500, width: 400, height: 200 } })
     const result = computePanelPlacement(input)
     expect(result.side).toBe('above')
@@ -92,8 +89,8 @@ describe('computePanelPlacement', () => {
     expect(result.width).toBe(400)
     expect(result.width).toBeLessThan(input.designWidth)
     expect(result.left).toBe(300 + 280 + PANEL_GAP)
-    // 垂直居中于节点：200 + (500 - 300) / 2
-    expect(result.top).toBe(300)
+    // 顶边与节点顶边对齐（不与节点垂直居中），高度用满下方空间
+    expect(result.top).toBe(200)
     expect(result.overlapsNode).toBe(false)
   })
 
@@ -111,7 +108,7 @@ describe('computePanelPlacement', () => {
     expect(result.overlapsNode).toBe(false)
   })
 
-  it('左右贴靠宽度不低于最小宽度 320px', () => {
+  it('左右贴靠宽度不低于最小宽度 280px', () => {
     // 节点位于 0，右侧空白 1000 - 300 - 12 - 8 = 680px（充足）；节点很高迫使贴靠
     const input = makeInput({
       nodeRect: { x: 0, y: 200, width: 300, height: 500 },
@@ -163,9 +160,9 @@ describe('computePanelPlacement', () => {
       width: 400,
       height: PANEL_HEADER_FALLBACK_HEIGHT,
     }
-    // 上方可用 180px、下方可用 280px，两者都收窄；上方收窄后不与标题条重叠 → 选上方
-    expect(result.side).toBe('above')
-    expect(result.maxHeight).toBe(180)
+    // 上方可用 180px、下方可用 280px、右侧可用 292px：右侧空间最大 → 选右侧（裁切最少）
+    expect(result.side).toBe('right')
+    expect(result.maxHeight).toBe(392)
     expect(overlapArea(rect, headerRect)).toBe(0)
   })
 
@@ -188,40 +185,42 @@ describe('computePanelPlacement', () => {
   })
 
   it('滞回：上次方向仍可行时保持不变', () => {
-    const base = makeInput()
-    const below = computePanelPlacement(base)
-    expect(below.side).toBe('below')
-    const again = computePanelPlacement({ ...base, previousSide: 'below' })
-    expect(again.side).toBe('below')
-    // 上次方向失效（下方空间不足）时按优先级重新选择
+    // 面板 200px：下方 280px 足够 → 完整放下、无需收窄
+    const base = makeInput({ panelHeight: 200, maxHeight: 200 })
+    expect(computePanelPlacement(base).side).toBe('below')
+    expect(computePanelPlacement({ ...base, previousSide: 'below' }).side).toBe('below')
+    // 上次方向失效（下方空间不足、需收窄）时改向不收缩的方向
     const moved = computePanelPlacement({
       ...base,
       nodeRect: { x: 300, y: 560, width: 400, height: 200 },
       previousSide: 'below',
     })
     expect(moved.side).toBe('above')
+    expect(moved.maxHeight).toBe(200)
   })
 
-  it('滞回让位于更优位置：上次方向不再可行时改向且不遮挡节点', () => {
-    // 节点宽 440 且高 520：左右空白不足 320、上下高度不足 240 → 可行候选只有 below / above
+  it('滞回让位于更优位置：上次方向压住其他节点时改向且不遮挡节点', () => {
+    // 节点宽 480：左侧空白 292px（可行）、右侧空白 220px（不足）
+    // 面板 250px：下方可用 280px → below 完整放下；视口压缩后 below 才失效
     const base = makeInput({
-      nodeRect: { x: 300, y: 100, width: 440, height: 520 },
-      panelHeight: 300,
-      maxHeight: 300,
+      nodeRect: { x: 300, y: 300, width: 480, height: 200 },
+      panelHeight: 250,
+      maxHeight: 250,
       previousSide: 'below',
     })
-    // 无其他节点：below 可行且与 above 同分 → 滞回保持 below
+    // 无其他节点：below 与 left 同为完整高度 → 方向优先级让 below 胜出（滞回保持）
     expect(computePanelPlacement(base).side).toBe('below')
-    // 下方出现其他节点后 below 仍可行（障碍物只影响同级排序），保持 below
-    const withObstacle = computePanelPlacement({
+    // 下方被其他节点占据：below 压住该节点 → 改向不压任何节点的上方
+    const occupiedBelow = computePanelPlacement({
       ...base,
-      obstacles: [{ x: 300, y: 632, width: 440, height: 160 }],
+      obstacles: [{ x: 300, y: 520, width: 440, height: 80 }],
     })
-    expect(withObstacle.side).toBe('below')
-    // 视口高度不足时 below 不再可行 → 改向 above，且不遮挡节点/标题条
+    expect(occupiedBelow.side).toBe('above')
+    expect(occupiedBelow.overlapsNode).toBe(false)
+    // 视口压缩后 below 需收窄（< 最小高度）→ 改向 above，且不遮挡节点/标题条
     const constrained = computePanelPlacement({
       ...base,
-      viewHeight: 420,
+      viewHeight: 620,
       previousSide: 'below',
     })
     expect(constrained.side).toBe('above')
@@ -274,40 +273,43 @@ describe('computePanelPlacement', () => {
     }
   })
 
-  it('左右贴靠的垂直收窄：高度上限随可用空间缩小', () => {
-    const input = makeInput({
+  it('左右贴靠不与节点垂直居中：顶边对齐节点顶边、高度用满下方空间', () => {
+    // 节点靠上：下方空间充足 → 面板高度不被压缩
+    const topAligned = computePanelPlacement(makeInput({
       nodeRect: { x: 300, y: 100, width: 280, height: 600 },
       viewHeight: 800,
       panelHeight: 520,
       maxHeight: 520,
-    })
-    const result = computePanelPlacement(input)
-    expect(result.side).toBe('right')
-    // 可用高度 = 800 - 8 - (100 - 12) = 704 > 520，高度上限保持 520
-    expect(result.maxHeight).toBe(520)
+    }))
+    expect(topAligned.side).toBe('right')
+    expect(topAligned.top).toBe(100)
+    expect(topAligned.maxHeight).toBe(520)
+    // 节点靠下：下方空间不足 → 底边对齐节点底边，用满上方空间
+    const bottomAligned = computePanelPlacement(makeInput({
+      nodeRect: { x: 300, y: 500, width: 280, height: 200 },
+      viewHeight: 800,
+      panelHeight: 520,
+      maxHeight: 520,
+    }))
+    expect(bottomAligned.side).toBe('right')
+    expect(bottomAligned.top).toBe(700 - 520)
+    expect(bottomAligned.maxHeight).toBe(520)
+  })
+
+  it('左右贴靠高度不足时才收窄，且不越出可视区', () => {
+    // 节点上下都贴边：上下可用高度都只有 300px 左右
     const tight = computePanelPlacement(makeInput({
-      nodeRect: { x: 300, y: 300, width: 280, height: 400 },
+      nodeRect: { x: 300, y: 250, width: 280, height: 300 },
       viewHeight: 800,
       panelHeight: 520,
       maxHeight: 520,
     }))
     expect(tight.side).toBe('right')
-    // 可用高度 = 800 - 8 - (300 - 12) = 504 < 520 → 收窄（仍优于上下方向只留 80px/280px）
-    expect(tight.maxHeight).toBe(504)
-    expect(tight.maxHeight).toBeGreaterThanOrEqual(PANEL_SIDE_MIN_HEIGHT)
-  })
-
-  it('左右贴靠高度收窄后仍垂直居中且不越界', () => {
-    const input = makeInput({
-      nodeRect: { x: 300, y: 300, width: 280, height: 400 },
-      viewHeight: 800,
-      panelHeight: 520,
-      maxHeight: 520,
-    })
-    const result = computePanelPlacement(input)
-    const rect = toRect(result, result.maxHeight)
+    // 顶边对齐节点顶边：可用高度 = 800 - 8 - 250 = 542 > 520 → 不收窄
+    expect(tight.maxHeight).toBe(520)
+    const rect = toRect(tight, Math.min(520, tight.maxHeight))
     expect(rect.y).toBeGreaterThanOrEqual(PANEL_VIEWPORT_MARGIN)
-    expect(rect.y + rect.height).toBeLessThanOrEqual(input.viewHeight - PANEL_VIEWPORT_MARGIN)
+    expect(rect.y + rect.height).toBeLessThanOrEqual(800 - PANEL_VIEWPORT_MARGIN)
   })
 
   it('节点放大到占满视口时仍能找到不遮挡节点的位置', () => {
