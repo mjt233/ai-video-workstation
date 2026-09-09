@@ -32,6 +32,39 @@ export interface GroupConnectResult {
   skipped: { nodeId: string; reason: GroupConnectSkipReason }[]
 }
 
+/** 连线改接忽略原因（与群组连接共用分类：转移/复制场景不会出现 in-group） */
+export type RewireSkipReason = GroupConnectSkipReason
+
+/** 连线改接结果：成功建立的新连线与被忽略项清单 */
+export interface RewireResult {
+  /** 成功建立的新连线列表（按传入顺序，供调用方做后续联动与文案） */
+  connected: CanvasConnection[]
+  /** 被忽略的改接项（原因见 RewireSkipReason） */
+  skipped: { fromNodeId: string; toNodeId: string; reason: RewireSkipReason }[]
+}
+
+/** 单条连线改接描述（端点字段缺省时沿用原连线；输入端起点覆盖目标端，输出端起点覆盖来源端） */
+export interface RewireItem {
+  /** 原连线 id（改接基准；removeSource=true 时该连线将被移除） */
+  connectionId: string
+  /** 新连线的输出节点 id（缺省沿用原连线的输出节点） */
+  fromNodeId?: string
+  /** 新连线的输出端口 id（缺省沿用原连线的输出端口） */
+  fromPortId?: string
+  /** 新连线的输入节点 id（缺省沿用原连线的输入节点） */
+  toNodeId?: string
+  /** 新连线的输入端口 id（缺省沿用原连线的输入端口） */
+  toPortId?: string
+}
+
+/** 连线改接参数 */
+export interface RewireOptions {
+  /** true=连接转移（移除原连线）；false=连接复制（保留原连线，仅新增） */
+  removeSource: boolean
+  /** 改接项列表（顺序即新连线的建立顺序，保证「按原顺序」转移） */
+  items: RewireItem[]
+}
+
 /**
  * 画布状态管理：加载/保存（防抖自动保存）、节点与连线的增删改查、连接校验。
  *
@@ -395,6 +428,30 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     node.config = {
       ...node.config,
       inputOrder: order.filter((id) => id !== sourceNodeId),
+    }
+    markDirty()
+  }
+
+  /**
+   * 向节点 config.inputOrder 末尾追加来源节点 id（连线改接后的目标端顺序同步）。
+   *
+   * 不 pushHistory：这是 rewireConnections 的配套清理（整个改接操作已在结构变更前
+   * 快照一次），单次撤销即可同时回退「连线 + inputOrder」。已存在的 id 会先从原位置
+   * 移除再统一追加到末尾，保证追加项之间的相对顺序与传入顺序一致且不产生重复条目；
+   * 节点不存在或 ids 为空时不做任何修改（幂等）。
+   *
+   * @param nodeId 目标节点 id
+   * @param ids 追加的来源节点 id 列表（顺序即期望的输入顺序）
+   */
+  function appendInputOrderEntries(nodeId: string, ids: string[]): void {
+    if (ids.length === 0) return
+    const node = data.value.nodes.find((n) => n.id === nodeId)
+    if (!node) return
+    const order = Array.isArray(node.config.inputOrder) ? ([...node.config.inputOrder] as string[]) : []
+    const idSet = new Set(ids)
+    node.config = {
+      ...node.config,
+      inputOrder: [...order.filter((id) => !idSet.has(id)), ...ids],
     }
     markDirty()
   }
@@ -811,6 +868,109 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
   }
 
   /**
+   * 批量改接连线（连接转移 / 连接复制的统一落点，单次撤销快照）。
+   *
+   * 每条改接项基于原连线解析新端点（fromNodeId/fromPortId/toNodeId/toPortId 缺省时
+   * 沿用原连线对应端点）：输入端起点覆盖目标端（保持来源改去向），输出端起点覆盖
+   * 来源端（保持去向改来源）。逐条校验后部分成功：
+   * - 节点级重复：同一来源节点对同一目标节点已存在任意连线（含本批次刚建立的）则忽略；
+   * - 新旧连线端点完全相同：无意义改接，按重复忽略（避免转移时删了再建）；
+   * - 类型不兼容 / 成环：经 canConnectNodes 校验失败，按 classifyConnectFailure 归类忽略。
+   *
+   * 校验通过后一次性应用：移除原连线（仅转移模式）→ 建立新连线 → 同步两侧
+   * config.inputOrder（转移时源端移除条目、目标端按新连线建立顺序追加条目）→
+   * 逐条触发 connect/disconnect 联动（applyConnectionSync 同步导演台素材块）。
+   * 全部条目被忽略时不做任何变更、不压撤销栈。
+   *
+   * @param options 改接参数（removeSource 区分转移/复制；items 顺序即新连线顺序）
+   * @returns 改接结果（成功连线 + 忽略清单）
+   */
+  function rewireConnections(options: RewireOptions): RewireResult {
+    const { removeSource, items } = options
+    const connected: CanvasConnection[] = []
+    const skipped: RewireResult['skipped'] = []
+    const removals: CanvasConnection[] = []
+    /** 本批次已建立连线的「来源→目标」键（同批次内也按节点级去重） */
+    const addedKeys = new Set<string>()
+    for (const item of items) {
+      const original = data.value.connections.find((c) => c.id === item.connectionId)
+      // 原连线已不存在（画布被并发修改等竞态）：静默跳过
+      if (!original) continue
+      const fromNodeId = item.fromNodeId ?? original.fromNodeId
+      const fromPortId = item.fromPortId ?? original.fromPortId
+      const toNodeId = item.toNodeId ?? original.toNodeId
+      const toPortId = item.toPortId ?? original.toPortId
+      // 目标与原连线完全相同（同来源同去向）：无意义的改接，按重复忽略（避免转移时删了再建）
+      if (
+        original.fromNodeId === fromNodeId
+        && original.fromPortId === fromPortId
+        && original.toNodeId === toNodeId
+        && original.toPortId === toPortId
+      ) {
+        skipped.push({ fromNodeId: original.fromNodeId, toNodeId, reason: 'duplicate' })
+        continue
+      }
+      // 节点级重复：同一来源节点对同一目标节点已存在连线（或本批次已建立）则忽略
+      const exists = data.value.connections.some(
+        (c) => c.fromNodeId === fromNodeId && c.toNodeId === toNodeId,
+      ) || addedKeys.has(`${fromNodeId}→${toNodeId}`)
+      if (exists) {
+        skipped.push({ fromNodeId, toNodeId, reason: 'duplicate' })
+        continue
+      }
+      const connection: CanvasConnection = {
+        id: newId(),
+        fromNodeId,
+        fromPortId,
+        toNodeId,
+        toPortId,
+      }
+      // 校验时把本批次已接受的连线一并纳入（防同批次内经新增连线成环的边缘场景）
+      const working = [...data.value.connections, ...connected]
+      if (!canConnectNodes(working, connection.fromNodeId, connection.toNodeId, data.value.nodes, connection.toPortId)) {
+        skipped.push({
+          fromNodeId: connection.fromNodeId,
+          toNodeId: connection.toNodeId,
+          reason: classifyConnectFailure(connection, data.value.nodes),
+        })
+        continue
+      }
+      addedKeys.add(`${connection.fromNodeId}→${connection.toNodeId}`)
+      connected.push(connection)
+      removals.push(original)
+    }
+    if (connected.length === 0) return { connected, skipped }
+    pushHistory()
+    if (removeSource) {
+      const removeIds = new Set(removals.map((c) => c.id))
+      data.value.connections = data.value.connections.filter((c) => !removeIds.has(c.id))
+    }
+    data.value.connections.push(...connected)
+    if (removeSource) {
+      for (const original of removals) {
+        removeInputOrderEntry(original.toNodeId, original.fromNodeId)
+      }
+    }
+    const appendByNode = new Map<string, string[]>()
+    for (const connection of connected) {
+      const list = appendByNode.get(connection.toNodeId) ?? []
+      list.push(connection.fromNodeId)
+      appendByNode.set(connection.toNodeId, list)
+    }
+    for (const [nodeId, ids] of appendByNode) {
+      appendInputOrderEntries(nodeId, ids)
+    }
+    markDirty()
+    for (const original of removeSource ? removals : []) {
+      emitConnectionsChanged({ type: 'disconnect', connection: original })
+    }
+    for (const connection of connected) {
+      emitConnectionsChanged({ type: 'connect', connection })
+    }
+    return { connected, skipped }
+  }
+
+  /**
    * 批量应用新增节点与连线（自动搭画布结果）。
    * 一次性压入撤销快照并置脏保存。
    *
@@ -937,6 +1097,7 @@ export function useCanvasStore(project: string, target: CanvasTarget) {
     removeInputOrderEntry,
     connect,
     disconnect,
+    rewireConnections,
     connectGroupToNode,
     createNodeAndConnect,
     onConnectionsChanged,

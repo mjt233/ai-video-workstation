@@ -33,7 +33,7 @@
       <div
         ref="flowEl"
         class="asset-canvas__flow"
-        :class="{ 'asset-canvas__flow--asset-drag': assetDragOver }"
+        :class="{ 'asset-canvas__flow--asset-drag': assetDragOver, 'asset-canvas__flow--rewiring': rewireDrag.active }"
         @dragover="onCanvasAssetDragover"
         @dragleave="onCanvasAssetDragleave"
         @drop="onCanvasAssetDrop"
@@ -143,6 +143,27 @@
             />
           </template>
         </VueFlow>
+
+        <!-- 连线改接覆盖层（连接转移/连接复制拖拽中）：预览曲线（固定端→鼠标）+ 徽标；均不拦截指针 -->
+        <svg
+          v-if="rewireDrag.active && rewireCurves.length > 0"
+          class="asset-canvas__rewire-line"
+        >
+          <path
+            v-for="(d, index) in rewireCurves"
+            :key="index"
+            :d="d"
+            class="asset-canvas__rewire-curve"
+            :class="{ 'asset-canvas__rewire-curve--copy': rewireDrag.mode === 'copy' }"
+          />
+        </svg>
+        <div
+          v-if="rewireDrag.active"
+          class="asset-canvas__rewire-badge"
+          :style="{ left: `${rewireDrag.mouse.x + 14}px`, top: `${rewireDrag.mouse.y + 14}px` }"
+        >
+          {{ rewireDrag.connectionIds.length }} 条连线 · {{ rewireDrag.mode === 'copy' ? '复制' : '转移' }}
+        </div>
 
         <!-- 多选悬浮工具栏（选中节点数 + 选中分组数 ≥ 2 时在多选框顶部居中；含「创建分组」） -->
         <CanvasSelectionToolbar
@@ -577,6 +598,7 @@ import CanvasGroupConnectMenu from './CanvasGroupConnectMenu.vue'
 import CanvasSelectionToolbar from './CanvasSelectionToolbar.vue'
 import SetAsSceneDialog from './SetAsSceneDialog.vue'
 import { useCanvasFlow } from './composables/useCanvasFlow'
+import { useCanvasRewire } from './composables/useCanvasRewire'
 import { useCanvasSelection } from './composables/useCanvasSelection'
 import { useCanvasMenus } from './composables/useCanvasMenus'
 import { useCanvasRename } from './composables/useCanvasRename'
@@ -1286,6 +1308,21 @@ watch(
   { deep: true, immediate: true },
 )
 
+/** 连线改接（连接转移/连接复制）：Shift+左键拖拽批量转移端点上的连线，Ctrl+左键批量复制 */
+const rewire = useCanvasRewire({
+  store,
+  flowEl,
+  findNode,
+  viewport,
+  showSnackbar,
+  onConnectionsAdded: (connections) => {
+    // flow 在其后创建（函数声明提升），音频来源→生成视频节点联动探测与手动连线一致
+    for (const connection of connections) {
+      flow.probeDirectorAudioDuration(connection.fromNodeId, connection.toNodeId)
+    }
+  },
+})
+
 /** Vue Flow 渲染映射、群组合成节点、持久分组节点与连线交互（含单选联动高亮与运行态高亮的派生集） */
 const flow = useCanvasFlow({
   store,
@@ -1296,6 +1333,10 @@ const flow = useCanvasFlow({
   runningNodeIds,
   groupRect: group.groupRect,
   ctrlHeld: canvasGroups.ctrlHeld,
+  // 仅连接转移（拔出原线）显示虚线样式；连接复制原线保持原样
+  rewiringEdgeIds: computed(() =>
+    rewire.rewireDrag.mode === 'transfer' ? new Set(rewire.rewireDrag.connectionIds) : new Set<string>(),
+  ),
 })
 
 /** 对话框与资产选择器 */
@@ -1378,6 +1419,19 @@ const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage,
 const { autoBuilding, autoBuild } = autobuild
 // 群组组合式导出（顶层解构：模板内自动解包 ref）
 const { groupRect, connectDrag, connectLine, connectMenu, menuItems, hoveredNodeId, onDotMouseDown, createNodeFromMenu } = group
+
+// 连线改接（转移/复制）导出（模板内自动解包 reactive）
+const { rewireDrag } = rewire
+
+/** 改接预览曲线 path 列表（各固定端锚点 → 鼠标位置；贝塞尔控制点水平外扩，与默认连线样式一致） */
+const rewireCurves = computed<string[]>(() => {
+  if (!rewireDrag.active) return []
+  const m = rewireDrag.mouse
+  return rewireDrag.anchorPoints.map((a) => {
+    const dx = Math.max(40, Math.abs(m.x - a.x) / 2)
+    return `M ${a.x},${a.y} C ${a.x + dx},${a.y} ${m.x - dx},${m.y} ${m.x},${m.y}`
+  })
+})
 // 持久分组组合式导出（顶层解构：模板内自动解包 ref）
 const { emptyGroupIds, colorMenu, colorPalette, renamingGroupId, groupRenameInput, createGroupFromSelection, onGroupDragStart, onGroupResizeEnd, onNodeDragFollow, startRenameGroup, commitRenameGroup, cancelRenameGroup, openColorMenu, pickGroupColor } = canvasGroups
 
@@ -1995,6 +2049,64 @@ watch(flowEl, (flow) => {
   pointer-events: none;
   white-space: nowrap;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  user-select: none;
+}
+
+/* 连线改接（连接转移/连接复制）拖拽中：
+   1) 被拔出的连线虚线半透明（class 由 useCanvasFlow 挂到 edge wrapper，仅转移模式进入该集合）； */
+:deep(.vue-flow__edge.canvas-edge--rewiring .vue-flow__edge-path) {
+  stroke-dasharray: 6 4;
+  opacity: 0.45;
+}
+
+/* 2) 端点整体弱高亮 + 可抓取光标（拖拽期间容器挂 --rewiring class）； */
+.asset-canvas__flow--rewiring :deep(.vue-flow__handle) {
+  cursor: crosshair;
+  box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.25);
+}
+
+/* 3) 悬停端点强高亮：可落（绿）/ 不可落（红），class 由 useCanvasRewire 命令式标记； */
+.asset-canvas__flow--rewiring :deep(.vue-flow__handle.canvas-rewire-target--valid) {
+  box-shadow: 0 0 0 5px rgba(46, 125, 50, 0.55);
+}
+
+.asset-canvas__flow--rewiring :deep(.vue-flow__handle.canvas-rewire-target--invalid) {
+  box-shadow: 0 0 0 5px rgba(198, 40, 40, 0.45);
+}
+
+/* 4) 预览曲线（各固定端锚点 → 鼠标）：覆盖在画布之上、不拦截指针；
+      转移为实线主色蓝，复制为虚线主色蓝。 */
+.asset-canvas__rewire-line {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.asset-canvas__rewire-curve {
+  fill: none;
+  stroke: rgb(25, 118, 210);
+  stroke-width: 2;
+}
+
+.asset-canvas__rewire-curve--copy {
+  stroke-dasharray: 6 4;
+}
+
+/* 5) 随鼠标徽标（模式与条数提示，不拦截指针）。 */
+.asset-canvas__rewire-badge {
+  position: absolute;
+  z-index: 31;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(25, 118, 210, 0.92);
+  border-radius: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   user-select: none;
 }
 

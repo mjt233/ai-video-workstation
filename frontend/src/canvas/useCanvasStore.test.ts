@@ -412,6 +412,164 @@ describe('useCanvasStore', () => {
     expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toEqual([a.id])
   })
 
+  // ── 连线改接（连接转移 / 连接复制）──────────────────────
+
+  it('rewireConnections：转移把多条连线按原顺序改接到目标节点，并同步两侧 inputOrder', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const c = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 0)
+    const d = store.addNode('image-generate', 200, 0)
+    store.connect(a.id, b.id)
+    store.connect(c.id, b.id)
+    // 源端 inputOrder 含两个来源；目标端已有其他顺序条目
+    store.updateNode(b.id, { config: { inputOrder: [a.id, c.id] } })
+    store.updateNode(d.id, { config: { inputOrder: ['stale'] } })
+    const result = store.rewireConnections({
+      removeSource: true,
+      items: store.connections.value.map((conn) => ({ connectionId: conn.id, toNodeId: d.id })),
+    })
+    expect(result.skipped).toHaveLength(0)
+    expect(result.connected.map((conn) => conn.fromNodeId)).toEqual([a.id, c.id])
+    // 原连线全部移除，新连线按原顺序建立在 d 上
+    expect(store.connections.value.filter((conn) => conn.toNodeId === b.id)).toHaveLength(0)
+    expect(store.connections.value.filter((conn) => conn.toNodeId === d.id).map((conn) => conn.fromNodeId)).toEqual([a.id, c.id])
+    // 源端 inputOrder 清理，目标端按顺序追加（已有条目保留在前）
+    expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toEqual([])
+    expect(store.nodes.value.find((n) => n.id === d.id)!.config.inputOrder).toEqual(['stale', a.id, c.id])
+  })
+
+  it('rewireConnections：转移为单次撤销，undo 整体回退连线与 inputOrder', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 0)
+    const d = store.addNode('image-generate', 200, 0)
+    store.connect(a.id, b.id)
+    store.updateNode(b.id, { config: { inputOrder: [a.id] } })
+    store.rewireConnections({ removeSource: true, items: [{ connectionId: store.connections.value[0].id, toNodeId: d.id }] })
+    store.undo()
+    expect(store.connections.value).toHaveLength(1)
+    expect(store.connections.value[0]).toMatchObject({ fromNodeId: a.id, toNodeId: b.id })
+    expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toEqual([a.id])
+    expect(store.nodes.value.find((n) => n.id === d.id)!.config.inputOrder).toBeUndefined()
+  })
+
+  it('rewireConnections：复制保留原连线，仅新增连线', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 0)
+    const d = store.addNode('image-generate', 200, 0)
+    store.connect(a.id, b.id)
+    const originalId = store.connections.value[0].id
+    const result = store.rewireConnections({
+      removeSource: false,
+      items: [{ connectionId: originalId, toNodeId: d.id }],
+    })
+    expect(result.skipped).toHaveLength(0)
+    expect(store.connections.value).toHaveLength(2)
+    expect(store.connections.value.some((conn) => conn.id === originalId)).toBe(true)
+    expect(store.connections.value.find((conn) => conn.toNodeId === d.id)).toMatchObject({ fromNodeId: a.id, toPortId: 'in' })
+    // 复制时源端 inputOrder 不清理
+    expect(store.nodes.value.find((n) => n.id === b.id)!.config.inputOrder).toBeUndefined()
+  })
+
+  it('rewireConnections：目标节点已有同一来源的连线时按节点级重复忽略，原连线保留', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 0)
+    const d = store.addNode('image-generate', 200, 0)
+    store.connect(a.id, b.id)
+    store.connect(a.id, d.id)
+    const historyLenBefore = store.historyPast.value.length
+    const dirtyBefore = store.dirty.value
+    const result = store.rewireConnections({
+      removeSource: true,
+      items: [{ connectionId: store.connections.value[0].id, toNodeId: d.id }],
+    })
+    expect(result.connected).toHaveLength(0)
+    expect(result.skipped).toEqual([{ fromNodeId: a.id, toNodeId: d.id, reason: 'duplicate' }])
+    expect(store.connections.value).toHaveLength(2)
+    // 全部被忽略：不压撤销栈、不额外置脏
+    expect(store.historyPast.value.length).toBe(historyLenBefore)
+    expect(store.dirty.value).toBe(dirtyBefore)
+  })
+
+  it('rewireConnections：同一来源在批次内出现两条时只建立一条（节点级去重）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 0)
+    const d = store.addNode('image-generate', 200, 0)
+    store.connect(a.id, b.id)
+    store.connect(a.id, b.id)
+    const result = store.rewireConnections({
+      removeSource: true,
+      items: store.connections.value.map((conn) => ({ connectionId: conn.id, toNodeId: d.id })),
+    })
+    expect(result.connected).toHaveLength(1)
+    expect(result.skipped).toEqual([{ fromNodeId: a.id, toNodeId: d.id, reason: 'duplicate' }])
+    expect(store.connections.value.filter((conn) => conn.toNodeId === d.id)).toHaveLength(1)
+  })
+
+  it('rewireConnections：目标端口类型不兼容时忽略并保留原连线', () => {
+    const store = useCanvasStore('p', TARGET)
+    const t = store.addNode('text', 0, 0)
+    const b = store.addNode('text-ai', 100, 0)
+    const d = store.addNode('image-generate', 200, 0)
+    store.connect(t.id, b.id)
+    const result = store.rewireConnections({
+      removeSource: true,
+      items: [{ connectionId: store.connections.value[0].id, toNodeId: d.id }],
+    })
+    expect(result.skipped[0].reason).toBe('incompatible')
+    expect(store.connections.value).toHaveLength(1)
+  })
+
+  it('rewireConnections：改接后会成环时忽略（reason=cycle）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 0)
+    const vg = store.addNode('video-generate', 200, 0)
+    const v2i = store.addNode('video-frame-extract', 300, 0)
+    const img2 = store.addNode('image-generate', 400, 0)
+    store.connect(a.id, b.id)
+    store.connect(b.id, vg.id)
+    store.connect(vg.id, v2i.id)
+    store.connect(v2i.id, img2.id)
+    // 把 img2 的输入（来自 v2i）转移到 vg：v2i→vg 会经 vg→v2i 成环
+    const result = store.rewireConnections({
+      removeSource: true,
+      items: [{ connectionId: store.connections.value.find((conn) => conn.toNodeId === img2.id)!.id, toNodeId: vg.id }],
+    })
+    expect(result.skipped).toEqual([{ fromNodeId: v2i.id, toNodeId: vg.id, reason: 'cycle' }])
+    expect(store.connections.value.find((conn) => conn.toNodeId === img2.id)).toBeTruthy()
+  })
+
+  it('rewireConnections：改接到原目标节点视为重复忽略（无意义改接）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 0)
+    store.connect(a.id, b.id)
+    const result = store.rewireConnections({
+      removeSource: true,
+      items: [{ connectionId: store.connections.value[0].id, toNodeId: b.id }],
+    })
+    expect(result.skipped).toEqual([{ fromNodeId: a.id, toNodeId: b.id, reason: 'duplicate' }])
+    expect(store.connections.value).toHaveLength(1)
+  })
+
+  it('rewireConnections：转移触发 disconnect+connect 联动事件（导演台同步依赖）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('image-loader', 0, 0)
+    const b = store.addNode('image-generate', 100, 0)
+    const d = store.addNode('image-generate', 200, 0)
+    store.connect(a.id, b.id)
+    const events: { type: 'connect' | 'disconnect' }[] = []
+    store.onConnectionsChanged((e) => events.push(e))
+    events.length = 0
+    store.rewireConnections({ removeSource: true, items: [{ connectionId: store.connections.value[0].id, toNodeId: d.id }] })
+    expect(events.map((e) => e.type)).toEqual(['disconnect', 'connect'])
+  })
+
   // ── 多选群组批量操作 ──────────────────────────────────
 
   it('copyNodes/pasteNodes：多节点复制粘贴重建 id 与组内连线', () => {

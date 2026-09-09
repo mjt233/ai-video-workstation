@@ -43,6 +43,8 @@ export interface UseCanvasFlowOptions {
   groupRect: ComputedRef<GroupRect | null>
   /** Ctrl 键是否按下（持久分组节点穿透类数据源；按下时分组框整体不拦截指针 → Ctrl+拖拽恒为框选） */
   ctrlHeld: Ref<boolean>
+  /** 连线改接（转移/复制）拖拽中被拔出的连线 id 集合（拖拽中这些连线显示虚线样式；缺省空集） */
+  rewiringEdgeIds?: Ref<Set<string>>
 }
 
 /** 分组/节点位置回写补丁 */
@@ -60,6 +62,8 @@ const EDGE_RELATED_INPUT_CLASS = 'canvas-edge--related canvas-edge--input'
 const EDGE_RELATED_OUTPUT_CLASS = 'canvas-edge--related canvas-edge--output'
 /** 运行态高亮连线挂载到 edge wrapper 的 class（主色蓝，复用 canvas-edge--related 描边规则，颜色经 --edge-related-color 提供） */
 const EDGE_RUNNING_RELATED_CLASS = 'canvas-edge--related canvas-edge--running'
+/** 连线改接（转移/复制）拖拽中被拔出的连线 class（虚线半透明提示，样式见 AssetCanvas scoped `:deep` 规则） */
+const EDGE_REWIRING_CLASS = 'canvas-edge--rewiring'
 
 /**
  * 画布流渲染与连线交互组合式。
@@ -69,6 +73,8 @@ const EDGE_RUNNING_RELATED_CLASS = 'canvas-edge--related canvas-edge--running'
  */
 export function useCanvasFlow(options: UseCanvasFlowOptions) {
   const { store, nodeMap, project, selectedEdgeId, selectedNodeIds, runningNodeIds, groupRect, ctrlHeld } = options
+  /** 改接拖拽中被拔出的连线 id 集合（未接线改接组合式时为空集） */
+  const rewiringIds = options.rewiringEdgeIds
 
   /**
    * 单选联动高亮（输入侧）：恰好选中 1 个节点时，收集「指向选中节点」的连线 id
@@ -239,8 +245,8 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   const flowNodeFullList = computed(() => [...flowGroupNodeList.value, ...flowNodeList.value, ...syntheticNodeList.value])
 
   /** Vue Flow 连线列表（type 固定 default；联动高亮时给关联连线挂方向分色 class：
-      运行态 canvas-edge--running（蓝，优先级最高）/ 单选输入侧 canvas-edge--input（绿）/
-      输出侧 canvas-edge--output（橙），Vue Flow 会把 edge.class 合并到 g.vue-flow__edge 上，
+      运行态 canvas-edge--running（蓝，优先级最高）/ 改接拖拽 canvas-edge--rewiring（虚线半透明）/
+      单选输入侧 canvas-edge--input（绿）/ 输出侧 canvas-edge--output（橙），Vue Flow 会把 edge.class 合并到 g.vue-flow__edge 上，
       由 AssetCanvas 的 :deep 规则渲染主题色） */
   const flowEdgeList = computed<FlowEdge[]>(() =>
     store.connections.value.map((c) => ({
@@ -252,11 +258,13 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
       type: 'default',
       class: runningInputEdgeIds.value.has(c.id)
         ? EDGE_RUNNING_RELATED_CLASS
-        : relatedInputEdgeIds.value.has(c.id)
-          ? EDGE_RELATED_INPUT_CLASS
-          : relatedOutputEdgeIds.value.has(c.id)
-            ? EDGE_RELATED_OUTPUT_CLASS
-            : undefined,
+        : rewiringIds?.value.has(c.id)
+          ? EDGE_REWIRING_CLASS
+          : relatedInputEdgeIds.value.has(c.id)
+            ? EDGE_RELATED_INPUT_CLASS
+            : relatedOutputEdgeIds.value.has(c.id)
+              ? EDGE_RELATED_OUTPUT_CLASS
+              : undefined,
     })),
   )
 
@@ -338,28 +346,37 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
     )
   }
 
+  /**
+   * 音频来源 → 生成视频节点的联动探测：连线建立后探测音频真实时长，
+   * 回填导演台素材块（修复占位 2s 截断）。
+   * 手动连线（onConnect）与连线改接（useCanvasRewire 的 onConnectionsAdded）共用。
+   *
+   * @param sourceId 来源（音频输出）节点 id
+   * @param targetId 生成视频节点 id
+   */
+  function probeDirectorAudioDuration(sourceId: string, targetId: string): void {
+    const target = nodeMap.value[targetId]
+    const source = nodeMap.value[sourceId]
+    if (target?.prototypeId !== 'video-generate' || getNodeOutputType(sourceId, store.nodes.value) !== 'audio') return
+    const path = getNodeCurrentAssetPath(source)
+    if (!path) return
+    getAudioInfo(project, path)
+      .then((info) => {
+        if (Number.isFinite(info.duration) && info.duration > 0) {
+          store.updateDirectorAudioClipDuration(targetId, sourceId, info.duration)
+        }
+      })
+      .catch(() => {
+        // 探测失败保留占位时长，不打扰用户
+      })
+  }
+
   /** 连接成功：写入 store（记录端口 id；store 内部再次校验，失败忽略） */
   function onConnect(conn: Connection): void {
     if (!conn.source || !conn.target) return
     const ok = store.connect(conn.source, conn.target, conn.sourceHandle ?? undefined, conn.targetHandle ?? undefined)
     if (!ok) return
-    // 音频来源 → 生成视频节点：连线后探测音频真实时长回填导演台素材块（修复占位 2s 截断）
-    const target = nodeMap.value[conn.target]
-    const source = nodeMap.value[conn.source]
-    if (target?.prototypeId === 'video-generate' && getNodeOutputType(conn.source, store.nodes.value) === 'audio') {
-      const path = getNodeCurrentAssetPath(source)
-      if (path) {
-        getAudioInfo(project, path)
-          .then((info) => {
-            if (Number.isFinite(info.duration) && info.duration > 0) {
-              store.updateDirectorAudioClipDuration(conn.target!, conn.source!, info.duration)
-            }
-          })
-          .catch(() => {
-            // 探测失败保留占位时长，不打扰用户
-          })
-      }
-    }
+    probeDirectorAudioDuration(conn.source, conn.target)
   }
 
   /**
@@ -423,6 +440,7 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
     onNodeResizeEnd,
     isValidConnection,
     onConnect,
+    probeDirectorAudioDuration,
     onEdgesChange,
     edgeMenu,
     onEdgeContextMenu,
