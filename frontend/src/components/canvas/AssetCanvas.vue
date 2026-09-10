@@ -191,9 +191,10 @@
               @context-menu="(e: MouseEvent) => openNodeContextMenu(e, id)"
             />
           </template>
-          <!-- 群组虚线框（多选 ≥2 个节点；拖动整组由 Vue Flow 原生节点拖动承接） -->
+          <!-- 群组虚线框（多选 ≥2 个节点；纯展示，整框 pointer-events: none —— 不允许成为框内元素的遮罩，
+               整体移动选中节点改为拖动任一选中节点/分组标题条） -->
           <template #node-group-frame>
-            <CanvasGroupFrame @context-menu="(e: MouseEvent) => openGroupContextMenu(e)" />
+            <CanvasGroupFrame />
           </template>
           <!-- 群组输出连接点（拖拽成组连接；mousedown 由 useCanvasGroup 承接） -->
           <template #node-group-dot>
@@ -338,7 +339,6 @@
           :save-targets="saveTargetsOf(contextMenuNode)"
           :has-connections="!!contextMenuNode && nodeHasConnections(contextMenu.nodeId)"
           :edge-menu="edgeMenu"
-          :group-menu="groupMenu"
           :group-entity-menu="groupEntityMenu"
           @generate="contextGenerate"
           @history="contextHistory"
@@ -348,8 +348,6 @@
           @copy="contextCopy"
           @delete="contextDelete"
           @disconnect-edge="disconnectEdge"
-          @group-copy="groupCopy"
-          @group-delete="groupDelete"
           @group-entity-rename="groupEntityRename"
           @group-entity-color="groupEntityColor"
           @group-entity-dissolve="groupEntityDissolve"
@@ -1526,8 +1524,9 @@ const canvasGroups = useCanvasGroups({
     getSelectedNodeIds: () => selection.selectedNodeIds.value,
     getSelectedGroupIds: () => selection.selectedGroupIds.value,
     setSelectedGroups: selection.setSelectedGroups,
-    toggleSelectGroup: selection.toggleSelectGroup,
-    clearNodeSelection: selection.clearNodeSelection,
+    setSelectedNodes: selection.setSelectedNodes,
+    selectGroupWithMembers: selection.selectGroupWithMembers,
+    toggleGroupWithMembers: selection.toggleGroupWithMembers,
   },
   showSnackbar,
 })
@@ -1704,7 +1703,7 @@ const { editorPanel, isMultiSelected, selectedNodeIds, selectedGroupIds, onEdgeC
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, previewInputsOf, editorTextInputs, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, selectedEdgeClassId, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
-const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, groupEntityMenu, groupEntityRename, groupEntityColor, groupEntityDissolve, addMenu, addNodeAt } = menus
+const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupEntityMenu, groupEntityRename, groupEntityColor, groupEntityDissolve, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
 // 群组组合式导出（顶层解构：模板内自动解包 ref）
 const { groupRect, connectDrag, connectLine, connectMenu, menuItems, hoveredNodeId, onDotMouseDown, createNodeFromMenu } = group
@@ -2146,13 +2145,6 @@ function onPaneContextMenu(event: MouseEvent): void {
   group.closeConnectMenu()
   const p = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
   menus.openAddMenu(event, Math.round(p.x - 60), Math.round(p.y - 40), flowEl.value)
-}
-
-/** 群组虚线框右键：打开群组菜单（复制/删除整组），不改变当前多选 */
-function openGroupContextMenu(event: MouseEvent): void {
-  flow.closeEdgeMenu()
-  menus.closeNodeMenu()
-  menus.openGroupMenu(event, flowEl.value)
 }
 
 /** 连线右键：记录选中 + 打开连线菜单（同时关闭节点右键菜单） */

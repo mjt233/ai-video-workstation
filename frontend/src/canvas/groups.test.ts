@@ -9,10 +9,13 @@ import {
   asCanvasGroupData,
   boundingRect,
   collectDragFollowSet,
+  collectGroupSelectionUnit,
   defaultGroupName,
   groupRectFromNodes,
   groupsOfNode,
   hexToRgba,
+  isGroupDragGesture,
+  isGroupUnitSelected,
   nodesInGroup,
   rectContains,
   rectsOverlap,
@@ -185,6 +188,86 @@ describe('collectDragFollowSet', () => {
   it('无节点时只返回分组集合', () => {
     const groups = [makeGroup('A', 0, 0, 600, 400), makeGroup('B', 100, 100, 200, 150)]
     expect(collectDragFollowSet(groups, [], 'A')).toEqual({ groupIds: ['A', 'B'], nodeIds: [] })
+  })
+})
+
+describe('collectGroupSelectionUnit / isGroupUnitSelected（单击分组标题条的「分组单元」选中）', () => {
+  /** 嵌套场景：A 完全包含 B，B 内含 n1；n2 只在 A 内；n3 在两者之外 */
+  function nestedScene() {
+    const groups = [makeGroup('A', 0, 0, 600, 400), makeGroup('B', 100, 100, 200, 150)]
+    const nodes = [
+      makeNode('n1', 120, 120, 100, 80),
+      makeNode('n2', 400, 40, 100, 80),
+      makeNode('n3', 800, 800, 100, 80),
+    ]
+    return { groups, nodes }
+  }
+
+  it('collectGroupSelectionUnit：分组自身 + 与其重叠的全部节点', () => {
+    const group = makeGroup('g1', 0, 0, 300, 300)
+    const nodes = [makeNode('inside', 10, 10), makeNode('partial', 280, 280), makeNode('outside', 500, 500)]
+    expect(collectGroupSelectionUnit(group, nodes)).toEqual({ groupId: 'g1', nodeIds: ['inside', 'partial'] })
+  })
+
+  it('collectGroupSelectionUnit：相切（边贴边）节点不算成员', () => {
+    const group = makeGroup('g1', 0, 0, 300, 300)
+    const nodes = [makeNode('touching', 300, 0, 100, 100)]
+    expect(collectGroupSelectionUnit(group, nodes).nodeIds).toEqual([])
+  })
+
+  it('collectGroupSelectionUnit：空分组只返回分组自身', () => {
+    expect(collectGroupSelectionUnit(makeGroup('g1', 0, 0, 300, 300), [])).toEqual({ groupId: 'g1', nodeIds: [] })
+  })
+
+  it('collectGroupSelectionUnit：嵌套子分组内的节点一并命中，子分组框不进入结果', () => {
+    const { groups, nodes } = nestedScene()
+    const outer = groups[0]
+    expect(collectGroupSelectionUnit(outer, nodes).nodeIds.sort()).toEqual(['n1', 'n2'])
+  })
+
+  it('collectGroupSelectionUnit：选中内层分组只带走内层节点', () => {
+    const { groups, nodes } = nestedScene()
+    const inner = groups[1]
+    expect(collectGroupSelectionUnit(inner, nodes).nodeIds).toEqual(['n1'])
+  })
+
+  it('isGroupUnitSelected：分组与全部成员节点均选中为真', () => {
+    const group = makeGroup('g1', 0, 0, 300, 300)
+    const nodes = [makeNode('n1', 10, 10), makeNode('n2', 100, 100)]
+    expect(isGroupUnitSelected(group, nodes, ['g1'], ['n1', 'n2'])).toBe(true)
+  })
+
+  it('isGroupUnitSelected：缺一个成员节点为假（可继续整组增选）', () => {
+    const group = makeGroup('g1', 0, 0, 300, 300)
+    const nodes = [makeNode('n1', 10, 10), makeNode('n2', 100, 100)]
+    expect(isGroupUnitSelected(group, nodes, ['g1'], ['n1'])).toBe(false)
+  })
+
+  it('isGroupUnitSelected：分组不在选中集为假（即便节点全选中）', () => {
+    const group = makeGroup('g1', 0, 0, 300, 300)
+    const nodes = [makeNode('n1', 10, 10)]
+    expect(isGroupUnitSelected(group, nodes, [], ['n1'])).toBe(false)
+  })
+
+  it('isGroupUnitSelected：空分组只需选中分组本身', () => {
+    const group = makeGroup('g1', 0, 0, 300, 300)
+    expect(isGroupUnitSelected(group, [], ['g1'], [])).toBe(true)
+    expect(isGroupUnitSelected(group, [], [], [])).toBe(false)
+  })
+})
+
+describe('isGroupDragGesture（Ctrl + 标题条手势判定）', () => {
+  it('无 Ctrl：一律进入常规拖动手势', () => {
+    expect(isGroupDragGesture(false, false)).toBe(true)
+    expect(isGroupDragGesture(false, true)).toBe(true)
+  })
+
+  it('Ctrl + 指针落在分组标题条/拖动条上：进入「Ctrl 单击」手势（不移动分组）', () => {
+    expect(isGroupDragGesture(true, true)).toBe(true)
+  })
+
+  it('Ctrl + 指针不在分组 chrome 上（框选起点）：不进入分组手势，交给 Vue Flow 框选', () => {
+    expect(isGroupDragGesture(true, false)).toBe(false)
   })
 })
 

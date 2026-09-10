@@ -139,6 +139,73 @@ export function groupsOfNode(groups: CanvasGroupData[], node: RectLike): CanvasG
 }
 
 /**
+ * 「分组单元选中」结果：分组本身 + 与其矩形重叠的节点。
+ *
+ * 语义：单击分组标题条时把分组视为一个整体选中——分组框与「组内全部节点」一起进入选中集，
+ * 从而支持复制 / 粘贴 / 删除整组（成员判定与画布一致：几何重叠面积 > 0，相切不算）。
+ */
+export interface GroupSelectionUnit {
+  /** 被选中的分组 id */
+  groupId: string
+  /** 随分组一起选中的节点 id 列表（与分组矩形重叠的全部节点，顺序与入参节点列表一致） */
+  nodeIds: string[]
+}
+
+/**
+ * 收集「分组单元」：分组自身 + 与其矩形重叠的全部节点。
+ *
+ * 成员判定即 `nodesInGroup`（几何重叠面积 > 0），故嵌套子分组**内部的节点**同样命中
+ * （它们与分组矩形重叠），而**子分组框本身不在结果中**——分组框不参与节点选中集。
+ *
+ * @param group 分组矩形（`CanvasGroupData` 满足该结构）
+ * @param nodes 候选节点列表（画布真实节点）
+ * @returns 分组单元（分组 id + 成员节点 id 列表；无成员时 nodeIds 为空数组）
+ */
+export function collectGroupSelectionUnit(group: RectLike & { id: string }, nodes: CanvasNodeData[]): GroupSelectionUnit {
+  return { groupId: group.id, nodeIds: nodesInGroup(group, nodes).map((n) => n.id) }
+}
+
+/**
+ * 判断某分组是否处于「分组单元选中」态：分组在选中分组集内，且其**全部成员节点**都在选中节点集内。
+ *
+ * 用途：`Ctrl` 单击标题条时判定「整组减选」（已整体选中 → 摘除）还是「整组增选」。
+ *
+ * @param group 分组矩形（`CanvasGroupData` 满足该结构）
+ * @param nodes 画布真实节点列表
+ * @param selectedGroupIds 当前选中分组 id 列表
+ * @param selectedNodeIds 当前选中节点 id 列表
+ * @returns 分组与其全部成员节点均已选中返回 true；分组未选中返回 false
+ */
+export function isGroupUnitSelected(
+  group: RectLike & { id: string },
+  nodes: CanvasNodeData[],
+  selectedGroupIds: readonly string[],
+  selectedNodeIds: readonly string[],
+): boolean {
+  if (!selectedGroupIds.includes(group.id)) return false
+  const selected = new Set(selectedNodeIds)
+  return nodesInGroup(group, nodes).every((n) => selected.has(n.id))
+}
+
+/**
+ * 判断按下 Ctrl/Cmd + 分组标题条 / 四边拖动条时该启动哪种手势。
+ *
+ * 背景（见 docs/canvas/interactions.md「持久分组」实现约束 T4）：按住 Ctrl 时分组节点整体
+ * 穿透指针事件（`canvas-group-node--passthrough`：节点 wrapper `pointer-events: none !important`，
+ * 仅标题条 / 四边拖动条 `auto`），用以保证「Ctrl + 拖拽 = 框选」零例外。若标题条上的 Ctrl 按下
+ * 一律忽略，则「Ctrl + 单击标题条」（分组单元整组增选 / 减选）永远无法触发。故按**指针落点**区分：
+ *
+ * @param ctrlKey 是否按下 Ctrl / Cmd（分组穿透状态由它决定）
+ * @param onGroupChrome 指针是否**直接按下在标题条 / 四边拖动条**上（`event.target` 命中分组 chrome）。
+ *   注意：Ctrl 穿透下「框选起点」的 `event.target` 是 Vue Flow pane，只有直接在标题条上按下才命中 chrome
+ * @returns true → 「Ctrl 单击」手势：不移动分组，位移超过 GROUP_DRAG_MIN_PX 时视作框选（不做任何事，
+ *   由 Vue Flow 框选接管）；false → 常规拖动手势（位移超阈值移动分组）
+ */
+export function isGroupDragGesture(ctrlKey: boolean, onGroupChrome: boolean): boolean {
+  return !ctrlKey || onGroupChrome
+}
+
+/**
  * 计算拖动某个分组时的「跟随集」（规则 R2）：
  * 1. 从被拖分组出发，递归收集**被当前集合中任一矩形完全包含**的其他分组
  *    （嵌套的子分组整体跟随，避免出现「被掏空的空框」）；收敛到不再增长为止；

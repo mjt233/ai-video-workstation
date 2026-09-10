@@ -2,6 +2,10 @@
  * 持久分组交互组合式：创建 / 拖动（R2 级联跟随）/ 缩放回写 / 重命名 / 改色 / 解散 /
  * 框选完全包含判定 / Ctrl 穿透状态 / 多选拖动时选中分组跟随。
  *
+ * 单击标题条 = 选中「分组单元」：分组与其**全部组内节点**一起进入选中集
+ * （`selection.selectGroupWithMembers`），使复制 / 粘贴 / 删除按整组语义工作；
+ * 写入发生在 mouseup，不影响标题条 `@dblclick` 进入内联重命名。
+ *
  * 关键实现约束（见 docs/canvas/interactions.md 与 Vue Flow 源码核实结论）：
  * - 分组节点 `selectable: false`（T1）：Vue Flow 框选**永远不会**选中分组，
  *   因此「完全框选选中分组」必须由本组合式在 `@selection-end` 自行判定
@@ -24,6 +28,8 @@ import {
   GROUP_PALETTE,
   collectDragFollowSet,
   groupRectFromNodes,
+  isGroupDragGesture,
+  nodesInGroup,
   rectContains,
   rectsOverlap,
   type RectLike,
@@ -56,12 +62,14 @@ export interface UseCanvasGroupsOptions {
     getSelectedNodeIds: () => string[]
     /** 读取当前选中分组 id 列表 */
     getSelectedGroupIds: () => string[]
-    /** 绝对写入分组选中集 */
+    /** 绝对写入分组选中集（框选完全包含判定） */
     setSelectedGroups: (groupIds: string[]) => void
-    /** 增/减选单个分组（Ctrl 单击语义） */
-    toggleSelectGroup: (groupId: string) => void
-    /** 清空节点选中（单击分组标题条时单选分组） */
-    clearNodeSelection: () => void
+    /** 绝对写入节点选中集（解散分组后清理成员节点选中） */
+    setSelectedNodes: (nodeIds: string[]) => void
+    /** 单击分组标题条：选中「分组单元」（分组 + 全部组内节点） */
+    selectGroupWithMembers: (groupId: string) => void
+    /** Ctrl 单击分组标题条：整组增选 / 减选 */
+    toggleGroupWithMembers: (groupId: string) => void
   }
   /** 操作反馈提示（snackbar） */
   showSnackbar: ShowSnackbar
@@ -76,6 +84,12 @@ interface GroupDragState {
   startClientY: number
   /** 是否已超过点击判定阈值（false 时 mouseup 视为「点击选中」） */
   moved: boolean
+  /**
+   * 「Ctrl 单击」手势（`Ctrl` + 直接在标题条 / 四边拖动条上按下）：
+   * 不移动分组——位移 ≤ 阈值 → 整组增选 / 减选；位移 > 阈值 → 视作框选，不做任何事
+   * （与「Ctrl + 拖拽 = 框选」一致）。见 `groups.ts: isGroupDragGesture`。
+   */
+  ctrlClickOnly: boolean
   /** 跟随平移的分组 id（含根分组与被完全包含的子分组） */
   followGroupIds: string[]
   /** 跟随平移的节点 id（与跟随分组重叠的节点） */
@@ -213,15 +227,23 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
 
   /**
    * 分组标题条 / 四边按下：启动自定义拖动。
-   * 按住 Ctrl（或 Cmd）时直接返回——此时分组节点已整体穿透指针事件，不会走到这里；
-   * 双重判定用于「先按下再按 Ctrl」的极端时序。
+   *
+   * Ctrl（Cmd）按下时**不能**直接返回：穿透（T4）只让节点 wrapper 穿透，标题条 / 四边拖动条
+   * 仍 `pointer-events: auto`，用户在按住 Ctrl 的状态下直接点在标题条上时事件照样落到这里。
+   * 此时按 `isGroupDragGesture` 进入「Ctrl 单击」手势：位移 ≤ 阈值 → 整组增选 / 减选；
+   * 位移 > 阈值 → 什么都不做（等同框选，与「Ctrl + 拖拽 = 框选」一致，不移动分组）；
+   * 而 Ctrl + 在画布空白/节点上拖拽时 `event.target` 是 pane/节点，永远不会进入本函数 ⇒ 框选不受影响。
    *
    * @param groupId 被拖动的分组 id
    * @param event 鼠标按下事件
    */
   function onGroupDragStart(groupId: string, event: MouseEvent): void {
     if (event.button !== 0) return
-    if (ctrlHeld.value || event.ctrlKey || event.metaKey) return
+    const ctrlKey = ctrlHeld.value || event.ctrlKey || event.metaKey
+    // 指针是否直接落在分组 chrome（标题条 / 四边拖动条）上：Ctrl 穿透下框选起点的 target 是 pane
+    const onGroupChrome = event.target instanceof Element
+      && (event.target.closest('.canvas-group__title') !== null || event.target.closest('.canvas-group__edge') !== null)
+    if (!isGroupDragGesture(ctrlKey, onGroupChrome)) return
     const group = store.groups.value.find((g) => g.id === groupId)
     if (!group) return
     // 兜底清理上一次手势遗留的 click 拦截器
@@ -234,6 +256,7 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
       startClientX: event.clientX,
       startClientY: event.clientY,
       moved: false,
+      ctrlClickOnly: ctrlKey,
       followGroupIds: follow.groupIds,
       followNodeIds: follow.nodeIds,
       originGroups: follow.groupIds
@@ -266,6 +289,7 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
 
   /**
    * 拖动中：超过点击阈值后，命令式移动跟随分组与跟随节点（不写 store）。
+   * 「Ctrl 单击」手势只判定位移阈值，不移动任何实体（位移超阈值即视作框选）。
    *
    * @param event 鼠标事件
    */
@@ -277,6 +301,8 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
       if (distance < GROUP_DRAG_MIN_PX) return
       state.moved = true
     }
+    // 「Ctrl 单击」手势：只记录是否超阈值（mouseup 据此判定框选），不移动任何实体
+    if (state.ctrlClickOnly) return
     const { dx, dy } = dragDelta(event, state)
     for (const g of state.originGroups) {
       updateNodePosition(g.id, { x: g.x + dx, y: g.y + dy })
@@ -287,8 +313,16 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
   }
 
   /**
-   * 拖动结束：位移未超过阈值 → 视为点击（选中该分组 / Ctrl 增选）；
+   * 拖动结束：位移未超过阈值 → 视为点击（选中「分组单元」/ Ctrl 整组增选）；
    * 否则一次性回写 store（分组 + 跟随节点，单次撤销）。
+   *
+   * 单击语义（分组单元）：分组与其**全部组内节点**一起进入选中集，从而支持
+   * 复制 / 粘贴 / 删除整组（见 useCanvasSelection.selectGroupWithMembers）。
+   * 该写入发生在 mouseup，不影响标题条 `@dblclick` 进入内联重命名
+   * （双击时两次 mouseup 均写入同一选中集，结果不变）。
+   *
+   * 「Ctrl 单击」手势：位移 ≤ 阈值 → 整组增选 / 减选；位移 > 阈值 → 不做任何事
+   * （视作框选，与「Ctrl + 拖拽 = 框选」一致）。
    *
    * @param event 鼠标事件
    */
@@ -300,14 +334,14 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
     window.removeEventListener('mouseup', onGroupDragEnd)
 
     if (!state.moved) {
-      if (event.ctrlKey || event.metaKey) {
-        selection.toggleSelectGroup(state.groupId)
+      if (state.ctrlClickOnly || event.ctrlKey || event.metaKey) {
+        selection.toggleGroupWithMembers(state.groupId)
       } else {
-        selection.clearNodeSelection()
-        selection.setSelectedGroups([state.groupId])
+        selection.selectGroupWithMembers(state.groupId)
       }
       return
     }
+    if (state.ctrlClickOnly) return
 
     // 拖动结束浏览器会对同一手势补发一次 click，若释放点落在画布空白处会命中 pane 并清空选中：
     // 安装一次性捕获阶段拦截器吞掉该合成 click（与 useCanvasGroup 输出点拖拽同一手法）
@@ -523,20 +557,26 @@ export function useCanvasGroups(options: UseCanvasGroupsOptions) {
   /**
    * 解散分组：仅删除分组框，组内节点保留（删除类操作，弹窗确认）。
    *
+   * 确认文案注明组内节点数量与「保留」语义（与「分组单元选中 + Delete」的**删除整组**区分开）；
+   * 解散后同步清空选中：该分组退出分组选中集，其成员节点退出节点选中集，
+   * 避免留下「已不存在的分组单元」的选中态。
+   *
    * @param groupId 分组 id
    */
   async function dissolveGroup(groupId: string): Promise<void> {
     const group = store.groups.value.find((g) => g.id === groupId)
     if (!group) return
+    const memberIds = new Set(nodesInGroup(group, store.nodes.value).map((n) => n.id))
     const ok = await confirm({
       title: '解散分组',
-      content: `确定解散分组「${group.name}」？组内节点将保留。`,
+      content: `确定解散分组「${group.name}」？组内 ${memberIds.size} 个节点将保留，不会被删除。`,
       confirmText: '解散',
       confirmColor: 'error',
     })
     if (!ok) return
     store.removeGroups([groupId])
     selection.setSelectedGroups(selection.getSelectedGroupIds().filter((id) => id !== groupId))
+    selection.setSelectedNodes(selection.getSelectedNodeIds().filter((id) => !memberIds.has(id)))
   }
 
   /** 重置全部分组交互状态（切换画布目标 / 组件卸载时调用） */

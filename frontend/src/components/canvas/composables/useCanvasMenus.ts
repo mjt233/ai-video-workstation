@@ -202,45 +202,6 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     if (id) void selection.deleteNode(id)
   }
 
-  // ── 群组右键菜单（多选虚线框，复制/删除整组）─────────────
-
-  /** 群组右键菜单状态（x/y 相对画布容器；count 为选中节点数，groupCount 为选中分组数） */
-  const groupMenu = reactive({ show: false, x: 0, y: 0, count: 0, groupCount: 0 })
-
-  /**
-   * 打开群组右键菜单：不改变当前多选状态。
-   *
-   * @param event 鼠标右键事件
-   * @param flowEl 画布容器 DOM（定位基准）
-   */
-  function openGroupMenu(event: MouseEvent, flowEl: HTMLElement | null): void {
-    const ids = selection.getSelectedNodeIds()
-    const groupIds = selection.getSelectedGroupIds()
-    if (ids.length + groupIds.length < 2) return
-    event.preventDefault()
-    event.stopPropagation()
-    const rect = flowEl?.getBoundingClientRect()
-    groupMenu.x = Math.round(event.clientX - (rect?.left ?? 0))
-    groupMenu.y = Math.round(event.clientY - (rect?.top ?? 0))
-    groupMenu.count = ids.length
-    groupMenu.groupCount = groupIds.length
-    groupMenu.show = true
-  }
-
-  /** 菜单：复制整组（选中节点 + 选中分组） */
-  function groupCopy(): void {
-    const ids = selection.getSelectedNodeIds()
-    const groupIds = selection.getSelectedGroupIds()
-    groupMenu.show = false
-    if (ids.length + groupIds.length > 0) store.copyNodes(ids, groupIds)
-  }
-
-  /** 菜单：删除整组（弹窗确认一次；含分组时同时解散分组） */
-  function groupDelete(): void {
-    groupMenu.show = false
-    void selection.deleteSelected()
-  }
-
   // ── 分组实体右键菜单（右键分组框：重命名 / 更改颜色 / 解散分组）──
 
   /** 分组实体右键菜单状态（x/y 相对画布容器；groupId 为对应分组） */
@@ -314,11 +275,10 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     addMenu.show = false
   }
 
-  /** 关闭全部菜单（节点/连线右键菜单 + 群组菜单 + 分组实体菜单 + 添加节点菜单） */
+  /** 关闭全部菜单（节点/连线右键菜单 + 分组实体菜单 + 添加节点菜单） */
   function closeAll(): void {
     contextMenu.show = false
     addMenu.show = false
-    groupMenu.show = false
     groupEntityMenu.show = false
   }
 
@@ -350,10 +310,6 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     contextRename,
     contextCopy,
     contextDelete,
-    groupMenu,
-    openGroupMenu,
-    groupCopy,
-    groupDelete,
     groupEntityMenu,
     openGroupEntityMenu,
     groupEntityRename,

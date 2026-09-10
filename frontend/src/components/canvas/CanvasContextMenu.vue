@@ -131,42 +131,6 @@
     </div>
   </div>
 
-  <!-- 群组右键菜单（复制/删除整组） -->
-  <div
-    v-if="groupMenu.show"
-    class="canvas-context-menu"
-    :style="{ left: `${groupMenu.x}px`, top: `${groupMenu.y}px` }"
-  >
-    <div class="canvas-context-menu__title">
-      <span>已选 {{ groupMenu.count }} 个节点</span>
-      <span v-if="groupMenu.groupCount > 0">、{{ groupMenu.groupCount }} 个分组</span>
-    </div>
-    <div
-      class="canvas-context-menu__item"
-      @click="emit('group-copy')"
-    >
-      <v-icon
-        size="small"
-        class="mr-2"
-      >
-        mdi-content-copy
-      </v-icon>
-      复制
-    </div>
-    <div
-      class="canvas-context-menu__item canvas-context-menu__item--danger"
-      @click="emit('group-delete')"
-    >
-      <v-icon
-        size="small"
-        class="mr-2"
-      >
-        mdi-delete-outline
-      </v-icon>
-      删除
-    </div>
-  </div>
-
   <!-- 分组实体右键菜单（右键分组框：重命名 / 更改颜色 / 解散分组） -->
   <div
     v-if="groupEntityMenu.show"
@@ -236,8 +200,6 @@ defineProps<{
   hasConnections: boolean
   /** 连线右键菜单状态（x/y 相对画布容器） */
   edgeMenu: { show: boolean; x: number; y: number }
-  /** 群组右键菜单状态（x/y 相对画布容器；count 为选中节点数，groupCount 为选中分组数） */
-  groupMenu: { show: boolean; x: number; y: number; count: number; groupCount: number }
   /** 分组实体右键菜单状态（x/y 相对画布容器；groupId 为对应分组） */
   groupEntityMenu: { show: boolean; x: number; y: number; groupId: string }
 }>()
@@ -259,10 +221,6 @@ const emit = defineEmits<{
   (e: 'delete'): void
   /** 断开选中连线 */
   (e: 'disconnect-edge'): void
-  /** 复制整组 */
-  (e: 'group-copy'): void
-  /** 删除整组 */
-  (e: 'group-delete'): void
   /** 重命名分组（进入标题内联编辑） */
   (e: 'group-entity-rename'): void
   /** 更改分组颜色（打开预设色板） */

@@ -215,9 +215,15 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
 
   /**
    * 群组合成节点（多选 ≥2 时追加，不入 store）：
-   * - __group-frame：虚线框（置于节点下层 zIndex -1，拖动框体经 Vue Flow 原生拖动整体移动选中节点）；
+   * - __group-frame：多选范围虚线框（**纯展示**，整框不拦截指针）；
    * - __group-dot：右侧输出连接点（zIndex 2000，位于全部节点之上，mousedown 由 useCanvasGroup 承接）。
    * 两者均 selectable/connectable/focusable=false，不参与选中/连线/框选。
+   *
+   * 虚线框 `zIndex: 1`（高于真实节点 0、高于持久分组节点 -2）：仅影响**绘制层级**，
+   * 让虚线边框在选中内容之上始终可见（不会被节点盖住）；**不参与命中判定**
+   * （`style.pointerEvents: 'none'` 覆盖 Vue Flow 内联的 `pointer-events: all`），
+   * 故不会遮挡框内任何元素（持久分组标题条、节点、连线、Ctrl 框选）——
+   * 详见 docs/canvas/interactions.md 实现约束表 T8。
    */
   const syntheticNodeList = computed(() => {
     const rect = groupRect.value
@@ -234,7 +240,10 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
         selectable: false,
         connectable: false,
         focusable: false,
-        zIndex: -1,
+        zIndex: 1,
+        // 关键：Vue Flow 会为节点内联 `pointer-events: all`，压在框内元素之上（如持久分组标题条）
+        // → 必须整体设为 none，命中判定完全交给框内真实元素与 pane（虚线框只作范围提示）
+        style: { pointerEvents: 'none' as const },
       },
       {
         id: GROUP_DOT_ID,
