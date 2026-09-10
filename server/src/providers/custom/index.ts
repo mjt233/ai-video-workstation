@@ -7,11 +7,14 @@
  * - 工作流配置（workflows）：名称 / 类型（多选）/ 是否异步 / 是否可取消 / 三段代码
  *   （调用发起、结果提取、取消调用）。
  *
+ * 中断：调用由后台协程统一驱动（execute 立即返回本地任务 id），同步工作流一律可中断
+ * （abort 在途请求），详见 client.ts 与 docs/plans/custom-provider.md「任务中断」。
+ *
  * 配置支持导入/导出（由前端实现 JSON 文件导出与回填）。
  */
 import { registerProvider } from '../registry.js';
 import type { ProviderDefinition, ProviderWorkflowEntry, ResolvedProviderConfig } from '../types.js';
-import { createCustomProviderClient, DEFAULT_CUSTOM_TIMEOUT_SECONDS } from './client.js';
+import { createCustomProviderClient, DEFAULT_CUSTOM_POLL_INTERVAL_SECONDS, DEFAULT_CUSTOM_TIMEOUT_SECONDS } from './client.js';
 import { buildWorkflowCallContext, compileCustomCodeModule } from './runtime.js';
 import { parseCustomWorkflows, type CustomWorkflowEntry } from './types.js';
 
@@ -117,7 +120,10 @@ async function listCustomWorkflows(config: ResolvedProviderConfig): Promise<Prov
         key: CUSTOM_PROVIDER_ID + ':' + e.name + ':' + type,
         name: e.name,
         type,
-        description: '自定义工作流（' + (e.async ? '异步' : '同步') + (e.cancelable ? '，可取消' : '') + '）',
+        description: '自定义工作流（' + (e.async ? '异步' : '同步')
+          + '，可中断'
+          + (e.cancelCode.trim() ? '，已配置取消调用' : '')
+          + '）',
       });
     }
   }
@@ -156,6 +162,14 @@ const definition: ProviderDefinition = {
       required: false,
       defaultValue: DEFAULT_CUSTOM_TIMEOUT_SECONDS,
       description: '异步工作流：结果提取连续报错或总耗时超过该时长即判定失败',
+    },
+    {
+      key: 'pollInterval',
+      label: '异步轮询间隔（秒）',
+      type: 'number',
+      required: false,
+      defaultValue: DEFAULT_CUSTOM_POLL_INTERVAL_SECONDS,
+      description: '异步工作流执行「结果提取」的间隔（默认 2 秒，与任务引擎轮询节奏一致）',
     },
     {
       key: 'commonCode',

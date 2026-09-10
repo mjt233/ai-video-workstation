@@ -96,6 +96,12 @@ export interface WorkflowCallContext {
    * 未注入时为 undefined。
    */
   readFileAsBase64Object?(relPath: string): Promise<{ mimeType: string; data: string }>;
+  /**
+   * 任务级中止信号：用户中断任务时触发，`ctx.request` 发起的在途请求会被立即中止
+   * 并抛「用户中断」。用户代码若自行调用 `fetch`，可把它透传给
+   * `fetch(url, { signal: ctx.signal })` 以获得同样的即时中止能力（未注入时为 undefined）。
+   */
+  signal?: AbortSignal;
   /** 本次调用的工作流类型（系统支持的类型之一）；测试连接等非工作流场景不存在 */
   workflowType?: WorkflowTypeId;
   /** 用户配置字段值（按声明类型转换为原生值；未填写时用声明默认值） */
@@ -304,11 +310,15 @@ async function coerceFormData(value: object): Promise<FormData> {
  *
  * @param conf 请求配置
  * @param defaultTimeoutMs 请求默认超时（毫秒）
+ * @param externalSignal 任务级中止信号（可选）：触发时立即中止在途请求并抛「用户中断」，
+ *   与请求自身超时（controller.abort）区分开——超时抛「http 请求失败（…超时…）」
  * @returns axios 风格响应对象
+ * @throws Error 配置非法 / 请求失败（含超时）/ 用户中断（externalSignal 触发）
  */
 export async function performCustomRequest(
   conf: WorkflowCallRequestConfig,
   defaultTimeoutMs?: number,
+  externalSignal?: AbortSignal,
 ): Promise<WorkflowCallResult> {
   if (!conf || typeof conf !== 'object' || typeof conf.url !== 'string' || !conf.url.trim()) {
     throw new Error('http 请求配置缺少 url 字段');
@@ -345,6 +355,11 @@ export async function performCustomRequest(
     ? conf.timeout
     : (defaultTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
   const controller = new AbortController();
+  // 任务级中止（用户中断）：与超时控制器联动，任一触发都中止在途请求。
+  // 已中止时直接抛「用户中断」，避免取消后仍发起新请求（如结果提取/取消代码的请求）
+  const onExternalAbort = (): void => controller.abort();
+  if (externalSignal?.aborted) throw new Error('用户中断');
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { method, headers, body, signal: controller.signal });
@@ -364,10 +379,13 @@ export async function performCustomRequest(
     });
     return { data, status: res.status, headers: responseHeaders };
   } catch (e) {
+    // 用户中断优先于超时/网络错误：让上层把任务收敛为「用户中断」而非失败
+    if (externalSignal?.aborted) throw new Error('用户中断');
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error('http 请求失败 (' + method + ' ' + url + ', 超时 ' + timeoutMs + 'ms): ' + msg);
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -393,6 +411,14 @@ export interface WorkflowCallContextDeps {
   userConfig?: Record<string, boolean | number | string>;
   /** 请求默认超时（毫秒，可选） */
   requestTimeoutMs?: number;
+  /**
+   * 任务级中止信号取值器（可选，注入 ctx.signal 并约束 ctx.request）。
+   *
+   * 用「取值器」而非固定信号：任务被取消后仍要执行【取消调用】代码，
+   * 该代码自己发起的取消请求不能被同一个已中止的信号连带阻断，
+   * 因此由调用方在每次请求前判定当前是否应施加中止信号。
+   */
+  getAbortSignal?: () => AbortSignal | undefined;
 }
 
 /**
@@ -417,8 +443,17 @@ export function buildWorkflowCallContext(deps: WorkflowCallContextDeps): Workflo
     readFileAsBase64Object: deps.readFileAsBase64Object,
     workflowType: deps.workflowType,
     userConfig: deps.userConfig ?? {},
-    request: (conf: WorkflowCallRequestConfig) => performCustomRequest(conf, requestTimeoutMs),
+    // 每次请求现取中止信号：取消后【取消调用】代码的请求不再被已中止的信号阻断
+    request: (conf: WorkflowCallRequestConfig) =>
+      performCustomRequest(conf, requestTimeoutMs, deps.getAbortSignal?.()),
   };
+  // 供用户代码自行 fetch 时协作中止：**动态取值**（不在构建时快照），
+  // 取消后返回 undefined，使【取消调用】代码把 ctx.signal 透传给 fetch 时不会被已中止的信号阻断
+  Object.defineProperty(ctx, 'signal', {
+    get: () => deps.getAbortSignal?.(),
+    enumerable: true,
+    configurable: true,
+  });
   return ctx;
 }
 

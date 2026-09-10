@@ -43,14 +43,30 @@ describe('syncCustomInstance', () => {
     expect(t2i).toBeDefined();
     expect(t2i?.provider).toBe('custom');
     expect(t2i?.providerInstanceId).toBe(INSTANCE_ID);
-    expect(t2i?.capabilities?.cancelable).toBe(false);
+    // 所有自定义工作流一律可中断（本地中止在途调用），并声明 deferredCancel 兜底
+    expect(t2i?.capabilities?.cancelable).toBe(true);
+    expect(t2i?.capabilities?.deferredCancel).toBe(true);
     expect(getImpl('image-edit', 'custom-wf-a-' + INSTANCE_ID)).toBeDefined();
   });
 
-  it('cancelable 能力按条目透传', async () => {
-    await syncCustomInstance(makeInstance([entry('wf-c', ['text-to-image'], { cancelable: true, cancelCode: 'export default async function() {}' })]));
-    const impl = getImpl('text-to-image', 'custom-wf-c-' + INSTANCE_ID);
-    expect(impl?.capabilities?.cancelable).toBe(true);
+  it('中断能力：同步/异步、是否勾选「支持取消」都一律可中断', async () => {
+    await syncCustomInstance(makeInstance([
+      entry('wf-sync-plain', ['text-to-image'], { async: false, cancelable: false }),
+      entry('wf-sync-cancel', ['text-to-image'], { async: false, cancelable: true, cancelCode: 'export default async function() {}' }),
+      entry('wf-async-cancel', ['text-to-image'], { async: true, cancelable: true, cancelCode: 'export default async function() {}' }),
+      // 异步 + 未勾选：仍可中断（本地中止；远端任务不被取消，因未配置取消代码）
+      entry('wf-async-plain', ['text-to-image'], { async: true, cancelable: false }),
+    ]));
+    for (const name of ['wf-sync-plain', 'wf-sync-cancel', 'wf-async-cancel', 'wf-async-plain']) {
+      const impl = getImpl('text-to-image', 'custom-' + name + '-' + INSTANCE_ID);
+      expect(impl?.capabilities?.cancelable).toBe(true);
+      expect(impl?.capabilities?.deferredCancel).toBe(true);
+    }
+    // 描述文案标注是否已配置远端取消调用
+    const withCancel = getImpl('text-to-image', 'custom-wf-async-cancel-' + INSTANCE_ID);
+    expect(withCancel?.description).toContain('已配置取消调用');
+    const withoutCancel = getImpl('text-to-image', 'custom-wf-async-plain-' + INSTANCE_ID);
+    expect(withoutCancel?.description).not.toContain('已配置取消调用');
   });
 
   it('用户配置字段注册为 params 声明（前端运行表单数据源）', async () => {

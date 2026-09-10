@@ -271,8 +271,14 @@ export interface WorkflowCapabilities {
   /** 是否支持中断（所有 Bridge 工作流声明 true） */
   cancelable?: boolean;
   /**
-   * 取消是否延迟生效：该 provider 的执行是同步的（execute 阻塞到完成），无法中止在途请求；
-   * 取消请求被接受并写入任务标记（params.cancelRequested），任务在执行完成后持久化为失败（用户中断）而非完成。
+   * 取消采用「写标记 + 尽力中止」的延迟语义（同步执行类 provider 声明）：
+   * 取消请求被接受后先把 `cancelRequested` 写入任务 params 并持久化，任务收敛为
+   * 失败（用户中断）而非完成——引擎在写产物前检查该标记，因此**中断后绝不落产物**；
+   * 若此时已有远端任务 id，还会额外通知 provider 中止在途请求（自定义服务商的同步
+   * 工作流借此立即 abort 在途 HTTP 请求；火山方舟 / OpenAI 兼容的 cancel 为 no-op）。
+   *
+   * 声明它的收益：execute 尚未返回远端任务 id 的窗口内也能受理取消（否则会被
+   * 「任务尚未提交到远端」拒绝），并且覆盖"提取刚完成、引擎正在下载/写盘"的竞态。
    */
   deferredCancel?: boolean;
 }

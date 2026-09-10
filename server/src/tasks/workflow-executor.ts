@@ -84,7 +84,37 @@ export function workflowCancelability(
 }
 
 /**
- * 执行工作流任务中断（复用既有语义：本地排队直接失败 / 运行中调 Bridge cancel / 延迟取消标记）。
+ * 通知 provider 中止任务（按工作流绑定的服务商实例定位客户端）。
+ *
+ * 优先按工作流绑定的服务商实例 ID 定位（多实例时避免把取消请求发错实例）。
+ * 供 `cancelWorkflowTask` 复用；失败由调用方决定是抛错还是仅告警。
+ *
+ * @param wf 工作流实现
+ * @param remoteTaskId 远端任务 id
+ * @throws Error provider 未注册 / 实例缺失 / provider.cancel 失败
+ */
+async function notifyProviderCancel(
+  wf: { provider?: string; providerInstanceId?: string },
+  remoteTaskId: string,
+): Promise<void> {
+  const providerId = wf?.provider ?? 'comfyui-bridge';
+  const providerDef = getProvider(providerId);
+  if (!providerDef) throw new Error(`provider 未注册: ${providerId}`);
+  const instances = await listInstances();
+  const inst = wf?.providerInstanceId
+    ? instances.find((i) => i.id === wf.providerInstanceId && i.type === providerId)
+    : instances.find((i) => i.type === providerId);
+  if (!inst) throw new Error(`未配置 ${providerId} 实例`);
+  await providerDef.createClient(resolveInstanceConfig(inst)).cancel(remoteTaskId);
+}
+
+/**
+ * 执行工作流任务中断（复用既有语义：本地排队直接失败 / 运行中调 provider cancel / 延迟取消标记）。
+ *
+ * `deferredCancel`（同步执行的 provider）语义已升级：先写取消标记与日志（保证任务最终
+ * 收敛为「用户中断」且不落产物），**再尽力通知 provider**——自定义服务商的同步工作流
+ * 据此 abort 在途请求，实现"点了就断"；火山方舟 / OpenAI 兼容等 provider 的 cancel
+ * 是 no-op，不受影响。通知失败只告警：标记已写，任务仍会正常收敛。
  *
  * @param taskId 任务 id
  * @throws Error 中断失败（provider 未注册 / 实例缺失 / 远端取消失败）
@@ -96,25 +126,35 @@ export async function cancelWorkflowTask(taskId: string): Promise<void> {
   if (!wf?.capabilities?.cancelable) return;
 
   if (task.status === 'running') {
-    // 同步执行 provider（deferredCancel）：无法中止在途请求 → 写取消标记，
-    // 由引擎在 execute 完成后检查并持久化为失败（用户中断）
+    // 同步执行 provider（deferredCancel）：无法中途拿到远端任务 id 时也能受理取消，
+    // 先写取消标记（引擎写产物前检查），再尽力中止在途请求
     if (wf?.capabilities?.deferredCancel) {
       db.updateTaskParams(task.id, markCancelRequested(JSON.parse(task.params)));
-      db.addLog(task.id, 'info', '已请求取消，将在执行完成后生效');
+      const remoteTaskId = parseTaskParams(task.params).remoteTaskId;
+      let notified = false;
+      if (remoteTaskId) {
+        try {
+          await notifyProviderCancel(wf, remoteTaskId);
+          notified = true;
+        } catch (e) {
+          // 标记已写入，任务仍会收敛为「用户中断」；通知失败不阻断取消，仅告警
+          console.warn(
+            `[workflow-executor] 通知 provider 中止在途请求失败（${task.id}）: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+      db.addLog(
+        task.id,
+        'info',
+        notified
+          ? '已请求取消，已通知服务商；任务将尽快收敛为「用户中断」'
+          : '已请求取消，将在执行完成后生效',
+      );
       return;
     }
-    const providerId = wf?.provider ?? 'comfyui-bridge';
-    const providerDef = getProvider(providerId);
-    if (!providerDef) throw new Error(`provider 未注册: ${providerId}`);
-    const instances = await listInstances();
-    // 优先按工作流绑定的服务商实例 ID 定位（多实例时避免把取消请求发错实例）
-    const inst = wf?.providerInstanceId
-      ? instances.find((i) => i.id === wf.providerInstanceId && i.type === providerId)
-      : instances.find((i) => i.type === providerId);
-    if (!inst) throw new Error(`未配置 ${providerId} 实例`);
     const remoteTaskId = parseTaskParams(task.params).remoteTaskId;
     if (!remoteTaskId) throw new Error('任务尚未提交到远端，无法中断');
-    await providerDef.createClient(resolveInstanceConfig(inst)).cancel(remoteTaskId);
+    await notifyProviderCancel(wf, remoteTaskId);
   }
   db.updateTaskStatus(task.id, 'failed', { error_msg: '用户中断' });
   db.addLog(task.id, 'info', 'Task cancelled by user');

@@ -89,6 +89,28 @@ describe('performCustomRequest', () => {
     const res = await performCustomRequest({ url: 'https://example.com/x' });
     expect(res.data).toBe('<xml/>');
   });
+
+  it('外部信号中止在途请求：抛「用户中断」而非请求失败', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      }, { once: true });
+    })));
+    const pending = performCustomRequest({ url: 'https://example.com/slow' }, 60000, controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toThrow(/用户中断/);
+  });
+
+  it('外部信号已中止时不发起请求', async () => {
+    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(performCustomRequest({ url: 'https://example.com/x' }, undefined, controller.signal))
+      .rejects.toThrow(/用户中断/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildWorkflowCallContext', () => {
@@ -121,6 +143,42 @@ describe('buildWorkflowCallContext', () => {
     expect(ctx.userConfig).toEqual({ model: 'gpt-image-2', steps: 20, enhance: true });
     const res = await ctx.request({ url: 'https://example.com/t' });
     expect(res.data).toEqual({ ok: 1 });
+  });
+
+  it('getAbortSignal 注入 ctx.signal 并约束 ctx.request（取消后放行）', async () => {
+    // 慢请求 fetch mock：只有被 abort 才会结束
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      }, { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    let cancelled = false;
+    const ctx = buildWorkflowCallContext({
+      providerConfig: {},
+      params: {},
+      getAbortSignal: () => (cancelled ? undefined : controller.signal),
+    });
+    // ctx.signal 动态取值：未取消 = 任务级信号
+    expect(ctx.signal).toBe(controller.signal);
+    // 在途请求随任务级信号中止（抛「用户中断」而非请求失败）
+    const pending = ctx.request({ url: 'https://example.com/slow' });
+    await Promise.resolve();
+    const requestSignal = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.signal as AbortSignal | undefined;
+    expect(requestSignal?.aborted).toBe(false);
+    controller.abort();
+    await expect(pending).rejects.toThrow(/用户中断/);
+    expect(requestSignal?.aborted).toBe(true);
+    // 取消后：ctx.signal 返回 undefined，【取消调用】代码的请求不再被已中止的信号阻断
+    cancelled = true;
+    expect(ctx.signal).toBeUndefined();
+    void ctx.request({ url: 'https://example.com/cancel' });
+    await Promise.resolve();
+    // 取消请求确实发出（没有被已中止的信号提前拒绝），且其请求信号未被中止
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const cancelSignal = (fetchMock.mock.calls[1]?.[1] as RequestInit | undefined)?.signal as AbortSignal | undefined;
+    expect(cancelSignal?.aborted).toBe(false);
   });
 });
 

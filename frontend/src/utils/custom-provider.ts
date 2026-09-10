@@ -82,9 +82,11 @@ export const EXTRACT_CODE_TEMPLATE = [
 /** 【取消调用】默认模板 */
 export const CANCEL_CODE_TEMPLATE = [
   '// ctx 与 callResult 与【调用发起】【结果提取】是同一个实例/响应',
+  '// 同步工作流在接口响应返回前被中断时 callResult 为 undefined，请判空后再取字段',
   'export default async function(ctx: WorkflowCallContext, callResult: WorkflowCallResult) {',
   '  // 调用远端取消接口，如：',
-  '  const taskId = callResult.data.task_id',
+  '  const taskId = callResult?.data?.task_id',
+  '  if (!taskId) return',
   '  await ctx.request({',
   '    url: ctx.providerConfig.baseUrl + "/v1/tasks/" + taskId + "/cancel",',
   "    method: 'post',",
@@ -436,6 +438,8 @@ export function buildContextLib(
     '  readFileToBase64?(relPath: string, withDataPrefix?: boolean): Promise<string>',
     '  /** 读取项目内任意文件并转为 { mimeType, data }（data 为不带 data: 前缀的纯 Base64，可直接填入 Gemini inlineData） */',
     '  readFileAsBase64Object?(relPath: string): Promise<{ mimeType: string; data: string }>',
+    '  /** 任务级中止信号：用户中断任务时触发（ctx.request 的在途请求会被立即中止并抛「用户中断」；自行 fetch 时可透传给 signal） */',
+    '  signal?: AbortSignal',
     '  /** 本次调用的工作流类型（系统支持的类型之一） */',
     '  workflowType?: CustomWorkflowTypeId',
     '  /** 用户配置字段值（按声明类型自动提示；未填写时用声明默认值） */',
@@ -534,7 +538,12 @@ export interface CustomWorkflowFormEntry {
   types: string[]
   /** 是否异步请求 */
   async: boolean
-  /** 是否支持取消 */
+  /**
+   * 【遗留字段】旧配置的「是否支持取消」勾选值。
+   *
+   * 中断能力已与之解耦：所有自定义工作流都可被用户中断（本地中止在途调用）；
+   * 是否额外调用远端取消接口由【取消调用】代码是否为空决定。保留仅为兼容旧配置读写。
+   */
   cancelable: boolean
   /** 【调用发起】代码 */
   callCode: string
@@ -735,7 +744,6 @@ export function validateWorkflowEntry(entry: CustomWorkflowFormEntry): string[] 
   if (entry.types.length === 0) errors.push('请至少选择一个工作流类型')
   if (!entry.callCode.trim()) errors.push('请编写「调用发起」代码')
   if (!entry.extractCode.trim()) errors.push('请编写「结果提取」代码')
-  if (entry.cancelable && !entry.cancelCode.trim()) errors.push('勾选「支持取消」后必须编写「取消调用」代码')
   const fields = entry.userConfigFields ?? []
   for (const field of fields) {
     if (!field.key.trim()) errors.push('用户配置字段存在空的 key')

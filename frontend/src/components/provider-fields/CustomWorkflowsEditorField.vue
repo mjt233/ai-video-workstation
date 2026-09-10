@@ -63,14 +63,14 @@
               >
                 异步
               </v-chip>
+              <!-- 所有自定义工作流都可中断 -->
               <v-chip
-                v-if="row.cancelable"
                 size="x-small"
                 variant="tonal"
                 color="warning"
                 class="ml-1"
               >
-                可取消
+                可中断
               </v-chip>
             </div>
           </td>
@@ -174,7 +174,7 @@
             class="mb-2"
           />
 
-          <!-- 是否异步 / 是否支持取消 -->
+          <!-- 是否异步 / 中断能力说明 -->
           <div class="d-flex ga-6 mb-2">
             <v-switch
               v-model="form.async"
@@ -184,14 +184,11 @@
               color="primary"
               density="comfortable"
             />
-            <v-switch
-              v-model="form.cancelable"
-              label="是否支持取消"
-              hint="勾选后需编写「取消调用」代码，任务可被用户中断"
-              persistent-hint
-              color="warning"
-              density="comfortable"
-            />
+            <!-- 中断能力：所有自定义工作流一律可中断，不再由配置开关决定 -->
+            <div class="text-caption text-medium-emphasis align-self-center">
+              所有工作流都可被用户中断：中断会中止在途 HTTP 请求并丢弃接口响应（不写产物）<br>
+              异步工作流未配置「取消调用」代码时，中断仅本地生效（远端任务不会被取消）
+            </div>
           </div>
 
           <!-- 输出尺寸配置：仅当勾选生图/生视频类型时显示 -->
@@ -415,10 +412,7 @@
             <v-tab value="extract">
               结果提取
             </v-tab>
-            <v-tab
-              v-if="form.cancelable"
-              value="cancel"
-            >
+            <v-tab value="cancel">
               取消调用
             </v-tab>
           </v-tabs>
@@ -495,6 +489,11 @@
               >
                 插入模板
               </v-btn>
+            </div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              {{ form.async
+                ? '可选：配置后中断时会额外调用远端取消接口；留空则中断仅本地生效（远端任务会继续执行）'
+                : '可选：配置后中断时会额外调用远端取消接口；同步工作流在接口响应返回前被中断时 callResult 为 undefined，脚本需自行判空' }}
             </div>
             <MonacoEditor
               v-model="form.cancelCode"
@@ -624,7 +623,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import MonacoEditor from '../monaco/MonacoEditor.vue'
 import { confirm } from '../../utils/confirm'
 import { getWorkflowTypes } from '../../api/providers'
@@ -976,11 +975,5 @@ async function removeEntry(index: number) {
   commit(entries.value.filter((_, i) => i !== index))
 }
 
-/** 取消勾选「支持取消」时若正停留在取消页签，切回「调用发起」 */
-watch(
-  () => form.value.cancelable,
-  (value) => {
-    if (!value && tab.value === 'cancel') tab.value = 'call'
-  },
-)
+/** 取消页签始终可见（所有工作流都可中断，取消调用代码可选），无需按开关切换页签 */
 </script>

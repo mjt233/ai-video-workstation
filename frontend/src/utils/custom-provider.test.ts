@@ -339,9 +339,9 @@ describe('validateWorkflowEntry', () => {
     expect(errors.join('')).toContain('结果提取')
   })
 
-  it('支持取消但未写取消代码时报错', () => {
+  it('「取消调用」代码可选：未填写也能通过校验（中断能力与它无关）', () => {
     const errors = validateWorkflowEntry({ ...base, cancelable: true, cancelCode: '' })
-    expect(errors.join('')).toContain('取消调用')
+    expect(errors).toEqual([])
   })
 
   it('用户配置字段：空 key 与重复 key 报错', () => {

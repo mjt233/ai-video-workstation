@@ -288,6 +288,25 @@ function buildSubmit(entry: CustomWorkflowEntry, type: CustomWorkflowType): Work
 }
 
 /**
+ * 解析条目的中断能力声明。
+ *
+ * **所有自定义工作流一律可中断**（中断由本地终止调用实现，不依赖远端是否提供取消接口）：
+ * - `cancelable`：同步/异步条目恒为 true——中断会立即中止协程（在途调用请求、异步结果提取
+ *   请求与轮询等待全部收敛），已返回的接口响应被丢弃、不写产物；
+ * - `deferredCancel`：恒为 true——取消请求先写 `cancelRequested` 标记（引擎写产物前检查），
+ *   覆盖「execute 尚未返回远端任务 id」的极短窗口与"提取刚完成、引擎正在写盘"的竞态。
+ *
+ * 远端取消接口是否调用由【取消调用】代码是否配置决定（见 client.ts 的 cancel）；
+ * 未配置时异步工作流的远端任务不会被取消，仅本地停止跟踪。
+ */
+function resolveCustomWorkflowCancelCapability(): Pick<
+  WorkflowCapabilities,
+  'cancelable' | 'deferredCancel'
+> {
+  return { cancelable: true, deferredCancel: true };
+}
+
+/**
  * 同步自定义服务商实例：按配置条目注册可执行工作流。
  *
  * 解析失败（结构/代码校验）抛错，由 instance-sync 记录日志；
@@ -308,13 +327,15 @@ export async function syncCustomInstance(instance: ProviderInstance): Promise<vo
         name: entry.name,
         description: '自定义工作流（' + entry.name
           + (entry.async ? '，异步' : '，同步')
-          + (entry.cancelable ? '，可取消' : '') + '）',
+          + '，可中断'
+          + (entry.cancelCode.trim() ? '，已配置取消调用' : '')
+          + '）',
         provider: PROVIDER_ID,
         providerInstanceId: instance.id,
         providerName: instance.name,
         workflowKey: key,
         capabilities: {
-          cancelable: entry.cancelable,
+          ...resolveCustomWorkflowCancelCapability(),
           // 生图/生视频类型声明统一尺寸能力（用户配置的比例/尺寸/自定义分辨率；TTS 类型不声明）
           ...(SIZE_TYPES.includes(type as CustomWorkflowType)
             ? { size: resolveCustomWorkflowSizeCapability(entry.sizeConfig) }

@@ -168,7 +168,12 @@ export interface CustomWorkflowEntry {
   types: CustomWorkflowType[];
   /** 是否异步请求：true 时【结果提取】被反复调用直到 isFinish，false 时仅调用一次 */
   async: boolean;
-  /** 是否支持取消：true 时声明 cancelable 能力并必须提供【取消调用】代码 */
+  /**
+   * 【遗留字段】旧配置的「是否支持取消」勾选值。
+   *
+   * 中断能力已不再由它决定——**所有自定义工作流一律可中断**（本地中止在途调用），
+   * 远端取消接口是否调用改由【取消调用】代码是否为空决定。保留该字段仅为兼容旧配置读写。
+   */
   cancelable: boolean;
   /** 【调用发起】TypeScript 代码：export default async function(ctx) 返回 http 请求配置 */
   callCode: string;
@@ -226,15 +231,13 @@ export function parseCustomWorkflowEntry(raw: unknown, index: number): CustomWor
   }
   const types = [...new Set(typesRaw as CustomWorkflowType[])];
   const isAsync = rec.async === true;
+  // 遗留字段：中断能力已与它解耦（所有工作流都可中断），不再据此校验【取消调用】代码必填
   const cancelable = rec.cancelable === true;
   const codeOf = (key: 'callCode' | 'extractCode' | 'cancelCode'): string =>
     typeof rec[key] === 'string' ? rec[key] : '';
   const callCode = codeOf('callCode');
   const extractCode = codeOf('extractCode');
   const cancelCode = codeOf('cancelCode');
-  if (cancelable && !cancelCode.trim()) {
-    throw new Error(where + '（' + name + '）勾选了「支持取消」，必须编写「取消调用」代码');
-  }
   const userConfigFields = parseUserConfigFields(rec.userConfigFields, where + '（' + name + '）');
   const sizeConfig = parseCustomWorkflowSizeConfig(rec.sizeConfig, where + '（' + name + '）');
   return {

@@ -69,11 +69,13 @@ interface TaskRecord {
 
 | 类型 | 登记点 | 中断实现 | 进度 |
 |------|--------|----------|------|
-| `workflow` | `workflow-engine.ts: runTask` 开始时登记（label = 实现名 + 画布定位 `nodeId`/`canvas`），完成/失败处 `finish` | `cancelWorkflowTask()`（复用 `canCancelTask` + Bridge cancel / deferredCancel 标记） | 远端 poll / DB（当前不写 progress → 不确定动画） |
+| `workflow` | `workflow-engine.ts: runTask` 开始时登记（label = 实现名 + 画布定位 `nodeId`/`canvas`），完成/失败处 `finish` | `cancelWorkflowTask()`（复用 `canCancelTask` + Bridge cancel / deferredCancel 标记 + provider cancel） | 远端 poll / DB（当前不写 progress → 不确定动画） |
 | `llm` | `routes/llm.ts` 会话创建后 `llmExecutor.create`，`lifecycle` 回调同步阶段/终态 | `sessionManager.cancel`（abort 上游） | 无百分比 → 展示阶段（Thinking…/正在响应…） |
 | `ffmpeg` | 四个路由（拼接/裁剪视频/裁剪音频/取帧）经 `startFfmpegTask` | `kill('SIGKILL')` + **删除半截产物** | `-progress` 解析 `timemark` → 真实百分比 |
 
 **中断能力差异**：`cancelable` + `cancelBlockReason` 如实展示——工作流不支持中断时按钮置灰并显示原因（如「该工作流不支持中断」）。
+
+**`deferredCancel`（同步执行类 provider 的取消语义）**：取消请求先写 `cancelRequested` 标记（引擎在写产物前检查 → 中断后绝不落产物），再尽力通知 provider `cancel` 中止在途请求；标记保证「无远端任务 id 的窗口」也能受理取消。自定义服务商的**所有工作流**（同步/异步）都恒声明 `cancelable: true` + `deferredCancel: true`：其 `execute` 立即返回任务 id 并由后台协程驱动「调用发起 → 在途请求 → 结果提取」，`cancel` 直接 `abort` 在途请求；未配置【取消调用】代码时中断仅本地生效（远端任务继续跑，但结果被丢弃、绝不落产物）——详见 [`../plans/custom-provider.md`](../plans/custom-provider.md) 的「任务中断」。
 
 ## ffmpeg 异步任务（`tasks/ffmpeg-executor.ts`）
 
@@ -139,3 +141,4 @@ interface TaskRecord {
 - **同一毫秒登记的任务排序**：`listActive` 用 `startedAt` + 内部 `seq` 排序，保证列表稳定。
 - **同节点单飞**：注册表按 `nodeId` 拒绝并发（`NODE_BUSY`），前端提交前也会按节点状态拦截。
 - **工作流任务不能只靠注册表恢复 Loading**：注册表只在引擎领取任务时登记，本地排队窗口（2s tick）与服务重启期间为空；画布恢复必须补查 SQLite `pending|running`，且画布定位要随 `params` 持久化（否则重启后无处可查）。
+- **阻塞式 `submit` 等于不可中断**：引擎只有在 `submit` 返回后才持久化远端任务 id，此时取消才被受理。自定义服务商因此把「调用发起 + 在途请求」放进后台协程、`execute` 立即返回；同步 provider 若确实无法中止在途请求（火山方舟 / OpenAI 兼容），必须声明 `deferredCancel`，否则「生成期间」的中断请求会被 `canCancelTask` 拒绝。

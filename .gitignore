@@ -9,6 +9,7 @@ __pycache__/
 server/config/providers.json*
 server/config/presets.json
 server/config/system.json
+server/config/
 .agents
 .trae/
 skills-lock.json
