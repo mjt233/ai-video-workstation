@@ -161,7 +161,10 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
     name: '生成图片',
     icon: 'mdi-image-plus',
     category: 'generate',
-    inputPorts: [{ id: 'in', type: 'image', label: '参考图' }],
+    // 单一输入连接点：图片（参考图，可多路）与文本（外部提示词，最多一个）共用。
+    // 连接后按来源节点输出类型自动归类——图片进输入预览与工作流输入图，文本作为 prompt
+    // 取值（禁用节点内提示词输入框，见 useCanvasNodeOps.generateNode）。
+    inputPorts: [{ id: 'in', type: ['image', 'text'], label: '输入' }],
     outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
     resizeable: true,
     canGenerate: true,

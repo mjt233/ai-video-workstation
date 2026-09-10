@@ -2,10 +2,11 @@
 
 > 返回 [总览与定位](./README.md)
 
-1. `generateNode(nodeId)`（`composables/useCanvasNodeOps.ts`，按原型分发）：收集输入图路径（`collectInputPaths`，含顺序）→ `gen.setInputPaths` → `gen.generate`。
+1. `generateNode(nodeId)`（`composables/useCanvasNodeOps.ts`，按原型分发）：收集输入图路径（`collectInputPaths`，含顺序）→ `gen.setInputPaths` → `gen.generate`。生成图片节点只提交**图片来源**的输入路径，并把连线文本输入作为 prompt 覆盖（`gen.generate` 第 4 参 `textPromptOverride`，多个文本输入时 snackbar 拦截不提交）。
 2. `generate`：
    - `image-edit`：`vars = { prompt, imagePaths: JSON.stringify(inputPaths), purpose: 'canvas-image' }`；
    - `text-to-image`：先把 prompt 写入节点目录的 `prompt.md`，`vars = { promptPath, purpose: 'canvas-image' }`。
+   - `prompt` 取值：`textPromptOverride`（外部连线文本，非空时生效）优先于 `config.prompt`，与生成视频节点的外部文本规则一致。
    - 产物路径 `computeOutputPath`：**固定文件名** `output.{ext}`（扩展名取原型 `outputExt`，无版本号计算）。
 3. 提交后轮询 `poll`（2s，首轮立即查一次）：**服务端终态为 `completed` / `failed`**（无 success/error）。轮询**只更新 `statusByNode` 展示**，成功时经 `onResult(nodeId, outputPath)` 回调通知 UI 刷新（AssetCanvas 更新节点产物信息 node-info）；**不回写 `config.current`/`config.history`**——结果落盘由服务端完成，页面离开/关闭后结果依然存在。
 4. 状态机：`statusByNode[nodeId]` = `running | success | error`。

@@ -377,11 +377,15 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
    * @param node 生成节点数据（图片、视频或 TTS）
    * @param videoParams 视频生成节点的自包含提交参数（仅 video-generate 需要）
    * @param onResult 任务完成（含失败）时的回调（nodeId, outputPath），供 UI 刷新产物展示；可省略（回落到 options.onResult）
+   * @param textPromptOverride 连线文本输入提供的外部提示词（仅图片节点使用）：非空时**优先于**
+   *   config.prompt 作为工作流 prompt（image-edit 的 vars.prompt / text-to-image 的 prompt 文件内容）；
+   *   未提供（undefined）或空白时沿用 config.prompt
    */
   async function generate(
     node: CanvasNodeData,
     videoParams?: VideoSubmitParams,
     onResult?: (nodeId: string, outputPath: string) => void,
+    textPromptOverride?: string,
   ): Promise<void> {
     const nodeId = node.id
     if (statusByNode.value[nodeId]?.status === 'running') return
@@ -469,7 +473,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     }
 
     const config = node.config
-    const prompt = String(config.prompt ?? '')
+    // 连线文本输入（外部提示词）非空时优先于节点配置的 prompt（与生成视频节点同一规则）
+    const prompt = textPromptOverride?.trim() ? textPromptOverride : String(config.prompt ?? '')
     const inputPaths = inputPathsRef.value[nodeId] ?? []
     const explicitWorkflow = typeof config.workflowId === 'string' && config.workflowId ? config.workflowId : undefined
     const workflowId = explicitWorkflow ?? (inputPaths.length > 0 ? 'image-edit' : 'text-to-image')

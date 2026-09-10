@@ -51,8 +51,8 @@ describe('getNodeOutputType / getNodeInputType', () => {
     expect(getNodeOutputType('loader', nodes)).toBe('image')
   })
 
-  it('生成图片输入 image', () => {
-    expect(getNodeInputType('gen', nodes)).toBe('image')
+  it('生成图片输入 image + text（单一 in 端口接受多类型）', () => {
+    expect(getNodeInputType('gen', nodes)).toEqual(['image', 'text'])
   })
 
   it('文本输出 text', () => {
@@ -93,8 +93,8 @@ describe('canConnectNodes', () => {
     expect(canConnectNodes([], 'loader', 'gen', nodes)).toBe(true)
   })
 
-  it('文本(text) → 生成图片(image) 类型不兼容', () => {
-    expect(canConnectNodes([], 'text', 'gen', nodes)).toBe(false)
+  it('文本(text) → 生成图片(in 端口 type: [image,text]) 可连接（文本作为外部提示词）', () => {
+    expect(canConnectNodes([], 'text', 'gen', nodes)).toBe(true)
   })
 
   it('生成图片(image) → 加载图片(无输入) 不可连接', () => {

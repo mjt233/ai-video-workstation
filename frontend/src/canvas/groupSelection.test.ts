@@ -143,7 +143,16 @@ describe('groupConnectOptions', () => {
     expect(map['tts-generate'].compatible).toBe(true)
     expect(map['audio-trim'].compatible).toBe(true)
     expect(map['video-generate'].compatible).toBe(true)
+    // 生成图片输入为 image + text：音频/视频输出均不兼容
     expect(map['image-generate'].compatible).toBe(false)
+  })
+
+  it('text 输出可连生成图片（文本作为外部提示词），不可连 TTS/取帧', () => {
+    const map = Object.fromEntries(groupConnectOptions(['text']).map((o) => [o.prototypeId, o]))
+    expect(map['image-generate'].compatible).toBe(true)
+    expect(map['video-generate'].compatible).toBe(true)
+    expect(map['tts-generate'].compatible).toBe(false)
+    expect(map['video-frame-extract'].compatible).toBe(false)
   })
 
   it('video 输出不可连裁剪音频（仅支持音频输入）', () => {

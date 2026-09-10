@@ -192,6 +192,34 @@ describe('useCanvasGeneration', () => {
     )
   })
 
+  it('图片节点外部文本输入（连线文本）优先于 config.prompt：文生图 prompt 文件取外部文本', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    // 文生图：prompt 文件内容取外部文本（config.prompt 不再使用）
+    await gen.generate(makeNode('节点内旧提示词'), undefined, undefined, '外部连线提示词')
+    expect(writeFs).toHaveBeenCalledWith('p', 'prompt/scene/1/1/canvas/n1/prompt.md', '外部连线提示词')
+  })
+
+  it('图片节点外部文本输入（连线文本）优先于 config.prompt：图生图 vars.prompt 取外部文本', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    const node = makeNode('节点内旧提示词', 'image-edit')
+    gen.setInputPaths('n1', ['assert/stage/街角/白天.jpg'])
+    await gen.generate(node, undefined, undefined, '外部连线提示词')
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: 'image-edit',
+        params: expect.objectContaining({
+          vars: expect.objectContaining({ prompt: '外部连线提示词', imagePaths: '["assert/stage/街角/白天.jpg"]' }),
+        }),
+      }),
+    )
+  })
+
+  it('图片节点外部文本为空/空白：回落到 config.prompt', async () => {
+    const gen = useCanvasGeneration('p', TARGET)
+    await gen.generate(makeNode('一只猫'), undefined, undefined, '   ')
+    expect(writeFs).toHaveBeenCalledWith('p', 'prompt/scene/1/1/canvas/n1/prompt.md', '一只猫')
+  })
+
   it('图片节点 config.sizeConfig 随 params.sizeConfig 提交', async () => {
     const gen = useCanvasGeneration('p', TARGET)
     const node: CanvasNodeData = {

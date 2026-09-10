@@ -12,15 +12,25 @@
       @remove="(input) => emit('disconnect-input', input.nodeId)"
     />
 
-    <!-- 提示词 Prompt -->
+    <!-- 多个文本连线输入：报错并禁止生成（仅保留一个） -->
+    <div
+      v-if="multiTextInput"
+      class="text-error text-body-small mb-2"
+    >
+      存在多个文本连线输入（{{ textInputCount }} 个），生成已禁用，请仅保留一个
+    </div>
+
+    <!-- 提示词 Prompt（连线文本输入时禁用并把「（已连接外部输入）」作为字段值显示——与生成视频
+         节点一致；禁用态 textarea 的 placeholder 在浏览器中不渲染文本，故不能只用 placeholder） -->
     <v-textarea
-      :model-value="prompt"
+      :model-value="promptDisplay"
       label="提示词 Prompt"
       rows="5"
       density="compact"
       variant="outlined"
       hide-details
-      class="mb-2"
+      :disabled="hasTextInput"
+      :class="['mb-2', { 'image-generate-editor__prompt--external': hasTextInput }]"
       @update:model-value="(v) => emit('update:config', { prompt: v })"
     />
 
@@ -175,6 +185,12 @@ const props = defineProps<{
   project: string
   node: CanvasNodeData
   inputs: CanvasInputInfo[]
+  /**
+   * 连线文本输入内容（来源节点输出类型为 text，如「文本」/「AI文本生成」节点）。
+   * 非空时禁用提示词输入框并显示「（已连接外部输入）」，实际提交的 prompt 取第一条
+   * （见 useCanvasNodeOps.generateNode）；多于一条时禁止生成。
+   */
+  textInputs?: string[]
   isRunning: boolean
   /** 画布类型：仅分镜画布（scene）显示「设为分镜场景图」 */
   kind: CanvasKind
@@ -240,6 +256,26 @@ function onUploadFilePicked(event: Event): void {
 const hasOutput = computed(() => !!(props.output || props.node.config.current))
 
 const prompt = computed(() => (typeof props.node.config.prompt === 'string' ? props.node.config.prompt : ''))
+
+/** 已连接外部文本输入时提示词字段的显示文案（与生成视频节点同文案） */
+const EXTERNAL_INPUT_TEXT = '（已连接外部输入）'
+
+/** 文本连线输入数量（来源为「文本」/「AI文本生成」节点的非空内容） */
+const textInputCount = computed(() => props.textInputs?.length ?? 0)
+
+/** 是否已连接文本输入（连接后提示词输入框禁用并显示「（已连接外部输入）」，prompt 取外部文本） */
+const hasTextInput = computed(() => textInputCount.value > 0)
+
+/** 是否存在多个文本连线输入（禁止生成并红字提示，保证提交的 prompt 唯一） */
+const multiTextInput = computed(() => textInputCount.value > 1)
+
+/**
+ * 提示词字段显示值：
+ * - 已连接文本输入：显示占位文案「（已连接外部输入）」（字段同时禁用；禁用态 textarea 不渲染
+ *   placeholder 文本，故必须作为字段值显示，与生成视频节点一致）；
+ * - 未连接：显示节点配置的提示词原文（`config.prompt` 不被外部输入覆盖，断开连线即恢复）。
+ */
+const promptDisplay = computed(() => (hasTextInput.value ? EXTERNAL_INPUT_TEXT : prompt.value))
 const workflowId = computed(() => {
   const explicit = props.node.config.workflowId
   if (typeof explicit === 'string' && explicit) return explicit
@@ -300,10 +336,11 @@ function onImplChange(v: string) {
 }
 
 /**
- * 点击「生成」：未选择工作流实现时展示校验错误且不触发生成，
- * 保证实际提交的实现与界面显示一致。
+ * 点击「生成」：存在多个文本连线输入时拦截（红字已提示）；
+ * 未选择工作流实现时展示校验错误且不触发生成，保证实际提交的实现与界面显示一致。
  */
 function requestGenerate() {
+  if (multiTextInput.value) return
   if (!currentImplId.value) {
     implError.value = !workflowsLoaded.value
       ? '工作流列表加载中，请稍候再试'
@@ -394,6 +431,14 @@ getWorkflows()
 </script>
 
 <style scoped>
+/* 已连接外部输入：禁用态字段文字提高对比度，「（已连接外部输入）」提示清晰可读
+   （Vuetify 禁用态默认把文字降到 ~38% 不透明度，提示会显得像被灰掉的水印） */
+.image-generate-editor__prompt--external :deep(.v-field__input),
+.image-generate-editor__prompt--external :deep(textarea) {
+  color: rgba(var(--v-theme-on-surface), 0.75);
+  -webkit-text-fill-color: rgba(var(--v-theme-on-surface), 0.75);
+}
+
 /* 参数行：紧凑横排，空间不足时换行（工作流实现下拉优先占满剩余宽度） */
 .generation-params-row {
   display: flex;

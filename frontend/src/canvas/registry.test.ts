@@ -55,9 +55,10 @@ describe('NODE_PROTOTYPES', () => {
     }
   })
 
-  it('生成图片只接受 image 输入，输出 image', () => {
+  it('生成图片接受 image + text 输入（文本作为外部提示词），输出 image', () => {
     const p = getPrototype('image-generate')!
-    expect(p.inputPorts.every((port) => port.type === 'image')).toBe(true)
+    expect(p.inputPorts[0].id).toBe('in')
+    expect(p.inputPorts[0].type).toEqual(['image', 'text'])
     expect(p.outputPorts[0].type).toBe('image')
   })
 

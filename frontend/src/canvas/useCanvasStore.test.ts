@@ -106,10 +106,19 @@ describe('useCanvasStore', () => {
 
   it('connect：类型不兼容拒绝', () => {
     const store = useCanvasStore('p', TARGET)
+    // 加载视频(video) → 生成图片(in: ['image','text']) 类型不兼容
+    const v = store.addNode('video-loader', 0, 0)
+    const g = store.addNode('image-generate', 0, 0)
+    expect(store.connect(v.id, g.id)).toBe(false)
+    expect(store.connections.value).toHaveLength(0)
+  })
+
+  it('connect：文本(text) → 生成图片可连接（文本作为外部提示词）', () => {
+    const store = useCanvasStore('p', TARGET)
     const t = store.addNode('text', 0, 0)
     const g = store.addNode('image-generate', 0, 0)
-    expect(store.connect(t.id, g.id)).toBe(false)
-    expect(store.connections.value).toHaveLength(0)
+    expect(store.connect(t.id, g.id)).toBe(true)
+    expect(store.connections.value).toHaveLength(1)
   })
 
   it('connect：成环拒绝', () => {
@@ -514,7 +523,8 @@ describe('useCanvasStore', () => {
     const store = useCanvasStore('p', TARGET)
     const t = store.addNode('text', 0, 0)
     const b = store.addNode('text-ai', 100, 0)
-    const d = store.addNode('image-generate', 200, 0)
+    // 获取视频帧仅接受 video 输入：text 来源改接过去不兼容
+    const d = store.addNode('video-frame-extract', 200, 0)
     store.connect(t.id, b.id)
     const result = store.rewireConnections({
       removeSource: true,

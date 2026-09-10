@@ -40,6 +40,8 @@
 
 生成图片 / 生成视频（非导演台模式）/ TTS 三个生成节点的配置组件采用统一骨架：**输入预览 → 提示词/文本字段 → 参数行**，让用户聚焦 prompt 编写与输入资源，其余细节参数收纳进可开关的菜单中调整。
 
+- **连线文本输入优先于节点内提示词**（生成图片/生成视频）：编辑器接收父级下发的 `textInputs`（`nodeOps.editorTextInputs`，来源为「文本」/「AI文本生成」节点的非空内容），非空时提示词输入框**禁用**并把「（已连接外部输入）」作为**字段值**显示（禁用态 `textarea` 的 `placeholder` 在浏览器中不渲染文本，因此不能用 placeholder 实现，与生成视频节点一致；另用 scoped 样式把禁用态文字提到 0.75 不透明度保证可读），实际提交的 prompt 取第一条外部文本（`gen.generate` 的 `textPromptOverride` 参数，见 [generation.md](./generation.md)）；`config.prompt` 不被覆盖，断开连线后恢复原文。存在**多个**文本连线输入时编辑器红字提示并禁止生成（生成入口 `useCanvasNodeOps.generateNode` 同样拦截）。
+
 - **输入预览**（`editors/CanvasInputPreview.vue`）：按图片/视频/音频三组展示连接到的输入资源（内部复用 `editors/VideoRefInputGroup.vue`），**仅该类型存在输入时渲染对应组**（无输入不显示条目），全部为空时显示占位文案；组内拖拽排序（`reorder` 事件上报本组新顺序，编辑器经 `mergeInputOrder` 合并回全局 `config.inputOrder`）+ 悬浮放大 tooltip（图片/视频/音频可播放）+ 缩略图右上角红色 x 快捷断开（`disconnect-input`）。
 - **参数行**（各编辑器内 `.generation-params-row` 紧凑横排，空间不足自动换行）：
   - 工作流：生成图片 = 工作流类型 + 工作流实现两个紧凑下拉；生成视频 = 单个工作流下拉（模式放其前）；TTS = 单个工作流实现下拉；

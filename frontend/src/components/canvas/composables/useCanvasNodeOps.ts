@@ -182,9 +182,18 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       showSnackbar(implMsg, 'error')
       return
     }
-    const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config, undefined, getScope())
+    // 连线文本输入（「文本」/「AI文本生成」节点）作为外部提示词：多个时禁止生成
+    //（提示并拦截，保证提交的 prompt 唯一且与界面显示一致），单个时优先于 config.prompt
+    const texts = textInputsOf(nodeId)
+    if (texts.length > 1) {
+      showSnackbar(`存在多个文本连线输入（${texts.length} 个），生成已禁用，请仅保留一个`, 'error')
+      return
+    }
+    // 输入口为 ['image','text'] 单一连接点：仅图片来源作为参考图提交，
+    // 避免文本来源被算作「有输入图」而误判为 image-edit 工作流
+    const paths = videoInputsOf(nodeId, 'image').map((i) => i.path)
     gen.setInputPaths(nodeId, paths)
-    await gen.generate(node, undefined, applyResult)
+    await gen.generate(node, undefined, applyResult, texts[0])
   }
 
   /** 中断生成：AI 文本节点走 LLM 会话取消（标准 Loading 遮罩「中断」按钮）；其余走通用中断 */
@@ -362,16 +371,19 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   })
 
   /**
-   * 视频生成节点（配置面板当前选中节点）的文本输入内容。
+   * 生成节点（配置面板当前选中节点）的文本输入内容。
    *
-   * 来源为「文本」节点（输出类型 text）：配置面板据此禁用 prompt 字段（显示
-   * 「（已连接外部输入）」）并在多个文本输入时禁止生成。非选中视频生成节点时为空数组。
+   * 适用原型：生成视频 / 生成图片（两者输入口均可接受文本来源）。来源为「文本」或
+   * 「AI文本生成」节点（输出类型 text）：配置面板据此禁用 prompt 字段（显示
+   * 「（已连接外部输入）」）并在多个文本输入时禁止生成。其余原型返回空数组。
    *
    * @returns 非空文本内容列表（按连接顺序）
    */
-  const videoTextInputs = computed<string[]>(() => {
+  const editorTextInputs = computed<string[]>(() => {
     const panelNode = getSelectedNode()
-    if (!panelNode || panelNode.prototypeId !== 'video-generate') return []
+    if (!panelNode || (panelNode.prototypeId !== 'video-generate' && panelNode.prototypeId !== 'image-generate')) {
+      return []
+    }
     return textInputsOf(panelNode.id)
   })
 
@@ -530,7 +542,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     audioInputsOf,
     videoInputsOf,
     videoInputGroups,
-    videoTextInputs,
+    editorTextInputs,
     isUpstreamUpdated,
     onUpdateConfig,
     onUpdateConfigQuiet,

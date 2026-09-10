@@ -4,7 +4,8 @@
 
 ## 连线规则（`frontend/src/canvas/connection.ts`）
 
-- 按**端口数据类型**判断兼容（ComfyUI 思路），v1 仅支持同类型：`image→image`、`text→text`；端口类型为**数组**（如 AI文本生成节点的 `['media','text']`）时任一匹配即可连接；`media` 输入口（生成视频）可接受任意来源（`canConnect`）。
+- 按**端口数据类型**判断兼容（ComfyUI 思路），v1 仅支持同类型：`image→image`、`text→text`；端口类型为**数组**（如 AI文本生成节点的 `['media','text']`、生成图片节点的 `['image','text']`）时任一匹配即可连接；`media` 输入口（生成视频）可接受任意来源（`canConnect`）。
+- **生成图片的单一 `in` 口同时接受图片（参考图，可多路）与文本（外部提示词）**：连接后按来源节点输出类型自动归类，文本来源作为 `prompt` 取值（见 [node-types.md](./node-types.md)）。**文本输入在生成时限制为一个**（与生成视频节点同规则）：连接多个文本来源时不提交生成，编辑器红字 + `useCanvasNodeOps.generateNode` snackbar 拦截；连线本身允许建立（不做连线期拦截）。
 - `canConnectNodes` = 类型兼容 + 不成环（`wouldCreateCycle` 反向可达性检测）+ 目标输入未满。
 - 建立连线：从源节点输出手柄拖到目标节点输入手柄（`@connect` → `store.connect`）；连接失败静默忽略。
 - **连接转移 / 连接复制（批量改接，`useCanvasRewire` + `store.rewireConnections`）**：
