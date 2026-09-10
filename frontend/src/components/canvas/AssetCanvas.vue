@@ -135,6 +135,22 @@
               d="M10,0 L0,-5 L2.5,0 L0,5 Z"
             />
           </template>
+          <!-- 连线拖拽预览线插槽（从节点端点拖出连接线时由 Vue Flow 挂载，交互结束即销毁）：
+               仅高亮预览线本身——统一画布主题色 + 2px 加粗 + 同色光晕，
+               明显区别于默认预览线（1px 灰）。**不按输入/输出端点分色**：
+               预览线的职责只是「正在连线」，起点端口类型已由鼠标下的端点与 Vue Flow 的
+               端点指示器表达，再用颜色编码一次只会引入「按起点还是按落点」的歧义
+               （一条连线两端必为一输入一输出，两种规则互为镜像、各有道理却都不直观）。
+               几何由 connectionPreview 按与默认预览线（Bezier）完全一致的参数计算，不做换算。
+               不影响既有连线高亮：单选联动、运行态高亮、改接虚线的派生集与样式均未改动。 -->
+          <template #connection-line="connectionProps">
+            <path
+              :d="connectionPreview(connectionProps)"
+              class="canvas-connection-preview"
+              fill="none"
+              stroke-linecap="round"
+            />
+          </template>
           <template #node-canvas="{ id, selected }">
             <CanvasNodeCard
               v-if="nodeMap[id]"
@@ -649,7 +665,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { VueFlow, BezierEdge, SelectionMode, getBezierPath, Position, useVueFlow, type EdgeMouseEvent, type NodeDragEvent, type NodeMouseEvent } from '@vue-flow/core'
+import { VueFlow, BezierEdge, SelectionMode, getBezierPath, Position, useVueFlow, type ConnectionLineProps, type EdgeMouseEvent, type NodeDragEvent, type NodeMouseEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -1686,7 +1702,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, isMultiSelected, selectedNodeIds, selectedGroupIds, onEdgeClick, onNodeDragStart: onNodeDragStartBase } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, previewInputsOf, editorTextInputs, disconnectInput } = nodeOps
-const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
+const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, selectedEdgeClassId, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupMenu, groupCopy, groupDelete, groupEntityMenu, groupEntityRename, groupEntityColor, groupEntityDissolve, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
@@ -1985,6 +2001,21 @@ function edgeRunningRelated(edgeId: string): boolean {
 }
 
 /**
+ * 是否为「被点击选中」的连线（蓝，class 优先级高于单选联动）。
+ * 供 #edge-default 插槽判定：选中态**不渲染流向箭头**（箭头语义是「数据正在流经」，
+ * 属运行态/单选联动高亮）。必须在这里显式判定——连线 class 由 useCanvasFlow 按优先级
+ * **互斥**挂载，但箭头是插槽内独立渲染的，若只按 related/running 判定，则在「节点单选 +
+ * 该节点的关联连线被点击选中」时会渲染出一条实际不可见的箭头（class 被 selected 顶掉），
+ * 既浪费 DOM 又与「选中态无箭头」的语义矛盾。
+ *
+ * @param edgeId 连线 id
+ * @returns 该连线当前为点击选中态返回 true
+ */
+function edgeSelected(edgeId: string): boolean {
+  return selectedEdgeClassId.value === edgeId
+}
+
+/**
  * 连线箭头时序缓存（按连线 id 记忆动画参数）。
  * 拖动/缩放节点时连线几何每帧变化，若每帧重算时长会让箭头瞬间跳位；缓存只在弧长
  * 变化超过阈值时重新计时（见 canvas/edgeFlow.ts）。切换画布时清空，避免旧几何残留。
@@ -2002,7 +2033,7 @@ interface EdgeArrow {
 /**
  * 构建连线流向箭头列表（#edge-default 插槽内使用）。
  *
- * 未高亮（非单选联动、非运行态关联）的连线返回空数组（不渲染箭头）；
+ * 未高亮（非单选联动、非运行态关联）或**被点击选中**的连线返回空数组（不渲染箭头）；
  * 高亮连线按与 BezierEdge 完全一致的参数计算连线 d 并注入 `offset-path: path(...)`，
  * 箭头从源端（source）滑向目标端（target），即数据流方向——输入侧（target=选中节点）
  * 流向选中节点，输出侧（source=选中节点）流向输出节点。
@@ -2023,6 +2054,7 @@ function edgeArrows(edgeProps: {
   sourcePosition?: Position
   targetPosition?: Position
 }): EdgeArrow[] {
+  if (edgeSelected(edgeProps.id)) return []
   if (!edgeRelatedSide(edgeProps.id) && !edgeRunningRelated(edgeProps.id)) return []
   const [pathD] = getBezierPath({
     sourceX: edgeProps.sourceX,
@@ -2045,6 +2077,32 @@ function edgeArrows(edgeProps: {
     })
   }
   return arrows
+}
+
+/**
+ * 连接预览线几何（#connection-line 插槽）。
+ *
+ * 与 Vue Flow 默认预览线（Bezier）逐参数一致——同一坐标系（均为流坐标，无需换算视口）、
+ * 同一贝塞尔参数、同一端点位置回退规则（sourcePosition 缺省 Top / targetPosition 缺省 Bottom），
+ * 使预览线与既有连线完全同形；配色（主题色）、线宽与光晕由模板类名对应的 scoped 样式决定。
+ *
+ * 刻意**不区分输入/输出端点**：预览线只表达「正在连线」，起点端口类型由鼠标下的端点与
+ * Vue Flow 的端点指示器（connectable 端点圈）表达；若按方向分色，则「按起点」与「按落点」
+ * 两种规则互为镜像（一条连线两端必为一输入一输出），怎么选都不直观。
+ *
+ * @param props Vue Flow 连接线插槽参数（起止坐标与起止端点位置）
+ * @returns 预览线 `path` 的 `d` 字符串
+ */
+function connectionPreview(props: ConnectionLineProps): string {
+  const [d] = getBezierPath({
+    sourceX: props.sourceX,
+    sourceY: props.sourceY,
+    targetX: props.targetX,
+    targetY: props.targetY,
+    sourcePosition: props.sourcePosition ?? Position.Top,
+    targetPosition: props.targetPosition ?? Position.Bottom,
+  })
+  return d
 }
 
 /** 内联重命名输入：写入 rename 组合式的临时值（卡片输入框上抛） */
@@ -2510,6 +2568,33 @@ watch(flowEl, (flow) => {
 :deep(.vue-flow__edge.canvas-edge--related .vue-flow__edge-path) {
   stroke: var(--edge-related-color);
   stroke-width: 2;
+}
+
+/* 连线拖拽预览线高亮（#connection-line 插槽渲染的 path）：画布主题色 + 加粗 2px + 同色光晕，
+   与默认预览线（1px 灰 `--vf-connection-path`）明显区分。
+   **刻意不按输入/输出端点分色**：预览线只表达「正在连线」——起点端口类型由鼠标下的端点与
+   Vue Flow 的端点指示器表达；按方向分色时「按起点」与「按落点」互为镜像（一条连线两端必为
+   一输入一输出），两种规则都说得通却都不直观，统一主题色消除该歧义。
+   与运行态蓝高亮（--edge-related-color: #1976d2）同色不冲突：预览线仅在拖拽中存在、
+   始终连着鼠标，形态与「节点 Loading 时指向它的实线 + 流向箭头」判然有别。
+   注：插槽内容渲染在 AssetCanvas 自身模板内，scoped 属性直接命中，无需 :deep / :global；
+   仅预览线本身被高亮，不联动既有连线、邻接节点或端点描边。 */
+.canvas-connection-preview {
+  stroke: #1976d2;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 3px rgba(25, 118, 210, 0.7));
+}
+
+/* 被点击选中的连线（class 由 useCanvasFlow 挂到 edge wrapper）：与连线预览线**同一视觉处理**
+   （主题色 #1976D2 + 2px 加粗 + 同色光晕），让「单击选中的线」与「正在拖拽的线」看起来
+   是同一件事——这条线正处于用户的操作焦点。**不叠加流向箭头动画**：箭头语义是「数据正在
+   流经」，属于运行态/单选联动高亮；单击选中若加箭头会被误读为正在生成。
+   与单选联动高亮的关系：连线点击不改变节点选中，二者可同屏（选中的那条为蓝、其关联连线
+   仍按方向绿/橙）；优先级见 useCanvasFlow（运行态 > 改接 > 单击选中 > 单选联动）。 */
+:deep(.vue-flow__edge.canvas-edge--selected .vue-flow__edge-path) {
+  stroke: #1976d2;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 3px rgba(25, 118, 210, 0.7));
 }
 
 :deep(.vue-flow__edge .canvas-edge__arrow) {

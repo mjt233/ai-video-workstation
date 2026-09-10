@@ -64,6 +64,16 @@ const EDGE_RELATED_OUTPUT_CLASS = 'canvas-edge--related canvas-edge--output'
 const EDGE_RUNNING_RELATED_CLASS = 'canvas-edge--related canvas-edge--running'
 /** 连线改接（转移/复制）拖拽中被拔出的连线 class（虚线半透明提示，样式见 AssetCanvas scoped `:deep` 规则） */
 const EDGE_REWIRING_CLASS = 'canvas-edge--rewiring'
+/**
+ * 被点击选中的连线 class（主题色 `#1976D2` + 2px 加粗 + 同色光晕，
+ * 与拖拽中的连线预览线 `.canvas-connection-preview` 同一视觉处理；
+ * 样式见 AssetCanvas scoped `:deep` 规则）。
+ *
+ * 单选联动高亮（绿/橙）刻意**不再叠加流向箭头动画**：箭头表示「数据正在流经这条线」，
+ * 是运行态与单选联动高亮的语义；单击选中只是「选中了这条线」，用颜色与线宽表达即可，
+ * 叠加箭头会让人误以为该连线在参与生成。
+ */
+const EDGE_SELECTED_CLASS = 'canvas-edge--selected'
 
 /**
  * 画布流渲染与连线交互组合式。
@@ -244,8 +254,21 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   /** Vue Flow 节点列表（持久分组 + 真实节点 + 多选合成节点；顺序即渲染层级，zIndex 另行控制） */
   const flowNodeFullList = computed(() => [...flowGroupNodeList.value, ...flowNodeList.value, ...syntheticNodeList.value])
 
+  /**
+   * 当前被点击选中的连线 id（仅当该连线仍存在时命中，否则为空串）。
+   *
+   * `selectedEdgeId` 在连线被删除后会保留旧 id（各删除路径不统一清理）；此处按
+   * `store.connections` 校验一次，避免用陈旧 id 匹配到连线，语义也更清晰。
+   */
+  const selectedEdgeClassId = computed<string>(() => {
+    const id = selectedEdgeId.value
+    if (!id) return ''
+    return store.connections.value.some((c) => c.id === id) ? id : ''
+  })
+
   /** Vue Flow 连线列表（type 固定 default；联动高亮时给关联连线挂方向分色 class：
       运行态 canvas-edge--running（蓝，优先级最高）/ 改接拖拽 canvas-edge--rewiring（虚线半透明）/
+      单击选中 canvas-edge--selected（蓝，仅被点击的那一条；拖拽中的连线仍显示改接虚线）/
       单选输入侧 canvas-edge--input（绿）/ 输出侧 canvas-edge--output（橙），Vue Flow 会把 edge.class 合并到 g.vue-flow__edge 上，
       由 AssetCanvas 的 :deep 规则渲染主题色） */
   const flowEdgeList = computed<FlowEdge[]>(() =>
@@ -260,11 +283,13 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
         ? EDGE_RUNNING_RELATED_CLASS
         : rewiringIds?.value.has(c.id)
           ? EDGE_REWIRING_CLASS
-          : relatedInputEdgeIds.value.has(c.id)
-            ? EDGE_RELATED_INPUT_CLASS
-            : relatedOutputEdgeIds.value.has(c.id)
-              ? EDGE_RELATED_OUTPUT_CLASS
-              : undefined,
+          : selectedEdgeClassId.value === c.id
+            ? EDGE_SELECTED_CLASS
+            : relatedInputEdgeIds.value.has(c.id)
+              ? EDGE_RELATED_INPUT_CLASS
+              : relatedOutputEdgeIds.value.has(c.id)
+                ? EDGE_RELATED_OUTPUT_CLASS
+                : undefined,
     })),
   )
 
@@ -432,6 +457,7 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
     flowEdges: flowEdgeList,
     relatedInputEdgeIds,
     relatedOutputEdgeIds,
+    selectedEdgeClassId,
     adjacentInputNodeIds,
     adjacentOutputNodeIds,
     runningInputEdgeIds,

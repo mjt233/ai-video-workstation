@@ -90,7 +90,10 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
 
   /**
    * 点击节点：普通单击切换为单选该节点；Ctrl（或 Cmd）单击增/减选。
-   * 合成节点（群组框/输出点）点击不改变选择。点击节点同时清空分组选中（FR-7.6）。
+   * 合成节点（群组框/输出点）点击不改变选择。点击节点同时清空分组选中（FR-7.6）
+   * 与**连线选中**（`selectedEdgeId`）——选中节点后其关联连线按方向分色高亮，
+   * 若保留上一条被点选的连线，画面上会同时存在两种「主题色高亮」，用户无从判断
+   * 当前焦点是节点还是连线。
    *
    * @param payload Vue Flow 节点点击事件（含 event 与 node）
    */
@@ -101,6 +104,7 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
     const id = payload.node.id
     if (isSyntheticNodeId(id)) return
     selectedGroupIds.value = []
+    selectedEdgeId.value = ''
     const event = payload.event as MouseEvent | undefined
     if (event?.ctrlKey || event?.metaKey) {
       toggleSelectNode(id)
@@ -146,7 +150,16 @@ export function useCanvasSelection(options: UseCanvasSelectionOptions) {
     selectedEdgeId.value = ''
   }
 
-  /** 记录当前选中的连线（供 Delete 键/连线右键菜单断开） */
+  /**
+   * 记录当前选中的连线（主题色高亮 + 供 Delete 键/连线右键菜单断开）。
+   *
+   * 仅写入连线选中，**不改变节点选中**：连线的关联高亮（绿/橙）与节点的关联高亮是两套
+   * 独立派生集，允许同屏并存（详见 useCanvasFlow 的 class 优先级）。清空时机为点击空白
+   * （`onPaneClick`）、点击节点（`onNodeClick`）、重置（`reset`）；连线被删除后其 id 不再
+   * 命中任何连线，class 自然失效（无需额外清理）。
+   *
+   * @param payload Vue Flow 连线点击事件（含连线）
+   */
   function onEdgeClick({ edge }: EdgeMouseEvent): void {
     selectedEdgeId.value = edge.id
   }
