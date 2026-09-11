@@ -2,12 +2,17 @@
  * 系统设置存储（系统配置 → 系统设置页签）。
  *
  * 系统级属性（不区分项目）统一落盘为 `server/config/system.json`，按**子类**分组，
- * 当前包含「回收站」子类：
+ * 当前包含「回收站」与「任务日志」两个子类：
  * ```jsonc
  * {
  *   "trash": {
  *     "autoClean": { "enabled": true, "intervalDays": 7, "retentionDays": 7 },
  *     "lastRunAt": "2026-08-20T10:00:00.000Z"
+ *   },
+ *   "taskLog": {
+ *     "autoClean": { "enabled": true, "intervalHours": 24, "retentionDays": 14 },
+ *     "heartbeatSeconds": 60,
+ *     "lastRunAt": null
  *   }
  * }
  * ```
@@ -31,6 +36,14 @@ export const SYSTEM_SETTINGS_PATH = path.resolve(__dirname, '../../config/system
 export const DAYS_MIN = 1;
 export const DAYS_MAX = 3650;
 
+/** 小时类配置的合法范围（1 小时 ~ 30 天） */
+export const HOURS_MIN = 1;
+export const HOURS_MAX = 720;
+
+/** 心跳间隔的合法范围（秒；0 = 不写心跳日志） */
+export const HEARTBEAT_MIN = 0;
+export const HEARTBEAT_MAX = 3600;
+
 /** 回收站自动清理配置 */
 export interface TrashAutoCleanSettings {
   /** 是否启用定时自动清理（默认 true） */
@@ -51,12 +64,41 @@ export interface TrashSettings {
 /** 系统设置整体结构（按子类分组，后续新增子类在此扩展） */
 export interface SystemSettings {
   trash: TrashSettings;
+  taskLog: TaskLogSettings;
+}
+
+/** 任务日志自动清理配置 */
+export interface TaskLogAutoCleanSettings {
+  /** 是否启用定时自动清理（默认 true） */
+  enabled: boolean;
+  /** 执行间隔（小时，默认 24）：距上次执行达到该间隔即触发一轮 */
+  intervalHours: number;
+  /** 日志保留期（天，默认 14）：**已终态任务**的日志超过该天数即被删除 */
+  retentionDays: number;
+}
+
+/** 任务日志子类设置 */
+export interface TaskLogSettings {
+  autoClean: TaskLogAutoCleanSettings;
+  /**
+   * 轮询心跳间隔（秒，默认 60）：
+   * 工作流引擎轮询远端任务时，状态与进度均未变化则按该间隔补写一条 debug 心跳日志；
+   * 设为 0 表示不写心跳（日志量最小，但无法判断「任务仍在推进」）。
+   */
+  heartbeatSeconds: number;
+  /** 上次自动清理执行时间（ISO 字符串；从未执行为 null，由服务端写入） */
+  lastRunAt: string | null;
 }
 
 /** 系统设置默认值（配置文件缺失/字段缺失时的回退值） */
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   trash: {
     autoClean: { enabled: true, intervalDays: 7, retentionDays: 7 },
+    lastRunAt: null,
+  },
+  taskLog: {
+    autoClean: { enabled: true, intervalHours: 24, retentionDays: 14 },
+    heartbeatSeconds: 60,
     lastRunAt: null,
   },
 };
@@ -68,6 +110,68 @@ export interface TrashAutoCleanPatch {
   retentionDays?: number;
 }
 
+/** 任务日志子类的可写字段（PUT 局部更新用） */
+export interface TaskLogPatch {
+  /** 自动清理配置（可部分更新） */
+  autoClean?: {
+    enabled?: boolean;
+    intervalHours?: number;
+    retentionDays?: number;
+  };
+  /** 轮询心跳间隔（秒；0 = 不写心跳） */
+  heartbeatSeconds?: number;
+}
+
+/**
+ * 校验并规范化整数类配置（通用）。
+ *
+ * 仅接受数字或非空数字字符串：`null` / `undefined` / 空串会被拒绝
+ * （否则 `Number(null) === 0` 会让 0 值配置绕过范围校验）。
+ *
+ * @param label 字段中文标签（用于报错）
+ * @param value 前端提交的原始值
+ * @param min 允许的最小值（含）
+ * @param max 允许的最大值（含）
+ * @param unit 单位中文名（用于报错文案）
+ * @returns 规范化后的整数
+ * @throws code=INVALID 非整数或超出 [min, max]
+ */
+function normalizeInt(label: string, value: unknown, min: number, max: number, unit: string): number {
+  const valid = typeof value === 'number'
+    || (typeof value === 'string' && value.trim() !== '');
+  const n = valid ? Number(value) : Number.NaN;
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw Object.assign(
+      new Error(`${label}必须是 ${min}~${max} 之间的整数（${unit}）`),
+      { code: 'INVALID' },
+    );
+  }
+  return n;
+}
+
+/**
+ * 校验并规范化「执行间隔」（小时）。
+ *
+ * @param label 字段中文标签（用于报错）
+ * @param value 前端提交的原始值
+ * @returns 规范化后的小时数
+ * @throws code=INVALID 非整数或超出 [1, 720]
+ */
+export function normalizeHours(label: string, value: unknown): number {
+  return normalizeInt(label, value, HOURS_MIN, HOURS_MAX, '小时');
+}
+
+/**
+ * 校验并规范化「轮询心跳间隔」（秒；0 表示不写心跳）。
+ *
+ * @param value 前端提交的原始值
+ * @returns 规范化后的秒数
+ * @throws code=INVALID 非整数或超出 [0, 3600]
+ */
+export function normalizeHeartbeatSeconds(value: unknown): number {
+  return normalizeInt('心跳间隔', value, HEARTBEAT_MIN, HEARTBEAT_MAX, '秒');
+}
+
 /**
  * 校验并规范化天数类配置。
  *
@@ -77,14 +181,7 @@ export interface TrashAutoCleanPatch {
  * @throws code=INVALID 非整数或超出 [1, 3650]
  */
 export function normalizeDays(label: string, value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(value);
-  if (!Number.isInteger(n) || n < DAYS_MIN || n > DAYS_MAX) {
-    throw Object.assign(
-      new Error(`${label}必须是 ${DAYS_MIN}~${DAYS_MAX} 之间的整数（天）`),
-      { code: 'INVALID' },
-    );
-  }
-  return n;
+  return normalizeInt(label, value, DAYS_MIN, DAYS_MAX, '天');
 }
 
 /**
@@ -112,7 +209,31 @@ function normalizeAutoClean(raw: unknown): TrashAutoCleanSettings {
 }
 
 /**
- * 把配置文件内容规范为完整的系统设置（逐字段回退默认值）。
+ * 把配置文件中的任意值规范为「任务日志 → 自动清理」配置（逐字段回退默认值）。
+ *
+ * @param raw 配置文件中 `taskLog.autoClean` 的原始值
+ * @returns 规范化后的自动清理配置
+ */
+function normalizeTaskLogAutoClean(raw: unknown): TaskLogAutoCleanSettings {
+  const fallback = DEFAULT_SYSTEM_SETTINGS.taskLog.autoClean;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...fallback };
+  const data = raw as Record<string, unknown>;
+  const enabled = typeof data.enabled === 'boolean' ? data.enabled : fallback.enabled;
+  const intervalHours = Number(data.intervalHours);
+  const retentionDays = Number(data.retentionDays);
+  return {
+    enabled,
+    intervalHours: Number.isInteger(intervalHours) && intervalHours >= HOURS_MIN && intervalHours <= HOURS_MAX
+      ? intervalHours
+      : fallback.intervalHours,
+    retentionDays: Number.isInteger(retentionDays) && retentionDays >= DAYS_MIN && retentionDays <= DAYS_MAX
+      ? retentionDays
+      : fallback.retentionDays,
+  };
+}
+
+/**
+ * 把配置文件中的任意值规范为完整的系统设置（逐字段回退默认值）。
  *
  * @param raw 配置文件解析后的任意值
  * @returns 规范化后的系统设置
@@ -127,10 +248,22 @@ export function normalizeSystemSettings(raw: unknown): SystemSettings {
     ? (trashRaw as Record<string, unknown>)
     : {};
   const lastRunAt = typeof trash.lastRunAt === 'string' && trash.lastRunAt ? trash.lastRunAt : null;
+  const taskLogRaw = data.taskLog;
+  const taskLog = taskLogRaw && typeof taskLogRaw === 'object' && !Array.isArray(taskLogRaw)
+    ? (taskLogRaw as Record<string, unknown>)
+    : {};
+  const heartbeat = Number(taskLog.heartbeatSeconds);
   return {
     trash: {
       autoClean: normalizeAutoClean(trash.autoClean),
       lastRunAt,
+    },
+    taskLog: {
+      autoClean: normalizeTaskLogAutoClean(taskLog.autoClean),
+      heartbeatSeconds: Number.isInteger(heartbeat) && heartbeat >= HEARTBEAT_MIN && heartbeat <= HEARTBEAT_MAX
+        ? heartbeat
+        : DEFAULT_SYSTEM_SETTINGS.taskLog.heartbeatSeconds,
+      lastRunAt: typeof taskLog.lastRunAt === 'string' && taskLog.lastRunAt ? taskLog.lastRunAt : null,
     },
   };
 }
@@ -230,6 +363,65 @@ export async function markTrashAutoCleanRun(
 }
 
 /**
+ * 局部更新「任务日志」配置（未传字段保持原值）。
+ *
+ * @param patch 可部分更新的字段（autoClean.enabled / autoClean.intervalHours /
+ *   autoClean.retentionDays / heartbeatSeconds）
+ * @param configPath 配置文件路径（默认 SYSTEM_SETTINGS_PATH）
+ * @returns 更新后的任务日志设置
+ * @throws code=INVALID 小时/天数非整数或越界、enabled 非布尔
+ */
+export async function updateTaskLogSettings(
+  patch: TaskLogPatch,
+  configPath: string = SYSTEM_SETTINGS_PATH,
+): Promise<TaskLogSettings> {
+  const settings = await readSystemSettings(configPath);
+  const next: TaskLogSettings = {
+    autoClean: { ...settings.taskLog.autoClean },
+    heartbeatSeconds: settings.taskLog.heartbeatSeconds,
+    lastRunAt: settings.taskLog.lastRunAt,
+  };
+  const autoClean = patch.autoClean;
+  if (autoClean) {
+    if (autoClean.enabled !== undefined) {
+      if (typeof autoClean.enabled !== 'boolean') {
+        throw Object.assign(new Error('enabled 必须是布尔值'), { code: 'INVALID' });
+      }
+      next.autoClean.enabled = autoClean.enabled;
+    }
+    if (autoClean.intervalHours !== undefined) {
+      next.autoClean.intervalHours = normalizeHours('执行间隔', autoClean.intervalHours);
+    }
+    if (autoClean.retentionDays !== undefined) {
+      next.autoClean.retentionDays = normalizeDays('日志保留期', autoClean.retentionDays);
+    }
+  }
+  if (patch.heartbeatSeconds !== undefined) {
+    next.heartbeatSeconds = normalizeHeartbeatSeconds(patch.heartbeatSeconds);
+  }
+  settings.taskLog = next;
+  await writeSystemSettings(settings, configPath);
+  return settings.taskLog;
+}
+
+/**
+ * 记录任务日志自动清理的执行时间（服务端内部调用）。
+ *
+ * @param at 执行时间（ISO 字符串）
+ * @param configPath 配置文件路径（默认 SYSTEM_SETTINGS_PATH）
+ * @returns 更新后的任务日志设置
+ */
+export async function markTaskLogCleanRun(
+  at: string,
+  configPath: string = SYSTEM_SETTINGS_PATH,
+): Promise<TaskLogSettings> {
+  const settings = await readSystemSettings(configPath);
+  settings.taskLog.lastRunAt = at;
+  await writeSystemSettings(settings, configPath);
+  return settings.taskLog;
+}
+
+/**
  * 计算下次自动清理时间。
  *
  * @param lastRunAt 上次执行时间（ISO 字符串；null 表示从未执行）
@@ -241,4 +433,18 @@ export function computeNextRunAt(lastRunAt: string | null, intervalDays: number)
   const last = Date.parse(lastRunAt);
   if (Number.isNaN(last)) return null;
   return new Date(last + intervalDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * 按「小时」粒度计算下次自动清理时间（任务日志清理使用）。
+ *
+ * @param lastRunAt 上次执行时间（ISO 字符串；null 表示从未执行）
+ * @param intervalHours 执行间隔（小时）
+ * @returns 下次执行时间（ISO 字符串）；从未执行或时间非法时返回 null（表示「应立即执行」）
+ */
+export function computeNextRunAtHours(lastRunAt: string | null, intervalHours: number): string | null {
+  if (!lastRunAt) return null;
+  const last = Date.parse(lastRunAt);
+  if (Number.isNaN(last)) return null;
+  return new Date(last + intervalHours * 60 * 60 * 1000).toISOString();
 }

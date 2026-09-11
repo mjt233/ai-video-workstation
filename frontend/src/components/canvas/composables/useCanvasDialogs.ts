@@ -55,6 +55,32 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
     historyDialog.show = true
   }
 
+  // ── 任务详情（节点生成任务的完整日志）────────────────────
+
+  /** 任务详情对话框状态（taskId 为空时对话框提示不可查询） */
+  const logDialog = reactive({ show: false, nodeId: '', taskId: '', nodeName: '' })
+
+  /**
+   * 打开节点任务详情对话框（节点错误遮罩「详情」按钮）。
+   *
+   * taskId 由调用方从该节点的生成状态取出：仅服务端持久化的任务（工作流 / LLM 会话）
+   * 才有日志可查；本地校验类错误没有 taskId，此时提示不可查询而不是打开空对话框。
+   *
+   * @param nodeId 节点 id
+   * @param taskId 该节点最近一次任务的 id（缺失时提示不可查询）
+   */
+  function openNodeLog(nodeId: string, taskId?: string): void {
+    const node = nodeMap.value[nodeId]
+    if (!taskId) {
+      showSnackbar('该任务没有可查询的日志（本地校验失败或日志已超期清理）', 'error')
+      return
+    }
+    logDialog.nodeId = nodeId
+    logDialog.taskId = taskId
+    logDialog.nodeName = node?.name ?? ''
+    logDialog.show = true
+  }
+
   // ── 保存为自定义资产 ────────────────────────────────────
 
   /** 保存为自定义资产对话框状态 */
@@ -217,6 +243,10 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
     saveAsDialog.nodeId = ''
     sceneDialog.show = false
     sceneDialog.nodeId = ''
+    logDialog.show = false
+    logDialog.nodeId = ''
+    logDialog.taskId = ''
+    logDialog.nodeName = ''
     picker.show = false
     picker.nodeId = ''
   }
@@ -237,6 +267,8 @@ export function useCanvasDialogs(options: UseCanvasDialogsOptions) {
     sceneDialogNode,
     openSetAsScene,
     openSetAsShotVideo,
+    logDialog,
+    openNodeLog,
     picker,
     pickerTabs,
     pickerSelected,

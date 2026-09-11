@@ -144,8 +144,8 @@ describe('useCanvasGeneration', () => {
     taskSocket.snapshotReady.value = true
     ;(runWorkflow as Mock).mockResolvedValue({ taskId: 'task-1', status: 'running' })
     ;(getTaskStatus as Mock).mockResolvedValue(COMPLETED_TASK)
-    ;(getTaskLogs as Mock).mockResolvedValue([])
-    ;(listWorkflowTasks as Mock).mockResolvedValue([])
+    ;(getTaskLogs as Mock).mockResolvedValue({ logs: [], total: 0, limit: 0, truncated: false })
+    ;(listWorkflowTasks as Mock).mockResolvedValue({ tasks: [], total: 0 })
     ;(listActiveTasks as Mock).mockResolvedValue([])
     ;(concatVideo as Mock).mockResolvedValue({ taskId: 'ff-1' })
     ;(trimVideo as Mock).mockResolvedValue({ taskId: 'ff-1' })
@@ -660,38 +660,41 @@ describe('useCanvasGeneration', () => {
   it('restore：注册表无记录时按 SQLite 补查恢复工作流任务（排队窗口/服务重启）', async () => {
     ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
     taskSocket.tasks.value = []
-    ;(listWorkflowTasks as Mock).mockImplementation(async (_p: string, status?: string) =>
-      status === 'pending' ? [workflowTaskResponse({ taskId: 'wf-9', status: 'pending' })] : [],
+    ;(listWorkflowTasks as Mock).mockImplementation(async (opts: { project?: string; status?: string }) =>
+      opts.status === 'pending' ? { tasks: [workflowTaskResponse({ taskId: 'wf-9', status: 'pending' })], total: 1 } : { tasks: [], total: 0 },
     )
     const gen = useCanvasGeneration('p', TARGET)
     await gen.restore(new Set(['vg']))
 
-    expect(listWorkflowTasks).toHaveBeenCalledWith('p', 'running')
-    expect(listWorkflowTasks).toHaveBeenCalledWith('p', 'pending')
+    expect(listWorkflowTasks).toHaveBeenCalledWith({ project: 'p', status: 'running', limit: 1000 })
+    expect(listWorkflowTasks).toHaveBeenCalledWith({ project: 'p', status: 'pending', limit: 1000 })
     expect(gen.statusByNode.value.vg?.status).toBe('running')
     expect(gen.statusByNode.value.vg?.taskId).toBe('wf-9')
   })
 
   it('restore：SQLite 补查按 画布 scope / 节点 过滤（无 nodeId 或跨画布不恢复）', async () => {
     taskSocket.tasks.value = []
-    ;(listWorkflowTasks as Mock).mockImplementation(async (_p: string, status?: string) =>
-      status === 'running'
-        ? [
-            // 其他画布
-            workflowTaskResponse({
-              taskId: 'wf-a',
-              params: {
-                vars: {}, promptPaths: [], outputPath: 'assert/x.mp4', nodeId: 'vg',
-                canvas: { kind: 'scene', episode: '2', shot: '2' },
-              },
-            }),
-            // 无画布定位（非画布节点提交）
-            workflowTaskResponse({
-              taskId: 'wf-b',
-              params: { vars: {}, promptPaths: [], outputPath: 'assert/x.mp4', nodeId: 'vg' },
-            }),
-          ]
-        : [],
+    ;(listWorkflowTasks as Mock).mockImplementation(async (opts: { status?: string }) =>
+      opts.status === 'running'
+        ? {
+            tasks: [
+              // 其他画布
+              workflowTaskResponse({
+                taskId: 'wf-a',
+                params: {
+                  vars: {}, promptPaths: [], outputPath: 'assert/x.mp4', nodeId: 'vg',
+                  canvas: { kind: 'scene', episode: '2', shot: '2' },
+                },
+              }),
+              // 无画布定位（非画布节点提交）
+              workflowTaskResponse({
+                taskId: 'wf-b',
+                params: { vars: {}, promptPaths: [], outputPath: 'assert/x.mp4', nodeId: 'vg' },
+              }),
+            ],
+            total: 2,
+          }
+        : { tasks: [], total: 0 },
     )
     const gen = useCanvasGeneration('p', TARGET)
     await gen.restore(new Set(['vg']))

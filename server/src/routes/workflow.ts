@@ -444,6 +444,21 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
  */
 export { parseTaskParams, getRemoteTaskId };
 
+/**
+ * 解析查询参数中的正整数（用于 limit / offset）。
+ *
+ * 非法值（非数字、负数、小数、数组）一律返回 undefined，由调用方按「不传」处理——
+ * 分页参数容错优先，避免脏参数导致 500。
+ *
+ * @param raw Express 查询参数原始值
+ * @returns 正整数；非法或缺失时为 undefined
+ */
+function parsePositiveInt(raw: unknown): number | undefined {
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
 function toTaskResponse(task: db.TaskRecord) {
   return {
     taskId: task.id,
@@ -500,16 +515,28 @@ workflowRouter.get('/workflow/tasks', (req: Request, res: Response) => {
   const project = req.query.project as string | undefined;
   const status = req.query.status as string | undefined;
   const batchId = req.query.batchId as string | undefined;
-  const tasks = db.listTasks(project, status, batchId);
+  const since = req.query.since as string | undefined;
+  const until = req.query.until as string | undefined;
+  const limit = parsePositiveInt(req.query.limit);
+  const offset = parsePositiveInt(req.query.offset);
+  const { tasks, total } = db.listTasks({ project, status, batchId, since, until, limit, offset });
   res.json({
     tasks: tasks.map(t => toTaskResponse(t)),
+    total,
+    limit: limit ?? null,
+    offset: offset ?? 0,
   });
 });
 
 // GET /api/workflow/tasks/:taskId/log — get task logs
 workflowRouter.get('/workflow/tasks/:taskId/log', (req: Request, res: Response) => {
-  const logs = db.getTaskLogs(req.params.taskId as string);
-  res.json({ logs });
+  const taskId = req.params.taskId as string;
+  // limit 缺省 = 全量（向后兼容）；limit=0 亦表示全量；limit=N 返回最后 N 条
+  const rawLimit = req.query.limit;
+  const limit = rawLimit === undefined ? 0 : (parsePositiveInt(rawLimit) ?? 0);
+  const total = db.getTaskLogCount(taskId);
+  const logs = limit > 0 ? db.getRecentTaskLogs(taskId, limit) : db.getTaskLogs(taskId);
+  res.json({ logs, total, limit, truncated: limit > 0 && total > logs.length });
 });
 
 // POST /api/workflow/retry/:taskId — retry a failed task

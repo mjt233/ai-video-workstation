@@ -182,6 +182,7 @@
               @upload-file="onUploadFile"
               @retry-upload="(nodeId: string) => void upload.retry(nodeId)"
               @retry="generateNode"
+              @detail="(nodeId: string) => openNodeLog(nodeId, statusByNode[nodeId]?.taskId)"
               @interrupt="onInterrupt"
               @start-rename="startRename"
               @update:rename-value="onRenameInput"
@@ -602,6 +603,13 @@
         </v-card>
       </v-dialog>
 
+      <!-- 任务详情对话框：节点错误遮罩「详情」按钮打开，展示该任务完整日志（含级别过滤） -->
+      <CanvasNodeLogDialog
+        v-model="logDialog.show"
+        :task-id="logDialog.taskId || null"
+        :node-name="logDialog.nodeName"
+      />
+
       <!-- 设为分镜场景图对话框（蓝图模式不可用：蓝图不绑定分镜） -->
       <SetAsSceneDialog
         v-if="!isBlueprint"
@@ -688,6 +696,7 @@ import { applyLlmEvent, buildLlmFinishedAdopt, createLlmStreamState, createThrot
 import type { CanvasStreamStatePayload } from './CanvasNodeCard.vue'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
+import CanvasNodeLogDialog from './CanvasNodeLogDialog.vue'
 import AiTextHistoryDialog from './AiTextHistoryDialog.vue'
 import SaveAssetDialog from './SaveAssetDialog.vue'
 import SaveAsDialog from './SaveAsDialog.vue'
@@ -1702,7 +1711,7 @@ const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } =
 const { editorPanel, isMultiSelected, selectedNodeIds, selectedGroupIds, onEdgeClick, onNodeDragStart: onNodeDragStartBase } = selection
 const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, previewInputsOf, editorTextInputs, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, selectedEdgeClassId, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
-const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
+const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, logDialog, openNodeLog, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupEntityMenu, groupEntityRename, groupEntityColor, groupEntityDissolve, addMenu, addNodeAt } = menus
 const { autoBuilding, autoBuild } = autobuild
 // 群组组合式导出（顶层解构：模板内自动解包 ref）

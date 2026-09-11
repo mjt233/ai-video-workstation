@@ -545,7 +545,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
         const task = await getTaskStatus(taskId)
         // 等待期间可能已被中断/重置（定时器被移除）：不再覆盖终态
         if (!pollTimers[nodeId]) return
-        const logs = await getTaskLogs(taskId).catch(() => [])
+        // 只要最后一条日志用于节点遮罩展示（服务端 limit=1 直取尾部，避免每 2 秒搬运上千行）
+        const logs = await getTaskLogs(taskId, { limit: 1 }).then(r => r.logs).catch(() => [])
         // 同上：两个 await 之后写状态前都要再校验一次，避免覆盖 reset/interrupt 后的状态
         if (!pollTimers[nodeId]) return
         const lastLog = logs.length > 0 ? String(logs[logs.length - 1].message) : undefined
@@ -930,7 +931,9 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     for (const status of ['running', 'pending'] as const) {
       let tasks: TaskResponse[]
       try {
-        tasks = await listWorkflowTasks(project, status)
+        // 补查只关心「本画布上仍在跑的节点任务」：limit 放大到 1000 条足够覆盖
+        // 排队窗口内的任务（不传 limit 会把项目全部历史任务都拉回来）
+        tasks = (await listWorkflowTasks({ project, status, limit: 1000 })).tasks
       } catch (e) {
         // 补查失败不影响注册表结果（仅可能漏排队窗口内的任务），打日志继续
         console.error(

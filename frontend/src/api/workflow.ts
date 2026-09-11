@@ -160,6 +160,8 @@ export interface TaskResponse {
 }
 
 export interface LogEntry {
+  /** 日志自增主键（列表稳定 key 与增量拉取用） */
+  id: number
   level: string
   message: string
   metadata?: string
@@ -264,18 +266,74 @@ export async function getTaskStatus(taskId: string): Promise<TaskResponse> {
   return data
 }
 
-export async function listTasks(project?: string, status?: string, batchId?: string): Promise<TaskResponse[]> {
+/**
+ * 查询任务列表（支持项目 / 状态 / 批次 / 时间范围过滤与分页）。
+ *
+ * 任务管理器「进行中」走统一任务注册表（WS），「历史」页签走本接口（SQLite 持久化权威）。
+ *
+ * @param options.project 项目名过滤
+ * @param options.status 状态过滤（pending / running / completed / failed）
+ * @param options.batchId 批次 id 过滤
+ * @param options.since 创建时间下界（ISO 字符串或 `YYYY-MM-DD`）
+ * @param options.until 创建时间上界（ISO 字符串或 `YYYY-MM-DD`）
+ * @param options.limit 分页大小（省略 = 不分页）
+ * @param options.offset 分页偏移（仅 limit 生效时有意义）
+ * @returns 当前页任务与满足条件的总数
+ */
+export async function listTasks(options: {
+  project?: string
+  status?: string
+  batchId?: string
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<{ tasks: TaskResponse[]; total: number }> {
   const params = new URLSearchParams()
-  if (project) params.set('project', project)
-  if (status) params.set('status', status)
-  if (batchId) params.set('batchId', batchId)
-  const { data } = await client.get<{ tasks: TaskResponse[] }>(`/workflow/tasks?${params}`)
-  return data.tasks
+  if (options.project) params.set('project', options.project)
+  if (options.status) params.set('status', options.status)
+  if (options.batchId) params.set('batchId', options.batchId)
+  if (options.since) params.set('since', options.since)
+  if (options.until) params.set('until', options.until)
+  if (options.limit) params.set('limit', String(options.limit))
+  if (options.offset) params.set('offset', String(options.offset))
+  const { data } = await client.get<{ tasks: TaskResponse[]; total: number }>(`/workflow/tasks?${params}`)
+  return { tasks: data.tasks, total: data.total ?? data.tasks.length }
 }
 
-export async function getTaskLogs(taskId: string): Promise<LogEntry[]> {
-  const { data } = await client.get<{ logs: LogEntry[] }>(`/workflow/tasks/${taskId}/log`)
-  return data.logs
+/** 任务日志读取结果 */
+export interface TaskLogsResult {
+  /** 日志条目（按写入顺序正序） */
+  logs: LogEntry[]
+  /** 该任务日志总行数（不受 limit 影响） */
+  total: number
+  /** 本次生效的条数上限（0 = 全量） */
+  limit: number
+  /** 是否因 limit 截断（true 时 logs 只是尾部片段） */
+  truncated: boolean
+}
+
+/**
+ * 读取任务日志。
+ *
+ * @param taskId 任务 id
+ * @param options.limit 只取最后 N 条（省略或 0 = 全量）：
+ *   画布节点轮询用 1（只要最后一条用于展示），日志查看器用 200 起步
+ * @returns 日志条目与截断信息
+ */
+export async function getTaskLogs(taskId: string, options: { limit?: number } = {}): Promise<TaskLogsResult> {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  const query = params.toString()
+  const { data } = await client.get<{ logs: LogEntry[]; total?: number; limit?: number; truncated?: boolean }>(
+    `/workflow/tasks/${taskId}/log${query ? `?${query}` : ''}`,
+  )
+  return {
+    logs: data.logs,
+    total: data.total ?? data.logs.length,
+    limit: data.limit ?? 0,
+    truncated: data.truncated ?? false,
+  }
 }
 
 export async function retryTask(taskId: string): Promise<{ taskId: string; status: string }> {

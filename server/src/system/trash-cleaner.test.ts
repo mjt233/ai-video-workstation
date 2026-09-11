@@ -132,7 +132,10 @@ describe('runTrashAutoClean', () => {
 
   it('没有超期条目时不调用 purge，但仍更新 lastRunAt', async () => {
     await writeSystemSettings(
-      { trash: { autoClean: { enabled: true, intervalDays: 7, retentionDays: 7 }, lastRunAt: null } },
+      {
+        trash: { autoClean: { enabled: true, intervalDays: 7, retentionDays: 7 }, lastRunAt: null },
+        taskLog: { autoClean: { enabled: true, intervalHours: 24, retentionDays: 14 }, heartbeatSeconds: 60, lastRunAt: null },
+      },
       configPath,
     );
     mockListTrash.mockResolvedValue({

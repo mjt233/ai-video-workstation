@@ -121,14 +121,26 @@
         <div class="text-body-small canvas-node__status-log">
           {{ status.errorMsg || '任务失败' }}
         </div>
-        <v-btn
-          size="x-small"
-          variant="tonal"
-          color="error"
-          @click.stop="emit('retry', node.id)"
-        >
-          重试
-        </v-btn>
+        <div class="canvas-node__status-actions">
+          <!-- 「详情」仅在任务可查询时渲染（本地校验类错误没有 taskId/IPC 记录，点了也无日志） -->
+          <v-btn
+            v-if="status.taskId"
+            size="x-small"
+            variant="text"
+            color="primary"
+            @click.stop="emit('detail', node.id)"
+          >
+            详情
+          </v-btn>
+          <v-btn
+            size="x-small"
+            variant="tonal"
+            color="error"
+            @click.stop="emit('retry', node.id)"
+          >
+            重试
+          </v-btn>
+        </div>
       </div>
       <!-- 加载节点上传遮罩（通用能力）：上传中显示文件名 + 进度条；失败显示错误与重试 -->
       <div
@@ -314,6 +326,8 @@ const emit = defineEmits<{
   (e: 'retry-upload', nodeId: string): void
   /** 状态遮罩「重试」按钮（失败后重新生成） */
   (e: 'retry', nodeId: string): void
+  /** 状态遮罩「详情」按钮（打开该节点最近一次任务的完整日志对话框；仅任务可查询时渲染） */
+  (e: 'detail', nodeId: string): void
   /** 状态遮罩「中断」按钮（统一中断入口，参数为节点 id） */
   (e: 'interrupt', nodeId: string): void
   /** 双击名称进入内联编辑 */
@@ -511,6 +525,15 @@ function handleStyle(count: number, index: number): Record<string, string> {
 
 .canvas-node__status--error {
   background: rgba(255, 235, 238, 0.92);
+}
+
+/* 错误遮罩操作区：「详情」（查看完整日志）+「重试」并排 */
+.canvas-node__status-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .canvas-node__status-log {

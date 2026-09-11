@@ -21,11 +21,34 @@ import { copyExistingAssetToHistory } from './assets/history.js';
 import { isCancelRequested } from './workflows/cancel.js';
 import { toNativeUserParams } from './workflows/user-params.js';
 import { workflowExecutor } from './tasks/workflow-executor.js';
+import { readSystemSettings } from './system/system-settings.js';
 import type { CanvasDefTarget } from './assets/canvas-def.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.resolve(__dirname, '../../design');
 const WORKFLOWS_DIR = path.resolve(__dirname, 'workflows');
+
+/**
+ * 读取「轮询心跳间隔」（毫秒）。
+ *
+ * 系统设置 `taskLog.heartbeatSeconds` 控制：状态与进度均未变化时按该间隔补写一条
+ * debug 心跳日志；0 表示不写心跳。
+ *
+ * 读取失败**不阻断任务**：回退默认值 60 秒并打印日志（系统设置文件损坏属于可恢复异常，
+ * 不应让生成任务失败）。
+ *
+ * @param configPath 系统设置文件路径（测试可注入临时路径）
+ * @returns 心跳间隔（毫秒）；0 表示不写心跳
+ */
+export async function resolvePollHeartbeatMs(configPath?: string): Promise<number> {
+  try {
+    const settings = await readSystemSettings(configPath);
+    return settings.taskLog.heartbeatSeconds * 1000;
+  } catch (e) {
+    console.error('[engine] 读取任务日志心跳配置失败，回退默认 60 秒:', e);
+    return 60_000;
+  }
+}
 
 // Re-export for API routes
 export { getAllWorkflows };
@@ -570,6 +593,10 @@ async function tryHandleSceneStageDirectReference(
   db.updateTaskStatus(taskId, 'completed', {
     result: { path: outputPath, directReference: true, prevReference: isPrev },
   });
+  // 本分支不走 runTask 的 provider 主流程（提前 return），因此必须自己收敛统一注册表：
+  // 否则该任务会永久停留在活跃区（任务管理器一直显示运行中、画布节点 Loading 不消失，
+  // 且同节点后续任务会被 NODE_BUSY 拒绝），直到服务重启。
+  workflowExecutor.finish(taskId, 'completed');
   return true;
 }
 
@@ -948,10 +975,29 @@ export async function runTask(taskId: string): Promise<void> {
     // 远端任务悬挂时用户可通过中断（cancel）兜底；provider 不可达时 poll 抛错 → 任务直接 failed。
     db.addLog(taskId, 'info', 'Polling task status...');
     const POLL_INTERVAL = 2000;
+    const heartbeatMs = await resolvePollHeartbeatMs();
+    /** 上一次落库的轮询状态（用于「变化才记」判定） */
+    let lastStatus: string | undefined;
+    /** 上一次落库时间（毫秒时间戳；用于心跳判定） */
+    let lastLoggedAt = Date.now();
     while (true) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
       const result = await provider.poll(remoteTaskId);
-      db.addLog(taskId, 'debug', `Poll result: status=${result.status} progress=${result.progress}`);
+
+      // ── 轮询日志降噪（变化才记 + 心跳）──
+      // 原实现每 2 秒无条件写一条 debug，实测占日志总量 89%、其中 92.6% 与上一条完全重复。
+      // 现在只在「状态/进度变化」时写 info（留下即有效，可回溯进度轨迹），
+      // 状态长时间不变时按配置间隔补一条 debug 心跳（证明轮询仍在推进）。
+      const signature = `${result.status}|${result.progress ?? '-'}`;
+      const now = Date.now();
+      if (signature !== lastStatus) {
+        db.addLog(taskId, 'info', `进度更新：status=${result.status} progress=${result.progress}`);
+        lastStatus = signature;
+        lastLoggedAt = now;
+      } else if (heartbeatMs > 0 && now - lastLoggedAt >= heartbeatMs) {
+        db.addLog(taskId, 'debug', `轮询中（状态未变）：status=${result.status} progress=${result.progress}`);
+        lastLoggedAt = now;
+      }
 
       if (result.done) {
         db.addLog(taskId, 'info', `Task completed with status: ${result.status}`);

@@ -2,7 +2,7 @@
   <!-- 全局「任务管理器」面板（Header 右上角图标展开；展示系统当前全部异步任务） -->
   <v-dialog
     :model-value="modelValue"
-    max-width="560"
+    max-width="760"
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
   >
     <v-card class="task-manager-dialog">
@@ -29,102 +29,128 @@
           @click="emit('update:modelValue', false)"
         />
       </v-card-title>
-      <v-card-text class="task-manager-dialog__body">
-        <template v-if="activeTasks.length > 0">
-          <div
-            v-for="t in activeTasks"
-            :key="t.id"
-            class="task-manager-dialog__row"
-          >
-            <div class="task-manager-dialog__info">
-              <div class="task-manager-dialog__title">
-                <v-progress-circular
-                  v-if="t.status === 'running'"
-                  :size="14"
-                  :width="2"
-                  indeterminate
-                  color="primary"
-                  class="mr-2"
-                />
-                <v-icon
-                  v-else
-                  icon="mdi-clock-outline"
-                  size="14"
-                  color="warning"
-                  class="mr-2"
-                />
-                <v-chip
-                  :color="typeColor(t.type)"
-                  size="x-small"
-                  variant="tonal"
-                  class="mr-2"
+
+      <!-- 「进行中」= 统一任务注册表（内存运行态）；「历史」= SQLite 持久化任务（含日志） -->
+      <v-tabs
+        v-model="tab"
+        density="comfortable"
+        color="primary"
+        class="px-4"
+      >
+        <v-tab value="active">
+          进行中
+        </v-tab>
+        <v-tab value="history">
+          历史
+        </v-tab>
+      </v-tabs>
+
+      <v-window v-model="tab">
+        <v-window-item value="active">
+          <v-card-text class="task-manager-dialog__body">
+            <template v-if="activeTasks.length > 0">
+              <div
+                v-for="t in activeTasks"
+                :key="t.id"
+                class="task-manager-dialog__row"
+              >
+                <div class="task-manager-dialog__info">
+                  <div class="task-manager-dialog__title">
+                    <v-progress-circular
+                      v-if="t.status === 'running'"
+                      :size="14"
+                      :width="2"
+                      indeterminate
+                      color="primary"
+                      class="mr-2"
+                    />
+                    <v-icon
+                      v-else
+                      icon="mdi-clock-outline"
+                      size="14"
+                      color="warning"
+                      class="mr-2"
+                    />
+                    <v-chip
+                      :color="typeColor(t.type)"
+                      size="x-small"
+                      variant="tonal"
+                      class="mr-2"
+                    >
+                      {{ typeLabel(t.type) }}
+                    </v-chip>
+                    <span class="task-manager-dialog__name">{{ t.label }}</span>
+                  </div>
+                  <div class="task-manager-dialog__meta">
+                    <span>{{ statusText(t) }}</span>
+                    <span class="mx-1">·</span>
+                    <span>已运行 {{ formatElapsed(t.startedAt) }}</span>
+                    <template v-if="locationText(t)">
+                      <span class="mx-1">·</span>
+                      <span>{{ locationText(t) }}</span>
+                    </template>
+                  </div>
+                  <!-- 进度条：ffmpeg 真实百分比；其余任务不确定进度（indeterminate） -->
+                  <v-progress-linear
+                    v-if="t.status === 'running'"
+                    :model-value="t.progress"
+                    :indeterminate="typeof t.progress !== 'number'"
+                    height="4"
+                    rounded
+                    color="primary"
+                    class="mt-1"
+                  />
+                </div>
+                <v-tooltip
+                  :text="t.cancelable ? '中断该任务' : (t.cancelBlockReason || '该任务不支持中断')"
+                  location="left"
                 >
-                  {{ typeLabel(t.type) }}
-                </v-chip>
-                <span class="task-manager-dialog__name">{{ t.label }}</span>
+                  <template #activator="{ props: tipProps }">
+                    <span v-bind="tipProps">
+                      <v-btn
+                        size="small"
+                        variant="tonal"
+                        color="error"
+                        class="task-manager-dialog__interrupt"
+                        :disabled="!t.cancelable"
+                        @click="onInterrupt(t)"
+                      >
+                        中断
+                      </v-btn>
+                    </span>
+                  </template>
+                </v-tooltip>
               </div>
-              <div class="task-manager-dialog__meta">
-                <span>{{ statusText(t) }}</span>
-                <span class="mx-1">·</span>
-                <span>已运行 {{ formatElapsed(t.startedAt) }}</span>
-                <template v-if="locationText(t)">
-                  <span class="mx-1">·</span>
-                  <span>{{ locationText(t) }}</span>
-                </template>
-              </div>
-              <!-- 进度条：ffmpeg 真实百分比；其余任务不确定进度（indeterminate） -->
-              <v-progress-linear
-                v-if="t.status === 'running'"
-                :model-value="t.progress"
-                :indeterminate="typeof t.progress !== 'number'"
-                height="4"
-                rounded
-                color="primary"
-                class="mt-1"
-              />
-            </div>
-            <v-tooltip
-              :text="t.cancelable ? '中断该任务' : (t.cancelBlockReason || '该任务不支持中断')"
-              location="left"
+            </template>
+            <div
+              v-else
+              class="task-manager-dialog__empty"
             >
-              <template #activator="{ props: tipProps }">
-                <span v-bind="tipProps">
-                  <v-btn
-                    size="small"
-                    variant="tonal"
-                    color="error"
-                    class="task-manager-dialog__interrupt"
-                    :disabled="!t.cancelable"
-                    @click="onInterrupt(t)"
-                  >
-                    中断
-                  </v-btn>
-                </span>
-              </template>
-            </v-tooltip>
-          </div>
-        </template>
-        <div
-          v-else
-          class="task-manager-dialog__empty"
-        >
-          <v-icon
-            icon="mdi-progress-clock"
-            size="36"
-            class="mb-2"
-            color="grey"
-          />
-          <div class="text-body-medium text-medium-emphasis">
-            暂无进行中的任务
-          </div>
-        </div>
-        <div
-          v-if="finishedNoticeCount > 0"
-          class="task-manager-dialog__finished-note"
-        >
-          本次面板打开期间已有 {{ finishedNoticeCount }} 个任务完成
-        </div>
-      </v-card-text>
+              <v-icon
+                icon="mdi-progress-clock"
+                size="36"
+                class="mb-2"
+                color="grey"
+              />
+              <div class="text-body-medium text-medium-emphasis">
+                暂无进行中的任务
+              </div>
+            </div>
+            <div
+              v-if="finishedNoticeCount > 0"
+              class="task-manager-dialog__finished-note"
+            >
+              本次面板打开期间已有 {{ finishedNoticeCount }} 个任务完成
+            </div>
+          </v-card-text>
+        </v-window-item>
+
+        <v-window-item value="history">
+          <v-card-text class="task-manager-dialog__body">
+            <TaskHistoryPanel :active="tab === 'history'" />
+          </v-card-text>
+        </v-window-item>
+      </v-window>
     </v-card>
   </v-dialog>
 </template>
@@ -132,6 +158,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { taskSocket, type LlmCanvasTarget, type TaskInfo, type TaskType } from '../canvas/taskSocket'
+import TaskHistoryPanel from './task/TaskHistoryPanel.vue'
 
 /**
  * 全局「任务管理器」面板（由原 LLM 活跃会话面板升级）：
@@ -160,6 +187,9 @@ const activeTasks = computed(() =>
     .sort((a, b) => b.startedAt - a.startedAt),
 )
 
+/** 当前页签：active = 进行中（内存注册表）；history = 历史（SQLite 任务 + 日志） */
+const tab = ref<'active' | 'history'>('active')
+
 /** 已完成计数提示（本次面板打开期间收敛的任务数；面板打开时清零） */
 const finishedNoticeCount = ref(0)
 /** 上次任务快照（数量减少判定完成） */
@@ -169,7 +199,7 @@ let prevCount = activeTasks.value.length
 const nowTick = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
 
-/** 面板打开时启动秒级计时；关闭时停止并清零完成计数 */
+/** 面板打开时启动秒级计时；关闭时停止并清零完成计数（同时复位页签） */
 watch(
   () => props.modelValue,
   (open) => {
@@ -181,6 +211,7 @@ watch(
         nowTick.value = Date.now()
       }, 1000)
     } else {
+      tab.value = 'active'
       if (tickTimer) {
         clearInterval(tickTimer)
         tickTimer = null

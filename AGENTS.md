@@ -50,7 +50,20 @@ overview.md
 - **存储清理**：项目设置面板「存储清理」页签扫描「无引用自定义资产」与「久远历史记录」（阈值默认 7 天），勾选后移入**系统全局回收站** `design/.trash/{批次}/{项目名}/...`；回收站的查看/恢复/彻底删除与定时自动清理（默认每 7 天执行一次、回收站保留期 7 天，配置落盘 `server/config/system.json`，日志前缀 `[trash-auto-clean]`）在**系统设置 → 系统设置 → 回收站**子类中管理。`.trash` 为保留目录，不出现在项目列表，也不允许创建/导入同名项目
 - **资产画布**（分镜/场景详情页「资产画布」Tab）的业务逻辑、数据模型与开发指南见 [./docs/canvas/README.md](./docs/canvas/README.md)（按主题拆分为多个文档）：包括节点类型、连线规则、画布交互、配置面板、输入图拖拽排序、生成流程、自动搭画布、设为分镜场景图、切换分镜跟随加载及常见坑
 - **画布蓝图**（可复用画布片段：多选创建 → 全局/项目级保存 → 系统配置「画布蓝图」页签管理 → 画布内插入，可自动包成独立分组）见 [./docs/canvas/blueprint.md](./docs/canvas/blueprint.md)：创建时**分组须显式选中**（仅选中组内全部节点不带分组）；蓝图编辑器复用 `AssetCanvas` 的 `mode='blueprint'`（执行类入口关闭，加载节点可上传/选择资产，资产上下文为蓝图 `assetProject`，**手动保存：`autoSave: false`，头部「保存」/Ctrl+S 落盘，关闭时提示不保存退出**）；蓝图文件为 `prompt/blueprint/{id}.json`（项目级）与 `server/config/blueprints/{id}.json`（全局）
-- **统一异步任务架构**（工作流 / LLM 会话 / ffmpeg 三类任务同一注册表 + 全局任务管理器 + ffmpeg 接口异步化）见 [./docs/canvas/task-architecture.md](./docs/canvas/task-architecture.md)：新增本地 ffmpeg 操作必须导出 `buildXxxCommand()` 交给 `tasks/ffmpeg-executor.ts` 执行（否则无进度、无法中断）；任务中断统一走 `POST /api/tasks/:taskId/cancel`；不要再引入 localStorage 任务记录
+- **统一异步任务架构**（工作流 / LLM 会话 / ffmpeg 三类任务同一注册表 + 全局任务管理器 + ffmpeg 接口异步化）：画布视角见 [./docs/canvas/task-architecture.md](./docs/canvas/task-architecture.md)：新增本地 ffmpeg 操作必须导出 `buildXxxCommand()` 交给 `tasks/ffmpeg-executor.ts` 执行（否则无进度、无法中断）；任务中断统一走 `POST /api/tasks/:taskId/cancel`；不要再引入 localStorage 任务记录
+- **任务管理（何时读 `docs/task-manager.md`）**：任务管理器的业务与实现机制统一见 [./docs/task-manager.md](./docs/task-manager.md)（总览 + 分主题索引：`data-model` / `lifecycle` / `execution` / `events` / `api` / `log` / `ui` / `development`）。**动手前先读该文档**的情形：
+  - 新增/修改任何**异步任务类型**（执行器、注册表登记、进度、中断能力）或本地 ffmpeg 操作；
+  - 改动**任务日志**（写入内容与级别、轮询降噪、`task_logs` 表结构、保留期与清理、占用统计）；
+  - 改动**任务查询/中断/历史接口**（`/api/workflow/tasks*`、`/api/tasks*`、`/api/system/task-log*`）；
+  - 改动**任务管理器 UI**、画布 Loading 恢复、错误「详情」日志查看、系统设置「日志」子类；
+  - 排查「任务卡住 / 刷新后 Loading 不消失 / 日志看不到 / 数据库变大」类问题。
+
+  三条必须遵守的约束：
+  1. **运行态与持久态是两个事实源**——内存注册表（`tasks/registry.ts`）是「现在在跑什么」的唯一事实源但**不持久化**；SQLite（`data/workflow.db`）是工作流任务与日志的持久化权威但**不含 ffmpeg / LLM 任务**；画布 Loading 恢复必须两者并用（注册表 + SQLite `pending|running` 补查）；
+  2. **日志清理的安全边界**——只删 `completed`/`failed` 任务的超期日志；**`pending`/`running` 任务的日志永不删除**；`tasks` 行与产物一律保留。自动清理（默认每 24 小时、保留期 14 天）与手动清理的配置在**系统设置 → 系统设置 → 日志**（`server/config/system.json` 的 `taskLog` 子类，日志前缀 `[tasklog-auto-clean]`）；判定空间回收用 `freelist_count`，**不要用文件大小**（Windows 截断后可能不缩小）；
+  3. **日志读取必须带 `limit`**——`GET /api/workflow/tasks/:taskId/log` 不传 `limit` 会返回全量（单任务可达上千行）；画布轮询用 `limit=1`，查看器用尾部 200 条 + 按需「查看全部」。
+
+  验证此类改动需在数据库**副本**上演练（`node scripts/verify-log-cleanup.mjs 14`），不得直接对真实库执行清理。
 - **画布节点媒体输入预览规则**：任何节点主体需要展示已连接的媒体输入（图片/音频/视频）时，必须复用生成图片/生成视频节点使用的统一输入预览组件 `frontend/src/components/canvas/editors/CanvasInputPreview.vue`（现有实例：AI文本生成节点），禁止为节点单独实现一套预览/徽标 UI。具体做法：
   1. 输入条目使用 `CanvasInputInfo`（`nodeId/path/label/version`），`version` = 来源节点产物 mtime（`nodeOps.withVersions` 经 `getOutputMtime` 提供），作为预览 URL 缓存键——源资产未变化时预览 URL 稳定，避免无关重渲染导致媒体反复重新加载；
   2. 按来源节点输出类型拆成 `images-inputs` / `videos-inputs` / `audios-inputs` 三组传入（某类型无输入时该组不渲染），各组标题/数量上限/占位文案按能力传参；

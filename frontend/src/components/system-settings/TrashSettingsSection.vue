@@ -398,9 +398,11 @@ async function save(): Promise<void> {
   error.value = ''
   try {
     settings.value = await updateSystemSettings({
-      enabled: form.enabled,
-      intervalDays: Number(form.intervalDays),
-      retentionDays: Number(form.retentionDays),
+      trash: {
+        enabled: form.enabled,
+        intervalDays: Number(form.intervalDays),
+        retentionDays: Number(form.retentionDays),
+      },
     })
     resetForm()
     snackbar.text = '自动清理配置已保存'

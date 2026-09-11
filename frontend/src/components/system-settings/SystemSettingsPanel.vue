@@ -21,6 +21,7 @@
         </v-expansion-panel-title>
         <v-expansion-panel-text>
           <TrashSettingsSection v-if="section.key === 'trash'" />
+          <TaskLogSettingsSection v-else-if="section.key === 'taskLog'" />
         </v-expansion-panel-text>
       </v-expansion-panel>
     </v-expansion-panels>
@@ -31,11 +32,12 @@
 import { ref, watch } from 'vue'
 import type { SystemSettingsSection } from '../../composables/useSystemSettings'
 import TrashSettingsSection from './TrashSettingsSection.vue'
+import TaskLogSettingsSection from './TaskLogSettingsSection.vue'
 
 /**
  * 系统设置面板：系统属性配置容器，按**子类**分组。
  *
- * 当前子类：回收站（自动清理配置 + 全局回收站管理）。
+ * 当前子类：回收站（自动清理配置 + 全局回收站管理）、任务日志（日志保留期与清理 + 占用统计）。
  * 后续新增系统属性时在 `SECTIONS` 注册子类并在模板中挂载对应子组件即可。
  */
 const props = defineProps<{
@@ -50,6 +52,12 @@ const SECTIONS: Array<{ key: SystemSettingsSection; label: string; icon: string;
     label: '回收站',
     icon: 'mdi-delete-outline',
     hint: '系统全局 · 自动清理与回收站管理',
+  },
+  {
+    key: 'taskLog',
+    label: '日志',
+    icon: 'mdi-text-box-outline',
+    hint: '任务日志 · 保留期、清理与占用统计',
   },
 ]
 

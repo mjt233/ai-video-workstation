@@ -23,10 +23,10 @@ export function useBatchTask(batchId: Ref<string | null>) {
       try {
         const [s, t] = await Promise.all([
           getBatchStatus(id),
-          listTasks(undefined, undefined, id),
+          listTasks({ batchId: id }),
         ])
         Object.assign(summary, s)
-        tasks.value = t
+        tasks.value = t.tasks
 
         // Auto-stop when all tasks are done
         if (s.completed + s.failed === s.total && s.total > 0) {

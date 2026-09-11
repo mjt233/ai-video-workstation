@@ -1,6 +1,9 @@
 # 统一异步任务架构与任务管理器
 
 > 返回 [总览与定位](./README.md) · 设计文档：[`../plans/2026-09-09-unified-async-task-manager.md`](../plans/2026-09-09-unified-async-task-manager.md)
+>
+> **本文是画布视角**（分层图、三类任务接入、WS 消息、画布 Loading 恢复与中断交互）。
+> 跨模块的完整任务管理机制（数据模型、生命周期、执行侧实现、接口清单、**任务日志的分级/降噪/保留期清理**、任务管理器「进行中 + 历史」界面、开发指南）见 [`../task-manager.md`](../task-manager.md) 及其分主题文档。
 
 ## 目标
 
@@ -130,6 +133,16 @@ interface TaskRecord {
 - 画布定位来源：提交时随任务携带 `nodeId` + `canvas`（ffmpeg 走请求体，工作流走 `params`），工作流任务的定位**随 params 持久化在 SQLite**，引擎登记注册表时透传（任务管理器也据此展示画布位置）。
 - 恢复后：工作流任务续跑本地轮询（SQLite 为权威，含阶段日志），ffmpeg 任务重新订阅 WS 广播；**任务未到终态前节点保持加载中**，终态收敛时刷新产物展示。
 - 两路结果按 `taskId` 去重；工作流任务仍保留本地轮询（`GET /api/workflow/tasks/:id`，引擎为权威），因为其状态推进在服务端队列中。
+- **轮询只取最后一条日志**：`getTaskLogs(taskId, { limit: 1 })`（服务端直取尾部并命中主键索引）。原实现每 2 秒拉取全量日志，单任务可达上千行，属于纯浪费。
+
+### 节点任务「详情」与历史查看
+
+| 入口 | 说明 |
+|------|------|
+| 节点错误遮罩「详情」 | 生成失败时节点卡片在「重试」旁渲染「详情」（仅 `status.taskId` 存在时渲染——本地校验类错误没有可查询的日志），点击打开 `CanvasNodeLogDialog`：任务摘要（状态/耗时/错误信息）+ 完整日志（级别过滤、默认尾部 200 条、可「查看全部」） |
+| 任务管理器「历史」页签 | 按时间范围/状态/项目筛选 SQLite 中的历史任务（默认最近 14 天，与日志保留期一致），逐条展开日志 |
+
+对话框状态由 `useCanvasDialogs` 的 `logDialog` 持有（`openNodeLog(nodeId, taskId)`，并纳入 `resetAll()`）；日志数据经 `composables/useTaskLogs.ts` 拉取。日志的保留期与清理见 [`../task-manager/log.md`](../task-manager/log.md)。
 
 ## 常见坑
 
@@ -142,3 +155,6 @@ interface TaskRecord {
 - **同节点单飞**：注册表按 `nodeId` 拒绝并发（`NODE_BUSY`），前端提交前也会按节点状态拦截。
 - **工作流任务不能只靠注册表恢复 Loading**：注册表只在引擎领取任务时登记，本地排队窗口（2s tick）与服务重启期间为空；画布恢复必须补查 SQLite `pending|running`，且画布定位要随 `params` 持久化（否则重启后无处可查）。
 - **阻塞式 `submit` 等于不可中断**：引擎只有在 `submit` 返回后才持久化远端任务 id，此时取消才被受理。自定义服务商因此把「调用发起 + 在途请求」放进后台协程、`execute` 立即返回；同步 provider 若确实无法中止在途请求（火山方舟 / OpenAI 兼容），必须声明 `deferredCancel`，否则「生成期间」的中断请求会被 `canCancelTask` 拒绝。
+- **日志读取不传 `limit` 会拖全量**（单任务上千行）：画布轮询用 `limit: 1`，查看器用尾部 200 条再按需全量；`GET /api/workflow/tasks/:taskId/log` 的缺省行为仍是全量（向后兼容）。
+- **轮询日志必须降噪**：2 秒一次无条件写日志曾让 `task_logs` 表 + 索引占到数据库的 87%（其中 92.6% 是连续重复行）。现为「状态/进度变化才记（`info`）+ 心跳兜底（`debug`，默认 60 秒，可配 0 关闭）」，见 [`../task-manager/log.md`](../task-manager/log.md)。
+- **判定磁盘回收看 `freelist_count`，不看文件大小**：`VACUUM` 会把文件截断到实际数据量，但 Windows 等平台的 `stat` 大小可能不缩小（甚至因重新分配而变大），只按文件大小校验会得出「清理无效」的错误结论。

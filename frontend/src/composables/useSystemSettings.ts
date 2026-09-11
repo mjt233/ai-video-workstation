@@ -9,7 +9,7 @@ import { ref } from 'vue'
  */
 
 /** 系统设置子类 key（用于外部跳转定位） */
-export type SystemSettingsSection = 'trash'
+export type SystemSettingsSection = 'trash' | 'taskLog'
 
 /** 对话框是否打开 */
 const dialogOpen = ref(false)

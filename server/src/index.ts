@@ -14,6 +14,7 @@ import { blueprintsRouter } from './routes/blueprints.js';
 import { cleanupRouter } from './routes/cleanup.js';
 import { systemRouter } from './routes/system.js';
 import { startTrashAutoCleanScheduler } from './system/trash-scheduler.js';
+import { startTaskLogCleanScheduler } from './system/log-scheduler.js';
 import { discoverProviders } from './providers/index.js';
 import { discoverWorkflows, startEngine } from './workflow-engine.js';
 import { syncAllInstances } from './providers/instance-sync.js';
@@ -109,6 +110,8 @@ discoverProviders().then(() =>
     startEngine();
     // 回收站自动清理调度器（默认每 7 天一次；配置见 系统设置 → 系统设置 → 回收站）
     startTrashAutoCleanScheduler();
+    // 任务日志自动清理调度器（默认每 24 小时一次；配置见 系统设置 → 系统设置 → 日志）
+    startTaskLogCleanScheduler();
     server.listen(Number(PORT), HOST, () => {
       printAccessUrls(PORT);
     });

@@ -269,13 +269,17 @@ class TaskRegistry {
   }
 
   /**
-   * 终态收敛：置状态/终态时间后移出活跃区（幂等：已终态直接返回）。
+   * 终态收敛：置状态/终态时间后移出活跃区（幂等：已终态直接返回缓存快照）。
    *
-   * 取消优先级高于调用方意图：已请求取消的任务即使执行器报成功也按 cancelled 收敛。
+   * **本方法按调用方声明的 `outcome.status` 落状态，不做任何优先级判定**——
+   * 「已请求取消的任务即使执行器报成功也按 cancelled 收敛」这条语义由**执行器**保证：
+   * ffmpeg 执行器在 `error` 事件里判 `cancelRequested` 收敛为 cancelled，
+   * 工作流引擎在写产物前检查 `cancelRequested` 标记并抛「用户中断」。
+   * 因此新增执行器时必须在自己的终态分支里处理取消，不能依赖注册表。
    *
    * @param id 任务 id
    * @param outcome 终态（缺省 completed）
-   * @returns 终态任务快照；任务不存在返回 null
+   * @returns 终态任务快照；任务不存在返回 null（已终态则返回缓存快照）
    */
   finish(id: string, outcome?: { status?: TaskStatus; error?: string }): TaskRecord | null {
     const t = this.tasks.get(id);
