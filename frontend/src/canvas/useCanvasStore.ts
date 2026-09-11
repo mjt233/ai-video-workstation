@@ -5,7 +5,7 @@ import { canConnect, canConnectNodes, getNodeInputPortId, getNodeOutputPortId } 
 import { getPrototype } from './registry'
 import { applyConnectionSync } from './connectionSync'
 import { serializeNodeClipboard, type NodeClipboardPayload } from './nodeClipboard'
-import { remapNodeConfig } from './groupSelection'
+import { clipboardPlacementOffset, instantiateClipboard } from './pastePlacement'
 import { DEFAULT_GROUP_COLOR, defaultGroupName, type RectLike } from './groups'
 import type { CanvasDirectorConfig } from './videoTypes'
 
@@ -17,9 +17,6 @@ export const DEFAULT_NODE_SIZE = { width: 240, height: 160 }
 
 /** 撤销/重做历史栈容量上限 */
 const HISTORY_LIMIT = 50
-
-/** 粘贴时新节点相对原位置的偏移量（像素） */
-const PASTE_OFFSET = 30
 
 /** 群组连接忽略原因 */
 export type GroupConnectSkipReason = 'incompatible' | 'cycle' | 'in-group' | 'duplicate'
@@ -596,44 +593,35 @@ export function useCanvasStore(
   }
 
   /**
-   * 粘贴剪贴板内容（节点 + 分组，整体偏移 PASTE_OFFSET），生成全新 id 并重映射：
-   * - 节点 id 全部更换；
-   * - config 内节点引用重映射（inputOrder、导演台素材块 sourceNodeId，见 remapNodeConfig）；
-   * - 组内连线按新 id 重建，并逐条触发 connect 联动（connectionSync，与手动连线行为一致）；
-   * - 分组换新 id 并同偏移平移（成员关系由几何重叠自动成立，无需重映射）。
+   * 粘贴剪贴板内容（节点 + 分组），生成全新 id 并按**零重叠落点**平移：
+   *
+   * 落点由 `pastePlacement.ts: clipboardPlacementOffset` 计算：首选「原内容右下方一个身位
+   * + 30px 间隙」，被画布已有内容占据时向右探测（再换泳道），保证**副本包围盒与画布
+   * 已有任何节点/分组矩形零重叠**。这是硬约束而非美观要求——分组成员关系由几何重叠
+   * 实时派生（`groups.ts: rectsOverlap`），副本一旦压住原件，拖动任一分组都会把对方的
+   * 节点一起带走（历史固定 30px 偏移的故障根因）。
+   *
+   * 其余处理：节点/连线/分组 id 全部更换、config 内节点引用重映射（`instantiateClipboard`）、
+   * 组内连线按新 id 重建并逐条触发 connect 联动（connectionSync，与手动连线行为一致）。
    * 可传入外部载荷（如从系统剪贴板标记解析出的，支持跨画布/刷新后粘贴）：
    * 未传入时使用内部剪贴板内容。
    *
    * @param source 外部复制载荷（缺省用内部剪贴板）
-   * @returns 新节点列表与新分组列表（均可能为空）
+   * @returns 新节点列表、新分组列表（均可能为空）与「落点是否被探测挪动过」标记（供提示文案使用）
    */
-  function pasteNodes(source?: NodeClipboardPayload): { nodes: CanvasNodeData[]; groups: CanvasGroupData[] } {
+  function pasteNodes(source?: NodeClipboardPayload): {
+    nodes: CanvasNodeData[]
+    groups: CanvasGroupData[]
+    cascaded: boolean
+  } {
     const base = source ?? clipboard.value
-    if (!base || (base.nodes.length === 0 && base.groups.length === 0)) return { nodes: [], groups: [] }
-    // 先建立旧 id → 新 id 映射（两遍扫描：config 重映射需要完整映射）
-    const idMap = new Map<string, string>()
-    for (const n of base.nodes) idMap.set(n.id, newId())
-    const nodes = base.nodes.map((n) => {
-      const copy = JSON.parse(JSON.stringify(n)) as CanvasNodeData
-      copy.id = idMap.get(n.id) ?? copy.id
-      copy.x = n.x + PASTE_OFFSET
-      copy.y = n.y + PASTE_OFFSET
-      copy.config = remapNodeConfig(JSON.parse(JSON.stringify(n.config)) as NodeConfig, idMap)
-      return copy
+    if (!base || (base.nodes.length === 0 && base.groups.length === 0)) return { nodes: [], groups: [], cascaded: false }
+    const placement = clipboardPlacementOffset(base, {
+      nodes: data.value.nodes,
+      groups: data.value.groups ?? [],
     })
-    const groups = base.groups.map((g) => ({
-      ...g,
-      id: newId(),
-      x: Math.round(g.x + PASTE_OFFSET),
-      y: Math.round(g.y + PASTE_OFFSET),
-    }))
-    const connections = base.connections.map((c) => ({
-      id: newId(),
-      fromNodeId: idMap.get(c.fromNodeId) ?? c.fromNodeId,
-      fromPortId: c.fromPortId,
-      toNodeId: idMap.get(c.toNodeId) ?? c.toNodeId,
-      toPortId: c.toPortId,
-    }))
+    const { payload } = instantiateClipboard(base, placement.offset)
+    const { nodes, groups, connections } = payload
     pushHistory()
     data.value.nodes.push(...nodes)
     data.value.connections.push(...connections)
@@ -642,7 +630,7 @@ export function useCanvasStore(
     for (const connection of connections) {
       emitConnectionsChanged({ type: 'connect', connection })
     }
-    return { nodes, groups }
+    return { nodes, groups, cascaded: placement.cascaded }
   }
 
   /**

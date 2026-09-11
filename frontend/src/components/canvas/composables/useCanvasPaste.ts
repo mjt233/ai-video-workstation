@@ -10,7 +10,8 @@ import { nextTick } from 'vue'
 import type { Ref } from 'vue'
 import { collectPastedMedia, buildClipboardAssetDest, type PastedMedia } from '../../../canvas/clipboard'
 import { parseNodeClipboardText, type NodeClipboardPayload } from '../../../canvas/nodeClipboard'
-import type { CanvasNodeData } from '../../../canvas/types'
+import { boundingRect, rectsOverlap, type RectLike } from '../../../canvas/groups'
+import type { CanvasGroupData, CanvasNodeData } from '../../../canvas/types'
 import type { CanvasStoreApi, ScreenToFlow, FindNode, AddSelectedNodes, ShowSnackbar } from './types'
 import type { CanvasUploadApi } from './useCanvasUpload'
 
@@ -18,7 +19,7 @@ import type { CanvasUploadApi } from './useCanvasUpload'
 export interface UseCanvasPasteOptions {
   /** 画布数据 store（添加节点/粘贴节点） */
   store: CanvasStoreApi
-  /** 画布容器 DOM（可视区中心计算） */
+  /** 画布容器 DOM（可视区中心计算 / 可视区矩形换算） */
   flowEl: Ref<HTMLDivElement | null>
   /** Vue Flow 屏幕坐标 → 流坐标换算 */
   screenToFlowCoordinate: ScreenToFlow
@@ -40,6 +41,18 @@ export interface UseCanvasPasteOptions {
   getSelectedGroupIds: () => string[]
   /** 操作反馈提示 */
   showSnackbar: ShowSnackbar
+  /**
+   * 读取当前画布可视区矩形（流坐标；缺省不提供则不做「副本是否可见」判定）。
+   * 由 AssetCanvas 用容器 `getBoundingClientRect` + `screenToFlowCoordinate` 换算。
+   */
+  visibleFlowRect?: () => RectLike | null
+  /**
+   * 把副本内容对准到视口（仅当副本完全落在可视区之外时调用）。
+   * 由 AssetCanvas 用 `fitView({ nodes: [...新节点, ...新分组], ... })` 实现。
+   *
+   * @returns 视口是否成功对准（false = 节点尚未测量等，调用方仅提示不报错）
+   */
+  revealPastedEntities?: (nodeIds: string[], groupIds: string[]) => Promise<boolean>
   /**
    * 媒体粘贴前置校验（可选）：返回非空文案时阻止本次媒体粘贴并提示。
    * 蓝图编辑器未设置资产项目时使用（无项目上下文无法上传资产）。
@@ -144,29 +157,82 @@ export function useCanvasPaste(options: UseCanvasPasteOptions) {
   }
 
   /**
+   * 判断落点包围盒是否**完全**落在当前可视区之外。
+   *
+   * 语义：只要有任意交叠（哪怕只露出一角）就认为「用户看得见副本」，不对准视口，避免
+   * 每次粘贴都跳视口打断操作；完全看不见时才对准。
+   *
+   * @param bounds 副本落点包围盒（流坐标）
+   * @returns true = 完全在可视区外（需要对准）
+   */
+  function isFullyOutsideViewport(bounds: RectLike): boolean {
+    const visible = options.visibleFlowRect?.()
+    if (!visible) return false
+    return !rectsOverlap(visible, bounds)
+  }
+
+  /**
+   * 粘贴后的视口处理：副本完全落在可视区外时把视口对准副本（新节点 + 新分组），
+   * 并提示落点情况；副本可见时不动视口。
+   *
+   * 落点提示仅在「确实对准了视口」时给出（否则会与用户眼前看到的画布矛盾）：
+   * - 落点被碰撞探测挪动过（`cascaded`）→ 说明首选位置被画布已有内容占用；
+   * - 未挪动 → 单纯因原内容较大而落到视野外。
+   *
+   * @param nodes 新粘贴的节点列表
+   * @param groups 新粘贴的分组列表
+   * @param cascaded 落点是否被碰撞探测挪动过
+   */
+  async function revealPastedIfOutside(
+    nodes: CanvasNodeData[],
+    groups: CanvasGroupData[],
+    cascaded: boolean,
+  ): Promise<void> {
+    if (nodes.length === 0 && groups.length === 0) return
+    const reveal = options.revealPastedEntities
+    // 副本几何取「已落位的最终坐标」（store 已按落点平移），包围盒 = 新节点 ∪ 新分组
+    const bounds = boundingRect([...nodes, ...groups])
+    if (!bounds || !isFullyOutsideViewport(bounds)) return
+    if (!reveal) return
+    await nextTick()
+    const ok = await reveal(nodes.map((n) => n.id), groups.map((g) => g.id))
+    if (!ok) {
+      console.warn('[canvas] 粘贴副本落在可视区外，但视口对准失败（节点尚未测量完成），请手动缩小画布查看')
+      showSnackbar('副本粘贴在可视区之外，请缩小画布查看', 'primary')
+      return
+    }
+    showSnackbar(cascaded ? '副本已粘贴到空白处（首选位置被占用），已自动对准' : '副本已粘贴在可视区之外，已自动对准', 'primary')
+  }
+
+  /**
    * 粘贴画布内复制的节点/分组并聚焦（节点选中显示边框、不自动打开配置面板；分组不进入聚焦）。
+   * 副本落点由 store 的零重叠落点算法决定（见 `canvas/pastePlacement.ts`）；
+   * 副本完全落在可视区外时才把视口对准副本。
    *
    * @param source 外部复制载荷（如系统剪贴板标记解析出的，支持跨画布/刷新后粘贴）；缺省用 store 内部剪贴板
    */
   async function pasteNodeAndFocus(source?: NodeClipboardPayload): Promise<void> {
-    const { nodes, groups } = store.pasteNodes(source)
+    const { nodes, groups, cascaded } = store.pasteNodes(source)
     if (nodes.length === 0 && groups.length === 0) return
     selection.setSelectedGroups(groups.map((g) => g.id))
     await focusPastedNodes(nodes.map((n) => n.id))
+    await revealPastedIfOutside(nodes, groups, cascaded)
   }
 
   /**
    * Ctrl+D：复制当前选中的节点与分组（含组内连线）并粘贴，聚焦新节点。
+   * 与 Ctrl+V 共用同一套落点与视口跟随规则。
    */
   async function duplicateSelected(): Promise<void> {
     const nodeIds = getSelectedNodeIds()
     const groupIds = getSelectedGroupIds()
     if (nodeIds.length === 0 && groupIds.length === 0) return
     store.copyNodes(nodeIds, groupIds)
-    const { nodes, groups } = store.pasteNodes()
+    const { nodes, groups, cascaded } = store.pasteNodes()
     if (nodes.length === 0 && groups.length === 0) return
     selection.setSelectedGroups(groups.map((g) => g.id))
     await focusPastedNodes(nodes.map((n: CanvasNodeData) => n.id))
+    await revealPastedIfOutside(nodes, groups, cascaded)
   }
 
   /**

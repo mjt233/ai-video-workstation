@@ -690,6 +690,7 @@ import { createEdgeFlowCache } from '../../canvas/edgeFlow'
 import { getCanvasNodeInfo } from '../../canvas/api'
 import { extOfAudioPath } from '../../canvas/audioTrim'
 import { isSyntheticNodeId, singleDraggedRealNodeId } from '../../canvas/groupSelection'
+import type { RectLike } from '../../canvas/groups'
 import type { CanvasScope } from '../../canvas/paths'
 import { llmSocket, type LlmCanvasTarget, type LlmFinishedInfo, type LlmSessionInfo, type LlmTaskEvent } from '../../canvas/llmSocket'
 import { applyLlmEvent, buildLlmFinishedAdopt, createLlmStreamState, createThrottledCommit, sameCanvasTarget, type LlmStreamState, type ThrottledCommit } from '../../canvas/llmEvents'
@@ -1018,6 +1019,63 @@ let fitViewChain: Promise<void> = Promise.resolve()
  */
 function onFitView(): void {
   void fitView({ ...FIT_VIEW_OPTIONS })
+}
+
+/**
+ * 读取当前画布可视区矩形（流坐标；供「粘贴副本是否可见」判定）。
+ *
+ * 用容器 `getBoundingClientRect` + `screenToFlowCoordinate` 把可视区四角换算到流坐标，
+ * 容器不存在或尺寸为 0（画布 Tab 隐藏）时返回 null，由调用方跳过视口判定。
+ *
+ * @returns 可视区矩形（流坐标）；不可用时返回 null
+ */
+function visibleFlowRect(): RectLike | null {
+  const rect = flowEl.value?.getBoundingClientRect()
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null
+  const a = screenToFlowCoordinate({ x: rect.left, y: rect.top })
+  const b = screenToFlowCoordinate({ x: rect.left + rect.width, y: rect.top + rect.height })
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(b.x - a.x),
+    height: Math.abs(b.y - a.y),
+  }
+}
+
+/** 粘贴副本对准视口时的尺寸等待参数：每次等待毫秒数与最大等待次数 */
+const REVEAL_PASTE_WAIT_MS = 40
+const REVEAL_PASTE_MAX_TRIES = 8
+
+/**
+ * 把视口对准指定实体（粘贴副本完全落在可视区外时调用）。
+ *
+ * `fitView` 只纳入**已测出宽高**的节点：粘贴后 Vue Flow 需要若干帧才会测量新节点
+ * （见 Vue Flow `fitView` 实现的 `!nodesToFit.length` 分支返回 false）。故先轮询等待
+ * 目标节点测出尺寸（最多 `REVEAL_PASTE_MAX_TRIES` 次 × `REVEAL_PASTE_WAIT_MS` 毫秒），
+ * 仍未就绪时返回 false，由调用方提示用户手动缩小查看，不静默失败。
+ *
+ * @param nodeIds 目标节点 id 列表（新粘贴的节点）
+ * @param groupIds 目标分组 id 列表（新粘贴的分组；分组同样渲染为 Vue Flow 节点）
+ * @returns 视口是否成功对准
+ */
+async function revealPastedEntities(nodeIds: string[], groupIds: string[]): Promise<boolean> {
+  const ids = [...nodeIds, ...groupIds]
+  if (ids.length === 0) return false
+  /** 目标节点是否全部已测出宽高（分组框尺寸经 style 下发，同样计入） */
+  const measured = (): boolean =>
+    ids.every((id) => {
+      const node = findNode(id)
+      return !!node && node.dimensions.width > 0 && node.dimensions.height > 0
+    })
+  for (let attempt = 0; attempt < REVEAL_PASTE_MAX_TRIES; attempt += 1) {
+    if (attempt === 0) await nextTick()
+    else await new Promise((resolve) => setTimeout(resolve, REVEAL_PASTE_WAIT_MS))
+    if (disposed) return false
+    if (!measured()) continue
+    const ok = await fitView({ ...FIT_VIEW_OPTIONS, nodes: ids })
+    if (ok) return true
+  }
+  return false
 }
 
 /**
@@ -1672,6 +1730,9 @@ const paste = useCanvasPaste({
   getSelectedNodeIds: () => selection.selectedNodeIds.value,
   getSelectedGroupIds: () => selection.selectedGroupIds.value,
   upload,
+  // 粘贴副本完全落在可视区外时把视口对准副本（可见则不动视口，避免打断操作）
+  visibleFlowRect,
+  revealPastedEntities,
   showSnackbar,
   // 蓝图模式未设置资产项目时阻止媒体粘贴（无项目上下文无法上传资产）
   mediaBlockedReason: () => (isBlueprint.value && !assetContextReady.value ? '请先在蓝图中选择资产项目，再粘贴媒体' : null),

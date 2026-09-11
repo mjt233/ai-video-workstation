@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { useCanvasStore } from './useCanvasStore'
+import { collectDragFollowSet, rectsOverlap } from './groups'
+import { clipboardBounds, PASTE_CASCADE_GAP } from './pastePlacement'
 
 vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
@@ -164,13 +166,15 @@ describe('useCanvasStore', () => {
     expect(store.nodes.value).toHaveLength(2)
   })
 
-  it('pasteNode(source)：外部节点源（如系统剪贴板标记）粘贴为新节点', () => {
+  it('pasteNode(source)：外部节点源（如系统剪贴板标记）粘贴到源节点之外（不叠压）', () => {
     const store = useCanvasStore('p', TARGET)
     const a = store.addNode('text', 0, 0)
     const b = store.pasteNode({ ...a, id: 'external', x: 100, y: 100 })
     expect(b).toBeTruthy()
     expect(b!.id).not.toBe('external')
-    expect(b!.x).toBe(130)
+    // 落点 = 源内容右下方向外错开一个身位 + 间隙：不与源节点矩形重叠
+    expect(b!.x).toBe(100 + a.width + PASTE_CASCADE_GAP)
+    expect(rectsOverlap(a, b!)).toBe(false)
     expect(store.nodes.value).toHaveLength(2)
     // 外部源不写入内部剪贴板
     expect(store.canPaste.value).toBe(false)
@@ -582,13 +586,14 @@ describe('useCanvasStore', () => {
 
   // ── 多选群组批量操作 ──────────────────────────────────
 
-  it('copyNodes/pasteNodes：多节点复制粘贴重建 id 与组内连线', () => {
+  it('copyNodes/pasteNodes：多节点复制粘贴重建 id 与组内连线，副本整体错出源内容包围盒', () => {
     const store = useCanvasStore('p', TARGET)
     const a = store.addNode('image-loader', 0, 0)
     const b = store.addNode('image-generate', 100, 100)
     expect(store.connect(a.id, b.id)).toBe(true)
     store.copyNodes([a.id, b.id])
-    const pasted = store.pasteNodes().nodes
+    const pastedResult = store.pasteNodes()
+    const pasted = pastedResult.nodes
     expect(pasted).toHaveLength(2)
     const pastedIds = new Set(pasted.map((n) => n.id))
     expect(pastedIds.has(a.id)).toBe(false)
@@ -597,10 +602,15 @@ describe('useCanvasStore', () => {
     expect(store.connections.value).toHaveLength(2)
     const newConn = store.connections.value.find((cn) => pastedIds.has(cn.fromNodeId) && pastedIds.has(cn.toNodeId))
     expect(newConn).toBeTruthy()
-    // 偏移 30px
+    // 落点 = 源内容包围盒（两节点并集）右下方一个身位 + 间隙 ⇒ 副本节点不与任何源节点重叠
+    const sourceBounds = clipboardBounds({ nodes: [a, b], connections: [], groups: [] })!
     const pastedA = pasted.find((n) => n.prototypeId === 'image-loader')!
-    expect(pastedA.x).toBe(30)
-    expect(pastedA.y).toBe(30)
+    expect(pastedA.x).toBe(a.x + PASTE_CASCADE_GAP + sourceBounds.width)
+    expect(pastedA.y).toBe(a.y + PASTE_CASCADE_GAP + sourceBounds.height)
+    expect(rectsOverlap(pastedA, a)).toBe(false)
+    expect(rectsOverlap(pasted.find((n) => n.prototypeId === 'image-generate')!, b)).toBe(false)
+    // 首选落点未被占用：不算「被探测挪动」
+    expect(pastedResult.cascaded).toBe(false)
   })
 
   it('pasteNodes：重映射 config.inputOrder 与导演台素材块引用', () => {
@@ -630,9 +640,9 @@ describe('useCanvasStore', () => {
     expect(store.canPaste.value).toBe(false)
   })
 
-  it('pasteNodes：无剪贴板内容返回空节点与空分组', () => {
+  it('pasteNodes：无剪贴板内容返回空节点、空分组且未发生挪动', () => {
     const store = useCanvasStore('p', TARGET)
-    expect(store.pasteNodes()).toEqual({ nodes: [], groups: [] })
+    expect(store.pasteNodes()).toEqual({ nodes: [], groups: [], cascaded: false })
   })
 
   it('updateNodes：批量移动位置为单次撤销', () => {
@@ -939,7 +949,7 @@ describe('useCanvasStore', () => {
     expect(store.groups.value).toHaveLength(1)
   })
 
-  it('copyNodes/pasteNodes：分组换新 id 并偏移 30px，成员关系按几何自动成立', () => {
+  it('copyNodes/pasteNodes：分组副本换新 id 且与源分组零重叠，成员关系仍由几何自动成立', () => {
     const store = useCanvasStore('p', TARGET)
     const a = store.addNode('text', 20, 30)
     const g = store.addGroup(rect(0, 0, 400, 300))
@@ -950,17 +960,55 @@ describe('useCanvasStore', () => {
     const newGroup = pasted.groups[0]
     expect(newGroup.id).not.toBe(g.id)
     expect(newGroup.name).toBe('分组 1')
-    expect(newGroup.x).toBe(30)
-    expect(newGroup.y).toBe(30)
+    // 落点 = 源内容包围盒（分组 400×300 ∪ 节点）右下 + 间隙：副本分组与源分组不重叠
+    expect(newGroup.x).toBe(g.x + PASTE_CASCADE_GAP + 400)
+    expect(newGroup.y).toBe(g.y + PASTE_CASCADE_GAP + 300)
+    expect(rectsOverlap(newGroup, g)).toBe(false)
     expect(store.groups.value).toHaveLength(2)
-    // 粘贴出的节点（20+30, 30+30）仍落在粘贴出的分组（30,30,400,300）内
+    // 副本节点整体跟随副本分组平移，仍落在副本分组内（相对位置不变）
     const newNode = pasted.nodes[0]
-    expect(newNode.x).toBe(50)
-    expect(newNode.y).toBe(60)
+    expect(newNode.x).toBe(a.x + PASTE_CASCADE_GAP + 400)
+    expect(newNode.y).toBe(a.y + PASTE_CASCADE_GAP + 300)
     expect(newGroup.x <= newNode.x && newGroup.x + newGroup.width >= newNode.x + newNode.width).toBe(true)
+    expect(newGroup.y <= newNode.y && newGroup.y + newGroup.height >= newNode.y + newNode.height).toBe(true)
     store.undo()
     expect(store.groups.value).toHaveLength(1)
     expect(store.nodes.value).toHaveLength(1)
+  })
+
+  it('copyNodes/pasteNodes（回归）：拖副本分组不再带走源节点，拖源分组不再带走副本节点', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('text', 20, 30)
+    const g = store.addGroup(rect(0, 0, 400, 300))
+    store.copyNodes([a.id], [g.id])
+    const pasted = store.pasteNodes()
+    const newGroup = pasted.groups[0]
+    const newNode = pasted.nodes[0]
+
+    // 拖副本分组：跟随集只含副本节点（源节点此前会因矩形重叠被一起拖走）
+    const copyFollow = collectDragFollowSet(store.groups.value, store.nodes.value, newGroup.id)
+    expect(copyFollow.groupIds).toEqual([newGroup.id])
+    expect(copyFollow.nodeIds).toEqual([newNode.id])
+    // 拖源分组：跟随集只含源节点
+    const sourceFollow = collectDragFollowSet(store.groups.value, store.nodes.value, g.id)
+    expect(sourceFollow.groupIds).toEqual([g.id])
+    expect(sourceFollow.nodeIds).toEqual([a.id])
+  })
+
+  it('copyNodes/pasteNodes：连续粘贴三份互不重叠（副本本身成为下次粘贴的避让对象）', () => {
+    const store = useCanvasStore('p', TARGET)
+    const a = store.addNode('text', 20, 30)
+    const g = store.addGroup(rect(0, 0, 400, 300))
+    store.copyNodes([a.id], [g.id])
+    store.pasteNodes()
+    store.pasteNodes()
+    expect(store.groups.value).toHaveLength(3)
+    for (let i = 0; i < store.groups.value.length; i += 1) {
+      for (let j = i + 1; j < store.groups.value.length; j += 1) {
+        expect(rectsOverlap(store.groups.value[i], store.groups.value[j])).toBe(false)
+      }
+    }
+    expect(store.nodes.value).toHaveLength(3)
   })
 
   it('copyNodes：仅复制分组（无节点）也可粘贴，canPaste 计入分组', () => {
@@ -983,18 +1031,21 @@ describe('useCanvasStore', () => {
     expect(store.pasteNodes().nodes).toHaveLength(1)
   })
 
-  it('pasteNodes：外部载荷含分组时重建分组', () => {
+  it('pasteNodes：外部载荷含分组时重建分组，落点按载荷包围盒错位', () => {
     const store = useCanvasStore('p', TARGET)
+    const source = store.addNode('text', 0, 0)
     const payload = {
-      nodes: [{ ...store.addNode('text', 0, 0) }],
+      nodes: [{ ...source }],
       connections: [],
       groups: [{ id: 'ext-g', name: '外部分组', color: '#0097A7', x: 100, y: 200, width: 300, height: 200 }],
     }
+    const bounds = clipboardBounds(payload)!
     const pasted = store.pasteNodes(payload)
     expect(pasted.groups).toHaveLength(1)
     expect(pasted.groups[0].id).not.toBe('ext-g')
-    expect(pasted.groups[0].x).toBe(130)
-    expect(pasted.groups[0].y).toBe(230)
+    // 偏移 = 载荷包围盒（节点 ∪ 分组）尺寸 + 间隙
+    expect(pasted.groups[0].x).toBe(100 + PASTE_CASCADE_GAP + bounds.width)
+    expect(pasted.groups[0].y).toBe(200 + PASTE_CASCADE_GAP + bounds.height)
     expect(store.groups.value).toHaveLength(1)
   })
 

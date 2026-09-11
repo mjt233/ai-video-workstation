@@ -47,6 +47,7 @@
 - **版本迁移**：`version` 由 `1` 升为 `2`。`migrateCanvasData` 对旧文件补 `groups: []`；`groups` 非法（非数组）或含结构非法项时**丢弃并 `console.warn`**（不抛错，保证旧/损坏文件仍可加载）。
 - **服务端零改动**：`PUT /api/canvas/def`（`server/src/assets/canvas-def.ts`）只校验 `data` 为对象且 `kind` 匹配，随后 `{ ...dataObj, rev, updatedAt }` 落盘，`groups` 作为未知字段原样透传；分镜重编号/移动、存储清理、自动搭画布均只处理 `nodes`/`connections`，不受影响。
 - **撤销/重做**：分组快照与节点同一份 `CanvasData` 深拷贝（`pushHistory`），因此分组增删改与拖动天然可撤销；拖动/缩放**结束时一次性回写**（`store.moveEntities` / `store.updateGroup`），单次撤销即可整体回退。
+- **几何派生的直接后果（复制粘贴必须避让）**：既然成员关系只由重叠决定，**复制出的副本绝不能与原件矩形重叠**（且需留净距，见 T9）——否则两个分组会同时“认领”对方的节点，拖动任一方都会把对方节点带走。落点由 `pastePlacement.ts: clipboardPlacementOffset` 统一计算（首选原内容右下方向外一个身位、被占用则逐级探测），实现与约束见 [interactions.md](./interactions.md) 约束 T9。
 
 ## 生成产物与历史
 
