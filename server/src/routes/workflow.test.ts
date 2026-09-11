@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { parseTaskParams, canCancelTask, getRemoteTaskId, validateWorkflowImpl, validateDiscoveredImpls, extractComfyuiProviderId, buildRunTaskParams } from './workflow.js';
+import { describe, expect, it, beforeEach } from 'vitest';
+import { parseTaskParams, canCancelTask, getRemoteTaskId, validateWorkflowImpl, validateDiscoveredImpls, extractComfyuiProviderId, buildRunTaskParams, toTaskResponse } from './workflow.js';
 import { register } from '../workflows/registry.js';
+import { taskRegistry } from '../tasks/registry.js';
 import type { TaskRecord } from '../db.js';
 import type { WorkflowDefinition } from '../workflows/types.js';
 import type { DiscoveredTask } from '../workflows/discovery.js';
@@ -105,6 +106,40 @@ const mkTask = (overrides: Partial<TaskRecord> = {}): TaskRecord =>
     phase: 0,
     ...overrides,
   });
+
+describe('toTaskResponse 的 progress 标准字段', () => {
+  beforeEach(() => {
+    taskRegistry.clear();
+  });
+
+  it('completed → 恒为 100（不依赖注册表是否还在）', () => {
+    const res = toTaskResponse(mkTask({ id: 'done-1', status: 'completed' }));
+    expect(res.progress).toBe(100);
+  });
+
+  it('running 且注册表有真实进度 → 取注册表值', () => {
+    taskRegistry.register({ type: 'workflow', label: '生成图片', idOverride: 'run-1', progress: 42 });
+    const res = toTaskResponse(mkTask({ id: 'run-1', status: 'running' }));
+    expect(res.progress).toBe(42);
+  });
+
+  it('running 但注册表无记录（服务重启/未登记）→ 省略字段，不伪造 0', () => {
+    const res = toTaskResponse(mkTask({ id: 'run-gone', status: 'running' }));
+    expect(res.progress).toBeUndefined();
+    expect('progress' in res).toBe(false);
+  });
+
+  it('running 但注册表未上报进度（服务商不上报中间进度）→ 省略字段', () => {
+    taskRegistry.register({ type: 'workflow', label: '生成视频', idOverride: 'run-2' });
+    const res = toTaskResponse(mkTask({ id: 'run-2', status: 'running' }));
+    expect('progress' in res).toBe(false);
+  });
+
+  it('failed → 省略字段（节点展示错误遮罩，无需百分比）', () => {
+    const res = toTaskResponse(mkTask({ id: 'fail-1', status: 'failed' }));
+    expect('progress' in res).toBe(false);
+  });
+});
 
 describe('parseTaskParams', () => {
   it('包含 video 自包含提交参数（wire 形态）', () => {

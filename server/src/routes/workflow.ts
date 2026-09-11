@@ -9,6 +9,7 @@ import { discoverTasks, type DiscoveredTask } from '../workflows/discovery.js';
 import { stripCancelRequested } from '../workflows/cancel.js';
 import { getRemoteTaskId, parseTaskParams } from '../workflows/task-params.js';
 import { cancelWorkflowTask, workflowExecutor } from '../tasks/workflow-executor.js';
+import { taskRegistry } from '../tasks/registry.js';
 import { parseTaskTarget } from '../tasks/task-target.js';
 import type { CanvasDefTarget } from '../assets/canvas-def.js';
 import {
@@ -459,7 +460,37 @@ function parsePositiveInt(raw: unknown): number | undefined {
   return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
-function toTaskResponse(task: db.TaskRecord) {
+/**
+ * 解析任务的进度百分比（响应中的标准结果字段 `progress`）。
+ *
+ * **取值规则（三态）**：
+ * - `completed` → 恒为 100（终态即全程走完，不依赖注册表是否还在）；
+ * - `running` / `pending` → 读内存统一注册表的**真实上报值**（引擎每轮轮询远端后写入）；
+ * - 其余情况（failed 等）→ `undefined`（字段缺省）。
+ *
+ * 进度**不落 SQLite**：它属于运行态（内存注册表是唯一事实源），服务重启即丢失，
+ * 前端据此回退为不确定动画。注册表无记录（重启后 / 引擎尚未登记）同样返回 `undefined`，
+ * 绝不回退成 0——伪造百分比比不确定动画更误导（如无 `duration` 的取帧任务）。
+ *
+ * @param task SQLite 任务记录
+ * @returns 0~100 的进度；无法确定时返回 undefined
+ */
+function taskProgress(task: db.TaskRecord): number | undefined {
+  if (task.status === 'completed') return 100;
+  if (task.status !== 'running' && task.status !== 'pending') return undefined;
+  return taskRegistry.get(task.id)?.progress;
+}
+
+/**
+ * SQLite 任务记录 → 接口响应（任务详情、任务列表共用）。
+ *
+ * 导出供单测直接校验响应形状（与 `parseTaskParams` / `canCancelTask` 同一约定）。
+ *
+ * @param task SQLite 任务记录
+ * @returns 任务响应（`progress` 为无法确定时省略该字段）
+ */
+export function toTaskResponse(task: db.TaskRecord) {
+  const progress = taskProgress(task);
   return {
     taskId: task.id,
     workflowId: task.workflow_id,
@@ -470,6 +501,7 @@ function toTaskResponse(task: db.TaskRecord) {
     createdAt: task.created_at,
     updatedAt: task.updated_at,
     params: parseTaskParams(task.params),
+    ...(typeof progress === 'number' ? { progress } : {}),
   };
 }
 

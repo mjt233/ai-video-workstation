@@ -76,11 +76,11 @@ describe('image-edit/seedream', () => {
     expect(call.params.size).toBe('720x1280');
   });
 
-  it('enable_specified_size=true 但宽高无效时回退 2K', async () => {
+  it('enable_specified_size=true 但宽高缺失时按项目尺寸（门控开启但无宽高可依）', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
     await impl.submit(mkCtx({ userParams: { enable_specified_size: 'true', width: '', height: '' } }));
     const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
-    expect(call.params.size).toBe('2K');
+    expect(call.params.size).toBe('1080x1920');
   });
 
   it('sizeConfig 宽高优先于旧 userParams 门控（统一尺寸配置直传宽高）', async () => {
@@ -93,11 +93,12 @@ describe('image-edit/seedream', () => {
     expect(call.params.size).toBe('1080x1920');
   });
 
-  it('sizeConfig 仅带比例/尺寸档（无宽高）时回退模型默认档位', async () => {
+  it('sizeConfig 仅带比例/尺寸档时按档位表换算（16:9 + 1K → 1820x1024，满足 pro 像素下限）', async () => {
     const impl = getImpl('image-edit', 'seedream-5-pro')!;
+    // 档位表 16:9 + 1K = 1820×1024，总像素 1863680 ∈ [921600, 4624220] → 原样提交
     await impl.submit(mkCtx({ sizeConfig: { ratio: '16:9', size: '1K' } }));
     const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
-    expect(call.params.size).toBe('2K');
+    expect(call.params.size).toBe('1820x1024');
   });
 
   it('单图：image 为字符串', async () => {

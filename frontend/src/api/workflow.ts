@@ -157,6 +157,15 @@ export interface TaskResponse {
   createdAt: string
   updatedAt: string
   params?: TaskParams
+  /**
+   * 任务进度百分比（0~100 的标准结果字段）。
+   *
+   * 三态语义：`completed` 恒为 100；`running`/`pending` 为服务端内存注册表的**真实上报值**
+   * （服务商不上报中间进度时缺省，如 MiniMax H3 / 火山方舟 / OpenAI 兼容）；
+   * `failed` 等情况缺省。**缺省一律按「无法确定」处理**（渲染不确定动画），不要回退成 0——
+   * 进度不落 SQLite，服务重启后即丢失。
+   */
+  progress?: number
 }
 
 export interface LogEntry {

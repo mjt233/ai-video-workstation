@@ -72,9 +72,9 @@ interface TaskRecord {
 
 | 类型 | 登记点 | 中断实现 | 进度 |
 |------|--------|----------|------|
-| `workflow` | `workflow-engine.ts: runTask` 开始时登记（label = 实现名 + 画布定位 `nodeId`/`canvas`），完成/失败处 `finish` | `cancelWorkflowTask()`（复用 `canCancelTask` + Bridge cancel / deferredCancel 标记 + provider cancel） | 远端 poll / DB（当前不写 progress → 不确定动画） |
+| `workflow` | `workflow-engine.ts: runTask` 开始时登记（label = 实现名 + 画布定位 `nodeId`/`canvas`），完成/失败处 `finish` | `cancelWorkflowTask()`（复用 `canCancelTask` + Bridge cancel / deferredCancel 标记 + provider cancel） | 引擎每轮 `poll` 远端后 `workflowExecutor.update(taskId, {progress})` 写注册表 → 接口 `progress` 字段 + WS 广播；**仅服务商上报中间进度时才有值**（Bridge / 自定义 provider），否则缺省 → 不确定动画 |
 | `llm` | `routes/llm.ts` 会话创建后 `llmExecutor.create`，`lifecycle` 回调同步阶段/终态 | `sessionManager.cancel`（abort 上游） | 无百分比 → 展示阶段（Thinking…/正在响应…） |
-| `ffmpeg` | 四个路由（拼接/裁剪视频/裁剪音频/取帧）经 `startFfmpegTask` | `kill('SIGKILL')` + **删除半截产物** | `-progress` 解析 `timemark` → 真实百分比 |
+| `ffmpeg` | 四个路由（拼接/裁剪视频/裁剪音频/取帧）经 `startFfmpegTask` | `kill('SIGKILL')` + **删除半截产物** | `-progress` 解析 `timemark` → 真实百分比（登记时**不预置 0**；无 `duration` 的取帧不上报 → 不确定动画） |
 
 **中断能力差异**：`cancelable` + `cancelBlockReason` 如实展示——工作流不支持中断时按钮置灰并显示原因（如「该工作流不支持中断」）。
 
@@ -117,9 +117,9 @@ interface TaskRecord {
 |------|------|
 | `canvas/taskSocket.ts` | 统一任务 WS 客户端（全局单例）：`tasks` 响应式列表、`task-update` 增量合并、`snapshotReady`（首个全量快照是否到达，恢复对账用）、`subscribe/unsubscribe/cancel`、断线指数退避重连 + 重订阅、`onFinished`（LLM 终态）、`onTaskUpdate`（任务增量）；`sessions` computed 兼容既有 LLM 视图 |
 | `canvas/llmSocket.ts` | **兼容再导出**（既有 `llmSocket.xxx` 调用点无需改动；新代码用 `taskSocket`） |
-| `components/TaskManagerDialog.vue` | 顶栏图标（`mdi-progress-clock` + 活跃任务数徽标）展开的面板：类型标记 / 状态 / 进度条 / 已运行时长 / 画布位置 / 中断（不可中断置灰 + tooltip 原因） |
+| `components/TaskManagerDialog.vue` | 顶栏图标（`mdi-progress-clock` + 活跃任务数徽标）展开的面板：类型标记 / 状态（有真实进度显示「处理中 N%」）/ 进度条（有进度确定态、否则不确定）/ 已运行时长 / 画布位置 / 中断（不可中断置灰 + tooltip 原因） |
 | `api/tasks.ts` | `listTasks` / `cancelTask`（HTTP 兜底） |
-| `canvas/useCanvasGeneration.ts` | 提交时携带 `nodeId`/`canvas`；ffmpeg 任务：提交拿 taskId → `trackFfmpegTask` 订阅，进度与终态由 `onTaskUpdate` 统一消费；`restore(knownNodeIds)` 合并注册表 + SQLite 工作流任务恢复 Loading |
+| `canvas/useCanvasGeneration.ts` | 提交时携带 `nodeId`/`canvas`；ffmpeg 任务：提交拿 taskId → `trackFfmpegTask` 订阅，进度与终态由 `onTaskUpdate` 统一消费；工作流任务：`poll()` 读响应里的 `progress`；两者都汇到 `GenerateStatus.progress`，由导出的 `nodeProgressPercent()` 决定节点遮罩渲染确定圆环+百分比还是不确定转圈；`restore(knownNodeIds)` 合并注册表 + SQLite 工作流任务恢复 Loading |
 
 ### 画布 Loading 恢复（已移除 localStorage）
 
@@ -141,6 +141,7 @@ interface TaskRecord {
 |------|------|
 | 节点错误遮罩「详情」 | 生成失败时节点卡片在「重试」旁渲染「详情」（仅 `status.taskId` 存在时渲染——本地校验类错误没有可查询的日志），点击打开 `CanvasNodeLogDialog`：任务摘要（状态/耗时/错误信息）+ 完整日志（级别过滤、默认尾部 200 条、可「查看全部」） |
 | 任务管理器「历史」页签 | 按时间范围/状态/项目筛选 SQLite 中的历史任务（默认最近 14 天，与日志保留期一致），逐条展开日志 |
+| 节点运行遮罩进度 | 任务**有真实进度**时遮罩渲染确定态圆环 + 圈内百分比（`nodeProgressPercent()` 判定），无进度保持不确定转圈。工作流进度来自 `GET /api/workflow/tasks/:id` 的 `progress` 标准字段（引擎轮询远端写入注册表，**不落 SQLite**），ffmpeg 来自 `task-update` 广播 |
 
 对话框状态由 `useCanvasDialogs` 的 `logDialog` 持有（`openNodeLog(nodeId, taskId)`，并纳入 `resetAll()`）；日志数据经 `composables/useTaskLogs.ts` 拉取。日志的保留期与清理见 [`../task-manager/log.md`](../task-manager/log.md)。
 
@@ -158,3 +159,4 @@ interface TaskRecord {
 - **日志读取不传 `limit` 会拖全量**（单任务上千行）：画布轮询用 `limit: 1`，查看器用尾部 200 条再按需全量；`GET /api/workflow/tasks/:taskId/log` 的缺省行为仍是全量（向后兼容）。
 - **轮询日志必须降噪**：2 秒一次无条件写日志曾让 `task_logs` 表 + 索引占到数据库的 87%（其中 92.6% 是连续重复行）。现为「状态/进度变化才记（`info`）+ 心跳兜底（`debug`，默认 60 秒，可配 0 关闭）」，见 [`../task-manager/log.md`](../task-manager/log.md)。
 - **判定磁盘回收看 `freelist_count`，不看文件大小**：`VACUUM` 会把文件截断到实际数据量，但 Windows 等平台的 `stat` 大小可能不缩小（甚至因重新分配而变大），只按文件大小校验会得出「清理无效」的错误结论。
+- **进度不可伪造**：`progress` 的语义是「真实上报过」，「有值」直接决定节点遮罩与任务管理器渲染确定百分比还是不确定动画。禁止在登记时预置 `0`（无 `duration` 的取帧任务会永久显示「0%」）、禁止按耗时估算、禁止按轮询次数假推进；**provider 侧同样不得把「未上报」兜底成 0**（ComfyUI Bridge 排队期间不报 `progress`，曾经的 `progress ?? 0` 会让视频任务在队列里挂几十分钟的「0%」，现已改为缺省）。判定统一走 `nodeProgressPercent()`，不要在组件里各写一套 `?? 0`。

@@ -2,13 +2,12 @@ import { resolveInstanceConfig } from '../providers/config-store.js';
 import { parseOpenAICompatibleModels } from '../providers/openai-compatible/models.js';
 import type { ProviderInstance } from '../providers/types.js';
 import { registerOrReplace, unregisterByInstance } from './registry.js';
+import { resolveOutputSize, resolveSpecifiedGate, SIZE_PARAMS } from './size.js';
 import type {
   ImageEditVars,
   TextToImageVars,
   WorkflowCapabilities,
   WorkflowRunContext,
-  WorkflowSizeConfig,
-  WorkflowUserParamDeclaration,
 } from './types.js';
 
 /** OpenAI 兼容 Provider 插件 id */
@@ -22,79 +21,16 @@ const SIZE_CAPABILITIES: WorkflowCapabilities['size'] = {
 };
 
 /**
- * 判断统一尺寸配置是否携带明确尺寸选择（宽高任一有效，或比例/尺寸档非自适应）。
+ * 把统一解析器给出的生效宽高转为 OpenAI 兼容的 `size` 字段（`"WxH"`）。
  *
- * 新交互下前端提交的 sizeConfig 只要用户操作过（非 自动/自动）即视为显式指定；
- * 此时宽高缺失会回退 projectConfig，保证输出尺寸明确。
+ * 尺寸来源与优先级由 `size.ts` 的 `resolveOutputSize` 统一决定，本函数不做任何
+ * 二次判断——宽高恒为有效正整数，直接拼接即可。
  *
- * @param sizeConfig 引擎注入的统一尺寸配置（可为空）
- * @returns 是否显式指定尺寸
+ * @param size 生效宽高（像素）
+ * @returns OpenAI `size` 字段值（`"WxH"`）
  */
-function hasExplicitSize(sizeConfig: WorkflowSizeConfig | undefined): boolean {
-  if (!sizeConfig) return false;
-  return (
-    (sizeConfig.width != null && sizeConfig.width > 0) ||
-    (sizeConfig.height != null && sizeConfig.height > 0) ||
-    (sizeConfig.ratio !== undefined && sizeConfig.ratio !== 'auto' && sizeConfig.ratio !== 'adaptive') ||
-    (sizeConfig.size !== undefined && sizeConfig.size !== 'auto')
-  );
-}
-
-/** 文生图 / 图片编辑共用的尺寸参数声明 */
-const SIZE_PARAMS: WorkflowUserParamDeclaration[] = [
-  {
-    name: '指定输出尺寸',
-    key: 'enable_specified_size',
-    type: 'boolean',
-    defaultValue: false,
-    description: '启用后按下方选定的宽高输出图片',
-  },
-  {
-    name: '输出宽度',
-    key: 'width',
-    type: 'integer',
-    defaultValue: '',
-    description: '输出图片宽度（像素）',
-  },
-  {
-    name: '输出高度',
-    key: 'height',
-    type: 'integer',
-    defaultValue: '',
-    description: '输出图片高度（像素）',
-  },
-];
-
-/**
- * 解析输出尺寸：仅当 enable_specified_size === 'true' 且宽高为正数时返回 "WxH"；
- * 否则回退 projectConfig 宽高；都无效则返回 undefined（请求不传 size）。
- *
- * @param specified 是否启用指定尺寸（字符串 "true" 才生效）
- * @param width 用户/变量宽度
- * @param height 用户/变量高度
- * @param fallbackWidth 项目默认宽度
- * @param fallbackHeight 项目默认高度
- * @returns OpenAI size 字段，或 undefined
- */
-export function resolveOpenAICompatibleSize(
-  specified: boolean,
-  width: string | number | boolean | undefined,
-  height: string | number | boolean | undefined,
-  fallbackWidth?: number,
-  fallbackHeight?: number,
-): string | undefined {
-  const pick = (raw: string | number | boolean | undefined): number | undefined => {
-    if (raw === undefined || raw === '' || typeof raw === 'boolean') return undefined;
-    const n = typeof raw === 'number' ? raw : Number(raw);
-    return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
-  };
-  const w = specified ? pick(width) : undefined;
-  const h = specified ? pick(height) : undefined;
-  if (w && h) return `${w}x${h}`;
-  const fw = pick(fallbackWidth);
-  const fh = pick(fallbackHeight);
-  if (fw && fh) return `${fw}x${fh}`;
-  return undefined;
+function toOpenAISize(size: { width: number; height: number }): string {
+  return `${size.width}x${size.height}`;
 }
 
 /**
@@ -108,18 +44,19 @@ function textToImageSubmit(modelId: string) {
     const promptPath = ctx.vars.promptPath?.trim();
     if (!promptPath) throw new Error('text-to-image 需要 vars.promptPath');
     const prompt = await ctx.readFile(promptPath);
-    // 尺寸：统一尺寸配置（新交互）与旧 vars 门控并存；宽高有效 → "WxH"，否则回退 projectConfig
-    const specified = ctx.vars.enable_specified_size === 'true' || hasExplicitSize(ctx.sizeConfig);
-    const size = resolveOpenAICompatibleSize(
-      specified,
-      ctx.sizeConfig?.width ?? ctx.vars.width,
-      ctx.sizeConfig?.height ?? ctx.vars.height,
-      ctx.projectConfig.width,
-      ctx.projectConfig.height,
-    );
+    // 尺寸：统一解析器（sizeConfig 显式宽高 → 档位换算 → 旧 vars 门控 → projectConfig）
+    const size = resolveOutputSize({
+      sizeConfig: ctx.sizeConfig,
+      // 缺省严格：工作流声明 enable_specified_size，必须显式开启才采用 vars 宽高
+      enableSpecified: resolveSpecifiedGate(ctx.sizeConfig, ctx.vars.enable_specified_size, false),
+      vars: ctx.vars,
+      userParams: ctx.userParams,
+      fallbackWidth: ctx.projectConfig.width,
+      fallbackHeight: ctx.projectConfig.height,
+    });
     return ctx.provider.execute({
       workflowId: modelId,
-      params: { prompt, ...(size ? { size } : {}) },
+      params: { prompt, size: toOpenAISize(size) },
     });
   };
 }
@@ -160,20 +97,19 @@ function imageEditSubmit(modelId: string) {
       }
     }
     const up = ctx.userParams ?? {};
-    // 尺寸：统一尺寸配置（新交互）与旧 userParams/vars 门控并存；宽高有效 → "WxH"，否则回退 projectConfig
-    const specified =
-      String(up.enable_specified_size ?? ctx.vars.enable_specified_size) === 'true'
-      || hasExplicitSize(ctx.sizeConfig);
-    const size = resolveOpenAICompatibleSize(
-      specified,
-      ctx.sizeConfig?.width ?? up.width ?? ctx.vars.width,
-      ctx.sizeConfig?.height ?? up.height ?? ctx.vars.height,
-      ctx.projectConfig.width,
-      ctx.projectConfig.height,
-    );
+    // 尺寸：统一解析器（sizeConfig 显式宽高 → 档位换算 → 旧 userParams/vars 门控 → projectConfig）
+    const legacyGate = up['enable_specified_size'] ?? ctx.vars.enable_specified_size;
+    const size = resolveOutputSize({
+      sizeConfig: ctx.sizeConfig,
+      enableSpecified: resolveSpecifiedGate(ctx.sizeConfig, legacyGate, false),
+      vars: ctx.vars,
+      userParams: up,
+      fallbackWidth: ctx.projectConfig.width,
+      fallbackHeight: ctx.projectConfig.height,
+    });
     return ctx.provider.execute({
       workflowId: modelId,
-      params: { mode: 'edit', prompt, ...(size ? { size } : {}) },
+      params: { mode: 'edit', prompt, size: toOpenAISize(size) },
       files,
     });
   };

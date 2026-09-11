@@ -189,6 +189,8 @@ const offTaskUpdate = taskSocket.onTaskUpdate((task) => {
 
 即：**ffmpeg 的进度与终态完全由广播驱动，前端不轮询**。
 
+> 工作流的进度**不走这条广播**（本监听第一行就把非 `ffmpeg` 任务挡掉）：它由本地轮询读 `GET /api/workflow/tasks/:id` 的 `progress` 标准字段写入同一个 `GenerateStatus.progress`。两条路径最终都汇到 `nodeProgressPercent()` 决定遮罩是渲染确定百分比还是不确定动画。注册表里工作流任务的 `progress` 由引擎每轮 `poll` 远端后写入，因此 WS 广播其实也带该字段——画布不用它，任务管理器用。
+
 ### 6.2 提交与 `not-found` 竞态
 
 `trackFfmpegTask(nodeId, taskId, outputPath, runningLog, onResult?)`：登记 `taskIdByNode` / `ffmpegOutputByNode` / `ffmpegResultCbByNode` 三张表，置 `running`，并额外 `taskSocket.subscribe(taskId, handler)`——只为处理"**订阅时任务已结束**"（刷新/重连竞态）：收到 `not-found` 即退订并按完成收敛，**且做产物存在性核验**（`getCanvasNodeInfo`）：产物在 → 调 `onResult` 刷新；产物不在 → 置 `errorMsg = '任务已结束但未生成产物，请重新执行'`（而非误报成功）。

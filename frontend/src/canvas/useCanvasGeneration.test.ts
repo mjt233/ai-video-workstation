@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import { useCanvasGeneration } from './useCanvasGeneration'
+import { useCanvasGeneration, nodeProgressPercent } from './useCanvasGeneration'
 
 vi.mock('../api/client', () => ({ writeFs: vi.fn() }))
 vi.mock('../api/workflow', () => ({
@@ -266,6 +266,8 @@ describe('useCanvasGeneration', () => {
     // 提交后进入 running（终态由任务广播驱动）
     expect(gen.statusByNode.value.vc?.status).toBe('running')
     expect(gen.statusByNode.value.vc?.taskId).toBe('ff-1')
+    // 未收到任何真实进度事件前不预置进度（遮罩走不确定动画，不显示假的 0%）
+    expect(gen.statusByNode.value.vc?.progress).toBeUndefined()
 
     // 服务端广播终态 completed → 收敛 success 并通知结果
     emitTaskUpdate(ffmpegTask({ status: 'completed', progress: 100 }))
@@ -335,6 +337,21 @@ describe('useCanvasGeneration', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(gen.statusByNode.value.n1?.status).toBe('error')
     expect(gen.statusByNode.value.n1?.errorMsg).toBe('用户中断')
+  })
+
+  it('轮询把服务端 progress 写入节点状态（无上报则缺省 → 不确定动画）', async () => {
+    ;(getTaskStatus as Mock).mockResolvedValue({ ...RUNNING_TASK, progress: 37 })
+    const gen = useCanvasGeneration('p', TARGET)
+    gen.setInputPaths('n1', ['assert/a.jpg'])
+    await gen.generate(makeNode('一只猫'))
+    await vi.advanceTimersByTimeAsync(1)
+    expect(gen.statusByNode.value.n1?.status).toBe('running')
+    expect(gen.statusByNode.value.n1?.progress).toBe(37)
+
+    // 服务端不再上报进度（服务商无中间进度）：字段被清掉，遮罩回退不确定动画而非停在 37%
+    ;(getTaskStatus as Mock).mockResolvedValue(RUNNING_TASK)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(gen.statusByNode.value.n1?.progress).toBeUndefined()
   })
 
   it('cancel 被拒绝：保持 running 态并上抛原因提示（不静默）', async () => {
@@ -754,5 +771,24 @@ describe('useCanvasGeneration', () => {
     emitTaskUpdate(ffmpegTask({ status: 'running', progress: 42 }))
     expect(gen.statusByNode.value.vc?.status).toBe('running')
     expect(gen.statusByNode.value.vc?.progress).toBe(42)
+  })
+})
+
+describe('nodeProgressPercent（节点遮罩圆环的可显示进度）', () => {
+  it('无进度数据 → null（调用方回退不确定动画，绝不当作 0）', () => {
+    expect(nodeProgressPercent(undefined)).toBeNull()
+    expect(nodeProgressPercent({ status: 'running' })).toBeNull()
+  })
+
+  it('真实进度 → 取整并钳制到 0~100', () => {
+    expect(nodeProgressPercent({ status: 'running', progress: 0 })).toBe(0)
+    expect(nodeProgressPercent({ status: 'running', progress: 37.6 })).toBe(38)
+    expect(nodeProgressPercent({ status: 'running', progress: 150 })).toBe(100)
+    expect(nodeProgressPercent({ status: 'running', progress: -5 })).toBe(0)
+  })
+
+  it('非有限数 → null（不渲染 NaN%）', () => {
+    expect(nodeProgressPercent({ status: 'running', progress: Number.NaN })).toBeNull()
+    expect(nodeProgressPercent({ status: 'running', progress: Number.POSITIVE_INFINITY })).toBeNull()
   })
 })

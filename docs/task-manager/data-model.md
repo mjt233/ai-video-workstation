@@ -162,7 +162,7 @@ type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 | `project` | string | 是 | 项目名（前端按项目过滤） |
 | `nodeId` | string | 是 | 发起节点 id（画布恢复按节点定位） |
 | `canvas` | `CanvasDefTarget` | 是 | 画布定位（前端按 scope 过滤恢复），见第六节 |
-| `progress` | number | 是 | 0~100；缺省 = 不确定进度（工作流、LLM 均不写 → UI 走不确定动画） |
+| `progress` | number | 是 | 0~100；**只写真实上报值**（ffmpeg 解 `-progress`、工作流引擎每轮 `poll` 远端后写入），缺省 = 无法确定进度（LLM、不上报中间进度的服务商、无 `duration` 的取帧）。**禁止预置 0 或估算**——注册表中「有值」直接决定前端渲染确定百分比还是不确定动画 |
 | `startedAt` | number | 否 | 登记时间（**毫秒时间戳**，列表倒序排序用） |
 | `updatedAt` | number | 否 | 最近更新时间（毫秒时间戳） |
 | `finishedAt` | number | 是 | 终态时间（毫秒时间戳，仅终态有值） |
@@ -326,10 +326,12 @@ interface GenerateStatus {
 | 字段 | 写入方 | 说明 |
 |------|--------|------|
 | `status` | `poll()`（工作流）/ `onTaskUpdate`（ffmpeg）/ `beginClientRun`/`endClientRun`/`setLlmError`（LLM） | `running` → 节点渲染通用 loading 遮罩 |
-| `progress` | `trackFfmpegTask()` 初始 0，随后由任务广播刷新 | 仅 ffmpeg 有真实百分比 |
+| `progress` | `poll()`（工作流，取响应里的 `progress` 标准字段）/ `onTaskUpdate`（ffmpeg 广播） | **仅真实上报过才写入**；缺省不写 → 遮罩走不确定动画。取帧、不上报中间进度的服务商、LLM 恒缺省。两个写入点都**不预置 0** |
 | `lastLog` | 工作流取日志最后一条（`limit = 1`）；ffmpeg 用阶段文案；LLM 为 `Thinking…`/`正在响应…` | 遮罩文案 |
 | `errorMsg` | 失败/中断/产物缺失 | 错误遮罩红字；「详情」按钮读完整日志 |
 | `taskId` | 提交返回或 `restore()` | 中断凭据（`taskIdByNode` 与之配合） |
+
+渲染侧统一经 `nodeProgressPercent(status)`（同文件导出）换算：返回数字 → 遮罩渲染确定态圆环 + 圈内百分比；返回 `null` → 原来那个不确定转圈。**任何地方都不得把缺省进度当 0**。
 
 工作流轮询只更新展示：`poll()` 每 `POLL_INTERVAL_MS = 2000` 调 `GET /api/workflow/tasks/:id` + `GET /api/workflow/tasks/:id/log?limit=1`，终态时清定时器、删 `taskIdByNode[nodeId]`，`completed` 时回调 `onResult(nodeId, outputPath)` 刷新产物。
 
@@ -343,7 +345,7 @@ interface GenerateStatus {
 | `type` | `'workflow' \| 'llm' \| 'ffmpeg'` | 任务类型 |
 | `label` | string | 展示名 |
 | `status` | `'pending' \| 'running' \| 'completed' \| 'failed' \| 'cancelled'` | 状态（**比 SQLite 多 `cancelled`**） |
-| `progress?` | number | 0~100；缺省 = 不确定进度 |
+| `progress?` | number | 0~100；缺省 = 无法确定进度（渲染不确定动画） |
 | `startedAt` | number | **毫秒时间戳**（耗时由客户端自行刷新） |
 | `project?` / `nodeId?` / `canvas?` | — | 画布定位（`canvas` 为 `LlmCanvasTarget`） |
 | `cancelable` / `cancelBlockReason?` | boolean / string | 中断能力与置灰原因（任务管理器 tooltip） |

@@ -298,6 +298,79 @@ describe('buildSubmit（text-to-image）', () => {
     });
   });
 
+  it('sizeConfig 显式宽高生效（画布节点 16:9 / 2K → 2560x1440，回归尺寸配置不生效）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't1' }));
+    const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
+    const ctx = {
+      // 画布图片节点只提交 sizeConfig，vars 不含 width/height
+      vars: { promptPath: 'p.md', purpose: 'canvas-image' },
+      sizeConfig: { ratio: '16:9', size: '2K', width: 2560, height: 1440 },
+      projectConfig: { width: 1920, height: 1080 },
+      readFile: async () => '一只猫',
+      provider: { execute },
+    } as never;
+    await submit(ctx as never);
+    expect(execute).toHaveBeenCalledWith({
+      workflowId: 'text_to_image',
+      params: expect.objectContaining({ width: 2560, height: 1440 }),
+    });
+  });
+
+  it('sizeConfig 显式宽高优先于 vars.width/height（新交互覆盖旧门控）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't1' }));
+    const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
+    const ctx = {
+      vars: { promptPath: 'p.md', enable_specified_size: 'true', width: '720', height: '1280' },
+      sizeConfig: { ratio: '1:1', size: '2K', width: 2048, height: 2048 },
+      projectConfig: { width: 1920, height: 1080 },
+      readFile: async () => '一只猫',
+      provider: { execute },
+    } as never;
+    await submit(ctx as never);
+    expect(execute).toHaveBeenCalledWith({
+      workflowId: 'text_to_image',
+      params: expect.objectContaining({ width: 2048, height: 2048 }),
+    });
+  });
+
+  it('sizeConfig 仅带比例/尺寸档（无宽高）时按档位表换算（16:9 + 1080P → 1920x1080）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't1' }));
+    const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
+    const ctx = {
+      vars: { promptPath: 'p.md' },
+      sizeConfig: { ratio: '16:9', size: '1080P' },
+      projectConfig: { width: 1080, height: 1920 },
+      readFile: async () => '一只猫',
+      provider: { execute },
+    } as never;
+    await submit(ctx as never);
+    expect(execute).toHaveBeenCalledWith({
+      workflowId: 'text_to_image',
+      params: expect.objectContaining({ width: 1920, height: 1080 }),
+    });
+  });
+
+  it('sizeConfig 为自适应（自动/自动）时回退 vars 宽高与项目尺寸', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't1' }));
+    const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
+    const base = {
+      sizeConfig: { ratio: 'auto', size: 'auto' },
+      projectConfig: { width: 1080, height: 1920 },
+      readFile: async () => '一只猫',
+      provider: { execute },
+    };
+    await submit({ ...base, vars: { promptPath: 'p.md', width: '720', height: '1280' } } as never);
+    expect(execute).toHaveBeenLastCalledWith({
+      workflowId: 'text_to_image',
+      params: expect.objectContaining({ width: 720, height: 1280 }),
+    });
+    await submit({ ...base, vars: { promptPath: 'p.md' } } as never);
+    expect(execute).toHaveBeenLastCalledWith({
+      workflowId: 'text_to_image',
+      params: expect.objectContaining({ width: 1080, height: 1920 }),
+    });
+  });
+
   it('ctx.comfyuiProviderId 非空时透传 providerId，缺省时不携带', async () => {
     const execute = vi.fn(async () => ({ taskId: 't1' }));
     const submit = buildSubmit('text_to_image', 'text-to-image', { cancelable: true });
@@ -347,6 +420,41 @@ describe('buildSubmit（image-edit）', () => {
     expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
       params: expect.objectContaining({ width: 640, height: 960 }),
     }));
+  });
+
+  it('sizeConfig 显式宽高生效（画布图片编辑节点同样不再落回项目尺寸）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('qwen-edit-2509', 'image-edit', { cancelable: true });
+    const ctx = {
+      // 画布图片节点（有输入图）只提交 sizeConfig，vars 不含 width/height
+      vars: { prompt: 'p', imagePaths: '["assert/a.png"]', purpose: 'canvas-image' },
+      sizeConfig: { ratio: '9:16', size: '2K', width: 1440, height: 2560 },
+      projectConfig: { width: 1920, height: 1080 },
+      readAssertFile: async () => new File([], 'a.png'),
+      provider: { execute },
+      userParams: {},
+    } as never;
+    await submit(ctx as never);
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      params: expect.objectContaining({ enable_specified_size: true, width: 1440, height: 2560 }),
+    }));
+  });
+
+  it('无 sizeConfig / 无旧宽高时提交项目尺寸（Bridge 语义：无有效尺寸即用项目尺寸）', async () => {
+    const execute = vi.fn(async () => ({ taskId: 't' }));
+    const submit = buildSubmit('qwen-edit-2509', 'image-edit', { cancelable: true });
+    const ctx = {
+      vars: { prompt: 'p', imagePaths: '["assert/a.png"]' },
+      projectConfig: { width: 1920, height: 1080 },
+      readAssertFile: async () => new File([], 'a.png'),
+      provider: { execute },
+      userParams: {},
+    } as never;
+    await submit(ctx as never);
+    const last = (execute as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as { params: Record<string, unknown> };
+    expect(last.params.width).toBe(1920);
+    expect(last.params.height).toBe(1080);
+    expect(last.params.enable_specified_size).toBe(true);
   });
 });
 

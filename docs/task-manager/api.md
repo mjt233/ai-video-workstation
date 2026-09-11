@@ -27,7 +27,7 @@
 | 字段 | 含义 |
 |------|------|
 | `id` / `type` / `label` / `status` | 任务 id；类型 `workflow` \| `llm` \| `ffmpeg`；展示名；状态 `pending` \| `running` \| `completed` \| `failed` \| `cancelled` |
-| `progress?` | 百分比 0~100（仅 ffmpeg 有真实进度；缺省表示不确定进度） |
+| `progress?` | 百分比 0~100；**只有真实上报过才有值**（ffmpeg 的 `-progress`、工作流远端 `poll` 的进度）；缺省 = 无法确定进度（LLM、不上报中间进度的服务商、无 `duration` 的取帧） |
 | `startedAt` | 登记时间（毫秒时间戳） |
 | `project?` / `nodeId?` / `canvas?` | 画布定位（`canvas` 为 `{kind:'scene',episode,shot}` 或 `{kind:'stage',stage,label}`） |
 | `cancelable` / `cancelBlockReason?` | 是否可中断；不可中断原因（UI tooltip 文案） |
@@ -51,7 +51,9 @@
 | GET | `/api/workflows` | 工作流类型及其**可执行**实现（未绑定服务商实例的候选不返回） | 无 | `{ workflows: WorkflowInfo[] }`：`{ type, implementations: [{ impl, name, description?, provider?, providerInstanceId?, providerName?, params?, capabilities? }] }` |
 | GET | `/api/workflow-types` | 系统支持的**工作流类型键**列表（注册表真实键集合，`getAllWorkflowTypes()`） | 无 | `{ types: string[] }` |
 
-`TaskResponse`（`toTaskResponse()`）：`taskId`、`workflowId`、`impl`、`status`、`result`（`{path}` 或 `null`）、`errorMsg`、`createdAt`、`updatedAt`、`params`（已解析的 JSON 对象，含 `nodeId` / `canvas`）。`LogEntry`：`{ id, level, message, metadata?, created_at }` —— `created_at` 为 SQLite UTC 串 `YYYY-MM-DD HH:MM:SS`。
+`TaskResponse`（`toTaskResponse()`）：`taskId`、`workflowId`、`impl`、`status`、`result`（`{path}` 或 `null`）、`errorMsg`、`createdAt`、`updatedAt`、`params`（已解析的 JSON 对象，含 `nodeId` / `canvas`）、**`progress?`**（进度标准结果字段，取值规则见下）。`LogEntry`：`{ id, level, message, metadata?, created_at }` —— `created_at` 为 SQLite UTC 串 `YYYY-MM-DD HH:MM:SS`。
+
+**`TaskResponse.progress` 的三态**（`taskProgress()`）：`completed` → 恒为 `100`；`running`/`pending` → 读内存注册表的真实上报值（引擎轮询远端后写入），**注册表无记录（服务重启 / 尚未登记）或服务商未上报时为 `undefined`（字段省略）**；`failed` 及终态其他情况 → 省略。**进度不落 SQLite**，故不能靠它做持久化统计；缺省时前端必须回退不确定动画，不得当作 `0`。
 
 **`/api/workflow/tasks` 查询参数语义**：
 

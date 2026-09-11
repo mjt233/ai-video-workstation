@@ -90,7 +90,7 @@
                       <span>{{ locationText(t) }}</span>
                     </template>
                   </div>
-                  <!-- 进度条：ffmpeg 真实百分比；其余任务不确定进度（indeterminate） -->
+                  <!-- 进度条：有真实进度（ffmpeg / 上报中间进度的工作流服务商）显示确定百分比，其余不确定 -->
                   <v-progress-linear
                     v-if="t.status === 'running'"
                     :model-value="t.progress"
@@ -276,7 +276,8 @@ function typeColor(type: TaskType): string {
 }
 
 /**
- * 状态文案：pending 排队中；running 按类型显示阶段（LLM Thinking/响应中、ffmpeg 进度百分比、工作流运行中）。
+ * 状态文案：pending 排队中；running 按类型显示阶段
+ * （LLM Thinking/响应中；任何有真实进度的任务显示「处理中 N%」；其余 ffmpeg「处理中…」、工作流「运行中…」）。
  *
  * @param t 任务摘要
  * @returns 状态文本
@@ -285,7 +286,9 @@ function statusText(t: TaskInfo): string {
   if (t.status === 'pending') return '排队中'
   if (t.status !== 'running') return t.status === 'completed' ? '已完成' : t.status === 'failed' ? '失败' : '已中断'
   if (t.type === 'llm') return t.phase === 'responding' ? '正在响应…' : 'Thinking…'
-  if (t.type === 'ffmpeg') return typeof t.progress === 'number' ? `处理中 ${t.progress}%` : '处理中…'
+  // 有真实进度就显示百分比：ffmpeg 恒有（除取帧），工作流取决于服务商是否上报中间进度
+  if (typeof t.progress === 'number') return `处理中 ${t.progress}%`
+  if (t.type === 'ffmpeg') return '处理中…'
   return '运行中…'
 }
 

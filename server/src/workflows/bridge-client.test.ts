@@ -112,17 +112,21 @@ describe('buildReferencePayload', () => {
 });
 
 describe('resolveImageEditSizeParams', () => {
-  it('enable_specified_size=true 时返回宽高', () => {
-    expect(resolveImageEditSizeParams({ enable_specified_size: 'true', width: '720', height: '1280' })).toEqual({ enable_specified_size: true, width: 720, height: 1280 });
+  it('specified=true 且宽高有效时返回 enable 标记与宽高', () => {
+    expect(resolveImageEditSizeParams({ width: 720, height: 1280, specified: true }))
+      .toEqual({ enable_specified_size: true, width: 720, height: 1280 });
   });
-  it('无 enable_specified_size 时 width/height 仍生效（Bridge 工作流不声明门控字段）', () => {
-    expect(resolveImageEditSizeParams({ width: '720', height: '1280' })).toEqual({ enable_specified_size: true, width: 720, height: 1280 });
+  it('宽高四舍五入取整（非整数像素不原样上送）', () => {
+    expect(resolveImageEditSizeParams({ width: 720.6, height: 1280.4, specified: true }))
+      .toEqual({ enable_specified_size: true, width: 721, height: 1280 });
   });
   it('仅单维有效时输出该维（另一维由 Bridge/工作流默认兜底）', () => {
-    expect(resolveImageEditSizeParams({ width: '720' })).toEqual({ enable_specified_size: true, width: 720 });
+    expect(resolveImageEditSizeParams({ width: 720, height: undefined, specified: true }))
+      .toEqual({ enable_specified_size: true, width: 720 });
   });
-  it('显式 false 或宽高无效时返回空对象', () => {
-    expect(resolveImageEditSizeParams({ enable_specified_size: 'false', width: '720', height: '1280' })).toEqual({});
-    expect(resolveImageEditSizeParams({})).toEqual({});
+  it('specified=false（前端「不指定」）或宽高无效时返回空对象', () => {
+    expect(resolveImageEditSizeParams({ width: 720, height: 1280, specified: false })).toEqual({});
+    expect(resolveImageEditSizeParams({ width: undefined, height: undefined, specified: true })).toEqual({});
+    expect(resolveImageEditSizeParams({ width: 0, height: -1, specified: true })).toEqual({});
   });
 });

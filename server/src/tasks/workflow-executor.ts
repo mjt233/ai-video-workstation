@@ -223,6 +223,10 @@ class WorkflowExecutor {
    * 判定依据算丢（例：只传 status 时用 undefined 的 remoteTaskId 重算，
    * 会把已提交远端的任务重新算回不可中断）。
    *
+   * `progress` 由引擎每轮轮询远端后写入（provider.poll 的返回值），是
+   * `GET /api/workflow/tasks*` 与 WS 广播里该字段的唯一来源；只传 `progress`
+   * 不触发上面的可中断性重算（条件要求 status 或 remoteTaskId 存在），故可安全高频调用。
+   *
    * @param taskId 任务 id
    * @param patch 状态/进度/远端任务 id 变化
    */

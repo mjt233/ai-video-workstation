@@ -117,14 +117,16 @@ describe('text-to-image/seedream', () => {
     expect(call.params.size).toBe('1024x1024');
   });
 
-  it('sizeConfig 仅带比例/尺寸档（无宽高）时回退项目尺寸', async () => {
+  it('sizeConfig 仅带比例/尺寸档时按档位表换算（16:9 + 1K → 1820x1024）', async () => {
     const impl = getImpl('text-to-image', 'seedream-5-pro')!;
+    // 档位表 16:9 + 1K = 1820×1024（基准 1024 落在短边），总像素 1863680 ∈ pro 允许区间。
+    // 注意：此处不再回退项目尺寸 1080x1920——用户显式选定的比例/尺寸档优先于项目默认
     await impl.submit(mkCtx({
       vars: { promptPath: 'x.md' },
       sizeConfig: { ratio: '16:9', size: '1K' },
     }));
     const call = executeMock.mock.calls[0][0] as { params: Record<string, unknown> };
-    expect(call.params.size).toBe('1080x1920');
+    expect(call.params.size).toBe('1820x1024');
   });
 
   it('sizeConfig 超出模型约束时自动匹配最接近的允许尺寸（保留约束规则）', async () => {

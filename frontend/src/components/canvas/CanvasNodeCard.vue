@@ -75,7 +75,9 @@
       />
       <!-- 节点状态遮罩（通用能力）：running 显示加载动画 + 统一中断入口；error 显示错误与重试。
            原型声明 statusOverlay 时渲染自定义遮罩（如 AI 文本节点的空遮罩——节点主体完全自绘
-           运行/错误状态 UI），未声明时保持默认整体遮罩（其余节点行为与视觉零变化）。 -->
+           运行/错误状态 UI），未声明时保持默认整体遮罩（其余节点行为与视觉零变化）。
+           running 的加载动画按**是否有真实进度**分流：有 → 确定态圆环 + 圈内百分比；
+           无 → 原不确定转圈（不伪造百分比）。 -->
       <component
         :is="proto?.statusOverlay"
         v-if="customStatusOverlay"
@@ -90,6 +92,16 @@
         class="canvas-node__status canvas-node__status--running"
       >
         <v-progress-circular
+          v-if="progressPercent !== null"
+          :model-value="progressPercent"
+          size="48"
+          width="4"
+          color="primary"
+        >
+          <span class="canvas-node__status-percent">{{ progressPercent }}%</span>
+        </v-progress-circular>
+        <v-progress-circular
+          v-else
           indeterminate
           size="28"
           color="primary"
@@ -226,6 +238,7 @@ import '@vue-flow/node-resizer/dist/style.css'
 import { getPrototype } from '../../canvas/registry'
 import type { CanvasNodeData } from '../../canvas/types'
 import type { GenerateStatus } from '../../canvas/useCanvasGeneration'
+import { nodeProgressPercent } from '../../canvas/useCanvasGeneration'
 import { formatBytes, type CanvasUploadFilePayload, type CanvasUploadState } from './composables/useCanvasUpload'
 
 /** AI 文本生成节点的画布定位（生成请求携带；服务端 CanvasDefTarget） */
@@ -359,6 +372,14 @@ const customStatusOverlay = computed(
 
 /** 节点是否处于运行中（Loading）状态：主色脉冲边框标识（生成状态机统一驱动，含 AI 文本节点） */
 const isRunning = computed(() => props.status?.status === 'running')
+
+/**
+ * 运行遮罩的可显示进度百分比（圆环 + 圈内数字）。
+ *
+ * `null` = 服务端未上报真实进度，遮罩走原来的不确定转圈（工作流服务商不上报中间进度、
+ * 取帧等无 `duration` 的 ffmpeg 操作、LLM 会话均属此类）。
+ */
+const progressPercent = computed(() => nodeProgressPercent(props.status))
 
 /** 鼠标悬浮中（悬浮时显示缩放控制点） */
 const hovered = ref(false)
@@ -541,6 +562,14 @@ function handleStyle(count: number, index: number): Record<string, string> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 圆环内百分比数字：等宽数字避免逐秒跳动（4 字符「100%」需放得进 48px 圆环内圈） */
+.canvas-node__status-percent {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 /* 上传进度条（加载节点遮罩内）：限制宽度防止撑满节点 */

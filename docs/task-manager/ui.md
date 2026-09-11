@@ -50,6 +50,19 @@
 5. 手动清理：**「立即清理超期日志」**（`cleanTaskLogs()`）与**「清空历史日志」**（`purgeTaskLogs()`）都会先弹 `confirm`——前者内容含保留期与「当前可清理约 N 行」，确认按钮「立即清理」（`primary`）；后者含「约 (totalRows - activeRows) 行、不受保留期限制、保留运行中 activeRows 行」，确认按钮「清空日志」（`error`）。两者都在文案中明确「运行中任务的日志不会删除；任务记录与生成产物不受影响。此操作不可撤销。」
 6. 操作完成后统一 `await load()` 刷新占用统计，并 snackbar 汇报结果：清理 → 「已清理 N 行日志，库占用 A → B」或「没有超期日志需要清理」；清空 → 「已清空 N 行历史日志（保留运行中 M 行）」。
 
+## 画布节点运行遮罩的进度呈现（`CanvasNodeCard.vue`）
+
+所有画布节点共用同一套运行遮罩（`status.status === 'running'`）；原型声明 `statusOverlay` 的（目前仅 AI 文本节点）走自定义遮罩，不适用本节的圆环。
+
+| 条件 | 渲染 |
+|------|------|
+| `nodeProgressPercent(status)` 返回数字 | **确定态圆环** `v-progress-circular`（`size="48"` `width="4"`）+ **圈内百分比数字**（`.canvas-node__status-percent`，11px / tabular-nums，避免逐位跳动）；下方仍是阶段日志 + 「中断」按钮 |
+| 返回 `null`（无真实进度） | 原样保留的不确定转圈（`indeterminate` `size="28"`） |
+
+判定完全由 `useCanvasGeneration.ts` 导出的 `nodeProgressPercent()` 完成（取整 + 钳制 0~100；`undefined`/`NaN` → `null`）。**缺省进度绝不当 0**：否则不上报中间进度的服务商（MiniMax H3 / 火山方舟 / OpenAI 兼容）、无 `duration` 的取帧任务、LLM 会话都会长期显示一个假的「0%」。
+
+数据来源两条路都汇到 `GenerateStatus.progress`：工作流读轮询响应里的 `progress` 标准字段，ffmpeg 读 `task-update` 广播（见 [events.md](./events.md) 第六节）。
+
 ## 任务管理器对话框（`TaskManagerDialog.vue`）
 
 标题「任务管理器」，右侧显示「（N 个进行中）」（`activeTasks.length > 0` 时才渲染）；右上角关闭按钮。`props.modelValue` 控制显隐，`props.tasks` 由 `App.vue` 注入 `taskSocket.tasks.value`。
@@ -63,10 +76,10 @@
 | 行首图标 | `running` → 转圈 `v-progress-circular`；否则（`pending`）→ `mdi-clock-outline` 黄色时钟 |
 | 类型 chip | `workflow` → 「AI 生成」（primary）；`llm` → 「LLM 会话」（purple）；`ffmpeg` → 「视频处理」（teal） |
 | 名称 | `t.label`（任务展示名） |
-| 状态文本 | `pending` → 「排队中」；`llm` running → `phase === 'responding'` ? 「正在响应…」: 「Thinking…」；`ffmpeg` running → 有 `progress` 时「处理中 N%」，否则「处理中…」；`workflow` running → 「运行中…」；终态回退为「已完成 / 失败 / 已中断」 |
+| 状态文本 | `pending` → 「排队中」；`llm` running → `phase === 'responding'` ? 「正在响应…」: 「Thinking…」；其余 running **有真实 `progress` 时一律「处理中 N%」**（ffmpeg 与上报中间进度的工作流）；无进度时 `ffmpeg` → 「处理中…」、`workflow` → 「运行中…」；终态回退为「已完成 / 失败 / 已中断」 |
 | 已运行时长 | `formatElapsed(startedAt)`：`mm:ss`，超过 1 小时为 `h:mm:ss`；由面板打开期间的 1 秒定时器刷新 |
 | 画布位置 | `locationText(t)`：`project` + 画布中文标签（`kind === 'scene'` → 「分镜第{episode}集 {shot}#」；`stage` → 「场景 {stage} / {label}」）；无定位信息时整段（含分隔符）不渲染 |
-| 进度条 | `v-if="t.status === 'running'"`；`progress` 为数字时显示真实百分比（ffmpeg），否则 `indeterminate` |
+| 进度条 | `v-if="t.status === 'running'"`；`progress` 为数字时显示真实百分比，否则 `indeterminate` |
 | 「中断」按钮 | `variant="tonal"` `color="error"`；`:disabled="!t.cancelable"`；tooltip 文案 = `cancelable` ? 「中断该任务」: (`cancelBlockReason` \|\| 「该任务不支持中断」)。tooltip 用 `<span>` 包住按钮，保证 disabled 状态下仍能悬浮读原因 |
 | 空态 | 图标 + 「暂无进行中的任务」 |
 | 完成提示 | 底部「本次面板打开期间已有 N 个任务完成」 |

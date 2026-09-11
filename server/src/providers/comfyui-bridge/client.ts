@@ -175,13 +175,17 @@ export function createComfyuiBridgeClient(config: ResolvedProviderConfig): Comfy
       }
       const data = (await res.json()) as {
         status: string;
-        progress?: number;
+        progress?: number | null;
         errorMessage?: string | null;
       };
       const done = data.status === 'completed' || data.status === 'failed';
       return {
         status: data.status,
-        progress: data.progress ?? 0,
+        // 不把「Bridge 未上报进度」强转成 0：progress 的语义是「真实上报过」，
+        // 有值才会让任务管理器与画布节点渲染确定百分比。排队期间（status=queued）
+        // Bridge 不报 progress，若伪造 0 会让 UI 长时间停在「0%」（视频任务可达数十分钟）；
+        // 缺省则回退不确定动画，开始采样后自动切到真实百分比。
+        ...(typeof data.progress === 'number' ? { progress: data.progress } : {}),
         done,
         errorMessage: data.errorMessage ?? null,
       };

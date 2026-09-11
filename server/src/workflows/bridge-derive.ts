@@ -97,7 +97,9 @@ function tagMetadata(tags: BridgeTagGroup[], id: string): Record<string, unknown
 export function deriveCapabilities(tags: BridgeTagGroup[], type: string): WorkflowCapabilities {
   const ids = new Set(collectTagIds(tags));
   const caps: WorkflowCapabilities = { cancelable: true };
-  // 图片/视频类工作流声明统一尺寸能力（前端尺寸组件据此渲染；宽高经 vars/video.resolution 直传 Bridge）
+  // 图片/视频类工作流声明统一尺寸能力（前端尺寸组件据此渲染；
+  // 文生图/图片编辑的宽高经引擎注入的 ctx.sizeConfig 由 size.ts 解析后提交 Bridge，
+  // 图生视频经 video.resolution 直传）
   if (type === 'text-to-image' || type === 'image-edit' || type === 'image-to-video') {
     caps.size = BRIDGE_SIZE_CAPABILITIES;
   }

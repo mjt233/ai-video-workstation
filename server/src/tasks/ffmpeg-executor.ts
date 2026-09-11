@@ -85,6 +85,11 @@ class FfmpegExecutor implements TaskExecutor<FfmpegTaskParams> {
   /**
    * 登记 ffmpeg 任务（中断句柄指向本执行器）。
    *
+   * **不写初始进度**：`progress` 只在 `run()` 里首个 `-progress` 事件上报后才存在，
+   * 未上报即字段缺省 ⇒ 前端/任务管理器显示**不确定动画**。刻意不给 `0`：
+   * 无 `duration` 的操作（取帧）永远算不出百分比，初始 `0` 会被显示成恒定的「0%」，
+   * 比不确定动画更误导。
+   *
    * @param meta 登记元信息
    * @param _params 执行参数（登记阶段未使用；执行参数在 run() 时传入）
    * @returns 任务记录
@@ -94,7 +99,6 @@ class FfmpegExecutor implements TaskExecutor<FfmpegTaskParams> {
     const task = taskRegistry.register({
       ...meta,
       type: this.type,
-      progress: 0,
       handle: createTaskHandle(() => {
         this.cancel(taskId);
       }),

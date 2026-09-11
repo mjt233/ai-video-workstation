@@ -988,6 +988,13 @@ export async function runTask(taskId: string): Promise<void> {
       // 原实现每 2 秒无条件写一条 debug，实测占日志总量 89%、其中 92.6% 与上一条完全重复。
       // 现在只在「状态/进度变化」时写 info（留下即有效，可回溯进度轨迹），
       // 状态长时间不变时按配置间隔补一条 debug 心跳（证明轮询仍在推进）。
+      // 进度同步进统一任务注册表：任务管理器与画布节点遮罩据此显示真实百分比
+      // （`GET /api/workflow/tasks*` 从注册表读该字段；WS 广播同样携带）。
+      // SQLite 不落进度——进度属运行态，服务重启后丢失 → 前端回退不确定动画。
+      if (typeof result.progress === 'number') {
+        workflowExecutor.update(taskId, { progress: result.progress });
+      }
+
       const signature = `${result.status}|${result.progress ?? '-'}`;
       const now = Date.now();
       if (signature !== lastStatus) {

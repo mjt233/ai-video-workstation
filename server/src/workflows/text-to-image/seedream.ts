@@ -1,6 +1,7 @@
 import { register } from '../registry.js';
 import type { TextToImageVars, WorkflowRunContext } from '../types.js';
-import { resolveSeedreamOutputSize, resolveSeedreamSize, SEEDREAM_MODELS, SEEDREAM_SIZE_LIMITS, submitSeedreamTextToImage } from '../seedream.js';
+import { resolveSeedreamSize, SEEDREAM_MODELS, SEEDREAM_SIZE_LIMITS, submitSeedreamTextToImage } from '../seedream.js';
+import { resolveOutputSize, resolveSpecifiedGate, SIZE_PARAMS } from '../size.js';
 
 for (const def of SEEDREAM_MODELS) {
   register<TextToImageVars>({
@@ -26,27 +27,8 @@ for (const def of SEEDREAM_MODELS) {
         defaultValue: false,
         description: '启用后使用方舟 standard 模式优化提示词（质量更优，耗时更长）',
       },
-      {
-        name: '指定输出尺寸',
-        key: 'enable_specified_size',
-        type: 'boolean',
-        defaultValue: false,
-        description: '启用后按下方选定的宽高输出图片',
-      },
-      {
-        name: '输出宽度',
-        key: 'width',
-        type: 'integer',
-        defaultValue: '',
-        description: '输出图片宽度（像素）',
-      },
-      {
-        name: '输出高度',
-        key: 'height',
-        type: 'integer',
-        defaultValue: '',
-        description: '输出图片高度（像素）',
-      },
+      // 旧版尺寸参数（新交互下由统一尺寸组件写入 params.sizeConfig，此处仅为兼容与回显）
+      ...SIZE_PARAMS,
     ],
     async submit(ctx: WorkflowRunContext<TextToImageVars>) {
       const promptPath = ctx.vars.promptPath?.trim();
@@ -54,18 +36,17 @@ for (const def of SEEDREAM_MODELS) {
         throw new Error('text-to-image 需要 vars.promptPath');
       }
       const prompt = await ctx.readFile(promptPath);
-      // 尺寸：优先统一尺寸配置（ctx.sizeConfig，新交互），其次旧 vars 门控
-      // （enable_specified_size==="true" 时采用 vars.width/height），最后回退 projectConfig；
-      // 经 resolveSeedreamSize 按模型约束校验/自动匹配最接近的允许尺寸
-      const specified = ctx.vars.enable_specified_size === 'true';
-      const size = resolveSeedreamOutputSize(
-        ctx.sizeConfig,
-        specified,
-        ctx.vars.width,
-        ctx.vars.height,
-        ctx.projectConfig.width,
-        ctx.projectConfig.height,
-      );
+      // 尺寸：统一解析器（sizeConfig 显式宽高 → 档位换算 → 旧 vars 门控 → projectConfig），
+      // 再经 resolveSeedreamSize 按模型约束校验/自动匹配最接近的允许尺寸
+      const size = resolveOutputSize({
+        sizeConfig: ctx.sizeConfig,
+        // 缺省严格：方舟工作流声明 enable_specified_size，必须显式开启才采用 vars 宽高
+        enableSpecified: resolveSpecifiedGate(ctx.sizeConfig, ctx.vars.enable_specified_size, false),
+        vars: ctx.vars,
+        userParams: ctx.userParams,
+        fallbackWidth: ctx.projectConfig.width,
+        fallbackHeight: ctx.projectConfig.height,
+      });
       const optimizeMode = ctx.userParams?.enhance_prompt === 'true' ? ('standard' as const) : undefined;
       return submitSeedreamTextToImage(ctx.provider, {
         model: def.model,

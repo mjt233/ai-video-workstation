@@ -41,6 +41,23 @@ export interface GenerateStatus {
   taskId?: string
 }
 
+/**
+ * 取节点运行态可展示的进度百分比（节点遮罩圆环用）。
+ *
+ * 只有**服务端真实上报过**进度（工作流远端 poll / ffmpeg `-progress`）才返回数字：
+ * 返回 `null` 表示「无法确定进度」，调用方必须回退为不确定动画——绝不把缺省当 0，
+ * 否则无 `duration` 的取帧任务、不上报中间进度的服务商（MiniMax H3 / 火山方舟 /
+ * OpenAI 兼容）会长期显示一个假的「0%」。
+ *
+ * @param status 节点生成状态（可为空：节点无运行态时）
+ * @returns 0~100 的整数百分比；无进度数据、非有限数时返回 null
+ */
+export function nodeProgressPercent(status?: GenerateStatus): number | null {
+  const p = status?.progress
+  if (typeof p !== 'number' || !Number.isFinite(p)) return null
+  return Math.max(0, Math.min(100, Math.round(p)))
+}
+
 /** 生成目标（与画布目标一致） */
 export interface GenTarget {
   kind: CanvasKind
@@ -300,6 +317,10 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
    * 进度与终态主要由全局 `onTaskUpdate` 监听消费（task-update 广播）；
    * 此处额外订阅该 taskId 以处理「订阅时任务已结束」（刷新/重连竞态）→ not-found。
    *
+   * **不预置 `progress: 0`**：进度只由首个真实 `-progress` 事件（WS 广播）写入，
+   * 未上报时保持缺省 → 遮罩显示不确定动画。取帧等无 `duration` 的操作永远算不出
+   * 百分比，预置 0 会让节点恒定显示「0%」。
+   *
    * @param nodeId 节点 id
    * @param taskId 任务 id
    * @param outputPath 产物相对路径（固定 output.{ext}）
@@ -316,7 +337,7 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     taskIdByNode.value[nodeId] = taskId
     ffmpegOutputByNode[nodeId] = outputPath
     ffmpegResultCbByNode[nodeId] = onResult
-    statusByNode.value[nodeId] = { status: 'running', lastLog: runningLog, taskId, progress: 0 }
+    statusByNode.value[nodeId] = { status: 'running', lastLog: runningLog, taskId }
     const off = taskSocket.subscribe(taskId, (event) => {
       if (event.type !== 'not-found') return
       // 订阅时任务已结束（刷新/重连竞态）：仅结束 loading，产物以文件为准
@@ -558,6 +579,8 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
           lastLog,
           taskId,
           errorMsg: task.errorMsg,
+          // 进度是标准结果字段：仅真实上报过才写入，缺省保持「无法确定」→ 遮罩走不确定动画
+          ...(typeof task.progress === 'number' ? { progress: task.progress } : {}),
         }
 
         if (done || isError) {

@@ -59,7 +59,7 @@
 | `project` | 前端按项目过滤恢复 |
 | `nodeId` / `canvas` | **画布恢复的两个关键字段**；缺了刷新后恢复不到 Loading。服务端从请求体取用 `parseTaskTarget(req.body)`（`tasks/task-target.ts`） |
 | `status` | 缺省 `running`；本地排队用 `pending` |
-| `progress` | 0~100；缺省 = 不确定进度（UI 显示 indeterminate） |
+| `progress` | 0~100；**只写真实上报值**，不要预置 0 或估算——「有值」直接决定 UI 渲染确定百分比还是不确定动画（详见 [ui.md](./ui.md) 「画布节点运行遮罩的进度呈现」） |
 | `cancelable` / `cancelBlockReason` | 见第二节 |
 | `payload` | 类型自有字段（`update()` 时**浅合并**）；想给前端用（如产物路径 `outputPath`）就放这里 |
 | `handle` | 中断凭据，经 `createTaskHandle()`；**只内存持有，不进广播载荷** |
@@ -104,7 +104,8 @@
 ### 5. 前端跟踪 + `restore` 支持（`frontend/src/canvas/useCanvasGeneration.ts`）
 
 - **提交**：调接口时带 `taskTarget(nodeId)`（`{ nodeId, canvas }`），拿到 `taskId`。
-- **跟踪**：`trackFfmpegTask(nodeId, taskId, outputPath, runningLog, onResult)` 登记 `taskIdByNode` / `ffmpegOutputByNode` / `ffmpegResultCbByNode` 并置 `running`；进度与终态在 `taskSocket.onTaskUpdate(...)` 里按 `taskId` 反查节点收敛（`completed` → `success` + 回调刷新产物；`cancelled` → 「已中断」；其余 → `task.error`）。额外 `taskSocket.subscribe(taskId, ...)` 只为处理「订阅时任务已结束」的 `not-found` 竞态。
+- **跟踪**：`trackFfmpegTask(nodeId, taskId, outputPath, runningLog, onResult)` 登记 `taskIdByNode` / `ffmpegOutputByNode` / `ffmpegResultCbByNode` 并置 `running`（**不预置 `progress`**，等首个真实进度事件）；进度与终态在 `taskSocket.onTaskUpdate(...)` 里按 `taskId` 反查节点收敛（`completed` → `success` + 回调刷新产物；`cancelled` → 「已中断」；其余 → `task.error`）。额外 `taskSocket.subscribe(taskId, ...)` 只为处理「订阅时任务已结束」的 `not-found` 竞态。
+- **工作流的进度**：不吃 WS 广播，走 `poll()` 里读 `GET /api/workflow/tasks/:id` 的 `progress` 标准字段（服务端从内存注册表补），与 ffmpeg 一样落到 `GenerateStatus.progress`。
 - **恢复**：`restore(knownNodeIds)` ← `collectRunningTasks(knownNodeIds)` → 数据源是 `activeRegistryTasks()`（WS 快照就绪时用 `taskSocket.tasks`，否则 HTTP 兜底 `listTasks(project)`）；过滤条件是 `isCurrentScope(task)`（项目 + 画布 scope）+ 节点仍在当前画布上（`knownNodeIds`）。
 - **新类型要参与恢复**：`RestoreEntry.kind` 目前是 `'ffmpeg' | 'workflow'`，需要在 `collectRunningTasks()` 的注册表分支放开类型判断、在 `restore()` 的 `entry.kind` 分支加跟踪方式（工作流是续跑 `poll()`，ffmpeg 是重订阅 WS）。
 - **终态不等于产物存在**：`onFfmpegTaskFinished()` 用 `getCanvasNodeInfo(project, finalPath)` 核验产物，缺失时提示「任务已结束但未生成产物，请重新执行」——新类型的恢复路径也要做同样的核验。

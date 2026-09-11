@@ -78,6 +78,21 @@ describe('createComfyuiBridgeClient', () => {
     expect(result.errorMessage).toBe('boom');
   });
 
+  it('Bridge 未上报 progress（如排队中）→ 字段缺省，不伪造 0', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'abc' }) } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'queued', progress: null }) } as unknown as Response);
+
+    const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+    const result = await client.poll('task-1');
+
+    expect(result.status).toBe('queued');
+    expect(result.done).toBe(false);
+    // 关键：缺省而非 0——否则任务管理器/画布节点会长时间停在「0%」
+    expect(result.progress).toBeUndefined();
+    expect('progress' in result).toBe(false);
+  });
+
   it('token 缓存按 client 实例持有：同一实例多次 poll 只登录一次', async () => {
     fetchMock
       .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'abc' }) } as unknown as Response)

@@ -97,6 +97,11 @@ describe('extractFfmpegError', () => {
 });
 
 describe('ffmpegExecutor', () => {
+  it('登记后不预置 progress（未上报即缺省 → 前端不确定动画，不伪造 0%）', () => {
+    const task = ffmpegExecutor.create({ label: '获取视频帧' }, { outputAbs: '/x/out.png', build: () => ({}) as never });
+    expect(taskRegistry.get(task.id)?.progress).toBeUndefined();
+  });
+
   it('run 成功：progress 上报 + finish(completed)', async () => {
     const cmd = mockCommand();
     mockFfmpeg.mockReturnValue(cmd.chain);

@@ -383,6 +383,40 @@ describe('轮询日志降噪（变化才记 + 心跳）', () => {
     ]);
   });
 
+  it('轮询进度写入统一注册表（REST/WS 的 progress 唯一来源）', async () => {
+    /** 注册表 update 事件里出现过的进度序列 */
+    const seen: number[] = [];
+    const off = taskRegistry.on((e) => {
+      if (e.type === 'update' && typeof e.task.progress === 'number') seen.push(e.task.progress);
+    });
+    scriptPoll([
+      { status: 'running', progress: 10 },
+      { status: 'running', progress: 60 },
+      { status: 'completed', progress: 100, done: true },
+    ]);
+
+    await runTaskWithFakeTimers();
+    off();
+
+    expect(seen).toEqual([10, 60, 100]);
+  });
+
+  it('服务商不上报进度时不伪造百分比（注册表无任何进度写入）', async () => {
+    /** 注册表 update 事件里出现过的进度序列 */
+    const seen: number[] = [];
+    const off = taskRegistry.on((e) => {
+      if (e.type === 'update' && typeof e.task.progress === 'number') seen.push(e.task.progress);
+    });
+    // poll 结果全程无 progress 字段（MiniMax H3 / 火山方舟 / OpenAI 兼容的真实形态）
+    scriptPoll([{ status: 'running' }, { status: 'running' }, { status: 'completed', done: true }]);
+
+    await runTaskWithFakeTimers();
+    off();
+
+    // 一次进度都不写 ⇒ 前端保持不确定动画（若这里出现 0 就是伪造进度）
+    expect(seen).toEqual([]);
+  });
+
   it('终态里程碑日志保留（完成 / 解析 / 产物落盘）', async () => {
     scriptPoll([{ status: 'completed', progress: 100, done: true }]);
 

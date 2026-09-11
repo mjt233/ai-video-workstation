@@ -19,7 +19,7 @@ import {
 import type { WorkflowUserParamDeclaration } from '../api/workflow'
 
 describe('computePresetSize', () => {
-  it('P 档按高度为基准：16:9 + 1080P → 1920×1080', () => {
+  it('基准恒为短边：16:9 + 1080P → 1920×1080', () => {
     expect(computePresetSize('16:9', '1080P')).toEqual({ width: 1920, height: 1080 })
   })
 
@@ -27,7 +27,7 @@ describe('computePresetSize', () => {
     expect(computePresetSize('1:1', '1080P')).toEqual({ width: 1080, height: 1080 })
   })
 
-  it('9:16 + 1080P → 1080×1920', () => {
+  it('竖屏基准落在宽度：9:16 + 1080P → 1080×1920', () => {
     expect(computePresetSize('9:16', '1080P')).toEqual({ width: 1080, height: 1920 })
   })
 
@@ -35,21 +35,40 @@ describe('computePresetSize', () => {
     expect(computePresetSize('4:3', '720P')).toEqual({ width: 960, height: 720 })
   })
 
-  it('K 档按宽度为基准：16:9 + 4K → 3840×2160', () => {
+  it('K 档同为短边基准：16:9 + 2K（基准 1440）→ 2560×1440', () => {
+    expect(computePresetSize('16:9', '2K')).toEqual({ width: 2560, height: 1440 })
+  })
+
+  it('竖屏 K 档基准落在宽度：9:16 + 2K → 1440×2560', () => {
+    expect(computePresetSize('9:16', '2K')).toEqual({ width: 1440, height: 2560 })
+  })
+
+  it('超宽比例基准仍落在高度：21:9 + 2K → 3360×1440', () => {
+    expect(computePresetSize('21:9', '2K')).toEqual({ width: 3360, height: 1440 })
+  })
+
+  it('正方形两维同为基准：1:1 + 2K → 1440×1440', () => {
+    expect(computePresetSize('1:1', '2K')).toEqual({ width: 1440, height: 1440 })
+  })
+
+  it('16:9 + 4K（基准 2160）→ 3840×2160；9:16 + 4K → 2160×3840', () => {
     expect(computePresetSize('16:9', '4K')).toEqual({ width: 3840, height: 2160 })
+    expect(computePresetSize('9:16', '4K')).toEqual({ width: 2160, height: 3840 })
   })
 
-  it('9:16 + 4K → 宽度 3840，高度按比例取整', () => {
-    expect(computePresetSize('9:16', '4K')).toEqual({ width: 3840, height: 6827 })
-  })
-
-  it('1:1 + 8K → 7680×7680', () => {
-    expect(computePresetSize('1:1', '8K')).toEqual({ width: 7680, height: 7680 })
+  it('1:1 + 8K（基准 4320）→ 4320×4320', () => {
+    expect(computePresetSize('1:1', '8K')).toEqual({ width: 4320, height: 4320 })
   })
 
   it('扩展档位：1:1 + 1K → 1024×1024；3:2 + 768P → 1152×768', () => {
     expect(computePresetSize('1:1', '1K')).toEqual({ width: 1024, height: 1024 })
     expect(computePresetSize('3:2', '768P')).toEqual({ width: 1152, height: 768 })
+  })
+
+  it('P 档横竖屏与历史行为一致（1080P 横屏 1920×1080、竖屏 1080×1920）', () => {
+    expect(computePresetSize('16:9', '1080P')).toEqual({ width: 1920, height: 1080 })
+    expect(computePresetSize('9:16', '1080P')).toEqual({ width: 1080, height: 1920 })
+    expect(computePresetSize('16:9', '768P')).toEqual({ width: 1365, height: 768 })
   })
 })
 
@@ -58,14 +77,34 @@ describe('SIZE_RATIOS / SIZE_RESOLUTIONS', () => {
     expect(SIZE_RATIOS.map((r) => r.key)).toEqual(['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'])
   })
 
-  it('分辨率档包含 11 个预设，P 档基准为高度、K 档基准为宽度', () => {
+  it('分辨率档包含 11 个预设，基准值恒为输出短边（各档为业务确认的标准短边）', () => {
     expect(SIZE_RESOLUTIONS.map((r) => r.key)).toEqual([
       '360P', '480P', '720P', '768P', '1080P', '1K', '1.5K', '2K', '3K', '4K', '8K',
     ])
-    expect(SIZE_RESOLUTIONS.find((r) => r.key === '1080P')?.baseOn).toBe('height')
-    expect(SIZE_RESOLUTIONS.find((r) => r.key === '768P')?.base).toBe(768)
-    expect(SIZE_RESOLUTIONS.find((r) => r.key === '1K')?.base).toBe(1024)
-    expect(SIZE_RESOLUTIONS.find((r) => r.key === '4K')?.baseOn).toBe('width')
+    // 各档标准短边：K 档数字是档位称呼，不等于 base（2K=1440、4K=2160）
+    expect(SIZE_RESOLUTIONS.map((r) => `${r.key}:${r.base}`)).toEqual([
+      '360P:360', '480P:480', '720P:720', '768P:768', '1080P:1080',
+      '1K:1024', '1.5K:1536', '2K:1440', '3K:1620', '4K:2160', '8K:4320',
+    ])
+  })
+
+  it('16:9 各档横屏取值（常见规格）', () => {
+    expect(computePresetSize('16:9', '768P')).toEqual({ width: 1365, height: 768 })
+    expect(computePresetSize('16:9', '1080P')).toEqual({ width: 1920, height: 1080 })
+    expect(computePresetSize('16:9', '2K')).toEqual({ width: 2560, height: 1440 })
+    expect(computePresetSize('16:9', '4K')).toEqual({ width: 3840, height: 2160 })
+    expect(computePresetSize('16:9', '8K')).toEqual({ width: 7680, height: 4320 })
+  })
+
+  it('同一档位横竖屏面积语义一致（短边相同）', () => {
+    for (const key of ['1080P', '1K', '2K', '4K'] as const) {
+      const base = SIZE_RESOLUTIONS.find((r) => r.key === key)!.base
+      const land = computePresetSize('16:9', key)
+      const port = computePresetSize('9:16', key)
+      expect(Math.min(land.width, land.height)).toBe(base)
+      expect(Math.min(port.width, port.height)).toBe(base)
+      expect(land.width * land.height).toBe(port.width * port.height)
+    }
   })
 })
 
@@ -102,8 +141,12 @@ describe('resolveSizeMode', () => {
     expect(resolveSizeMode({ enableSpecifiedSize: true, width: 1080, height: 1920 })).toBe('preset')
   })
 
-  it('启用且 K 档宽高匹配预设（16:9+4K=3840×2160）→ preset', () => {
-    expect(resolveSizeMode({ enableSpecifiedSize: true, width: 3840, height: 2160 })).toBe('preset')
+  it('启用且 K 档宽高匹配预设（16:9+2K=2560×1440）→ preset', () => {
+    expect(resolveSizeMode({ enableSpecifiedSize: true, width: 2560, height: 1440 })).toBe('preset')
+  })
+
+  it('启用且竖屏 K 档宽高匹配预设（9:16+2K=1440×2560）→ preset', () => {
+    expect(resolveSizeMode({ enableSpecifiedSize: true, width: 1440, height: 2560 })).toBe('preset')
   })
 
   it('启用但不匹配任何预设 → manual', () => {
@@ -219,9 +262,10 @@ describe('normalizeSizeConfig', () => {
 })
 
 describe('resolvePresetSize', () => {
-  it('已知档位换算宽高', () => {
-    expect(resolvePresetSize('16:9', '1K')).toEqual({ width: 1024, height: 576 })
-    expect(resolvePresetSize('1:1', '2K')).toEqual({ width: 2560, height: 2560 })
+  it('已知档位换算宽高（基准为短边）', () => {
+    expect(resolvePresetSize('16:9', '1K')).toEqual({ width: 1820, height: 1024 })
+    expect(resolvePresetSize('1:1', '2K')).toEqual({ width: 1440, height: 1440 })
+    expect(resolvePresetSize('9:16', '2K')).toEqual({ width: 1440, height: 2560 })
   })
 
   it('auto / 未注册档位返回 null', () => {
@@ -279,8 +323,8 @@ describe('toSizeConfig', () => {
 })
 
 describe('formatSizeConfigText', () => {
-  it('预设组合不追加自定义宽高：16:9 / 1K', () => {
-    expect(formatSizeConfigText({ ratio: '16:9', size: '1K', width: 1024, height: 576 })).toBe('16:9 / 1K')
+  it('预设组合不追加自定义宽高：16:9 / 2K', () => {
+    expect(formatSizeConfigText({ ratio: '16:9', size: '2K', width: 2560, height: 1440 })).toBe('16:9 / 2K')
   })
 
   it('手动改过宽高追加后缀：1:1 / 2K / 1024x1024', () => {

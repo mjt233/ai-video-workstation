@@ -9,7 +9,7 @@ import type {
 } from '../providers/comfyui-bridge/client.js';
 import { registerOrReplace, unregisterByInstance } from './registry.js';
 import { deriveCapabilities, deriveParams, deriveWorkflowType, type BridgeDerivedType } from './bridge-derive.js';
-import {
+import { resolveOutputSize, resolveSpecifiedGate } from './size.js';import {
   buildDirectorPayload,
   buildFirstLastFramePayload,
   buildImageEditPayload,
@@ -111,40 +111,28 @@ function exposeFieldOf(tags: BridgeTagGroup[], tagId: string): string | undefine
 interface TextToImageVarsLike extends WorkflowVarsBase {
   /** 提示词文件相对路径（相对 design/{project}/） */
   promptPath?: string;
-  /** 是否启用指定输出尺寸（"true" 时 width/height 生效） */
+  /** 旧版尺寸门控（"true" 时 width/height 生效；"false" 时为「不指定」） */
   enable_specified_size?: string;
-  /** 覆盖宽度（像素，字符串形式） */
+  /** 旧版覆盖宽度（像素，字符串形式；现由统一尺寸配置 sizeConfig 取代） */
   width?: string;
-  /** 覆盖高度（像素，字符串形式） */
+  /** 旧版覆盖高度（像素，字符串形式） */
   height?: string;
   /** 提示词强化开关（"true"/"false"） */
   enhance_prompt?: string;
 }
 
 /**
- * 解析覆盖尺寸：仅接受有限正数（与 resolveImageEditSizeParams 行为一致），否则回退默认值。
- *
- * @param value 用户传入的尺寸字符串（可空）
- * @param fallback 回退值（projectConfig 或缺省 1080/1920）
- * @returns 有效覆盖尺寸或回退值
- */
-function resolveOverrideSize(value: string | undefined, fallback: number): number {
-  if (!value || value === '') return fallback;
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-/**
  * 文生图提交实现。
  *
- * 读取 vars.promptPath 对应的提示词文件内容作为 prompt；输出尺寸优先采用
- * vars.width/height（有效正数），未配置时回退 projectConfig（缺省 1080×1920）。
+ * 读取 vars.promptPath 对应的提示词文件内容作为 prompt；输出尺寸经统一解析器
+ * `resolveOutputSize` 得出（优先级：**统一尺寸配置 sizeConfig 显式宽高 → sizeConfig
+ * 档位换算 → 旧版 vars 宽高 → 项目尺寸**）。
  *
  * 尺寸门控说明：ComfyUI Bridge 工作流（ceb-*，动态注册）通常不声明
- * enable_specified_size 参数（该字段为 Seedream 等云工作流约定），若以其 === 'true'
- * 作为唯一开关，画布节点等提交的 width/height 会被静默忽略而始终使用项目全局尺寸。
- * 因此仅当显式 enable_specified_size === 'false'（前端「不指定」模式，此时不携带
- * width/height）时才回退 projectConfig，其余情况 width/height 有效即采用。
+ * enable_specified_size 参数（该字段为 Seedream 等云工作流约定），此时门控缺省取
+ * 「宽松」语义（`enableSpecifiedSize` 的 `legacyDefault = true`）——vars 宽高有效即采用，
+ * 与历史行为一致；一旦 sizeConfig 携带用户选择的尺寸，则该选择恒先生效，
+ * 不受旧门控影响。
  *
  * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
  * @returns 动态工作流 submit 函数
@@ -154,17 +142,22 @@ function textToImageSubmit(workflowId: string): WorkflowDefinition['submit'] {
     const promptPath = ctx.vars.promptPath?.trim();
     if (!promptPath) throw new Error('text-to-image 需要 vars.promptPath');
     const prompt = await ctx.readFile(promptPath);
-    const specified = ctx.vars.enable_specified_size !== 'false';
-    const width = specified
-      ? resolveOverrideSize(ctx.vars.width, ctx.projectConfig.width || 1080)
-      : (ctx.projectConfig.width || 1080);
-    const height = specified
-      ? resolveOverrideSize(ctx.vars.height, ctx.projectConfig.height || 1920)
-      : (ctx.projectConfig.height || 1920);
+    const size = resolveOutputSize({
+      sizeConfig: ctx.sizeConfig,
+      // 缺省宽松（Bridge 工作流通常不声明 enable_specified_size）：显式 'false' 视为
+      // 「不指定」，显式 'true' 或 sizeConfig 有明确尺寸时采用，其余按 vars 宽高兜底
+      enableSpecified: resolveSpecifiedGate(ctx.sizeConfig, ctx.vars.enable_specified_size, true),
+      vars: ctx.vars,
+      userParams: ctx.userParams,
+      fallbackWidth: ctx.projectConfig.width,
+      fallbackHeight: ctx.projectConfig.height,
+    });
     const seed = ctx.vars.seed ? Number(ctx.vars.seed) : undefined;
     const enhance = ctx.vars.enhance_prompt === 'true';
     const extraParams = passthroughParams(ctx, TEXT_TO_IMAGE_STRUCTURAL_KEYS);
-    return executeWithProvider(ctx, buildTextToImagePayload({ workflowId, prompt, width, height, seed, enhance_prompt: enhance, extraParams }));
+    return executeWithProvider(ctx, buildTextToImagePayload({
+      workflowId, prompt, width: size.width, height: size.height, seed, enhance_prompt: enhance, extraParams,
+    }));
   };
 }
 
@@ -226,6 +219,9 @@ function ttsCloneSubmit(workflowId: string): WorkflowDefinition['submit'] {
  * vars.imagePaths 为 JSON 字符串数组（相对 design/{project}/ 的 assert/ 路径）；
  * 逐个经 ctx.readAssertFile 解析为 File 后按顺序映射 image_{n} 上传。
  *
+ * 输出尺寸同样经统一解析器 `resolveOutputSize`（sizeConfig 优先，旧版 vars/userParams
+ * 宽高兜底），再经 `resolveImageEditSizeParams` 收敛为载荷字段。
+ *
  * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
  * @returns 动态工作流 submit 函数
  */
@@ -245,11 +241,22 @@ function imageEditSubmit(workflowId: string): WorkflowDefinition['submit'] {
     if (paths.length === 0) throw new Error('image-edit 至少需要一张输入图片（vars.imagePaths）');
     const imgs: File[] = [];
     for (const rel of paths) imgs.push(await ctx.readAssertFile(rel));
-    const size = resolveImageEditSizeParams(vars);
+    const legacyGate = ctx.userParams?.['enable_specified_size'] ?? vars.enable_specified_size;
+    const gate = resolveSpecifiedGate(ctx.sizeConfig, legacyGate, true);
+    const size = resolveOutputSize({
+      sizeConfig: ctx.sizeConfig,
+      enableSpecified: gate,
+      vars,
+      userParams: ctx.userParams,
+      fallbackWidth: ctx.projectConfig.width,
+      fallbackHeight: ctx.projectConfig.height,
+    });
     // 动态用户参数（如 enable_multiple_angles_lora）经 ctx.userParams 透传，不在本层硬编码
     const extraParams = passthroughParams(ctx, IMAGE_EDIT_STRUCTURAL_KEYS);
     return executeWithProvider(ctx, buildImageEditPayload({
-      workflowId, prompt, imgs, seed: vars.seed, size, extraParams,
+      workflowId, prompt, imgs, seed: vars.seed,
+      size: resolveImageEditSizeParams({ ...size, specified: gate !== 'off' }),
+      extraParams,
     }));
   };
 }

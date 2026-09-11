@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderClient } from '../providers/types.js';
 import { getImpl, unregisterByInstance } from './registry.js';
-import { resolveOpenAICompatibleSize, syncOpenAICompatibleInstance } from './openai-compatible-sync.js';
-import type { ImageEditVars, TextToImageVars, WorkflowRunContext } from './types.js';
+import { syncOpenAICompatibleInstance } from './openai-compatible-sync.js';
+import type { ImageEditVars, TextToImageVars, WorkflowRunContext, WorkflowSizeConfig } from './types.js';
 
 vi.mock('../providers/config-store.js', () => ({
   resolveInstanceConfig: vi.fn((inst: { config: Record<string, unknown> }) => inst.config),
@@ -16,21 +16,66 @@ const stubProvider = {
   cancel: vi.fn(),
 } as unknown as ProviderClient;
 
-describe('resolveOpenAICompatibleSize', () => {
-  it('指定尺寸且宽高有效时返回 WxH', () => {
-    expect(resolveOpenAICompatibleSize(true, '720', '1280', 1080, 1920)).toBe('720x1280');
+describe('openai-compatible 尺寸解析（经统一解析器 resolveOutputSize）', () => {
+  /**
+   * 构造文生图上下文并取回提交载荷（仅关注 size 字段）。
+   *
+   * @param over 覆盖的上下文片段（vars / sizeConfig / projectConfig）
+   * @returns provider.execute 收到的 params
+   */
+  async function submitTextToImage(over: {
+    vars?: Record<string, string | undefined>;
+    sizeConfig?: WorkflowSizeConfig;
+    projectConfig?: { width: number; height: number };
+  }): Promise<Record<string, unknown>> {
+    await syncOpenAICompatibleInstance({
+      id: 'inst-oai',
+      type: 'openai-compatible',
+      name: '中转A',
+      config: { models: [{ id: 'gpt-image-1', capabilities: ['text-to-image'] }] },
+    });
+    const impl = getImpl('text-to-image', 'oai-gpt-image-1-inst-oai')!;
+    const ctx: WorkflowRunContext<TextToImageVars> = {
+      project: 'p',
+      projectConfig: over.projectConfig ?? { width: 1080, height: 1920 },
+      vars: { promptPath: 'prompt/a.md', ...(over.vars ?? {}) },
+      ...(over.sizeConfig ? { sizeConfig: over.sizeConfig } : {}),
+      provider: stubProvider,
+      readFile: async () => '一只猫',
+      readAssertFile: async () => new File(['x'], 'x.png'),
+    };
+    await impl.submit(ctx);
+    const call = executeMock.mock.calls.at(-1)![0] as { params: Record<string, unknown> };
+    return call.params;
+  }
+
+  it('sizeConfig 显式宽高 → 直传 "WxH"', async () => {
+    const params = await submitTextToImage({
+      sizeConfig: { ratio: '16:9', size: '2K', width: 2560, height: 1440 },
+    });
+    expect(params.size).toBe('2560x1440');
   });
 
-  it('指定尺寸但宽高无效时回退项目尺寸', () => {
-    expect(resolveOpenAICompatibleSize(true, '', '', 1080, 1920)).toBe('1080x1920');
+  it('sizeConfig 仅带比例/尺寸档 → 按档位表换算（16:9 + 1K → 1820x1024）', async () => {
+    const params = await submitTextToImage({ sizeConfig: { ratio: '16:9', size: '1K' } });
+    expect(params.size).toBe('1820x1024');
   });
 
-  it('未指定尺寸时使用项目尺寸', () => {
-    expect(resolveOpenAICompatibleSize(false, '1', '2', 1080, 1920)).toBe('1080x1920');
+  it('无 sizeConfig 时回退项目尺寸', async () => {
+    const params = await submitTextToImage({ projectConfig: { width: 720, height: 1280 } });
+    expect(params.size).toBe('720x1280');
   });
 
-  it('都无效时不传 size', () => {
-    expect(resolveOpenAICompatibleSize(false, undefined, undefined)).toBeUndefined();
+  it('旧版门控 enable_specified_size=true 时 vars 宽高生效', async () => {
+    const params = await submitTextToImage({
+      vars: { enable_specified_size: 'true', width: '512', height: '768' },
+    });
+    expect(params.size).toBe('512x768');
+  });
+
+  it('门控缺失时忽略 vars 宽高（OpenAI 兼容旧语义：必须显式开启）', async () => {
+    const params = await submitTextToImage({ vars: { width: '512', height: '768' } });
+    expect(params.size).toBe('1080x1920');
   });
 });
 

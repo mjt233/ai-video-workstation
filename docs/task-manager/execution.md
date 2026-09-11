@@ -128,6 +128,7 @@ workflowExecutor.update(taskId, { remoteTaskId });
 | 间隔 | `POLL_INTERVAL = 2000`（2 秒） | 先 `setTimeout` 再 `poll`，首轮也等 2 秒 |
 | 上限 | **无** | 视频生成可能远超 5 分钟，轮询直到 `result.done`；远端悬挂由用户中断兜底，provider 不可达时 `poll` 抛错 → 任务直接 failed |
 | 变化判定 | `signature = \`${result.status}|${result.progress ?? '-'}\`` | 与上一条不同 → 写 `info` 日志 `进度更新：status=... progress=...` 并记录 `lastLoggedAt` |
+| 进度同步 | `if (typeof result.progress === 'number') workflowExecutor.update(taskId, { progress: result.progress })` | **本轮新增**：把远端进度写进统一注册表——它是 `GET /api/workflow/tasks*` 的 `progress` 字段与 WS 广播的唯一来源（SQLite 不落进度）。只传 `progress` 不触发可中断性重算（条件要求 `status`/`remoteTaskId` 存在） |
 | 心跳 | `heartbeatMs = await resolvePollHeartbeatMs()` | 状态未变且距 `lastLoggedAt ≥ heartbeatMs` → 补一条 `debug` 日志 `轮询中（状态未变）`。`heartbeatSeconds` 取自系统设置 `taskLog.heartbeatSeconds`，`0` = 不写心跳；**读取配置失败不阻断任务**，回退 60 秒并打日志 |
 | 终态 | `result.done === true` | 写 `Task completed with status: ...`；`status==='failed'` 时 **`throw new Error(result.errorMessage ?? '远端任务失败（未知原因）')`**——优先透出 provider 的真实原因（敏感内容/余额不足等），避免落到兜底文案 `No output files found from provider task` 而丢掉病因；否则 `break` 进入 Step 3 |
 
@@ -237,7 +238,7 @@ interface FfmpegCommandSpec {
 create(meta, _params) {
   let taskId = '';
   const task = taskRegistry.register({
-    ...meta, type: this.type, progress: 0,
+    ...meta, type: this.type,                       // 刻意不写 progress: 0
     handle: createTaskHandle(() => { this.cancel(taskId); }),   // 闭包延后取 id
   });
   taskId = task.id;
@@ -246,6 +247,8 @@ create(meta, _params) {
 ```
 
 `taskId` 用 `let` + 闭包延后绑定：句柄构造时 `register()` 还没返回 id。
+
+**不预置 `progress: 0`**：`progress` 的语义是「真实上报过」（注册表里有值 = 前端渲染确定百分比）。取帧等操作没有 `duration`，`computeProgressPercent` 恒返回 `null` ⇒ 永远不会上报；若登记时写 0，节点遮罩会永久显示「0%」，比不确定动画更误导。
 
 `run(taskId, params)`：
 
@@ -354,7 +357,7 @@ LLM 的执行权在 `server/src/llm/session-manager.ts`（上游流 + `AbortCont
 | 环节 | 实现 |
 |------|------|
 | `execute` | `POST {baseUrl}/api/workflows/{workflowId}/execute`。有 `files` → `FormData`（`params` 为 JSON 字符串字段、`providerId` 为独立表单字段、文件按别名 append，**不手设 Content-Type**，由 fetch 带 multipart boundary）；无文件 → JSON body，`providerId` **后置展开**保证保留键优先于同名工作流参数。返回 `{ taskId: data.task_id }`。**提交无需认证** |
-| `poll` | `GET {baseUrl}/api/tasks/{taskId}`，`Authorization: Bearer <token>`；`done = status==='completed'\|\|status==='failed'`，`progress ?? 0`，`errorMessage ?? null` |
+| `poll` | `GET {baseUrl}/api/tasks/{taskId}`，`Authorization: Bearer <token>`；`done = status==='completed'\|\|status==='failed'`；`progress` **仅在 Bridge 上报了数字时才带**（排队期间 Bridge 不报进度，此前 `progress ?? 0` 的写法会让 UI 长时间停在「0%」，已改为缺省），`errorMessage ?? null` |
 | `getOutput` | `GET {baseUrl}/api/tasks/{taskId}/output-files` → 取 `files[0]`，相对 URL 拼 `baseUrl` → 返回 **`type:'fetch'`**（`GET` + `Authorization` 头，因为产物下载同样要鉴权）。**无文件返回 `null`** |
 | `cancel` | `POST {baseUrl}/api/tasks/{taskId}/cancel`（无认证头） |
 | token | `ensureToken()`：`POST /api/auth/login {password}`；**按客户端实例缓存 30 分钟**（有效期未知，保守取值）。引擎每次执行重新 `createClient` ⇒ 配置变更后自动用新配置与新 token |

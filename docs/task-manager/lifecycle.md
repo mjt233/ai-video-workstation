@@ -132,7 +132,7 @@
 | 参数富化 | `tts-voice-design` 的 `scene-tts` / `character-voice`、`image-edit` 的 `scene-stage-image`（含 `tryHandleSceneStageDirectReference` 直接复制分支：命中即 `db.updateTaskStatus(completed)` + **`workflowExecutor.finish`** 后 `return`——提前 return 的分支必须自己收敛注册表，否则任务永久留在活跃区）；注入 `seed`（用户未填 → `Date.now()`） |
 | Provider 解析 | `wf.providerInstanceId` → `getInstance()` → `getProvider(instance.type)` → `createClient(resolveInstanceConfig(instance))`；任一步缺失抛错（配置**按请求实时解析**，支持热加载） |
 | Step 1 提交 | `db.addLog('Starting workflow: …')` + `db.updateTaskStatus(id,'running')` → `wf.submit(runContext)` → **基于最新 params 合并**写入 `remoteTaskId`（勿用提交前快照，否则会覆盖并发写入的 `cancelRequested`）→ `workflowExecutor.update(taskId, {remoteTaskId})` 重算可中断性（登记时尚未提交远端 → 不可中断） |
-| Step 2 轮询 | `POLL_INTERVAL = 2000`，无限轮询直到 `result.done`。**日志降噪**：`status|progress` 变化才写 `info`；长时间不变按 `taskLog.heartbeatSeconds`（默认 60，0 = 关闭）补一条 `debug` 心跳 |
+| Step 2 轮询 | `POLL_INTERVAL = 2000`，无限轮询直到 `result.done`。**进度同步**：`result.progress` 有值时 `workflowExecutor.update(taskId, {progress})` 写入注册表（REST `progress` 字段与 WS 广播的来源）。**日志降噪**：`status|progress` 变化才写 `info`；长时间不变按 `taskLog.heartbeatSeconds`（默认 60，0 = 关闭）补一条 `debug` 心跳 |
 | Step 3 取产物 | `provider.getOutput(remoteTaskId)`；为空抛 `No output files found from provider task`（远端 `failed` 时优先透出 `errorMessage`） |
 | 取消标记检查 | 写产物**之前**读最新 params：`isCancelRequested()` 为真 → `throw new Error('用户中断')`（**不归档、不写产物**） |
 | 归档 + 落盘 | `copyExistingAssetToHistory()` 把已有产物归档到 history（copy 语义，固定路径产物在生成期间不消失）→ `download` / `fetch` / `body`(base64) 三种取回方式写 `assert/` |
@@ -150,9 +150,9 @@
 
 | 阶段 | 关键行为 |
 |------|----------|
-| 登记 | `ffmpegExecutor.create(meta, params)` → `taskRegistry.register({...meta, type:'ffmpeg', progress: 0, handle})`（`handle` 指向 `this.cancel`）；同节点已有任务 → 409 |
+| 登记 | `ffmpegExecutor.create(meta, params)` → `taskRegistry.register({...meta, type:'ffmpeg', handle})`（`handle` 指向 `this.cancel`；**不预置 `progress`**——未上报即缺省 ⇒ 前端不确定动画）；同节点已有任务 → 409 |
 | 执行 | `run(taskId, params)`：`Ffmpeg()` + `params.build(cmd)` → `cmd.save(outputAbs)`；`stderr` 尾部保留 4000 字符（失败信息用） |
-| 进度 | `cmd.on('progress')` → `computeProgressPercent(parseTimemarkSeconds(p.timemark), duration)` → `taskRegistry.update(taskId, {progress})`（**钳制 0~99**） |
+| 进度 | `cmd.on('progress')` → `computeProgressPercent(parseTimemarkSeconds(p.timemark), duration)` → `taskRegistry.update(taskId, {progress})`（**钳制 0~99**；无 `duration` 的取帧返回 `null` ⇒ 一次都不写） |
 | 成功 | `end` → `running.delete` → `finish(id, {status:'completed'})`（`progress` 缺省时 `finish` 补 100） |
 | 失败 | `error` 且 `state.cancelRequested === false` → `extractFfmpegError(e, stderrTail)` → `finish(id, {status:'failed', error})` |
 | 中断 | `error` 且 `cancelRequested === true` → `finish(id, {status:'cancelled'})`（不算错误） |
@@ -294,8 +294,8 @@ stripCancelRequested(params)     // 重试复制 params 时剥离旧标记
 
 | 任务类型 | 恢复动作 |
 |----------|----------|
-| `workflow` | 置 `statusByNode[nodeId] = {status:'running', lastLog:'任务进行中…', taskId}`，**续跑本地轮询** `poll(taskId, nodeId, outputPath)`（SQLite 为权威，含阶段日志与终态） |
-| `ffmpeg` | 置同一运行态，并 `taskSocket.subscribe(taskId, …)` 重订阅以处理「订阅时任务已结束」竞态（收到 `not-found` → 结束 Loading，产物以文件为准）；进度由全局 `onTaskUpdate` 消费 |
+| `workflow` | 置 `statusByNode[nodeId] = {status:'running', lastLog:'任务进行中…', taskId}`（**不带进度**，首轮轮询落定后才有真实百分比），**续跑本地轮询** `poll(taskId, nodeId, outputPath)`（SQLite 为权威，含阶段日志与终态） |
+| `ffmpeg` | 置同一运行态（同样不带进度），并 `taskSocket.subscribe(taskId, …)` 重订阅以处理「订阅时任务已结束」竞态（收到 `not-found` → 结束 Loading，产物以文件为准）；进度由全局 `onTaskUpdate` 消费 |
 | 已在本会话跟踪中 | `statusByNode[nodeId]?.status === 'running'` → 跳过，不重复接管 |
 
 `switchTarget(newTarget, knownNodeIds)` = `targetRef` 更新 → `reset()`（清定时器/状态/`taskIdByNode`，**不动服务端任务**）→ `await restore(knownNodeIds)`。`reset()` / `dispose()` 只清理前端内存态与订阅，运行中的任务在服务端继续执行。
@@ -304,7 +304,7 @@ stripCancelRequested(params)     // 重试复制 params 时剥离旧标记
 
 | 类型 | 进度 | 终态 | 完成后 |
 |------|------|------|--------|
-| `workflow` | 本地轮询（无百分比 → 不确定动画） | `poll()` 读到 `completed` / `failed` | `completed` → `onResult(nodeId, outputPath)` 刷新产物（固定路径 + mtime） |
+| `workflow` | 本地轮询（`GET /api/workflow/tasks/:id` 的 `progress`：服务商上报了就有真实百分比，否则不确定动画） | `poll()` 读到 `completed` / `failed` | `completed` → `onResult(nodeId, outputPath)` 刷新产物（固定路径 + mtime） |
 | `ffmpeg` | `task-update` 广播（真实百分比） | `task-update` 广播 `completed`/`failed`/`cancelled` | 刷新产物；产物不存在时置错误「任务已结束但未生成产物，请重新执行」 |
 | `llm` | 阶段文案（`Thinking…` / `正在响应…`） | 全局 `finished` 广播（含 `persistPatch` / `rev` / `prevRev`） | 画布按 `项目 + scope` 过滤，`savedRev === prevRev` 时采纳补丁 |
 

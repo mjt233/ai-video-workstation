@@ -51,12 +51,7 @@ overview.md
 - **资产画布**（分镜/场景详情页「资产画布」Tab）的业务逻辑、数据模型与开发指南见 [./docs/canvas/README.md](./docs/canvas/README.md)（按主题拆分为多个文档）：包括节点类型、连线规则、画布交互、配置面板、输入图拖拽排序、生成流程、自动搭画布、设为分镜场景图、切换分镜跟随加载及常见坑
 - **画布蓝图**（可复用画布片段：多选创建 → 全局/项目级保存 → 系统配置「画布蓝图」页签管理 → 画布内插入，可自动包成独立分组）见 [./docs/canvas/blueprint.md](./docs/canvas/blueprint.md)：创建时**分组须显式选中**（仅选中组内全部节点不带分组）；蓝图编辑器复用 `AssetCanvas` 的 `mode='blueprint'`（执行类入口关闭，加载节点可上传/选择资产，资产上下文为蓝图 `assetProject`，**手动保存：`autoSave: false`，头部「保存」/Ctrl+S 落盘，关闭时提示不保存退出**）；蓝图文件为 `prompt/blueprint/{id}.json`（项目级）与 `server/config/blueprints/{id}.json`（全局）
 - **统一异步任务架构**（工作流 / LLM 会话 / ffmpeg 三类任务同一注册表 + 全局任务管理器 + ffmpeg 接口异步化）：画布视角见 [./docs/canvas/task-architecture.md](./docs/canvas/task-architecture.md)：新增本地 ffmpeg 操作必须导出 `buildXxxCommand()` 交给 `tasks/ffmpeg-executor.ts` 执行（否则无进度、无法中断）；任务中断统一走 `POST /api/tasks/:taskId/cancel`；不要再引入 localStorage 任务记录
-- **任务管理（何时读 `docs/task-manager.md`）**：任务管理器的业务与实现机制统一见 [./docs/task-manager.md](./docs/task-manager.md)（总览 + 分主题索引：`data-model` / `lifecycle` / `execution` / `events` / `api` / `log` / `ui` / `development`）。**动手前先读该文档**的情形：
-  - 新增/修改任何**异步任务类型**（执行器、注册表登记、进度、中断能力）或本地 ffmpeg 操作；
-  - 改动**任务日志**（写入内容与级别、轮询降噪、`task_logs` 表结构、保留期与清理、占用统计）；
-  - 改动**任务查询/中断/历史接口**（`/api/workflow/tasks*`、`/api/tasks*`、`/api/system/task-log*`）；
-  - 改动**任务管理器 UI**、画布 Loading 恢复、错误「详情」日志查看、系统设置「日志」子类；
-  - 排查「任务卡住 / 刷新后 Loading 不消失 / 日志看不到 / 数据库变大」类问题。
+- **任务管理**：任务管理器的业务与实现机制统一见 [./docs/task-manager.md](./docs/task-manager.md)（总览 + 分主题索引：`data-model` / `lifecycle` / `execution` / `events` / `api` / `log` / `ui` / `development`）——**凡涉及异步任务类型/执行器、任务进度、任务日志（写入·保留期·清理）、任务接口与任务管理器 UI、画布 Loading 恢复的改动，或排查「任务卡住 / Loading 不消失 / 日志看不到 / 数据库变大」类问题，动手前先读该文档**。
 
   三条必须遵守的约束：
   1. **运行态与持久态是两个事实源**——内存注册表（`tasks/registry.ts`）是「现在在跑什么」的唯一事实源但**不持久化**；SQLite（`data/workflow.db`）是工作流任务与日志的持久化权威但**不含 ffmpeg / LLM 任务**；画布 Loading 恢复必须两者并用（注册表 + SQLite `pending|running` 补查）；

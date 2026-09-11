@@ -5,6 +5,9 @@
  * 本文件只保留「提交载荷」纯函数构建器：workflowId 作为入参，返回 { workflowId, params, files? }，
  * 不再硬编码任何 Bridge workflow id。动态注册（bridge-sync）据此构建 submit。
  * - resolveImageEditSizeParams — 图片编辑尺寸解析（纯函数，保留）
+ *
+ * 尺寸解析统一走 `size.ts`（`resolveOutputSize`）；本文件只负责把已解析出的宽高
+ * 组装进 Bridge 载荷（`width`/`height` 顶层字段）。
  */
 
 /** 提交载荷：Bridge execute 的入参 */
@@ -103,30 +106,41 @@ export interface ImageEditSizeParams {
 }
 
 /**
- * 从工作流 vars 解析图片编辑尺寸参数。
+ * 把统一尺寸解析结果转换为图片编辑提交用的尺寸参数。
  *
- * 仅当 vars.enable_specified_size === 'false'（前端「不指定」模式）或无有效宽高时
- * 返回空对象；否则返回启用标记与有效宽高（数字，取整）。
+ * **优先级来源已统一到 `size.ts` 的 `resolveOutputSize`**（sizeConfig 显式宽高 →
+ * 档位换算 → 旧版门控宽高 → 项目尺寸），本函数只负责「宽高 → 载荷字段」的收敛：
+ *
+ * - `specified === false`（前端「不指定」模式）→ 返回空对象，不携带
+ *   width/height/enable_specified_size，由 Bridge/工作流默认兜底；
+ * - `specified === true` → 携带 `enable_specified_size: true` 与有效宽高（取整）；
+ *   宽高均无效时同样返回空对象。
  *
  * 门控说明：ComfyUI Bridge 工作流（ceb-*，动态注册）通常不声明 enable_specified_size
  * 参数（该字段为 Seedream 等云工作流约定），若以其 === 'true' 作为唯一开关，
- * 画布节点等提交的 width/height 会被静默忽略而始终使用项目全局尺寸。
+ * 画布节点提交的尺寸会被静默忽略而始终使用项目全局尺寸。
  *
- * @param vars 工作流 vars（key → 字符串值）
+ * @param options.width 已解析出的生效宽度（像素）
+ * @param options.height 已解析出的生效高度（像素）
+ * @param options.specified 是否按「指定尺寸」提交（见 size.ts 的 enableSpecifiedSize）
  * @returns 可透传给 Bridge 的尺寸参数
  */
-export function resolveImageEditSizeParams(
-  vars: Record<string, string | undefined>,
-): ImageEditSizeParams {
-  if (vars.enable_specified_size === 'false') return {};
-  const out: ImageEditSizeParams = {};
-  const width = vars.width ? Number(vars.width) : NaN;
-  const height = vars.height ? Number(vars.height) : NaN;
-  if (Number.isFinite(width)) out.width = Math.round(width);
-  if (Number.isFinite(height)) out.height = Math.round(height);
-  if (out.width == null && out.height == null) return {};
-  out.enable_specified_size = true;
-  return out;
+export function resolveImageEditSizeParams(options: {
+  width: number | undefined;
+  height: number | undefined;
+  specified: boolean;
+}): ImageEditSizeParams {
+  if (!options.specified) return {};
+  const valid = (v: number | undefined): number | undefined =>
+    v !== undefined && Number.isFinite(v) && v > 0 ? Math.round(v) : undefined;
+  const w = valid(options.width);
+  const h = valid(options.height);
+  if (w === undefined && h === undefined) return {};
+  return {
+    enable_specified_size: true,
+    ...(w !== undefined ? { width: w } : {}),
+    ...(h !== undefined ? { height: h } : {}),
+  };
 }
 
 /**

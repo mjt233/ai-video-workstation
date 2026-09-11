@@ -49,25 +49,38 @@ export const SIZE_RATIOS: SizeRatio[] = [
 
 export interface SizeResolution {
   key: SizeResolutionKey
-  /** 基准像素值：P 档为高度基准、K 档为宽度基准 */
+  /** 基准像素值：**恒为输出短边**（横屏落在高度、竖屏落在宽度），P 档与 K 档同一规则 */
   base: number
-  /** 'height' = 以高度为基准；'width' = 以宽度为基准 */
-  baseOn: 'height' | 'width'
 }
 
-/** 分辨率档（P 档按高度、K 档按宽度为基准） */
+/**
+ * 分辨率档（基准值恒为「短边」，横屏落在高、竖屏落在宽）。
+ *
+ * 统一规则：`短边 = base`，长边按比例换算（横屏 `width = round(base × ratio)`、
+ * 竖屏 `height = round(base ÷ ratio)`、正方形两者相等）。因此同一档位下横竖屏面积一致。
+ *
+ * 各档 base 为「该档的标准短边」，**并非统一的倍数公式**（由业务方逐档确认）：
+ * - P 档：360 / 480 / 720 / 768 / 1080（即 `16:9` 下 640×360 / 854×480 / 1280×720 /
+ *   1365×768 / 1920×1080）；
+ * - K 档：`1K` 1024、`1.5K` 1536、`2K` **1440**（→ `16:9` 2560×1440、`9:16` 1440×2560）、
+ *   `3K` 1620（→ 2880×1620）、`4K` **2160**（→ 3840×2160、竖屏 2160×3840）、
+ *   `8K` 4320（→ 7680×4320）；
+ * - 注意 `2K` 的 base 是 **1440**（2560×1440 的短边）而非 2560、`4K` 是 **2160** 而非
+ *   3840：K 档数字是档位称呼，不代表 base 数值。若把 base 当作宽度，竖屏会算出
+ *   `2560x4551` 这类超大图（9:16 / 2K 的历史成因）。
+ */
 export const SIZE_RESOLUTIONS: SizeResolution[] = [
-  { key: '360P', base: 360, baseOn: 'height' },
-  { key: '480P', base: 480, baseOn: 'height' },
-  { key: '720P', base: 720, baseOn: 'height' },
-  { key: '768P', base: 768, baseOn: 'height' },
-  { key: '1080P', base: 1080, baseOn: 'height' },
-  { key: '1K', base: 1024, baseOn: 'width' },
-  { key: '1.5K', base: 1536, baseOn: 'width' },
-  { key: '2K', base: 2560, baseOn: 'width' },
-  { key: '3K', base: 3072, baseOn: 'width' },
-  { key: '4K', base: 3840, baseOn: 'width' },
-  { key: '8K', base: 7680, baseOn: 'width' },
+  { key: '360P', base: 360 },
+  { key: '480P', base: 480 },
+  { key: '720P', base: 720 },
+  { key: '768P', base: 768 },
+  { key: '1080P', base: 1080 },
+  { key: '1K', base: 1024 },
+  { key: '1.5K', base: 1536 },
+  { key: '2K', base: 1440 },
+  { key: '3K', base: 1620 },
+  { key: '4K', base: 2160 },
+  { key: '8K', base: 4320 },
 ]
 
 export interface SizeValue {
@@ -78,12 +91,14 @@ export interface SizeValue {
 }
 
 /**
- * 按比例×分辨率档换算宽高。
- * - P 档（360P/720P/1080P）：以高度为基准（横向/方形）——
- *   `height = 基准`、`width = round(高 × 比例)`；
- *   竖屏（比例 < 1）时基准实为「短边」，落在宽度上——`width = 基准`、`height = round(宽 ÷ 比例)`
- *   （如 9:16 + 1080P → 1080×1920，即竖屏视频标准 1080P）。
- * - K 档（2K/4K/8K）：以宽度为基准——`width = 基准`、`height = round(宽 ÷ 比例)`。
+ * 按比例×分辨率档换算宽高（基准值恒为短边）。
+ *
+ * - 横屏/正方形（比例 ≥ 1）：`height = 基准`、`width = round(基准 × 比例)`；
+ * - 竖屏（比例 < 1）：`width = 基准`、`height = round(基准 ÷ 比例)`。
+ *
+ * 例：2K（基准 1440）→ 16:9 得 2560x1440、9:16 得 1440x2560；4K（基准 2160）→ 16:9 得
+ * 3840x2160、9:16 得 2160x3840。P 档与 K 档同一规则，1080P 横屏 16:9 仍为 1920x1080、
+ * 竖屏 9:16 为 1080x1920。
  *
  * @param ratioKey 比例档 key
  * @param resolutionKey 分辨率档 key
@@ -92,14 +107,8 @@ export interface SizeValue {
 export function computePresetSize(ratioKey: SizeRatioKey, resolutionKey: SizeResolutionKey): SizeValue {
   const r = SIZE_RATIOS.find((x) => x.key === ratioKey)!
   const res = SIZE_RESOLUTIONS.find((x) => x.key === resolutionKey)!
-  if (res.baseOn === 'height') {
-    if (r.ratio < 1) {
-      // 竖屏：P 档基准落在短边（宽度）上
-      return { width: res.base, height: Math.round(res.base / r.ratio) }
-    }
-    return { height: res.base, width: Math.round(res.base * r.ratio) }
-  }
-  return { width: res.base, height: Math.round(res.base / r.ratio) }
+  if (r.ratio < 1) return { width: res.base, height: Math.round(res.base / r.ratio) }
+  return { width: Math.round(res.base * r.ratio), height: res.base }
 }
 
 export interface SizeEchoInput {
@@ -150,13 +159,11 @@ export function resolveSizeMode(input: SizeEchoInput): SizeMode {
   }
   const ratio = w / h
   const matchedRatio = SIZE_RATIOS.find((r) => Math.abs(r.ratio - ratio) < 0.01)
-  // 分辨率档基准可落在宽或高：P 档横屏基准为高度、竖屏基准为宽度；K 档基准恒为宽度。
-  // 各档 base 值唯一（360/720/1080/2560/3840/7680），用“任一维等于 base”即可初步匹配；
-  // 最终以 computePresetSize 计算结果反查确认，避免“基准落在错误一侧”的误判
-  // （如 1080×810 会被误认为预设，但没有任何预设产出该尺寸）。
-  const matchedRes = SIZE_RESOLUTIONS.find(
-    (res) => res.base === w || res.base === h,
-  )
+  // 分辨率档基准恒为输出短边（横屏落在高、竖屏落在宽），各档 base 值唯一，
+  // 用「短边等于 base」即可初步匹配；最终以 computePresetSize 计算结果反查确认，
+  // 避免「基准落在错误一侧」的误判（如 1080×810 会被误认为预设，但没有任何预设产出该尺寸）。
+  const shortEdge = Math.min(w, h)
+  const matchedRes = SIZE_RESOLUTIONS.find((res) => res.base === shortEdge)
   if (
     matchedRatio &&
     matchedRes &&

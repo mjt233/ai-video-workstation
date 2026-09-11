@@ -1,6 +1,7 @@
 import { register } from '../registry.js';
 import type { ImageEditVars, WorkflowRunContext } from '../types.js';
 import { fileToDataUrl, resolveSeedreamSize, SEEDREAM_MODELS, SEEDREAM_SIZE_LIMITS, submitSeedreamImageEdit } from '../seedream.js';
+import { resolveOutputSize, resolveSpecifiedGate, SIZE_PARAMS } from '../size.js';
 
 for (const def of SEEDREAM_MODELS) {
   register<ImageEditVars>({
@@ -18,29 +19,7 @@ for (const def of SEEDREAM_MODELS) {
         supportCustomSize: true,
       },
     },
-    params: [
-      {
-        name: '指定输出尺寸',
-        key: 'enable_specified_size',
-        type: 'boolean',
-        defaultValue: false,
-        description: '启用后按下方选定的宽高输出图片',
-      },
-      {
-        name: '输出宽度',
-        key: 'width',
-        type: 'integer',
-        defaultValue: '',
-        description: '输出图片宽度（像素）',
-      },
-      {
-        name: '输出高度',
-        key: 'height',
-        type: 'integer',
-        defaultValue: '',
-        description: '输出图片高度（像素）',
-      },
-    ],
+    params: SIZE_PARAMS,
     async submit(ctx: WorkflowRunContext<ImageEditVars>) {
       const prompt = (ctx.vars.prompt ?? '').trim();
       if (!prompt) {
@@ -76,19 +55,24 @@ for (const def of SEEDREAM_MODELS) {
         dataUrls.push(await fileToDataUrl(f));
       }
 
-      // 尺寸：优先统一尺寸配置（ctx.sizeConfig，新交互），其次旧 userParams 门控
-      // （enable_specified_size===true 时用 width/height）；均未提供时回退模型默认档位。
-      // 注：userParams 值类型为 boolean|number|string，需 String() 强转后再解析
+      // 尺寸：用户配置过尺寸 → 统一解析器（sizeConfig 显式宽高 → 档位换算 → 旧版
+      // userParams 门控 → projectConfig）；从未配置过（自动/自动、无宽高）→ **省略 size**，
+      // 由方舟按模型默认档位自选，避免把项目尺寸强加给方舟模型
       const up = ctx.userParams ?? {};
-      const sc = ctx.sizeConfig;
-      const scValid = sc?.width != null && sc.width > 0 && sc?.height != null && sc.height > 0;
-      const specified = scValid || String(up.enable_specified_size) === 'true';
-      const size = specified
-        ? resolveSeedreamSize(
-            SEEDREAM_SIZE_LIMITS[def.kind],
-            scValid ? String(sc.width) : String(up.width ?? ''),
-            scValid ? String(sc.height) : String(up.height ?? ''),
-          )
+      const legacyGate = up['enable_specified_size'] ?? ctx.vars.enable_specified_size;
+      const gate = resolveSpecifiedGate(ctx.sizeConfig, legacyGate, false);
+      const resolved = gate === 'default-strict'
+        ? undefined
+        : resolveOutputSize({
+            sizeConfig: ctx.sizeConfig,
+            enableSpecified: gate,
+            vars: ctx.vars,
+            userParams: up,
+            fallbackWidth: ctx.projectConfig.width,
+            fallbackHeight: ctx.projectConfig.height,
+          });
+      const size = resolved
+        ? resolveSeedreamSize(SEEDREAM_SIZE_LIMITS[def.kind], resolved.width, resolved.height)
         : resolveSeedreamSize(SEEDREAM_SIZE_LIMITS[def.kind]);
 
       return submitSeedreamImageEdit(ctx.provider, {
