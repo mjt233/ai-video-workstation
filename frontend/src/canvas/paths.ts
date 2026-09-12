@@ -64,16 +64,19 @@ export function canvasNodeAssetPath(scope: CanvasScope, nodeId: string, version:
 }
 
 /**
- * 画布节点固定产物路径（生成图片 output.jpg / 生成视频 output.mp4）：
+ * 画布节点固定产物路径（生成图片 output.jpg / 生成视频 output.mp4 / 图片修剪与扩展 output.png）：
  * - 分镜画布：assert/scene/{集数}/{分镜}/canvas/{nodeId}/output.{ext}
  * - 场景画布：assert/stage/{场景名}/canvas/{子场景标签}/{nodeId}/output.{ext}
- * 与服务端 routes/canvas.ts 上传端点的校验正则保持一致（两端须同步修改）。
+ *
+ * 注：png 仅为「图片修剪与扩展」节点（输出格式可选 png/jpg）的产物扩展名，
+ * 用于该节点产物路径的识别；「上传产物」端点的接受扩展名仍为 jpg / mp4（见 assets/canvas-upload.ts）。
+ * 与服务端 routes/canvas.ts / assets/canvas-upload.ts 的校验正则保持一致（两端须同步修改）。
  */
 const CANVAS_NODE_OUTPUT_RE =
-  /^assert\/(?:scene\/[1-9]\d*\/[1-9]\d*\/canvas\/[^/]+|stage\/[^/]+\/canvas\/[^/]+\/[^/]+)\/output\.(jpg|mp4)$/
+  /^assert\/(?:scene\/[1-9]\d*\/[1-9]\d*\/canvas\/[^/]+|stage\/[^/]+\/canvas\/[^/]+\/[^/]+)\/output\.(jpg|png|mp4)$/
 
 /**
- * 判断路径是否为画布节点固定产物路径（output.jpg / output.mp4）。
+ * 判断路径是否为画布节点固定产物路径（output.jpg / output.png / output.mp4）。
  * 上传分发用：为真时走 /api/canvas/upload（服务端归档历史后覆盖固定路径），
  * 否则走通用 /fs/upload（加载节点上传，不归档历史）。
  *

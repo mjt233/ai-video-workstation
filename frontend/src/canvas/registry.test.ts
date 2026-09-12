@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含十三个内置节点', () => {
+  it('包含十四个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'audio-trim',
+      'image-crop',
       'image-generate',
       'image-loader',
       'input-preview',
@@ -149,6 +150,22 @@ describe('getOutputAssetPath（各节点自实现输出资产解析）', () => {
     expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/at/output.flac' } })).toBe('assert/scene/1/1/canvas/at/output.flac')
     expect(p.getOutputAssetPath?.({})).toBeUndefined()
   })
+
+  it('图片修剪与扩展节点：image 输入、image 输出、默认配置与 current.path 解析', () => {
+    const p = getPrototype('image-crop')!
+    expect(p.name).toBe('图片修剪与扩展')
+    expect(p.category).toBe('tool')
+    expect(p.icon).toBe('mdi-crop')
+    expect(p.inputPorts[0]?.type).toBe('image')
+    expect(p.outputPorts[0]?.type).toBe('image')
+    expect(p.defaultConfig).toEqual({
+      crop: { xPct: 0, yPct: 0, wPct: 100, hPct: 100 },
+      background: '#FFFFFF',
+      format: 'png',
+    })
+    expect(p.getOutputAssetPath?.({ current: { path: 'assert/scene/1/1/canvas/ic/output.png' } })).toBe('assert/scene/1/1/canvas/ic/output.png')
+    expect(p.getOutputAssetPath?.({})).toBeUndefined()
+  })
 })
 
 describe('outputExt（生成类节点产物扩展名）', () => {
@@ -160,6 +177,8 @@ describe('outputExt（生成类节点产物扩展名）', () => {
     expect(getPrototype('video-concat')?.outputExt).toBe('mp4')
     expect(getPrototype('video-trim')?.outputExt).toBe('mp4')
     expect(getPrototype('audio-trim')?.outputExt).toBe('flac')
+    // 图片修剪与扩展：产物扩展名随 config.format（png / jpg），原型声明为兜底 png
+    expect(getPrototype('image-crop')?.outputExt).toBe('png')
     expect(getPrototype('image-loader')?.outputExt).toBeUndefined()
     expect(getPrototype('audio-loader')?.outputExt).toBeUndefined()
     expect(getPrototype('video-loader')?.outputExt).toBeUndefined()
@@ -173,6 +192,12 @@ describe('canGenerate / hasHistory 能力标志', () => {
     for (const id of ids) {
       expect(getPrototype(id)?.canGenerate, `${id} 应支持重新生成`).toBe(true)
     }
+  })
+
+  it('图片修剪与扩展节点无「重新生成」入口（纯前端生成 + 上传落盘，执行入口在配置面板）', () => {
+    const p = getPrototype('image-crop')!
+    expect(p.canGenerate ?? false).toBe(false)
+    expect(p.hasHistory ?? false).toBe(false)
   })
 
   it('加载类与文本节点不支持重新生成', () => {

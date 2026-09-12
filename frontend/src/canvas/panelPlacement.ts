@@ -105,6 +105,17 @@ export interface PanelPlacementInput {
    * 面板在多个方向之间来回跳变；传 undefined 表示无历史（按优先级取最优）。
    */
   previousSide?: PanelPlacementSide | null
+  /**
+   * 面板期望的**宽度下限**（屏幕像素；缺省 `PANEL_SIDE_MIN_WIDTH`）。
+   *
+   * 贴靠左右侧时宽度只能取「节点侧边到可视区边缘的空白」，可能远小于设计宽度；而组件的
+   * 宽度下限保护（`PANEL_MIN_WIDTH`）在放不下时会退回到定位给出的宽度——于是出现
+   * 「配置面板本可以放下 560px，却因为选了只剩 350px 的右侧贴靠而缩水」。传入本值后，
+   * 宽度是否达标会成为**同级排序的一项**（排在「不收窄高度」之后）：达标的方向优先。
+   * **不作为可行性门槛**（仍以 `PANEL_SIDE_MIN_WIDTH` 判定）——否则纵向空间紧张时连
+   * 「挤一挤还能用」的贴靠候选都会被丢掉，退化成更矮的滚动面板。
+   */
+  sideMinWidth?: number
 }
 
 /**
@@ -158,6 +169,8 @@ interface PlacementCandidate {
   headerOverlapArea: number
   /** 与其他节点（obstacles）重叠的面积之和（像素²；同级排序用，0 = 不压住其他节点） */
   obstacleOverlapArea: number
+  /** 宽度是否达到期望下限（`sideMinWidth`）：贴靠左右侧被收窄到下限以下时为 false */
+  meetsWidthFloor: boolean
 }
 
 /**
@@ -241,6 +254,7 @@ function buildCandidate(
       nodeOverlapArea: 0,
       headerOverlapArea: 0,
       obstacleOverlapArea: 0,
+      meetsWidthFloor: width >= widthFloorOf(input),
     }
   }
 
@@ -276,7 +290,19 @@ function buildCandidate(
     nodeOverlapArea: 0,
     headerOverlapArea: 0,
     obstacleOverlapArea: 0,
+    meetsWidthFloor: width >= widthFloorOf(input),
   }
+}
+
+/**
+ * 读取期望宽度下限（缺省 `PANEL_SIDE_MIN_WIDTH`，非法值同样回退缺省）。
+ *
+ * @param input 定位输入
+ * @returns 期望宽度下限（屏幕像素）
+ */
+function widthFloorOf(input: PanelPlacementInput): number {
+  const v = input.sideMinWidth
+  return Number.isFinite(v) && (v as number) > 0 ? (v as number) : PANEL_SIDE_MIN_WIDTH
 }
 
 /**
@@ -341,14 +367,17 @@ function isCandidateViable(candidate: PlacementCandidate): boolean {
 /**
  * 同级排序（可行性相同的一组候选之间择优）：
  * 「不遮标题条」→「不裁切」→「不收窄面板高度（都只能收窄时取可见高度更大者）」→
- * 「压住其他节点最少」→ 方向优先级 →「与选中节点重叠最小」。
+ * 「宽度达到期望下限（`sideMinWidth`）」→「压住其他节点最少」→ 方向优先级 →「与选中节点重叠最小」。
  *
- * 三条关键约定：
+ * 四条关键约定：
  * - **标题条优先级最高**：即使用户把节点放大到面板无法完整放下的程度，也要保证节点标题条可见
  *   （用户始终能认出当前配置的是哪个节点）；
  * - **不收窄优先于方向优先级**：下方只需收窄高度就能放下、而左右侧能保持完整高度时，
  *   选左右侧（贴靠只换行不压缩内容，比挤成很矮的滚动条更可用）；上下与左右同为完整高度时，
  *   仍按 下→上→右→左 的顺序保持既有视觉语言；
+ * - **宽度达标优先于方向优先级**：贴靠左右侧的宽度只能是「节点侧边到可视区边缘」的空白，
+ *   可能远小于设计宽度；此时若上下方能按设计宽度完整放下，就选上下方（面板不缩水）。
+ *   该比较仅在「都不收窄」时才有意义，故排在收窄比较之后；
  * - **不收窄也优先于「不压住其他节点」**：都只能收窄时，先比可见高度（滚动更少），再比障碍物重叠。
  *   否则会出现「为了不压住别的节点，把面板塞进一个只有 200 多像素高的位置」——
  *   而那个位置恰好在下一帧把实测高度推向另一个方向，引发方向抖动。
@@ -367,6 +396,9 @@ function compareCandidates(a: PlacementCandidate, b: PlacementCandidate): number
   if (clippedA !== clippedB) return clippedA - clippedB
   if (a.clippedArea !== b.clippedArea) return a.clippedArea - b.clippedArea
   if (a.shrunk !== b.shrunk) return a.shrunk ? 1 : -1
+  // 宽度达标优先于方向优先级：贴靠左右侧往往只能拿到「节点侧边到可视区边缘」的窄空白，
+  // 若面板本来能在下方/上方按设计宽度完整放下，就不该为了贴靠把宽度缩掉一截。
+  if (a.meetsWidthFloor !== b.meetsWidthFloor) return a.meetsWidthFloor ? -1 : 1
   // 两者都未收窄时高度恒等于实测高度（相等），此比较仅在「都只能收窄」时生效：
   // 取可见高度更大的方向（滚动更少）
   if (a.height !== b.height) return b.height - a.height
@@ -453,6 +485,7 @@ export function computePanelPlacement(input: PanelPlacementInput): PanelPlacemen
       nodeOverlapArea: 0,
       headerOverlapArea: 0,
       obstacleOverlapArea: 0,
+      meetsWidthFloor: false,
     }
     if (viewWidth > 0 && viewHeight > 0) measureCandidate(chosen, input)
   }

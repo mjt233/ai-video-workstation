@@ -40,11 +40,14 @@ beforeEach(() => {
 });
 
 describe('assertCanvasNodeOutputPath', () => {
-  it('允许分镜画布节点固定产物路径（jpg / mp4）', () => {
+  it('允许分镜画布节点固定产物路径（jpg / png / mp4）', () => {
     expect(assertCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.jpg'))
       .toBe('assert/scene/1/2/canvas/n1/output.jpg');
     expect(assertCanvasNodeOutputPath('assert/scene/12/3/canvas/abc-123/output.mp4'))
       .toBe('assert/scene/12/3/canvas/abc-123/output.mp4');
+    // png：图片修剪与扩展节点（纯前端 canvas 合成后上传落盘，输出格式 png / jpg）
+    expect(assertCanvasNodeOutputPath('assert/scene/1/2/canvas/ic/output.png'))
+      .toBe('assert/scene/1/2/canvas/ic/output.png');
   });
 
   it('允许场景画布节点固定产物路径（多一段子场景标签）', () => {
@@ -52,6 +55,8 @@ describe('assertCanvasNodeOutputPath', () => {
       .toBe('assert/stage/现代商场/canvas/正门入口/n1/output.jpg');
     expect(assertCanvasNodeOutputPath('assert/stage/现代商场/canvas/正门入口/n1/output.mp4'))
       .toBe('assert/stage/现代商场/canvas/正门入口/n1/output.mp4');
+    expect(assertCanvasNodeOutputPath('assert/stage/现代商场/canvas/正门入口/n1/output.png'))
+      .toBe('assert/stage/现代商场/canvas/正门入口/n1/output.png');
   });
 
   it('统一反斜杠为斜杠后校验', () => {
@@ -66,8 +71,8 @@ describe('assertCanvasNodeOutputPath', () => {
     // 分镜视频产物
     expect(() => assertCanvasNodeOutputPath('assert/scene/1/2/video/0.mp4'))
       .toThrow('仅支持上传到画布节点的固定产物路径');
-    // 画布产物但不属于本功能支持的扩展名（png / flac）
-    expect(() => assertCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.png'))
+    // 画布产物但不属于本功能支持的扩展名（webp / flac）
+    expect(() => assertCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.webp'))
       .toThrow('仅支持上传到画布节点的固定产物路径');
     expect(() => assertCanvasNodeOutputPath('assert/stage/现代商场/canvas/正门入口/n1/output.flac'))
       .toThrow('仅支持上传到画布节点的固定产物路径');
@@ -92,6 +97,13 @@ describe('assertCanvasUploadFile', () => {
     expect(() => assertCanvasUploadFile('jpg', 'image/webp', 'a.webp')).not.toThrow();
     expect(() => assertCanvasUploadFile('jpg', 'video/mp4', 'a.mp4')).toThrow('仅支持上传 jpg / png / webp 格式图片');
     expect(() => assertCanvasUploadFile('jpg', 'image/gif', 'a.gif')).toThrow('仅支持上传 jpg / png / webp 格式图片');
+  });
+
+  it('PNG 产物（output.png）接受 image/png MIME 或 .png 扩展名，拒绝其它类型', () => {
+    expect(() => assertCanvasUploadFile('png', 'image/png', 'output.png')).not.toThrow();
+    expect(() => assertCanvasUploadFile('png', 'application/octet-stream', 'output.png')).not.toThrow();
+    expect(() => assertCanvasUploadFile('png', 'image/jpeg', 'output.jpg')).toThrow('PNG 产物仅支持上传 png 格式图片');
+    expect(() => assertCanvasUploadFile('png', 'image/webp', 'output.webp')).toThrow('PNG 产物仅支持上传 png 格式图片');
   });
 
   it('视频产物（output.mp4）接受 mp4 MIME 或 .mp4 扩展名（部分浏览器报 octet-stream）', () => {

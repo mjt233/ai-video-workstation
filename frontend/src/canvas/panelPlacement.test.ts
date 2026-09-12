@@ -365,3 +365,54 @@ describe('computePanelPlacement', () => {
     expect(result.overlapsHeader).toBe(false)
   })
 })
+
+describe('computePanelPlacement 宽度下限偏好（sideMinWidth）', () => {
+  /** 节点右侧只剩 350px 空白（≥ 最小贴靠宽度 280，但低于期望下限 440） */
+  const NARROW_RIGHT = { x: 300, y: 300, width: 330, height: 200 }
+
+  it('上下方能按设计宽度放下时，不为了贴靠把宽度缩到下限以下', () => {
+    // 下方可用 280px ≥ 面板 200px → 下方可行且宽度 = 设计宽度 560
+    const input = makeInput({
+      nodeRect: NARROW_RIGHT,
+      designWidth: 560,
+      sideMinWidth: 440,
+      panelHeight: 200,
+    })
+    const result = computePanelPlacement(input)
+    expect(result.side).toBe('below')
+    expect(result.width).toBe(560)
+  })
+
+  it('宽度达标优先于「不压住其他节点」：宁可压住别的节点也要保住设计宽度', () => {
+    // 节点很高（上下都放不下）且贴近右缘：右侧只剩 280px、左侧有 600px（可取设计宽度 560），
+    // 但左侧候选会压住障碍物节点
+    const input = makeInput({
+      nodeRect: { x: 620, y: 200, width: 80, height: 500 },
+      designWidth: 560,
+      sideMinWidth: 440,
+      panelHeight: 300,
+      obstacles: [{ x: 100, y: 200, width: 400, height: 400 }],
+    })
+    const result = computePanelPlacement(input)
+    expect(result.side).toBe('left')
+    expect(result.width).toBe(560)
+    // 不传下限时保持原行为：按「不压住其他节点」挑右侧的 280px 窄面板
+    const legacy = computePanelPlacement({ ...input, sideMinWidth: undefined })
+    expect(legacy.side).toBe('right')
+    expect(legacy.width).toBe(PANEL_SIDE_MIN_WIDTH)
+  })
+
+  it('宽度下限不是可行性门槛：上下都放不下时，窄的贴靠候选照旧可用', () => {
+    // 节点很高：下方只剩 80px、上方 180px（都需收窄）→ 只能贴靠左侧（280px < 下限 440）
+    const input = makeInput({
+      nodeRect: { x: 300, y: 200, width: 640, height: 500 },
+      designWidth: 560,
+      sideMinWidth: 440,
+      panelHeight: 300,
+    })
+    const result = computePanelPlacement(input)
+    expect(result.side).toBe('left')
+    expect(result.width).toBe(PANEL_SIDE_MIN_WIDTH)
+    expect(result.overlapsNode).toBe(false)
+  })
+})

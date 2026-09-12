@@ -66,11 +66,13 @@ describe('canvasNodeOutputPath', () => {
 })
 
 describe('isCanvasNodeOutputPath', () => {
-  it('识别分镜/场景画布节点固定产物路径（jpg / mp4）', () => {
+  it('识别分镜/场景画布节点固定产物路径（jpg / png / mp4）', () => {
     expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.jpg')).toBe(true)
     expect(isCanvasNodeOutputPath('assert/scene/12/3/canvas/abc/output.mp4')).toBe(true)
     expect(isCanvasNodeOutputPath('assert/stage/现代商场/canvas/正门入口/n1/output.jpg')).toBe(true)
     expect(isCanvasNodeOutputPath('assert/stage/现代商场/canvas/正门入口/n1/output.mp4')).toBe(true)
+    // png：图片修剪与扩展节点（输出格式可选 png/jpg）的产物扩展名
+    expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/ic/output.png')).toBe(true)
   })
 
   it('统一反斜杠为斜杠后识别', () => {
@@ -83,7 +85,7 @@ describe('isCanvasNodeOutputPath', () => {
 
   it('拒绝非固定产物路径（版本号/其它扩展名/其它资产）', () => {
     expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/v2.jpg')).toBe(false)
-    expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.png')).toBe(false)
+    expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.webp')).toBe(false)
     expect(isCanvasNodeOutputPath('assert/scene/1/2/canvas/n1/output.flac')).toBe(false)
     expect(isCanvasNodeOutputPath('assert/scene/1/2/video/0.mp4')).toBe(false)
     expect(isCanvasNodeOutputPath('assert/character/陈书文/appearance.jpg')).toBe(false)

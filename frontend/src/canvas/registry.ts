@@ -11,6 +11,7 @@ import ExtractFrameNode from '../components/canvas/nodes/ExtractFrameNode.vue'
 import ConcatVideoNode from '../components/canvas/nodes/ConcatVideoNode.vue'
 import TrimVideoNode from '../components/canvas/nodes/TrimVideoNode.vue'
 import AudioTrimNode from '../components/canvas/nodes/AudioTrimNode.vue'
+import ImageCropNode from '../components/canvas/nodes/ImageCropNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
 import AiTextGenerateNode from '../components/canvas/nodes/AiTextGenerateNode.vue'
 import InputPreviewNode from '../components/canvas/nodes/InputPreviewNode.vue'
@@ -23,6 +24,7 @@ import ExtractFrameEditor from '../components/canvas/editors/ExtractFrameEditor.
 import ConcatVideoEditor from '../components/canvas/editors/ConcatVideoEditor.vue'
 import TrimVideoEditor from '../components/canvas/editors/TrimVideoEditor.vue'
 import AudioTrimEditor from '../components/canvas/editors/AudioTrimEditor.vue'
+import ImageCropEditor from '../components/canvas/editors/ImageCropEditor.vue'
 import TtsGenerateEditor from '../components/canvas/editors/TtsGenerateEditor.vue'
 
 /**
@@ -375,6 +377,33 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       duration: 1,
       format: AUDIO_TRIM_FORMAT_ORIG,
       mp3Bitrate: AUDIO_TRIM_MP3_BITRATE_DEFAULT,
+    },
+  },
+  {
+    id: 'image-crop',
+    name: '图片修剪与扩展',
+    icon: 'mdi-crop',
+    category: 'tool',
+    // 输入/输出均为 image：选区即输出画布——向内拖裁剪、向外拖扩展（扩展区域填背景色）。
+    // 产物为**纯前端 canvas 生成**（主线程 drawImage + toBlob）后经 /api/canvas/upload 落盘，
+    // 不经过任何异步任务，故**不声明 canGenerate**（右键菜单无「重新生成」；
+    // 执行入口唯一：配置面板的「应用」按钮，见 editors/ImageCropEditor.vue）。
+    inputPorts: [{ id: 'in', type: 'image', label: '图片' }],
+    outputPorts: [{ id: 'out', type: 'image', label: '图片' }],
+    resizeable: true,
+    bodyComponent: ImageCropNode,
+    editorComponent: ImageCropEditor,
+    getOutputAssetPath: generateOutput,
+    // 产物扩展名随 config.format 变化（png 默认 / jpg），此处 'png' 仅为无配置上下文时的兜底声明，
+    // 实际路径推导走 getNodeCurrentAssetPath 的 image-crop 分支（cropOutputExt）
+    outputExt: 'png',
+    defaultConfig: {
+      // 选区（归一化到原图的百分比；缺省 = 原图整幅）。用百分比存储：节点缩放/蓝图复用/换源图不失真
+      crop: { xPct: 0, yPct: 0, wPct: 100, hPct: 100 },
+      // 扩展区域背景色（#RRGGBB / #RRGGBBAA；缺省不透明白）
+      background: '#FFFFFF',
+      // 输出格式：png（默认，支持透明）/ jpg
+      format: 'png',
     },
   },
 ]

@@ -139,6 +139,12 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       await trimNodeAudio(nodeId)
       return
     }
+    if (node.prototypeId === 'image-crop') {
+      // 图片修剪与扩展：产物由**配置面板内的「应用」按钮**完成（纯前端 canvas 合成 + 上传落盘，
+      // 无异步任务、无任务凭据），故此处不执行任何操作，仅提示入口（防御右键菜单/其它入口误触）。
+      showSnackbar('请在节点配置面板中调整选区后点击「应用」', 'primary')
+      return
+    }
     if (node.prototypeId === 'video-generate') {
       const implMsg = missingWorkflowImplMessage(node)
       if (implMsg) {
@@ -331,6 +337,21 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     const node = nodeMap.value[nodeId]
     const all = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope()))
     return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === 'audio')
+  }
+
+  /**
+   * 收集节点的图片输入资产（来源节点输出类型为 image）。
+   *
+   * 「图片修剪与扩展」节点使用 image 输入连接点，连线校验已保证来源为图片输出；
+   * 这里仍按来源输出类型过滤，防御旧数据/异常连线把非图片资产带入合成。
+   *
+   * @param nodeId 目标节点 id
+   * @returns 图片输入资产信息数组
+   */
+  function imageInputsOf(nodeId: string): CanvasInputInfo[] {
+    const node = nodeMap.value[nodeId]
+    const all = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope()))
+    return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === 'image')
   }
 
   /** 节点当前输入资产信息（含来源节点，供编辑器预览/拖拽排序；生成类来源按固定产物路径推导） */
@@ -540,6 +561,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     isNodeRunning,
     inputsOf,
     audioInputsOf,
+    imageInputsOf,
     videoInputsOf,
     videoInputGroups,
     editorTextInputs,

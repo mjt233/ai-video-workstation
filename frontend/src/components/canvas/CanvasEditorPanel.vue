@@ -64,6 +64,7 @@ import type { CanvasInputInfo } from '../../canvas/generate'
 import {
   PANEL_GAP,
   PANEL_HEADER_FALLBACK_HEIGHT,
+  PANEL_SIDE_MIN_WIDTH,
   PANEL_VIEWPORT_MARGIN,
   computePanelPlacement,
   type PanelPlacementSide,
@@ -158,7 +159,21 @@ const emit = defineEmits<{
 const isUploading = computed(() => props.uploadState?.status === 'uploading')
 
 /** 配置面板固定宽度（像素，屏幕坐标，不随缩放变化） */
+/**
+ * 面板最小宽度（仅作**下限保护**，不影响定位算法选出的方向与高度）：
+ * 定位算法在上下空间都放不下时会贴靠节点左右侧并把宽度收窄到 `PANEL_SIDE_MIN_WIDTH`（280px）。
+ * 对「图片修剪与扩展」节点的框选器而言 280px 太窄（源图被缩到 0.35 倍，几乎无法精确拖拽），
+ * 故给出折中下限；窄视口下随设计宽度一起变小（`min(designWidth, PANEL_MIN_WIDTH)`）。
+ *
+ * **关键：加宽必须朝「远离节点」的方向扩展**（见 `panelStyle`）——面板是按某个侧边锚定摆放的，
+ * 若只提高 min-width，浏览器会朝另一侧长出去、把面板盖到节点上（实测踩坑：面板从节点左侧
+ * 向右长进节点区域，破坏「面板永不遮挡整个节点」的既有保证）。
+ */
+const PANEL_MIN_WIDTH = 440
 const EDITOR_PANEL_WIDTH = 440
+/** 「图片修剪与扩展」节点面板设计宽度（框选器需要横向空间：源图 + 两侧可向外拖拽的留白） */
+const EDITOR_PANEL_WIDTH_CROP = 560
+
 /** 生成图片节点配置面板固定宽度（更宽，屏幕坐标，不随缩放变化） */
 const EDITOR_PANEL_WIDTH_GENERATE = 560
 /** 生成视频节点配置面板固定宽度（导演台嵌入与参数行需要，屏幕坐标，不随缩放变化） */
@@ -186,11 +201,12 @@ let headerResizeObserver: ResizeObserver | null = null
 /** 自然高度测量进行中（防止测量期间临时移除 max-height 触发的 ResizeObserver 重入） */
 let measuringPanel = false
 
-/** 当前节点面板的设计宽度（普通 440 / 生成图片 560 / 生成视频 720，屏幕像素） */
+/** 当前节点面板的设计宽度（普通 440 / 图片修剪与扩展 560 / 生成图片 560 / 生成视频 720，屏幕像素） */
 const designWidth = computed(() => {
   const proto = props.node?.prototypeId
   if (proto === 'image-generate') return EDITOR_PANEL_WIDTH_GENERATE
   if (proto === 'video-generate') return EDITOR_PANEL_WIDTH_VIDEO
+  if (proto === 'image-crop') return EDITOR_PANEL_WIDTH_CROP
   return EDITOR_PANEL_WIDTH
 })
 
@@ -244,8 +260,27 @@ const placement = computed(() => {
     // 其他节点作为「尽量不压住」的障碍物（同级排序项，不影响可行性判定）
     obstacles: (props.otherNodes ?? []).map(toScreen),
     previousSide: lastSide.value,
+    // 期望宽度下限：让定位把「宽度达标」纳入同级排序——否则节点靠近可视区右缘时，
+    // 会选出「右侧贴靠只剩 350px」这种位置，把宽度下限保护连同框选器一起拖垮
+    sideMinWidth: minPanelWidth(),
   })
 })
+
+/**
+ * 面板期望宽度下限（屏幕像素）：设计宽度、`PANEL_MIN_WIDTH` 与可视区可用宽度的较小值。
+ *
+ * 与 `panelStyle` 的宽度下限保护同源（同一个值既用于「加宽」也用于「选方向」，
+ * 否则会出现「按 560 选方向、按 440 加宽」的口径分叉）。
+ *
+ * @returns 期望宽度下限（屏幕像素）
+ */
+function minPanelWidth(): number {
+  return Math.min(
+    designWidth.value,
+    PANEL_MIN_WIDTH,
+    Math.max(props.flowWidth - 2 * PANEL_VIEWPORT_MARGIN, 0),
+  )
+}
 
 /**
  * 面板定位样式（left/top/width/max-height）。
@@ -260,10 +295,45 @@ const panelStyle = computed<Record<string, string> | null>(() => {
   if (!result) return lastPanelStyle.value?.style ?? null
   // 高度未测量：不定位（面板整体透明），等测量完成后重算（避免用乐观估计闪现错误位置）
   if (result.unmeasured) return null
+  // 宽度下限保护（见 PANEL_MIN_WIDTH）：只放大宽度，不改变定位算法选出的方向与高度
+  const minWidth = minPanelWidth()
+  // 贴靠左右侧时面板以「节点侧边」锚定，加宽必须朝远离节点的方向长：
+  // - 面板在节点左侧：右边缘固定，宽度增加 → 左边缘左移；
+  // - 面板在节点右侧：左边缘固定，宽度增加 → 右边缘右移。
+  const rightEdge = result.left + result.width
+  let width = Math.max(result.width, minWidth)
+  let left = result.side === 'left' ? rightEdge - width : result.left
+  // 约束一（可视区左缘）：贴左加宽可能把左缘推出可视区。此时必须**收回宽度**而不是靠
+  // 末尾的 `left` 钳制「修正」——那会把右边缘重新推回节点里（右边缘锚定是贴左的全部意义）。
+  if (left < PANEL_VIEWPORT_MARGIN) {
+    width = Math.max(rightEdge - PANEL_VIEWPORT_MARGIN, Math.min(result.width, PANEL_SIDE_MIN_WIDTH))
+    left = result.side === 'left' ? rightEdge - width : result.left
+  }
+  // 约束二（可视区右缘）：定位算法按收窄后的宽度计算，未预期加宽
+  const maxWidthByView = Math.max(props.flowWidth - PANEL_VIEWPORT_MARGIN - left, 0)
+  if (width > maxWidthByView) {
+    width = Math.max(maxWidthByView, Math.min(result.width, PANEL_SIDE_MIN_WIDTH))
+    left = result.side === 'left' ? rightEdge - width : result.left
+  }
+  // 约束三（节点近侧边缘）：**仅在面板贴靠节点左右侧时才有意义**——只有横向相邻时加宽才可能
+  // 长进节点。上下方位（below/above）面板整体位于节点上下方，横向加宽与遮挡无关，若照搬此
+  // 钳制会退化成「宽度 = 节点右边缘 − 面板左边缘」这种与遮挡毫不相干的截断（实测：
+  // 节点在面板右上方时设计宽度 560px 被截成 400px，框选器跟着缩水——定位正常却宽度失守）。
+  if (result.side === 'left' || result.side === 'right') {
+    const nodeRect = findNodeRect()
+    if (nodeRect) {
+      const nearEdge = result.side === 'left' ? nodeRect.x : nodeRect.x + nodeRect.width
+      const maxWidthByNode = nearEdge - left
+      if (maxWidthByNode > 0 && width > maxWidthByNode) {
+        width = Math.max(maxWidthByNode, Math.min(result.width, PANEL_SIDE_MIN_WIDTH))
+        left = result.side === 'left' ? rightEdge - width : result.left
+      }
+    }
+  }
   return {
-    left: `${result.left}px`,
+    left: `${Math.max(left, PANEL_VIEWPORT_MARGIN)}px`,
     top: `${result.top}px`,
-    width: `${result.width}px`,
+    width: `${width}px`,
     maxHeight: `${result.maxHeight}px`,
   }
 })
@@ -292,6 +362,26 @@ watch(panelStyle, (style) => {
 watch(() => props.visible, (visible) => {
   if (!visible) lastSide.value = null
 })
+
+/**
+ * 读取当前节点在画布可视区坐标系的矩形（屏幕像素）。
+ *
+ * 用于给「宽度下限保护」加上「不得越过节点近侧边缘」的约束（见 `panelStyle`）。
+ * 与 `placement` 的入参同源：节点 wrapper 在 `flowEl` 内的 `getBoundingClientRect` 差值。
+ *
+ * @param nodeId 节点 id（可省略；省略时使用当前面板节点）
+ * @returns 节点矩形；节点未渲染时返回 null
+ */
+function findNodeRect(nodeId?: string): { x: number; y: number; width: number; height: number } | null {
+  const id = nodeId ?? props.node?.id
+  if (!id) return null
+  const flow = document.querySelector<HTMLElement>('.asset-canvas__flow')
+  const el = document.querySelector<HTMLElement>(`[data-id="${id}"]`)
+  if (!flow || !el) return null
+  const base = flow.getBoundingClientRect()
+  const rect = el.getBoundingClientRect()
+  return { x: rect.left - base.left, y: rect.top - base.top, width: rect.width, height: rect.height }
+}
 
 /**
  * 读取当前节点标题条高度（流坐标像素）。

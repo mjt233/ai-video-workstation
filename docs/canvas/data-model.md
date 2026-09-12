@@ -51,13 +51,15 @@
 
 ## 生成产物与历史
 
-- 节点产物：`assert/{scope}/canvas/{nodeId}/output.{ext}` —— **固定文件名**（扩展名按原型：图片 jpg / 视频 mp4 / 帧 png / TTS flac，见 `registry.ts` 的 `outputExt`；**裁剪音频节点例外**——扩展名随输出格式 `config.format` 变化，「原格式」跟随输入扩展名，见 [node-types.md](./node-types.md)）。"当前结果"即文件系统事实：前端按 `scope + nodeId + 扩展名` 恒等推导（`paths.ts: canvasNodeOutputPath` / `generate.ts: getNodeCurrentAssetPath`），**不再读写 `config.current`/`config.history`**（旧数据字段保留兼容读取、不再写入）。
+- 节点产物：`assert/{scope}/canvas/{nodeId}/output.{ext}` —— **固定文件名**（扩展名按原型：图片 jpg / 视频 mp4 / 帧 png / TTS flac，见 `registry.ts` 的 `outputExt`；**两个例外**——① 裁剪音频：扩展名随输出格式 `config.format` 变化，「原格式」跟随输入扩展名；② 图片修剪与扩展：扩展名随 `config.format`（png / jpg）变化，均由 `generate.ts: getNodeCurrentAssetPath` 按节点配置解析）。"当前结果"即文件系统事实：前端按 `scope + nodeId + 扩展名` 恒等推导（`paths.ts: canvasNodeOutputPath` / `generate.ts: getNodeCurrentAssetPath`），**不再读写 `config.current`/`config.history`**（旧数据字段保留兼容读取、不再写入）。
+- **产物扩展名随配置变化的镜像字段 `config.outputExt`**：裁剪音频与图片修剪与扩展两个节点在产出成功后，由 AssetCanvas 把**实际落盘扩展名**静默写回 `config.outputExt`（`updateNodeQuiet`，不入撤销栈），供**无输入链路上下文**处的固定产物路径推导兜底（画布加载刷新 node-info、保存为/自定义资产对话框、下游输入收集等）。切换格式后**上一扩展名的旧产物文件保留在节点目录但不再展示**（不删除，与裁剪音频现状一致）。
 - 历史版本：`assert/{scope}/canvas/{nodeId}/history/output/{时间戳}.{ext}`，由服务端 `assets/history.ts` 统一管理（与分镜场景图/自定义资产同一套机制）：
   - 重复生成时旧产物先**复制**归档进 history 目录（`copyExistingAssetToHistory`，copy 而非 rename → 生成运行期间旧图持续可见），再覆盖固定路径（引擎与 `routes/canvas.ts` 三个同步分支均已接入）；
   - 历史列表/激活/删除走通用 API `GET/POST/DELETE /api/assets/:project/history*`（`listAssetHistory` / `activateHistoryVersion` / `deleteHistoryVersion`，path 参数为固定产物路径）。
 - 产物信息（存在性 / mtime / 大小）：`GET /api/canvas/node-info?project=&path=`（fs.stat），前端画布加载与生成完成时刷新，用于预览防缓存 token、按钮文案与「上游已更新」角标。
 - 预览 URL：`/api/fs/{project}/{relPath}?t=...`（`preview.ts: buildPreviewUrl`；token 为产物 mtime）。
 - **手动上传产物（生成图片/视频节点）**：生成图片/生成视频编辑器提供「上传产物」按钮，把本地图片/视频直接写入节点固定产物路径（`output.jpg` / `output.mp4`）。上传经 `POST /api/canvas/upload`（见 [module-structure.md](./module-structure.md)）——目标已有产物时**先归档进 history 目录再覆盖**（与重复生成同一套历史机制，可在「历史」对话框查看/激活/删除）；图片接受 jpg/png/webp（统一落盘 `output.jpg`，与 `/assets/upload` 一致），视频**仅接受 mp4**（不转码，其余格式提示先转码）。**反馈**：上传中「上传产物」按钮显示 loading 并禁用（防重复点击，`CanvasEditorPanel` 经 `upload-state` prop 下发），节点卡片叠加进度遮罩（文件名 + 进度条）；成功时 snackbar 提示「上传成功」，覆盖了旧产物时提示「上传成功，原产物已保存为历史版本」（据服务端 `archived` 返回值区分）；失败时节点卡片错误遮罩（含「重试」）+ snackbar。上传进度/失败遮罩复用加载节点同款通用能力（`useCanvasUpload` 按目标路径自动选择端点：`isCanvasNodeOutputPath` 为真走 `/api/canvas/upload`，否则走通用 `/fs/upload`）。生成运行中（loading）上传按钮禁用。
+- **纯前端生成 + 上传落盘（图片修剪与扩展节点）**：该节点不跑工作流、不产生异步任务，产物由**主线程 Canvas 合成**（`canvas/imageCompose.ts`）后经 `POST /api/canvas/upload` 写入固定路径。因此服务端 `assertCanvasNodeOutputPath` 的产物路径白名单放宽到 `output.(jpg|png|mp4)`（两端正则须同步：`frontend/src/canvas/paths.ts` 与 `server/src/assets/canvas-upload.ts`），PNG 产物要求 `image/png` MIME 或 `.png` 扩展名；上传仍复用 `useCanvasUpload`（进度遮罩 / 失败重试 / 中止全部免费获得），并自动归档旧产物进 history。**该节点无任务记录，故无任务管理器条目、无中断、刷新页面后无 Loading 可恢复**。
 
 > **异步结果可靠性**：任务由服务端 SQLite 队列独立执行，产物落盘与页面无关；离开画布 / 切换项目 / 关闭浏览器后任务完成，重新进入画布时按固定路径直接可见（无任何元数据回写依赖）。前端轮询（`useCanvasGeneration.poll`）仅负责实时状态展示，纯体验层。
 >

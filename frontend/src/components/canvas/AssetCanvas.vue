@@ -689,6 +689,7 @@ import { getPrototype } from '../../canvas/registry'
 import { createEdgeFlowCache } from '../../canvas/edgeFlow'
 import { getCanvasNodeInfo } from '../../canvas/api'
 import { extOfAudioPath } from '../../canvas/audioTrim'
+import { isImageCropOutputExt } from '../../canvas/imageCrop'
 import { isSyntheticNodeId, singleDraggedRealNodeId } from '../../canvas/groupSelection'
 import type { RectLike } from '../../canvas/groups'
 import type { CanvasScope } from '../../canvas/paths'
@@ -721,6 +722,7 @@ import { useCanvasRename } from './composables/useCanvasRename'
 import { useCanvasPaste } from './composables/useCanvasPaste'
 import { useCanvasKeyboard } from './composables/useCanvasKeyboard'
 import { useCanvasNodeOps, type LlmMediaInputItem } from './composables/useCanvasNodeOps'
+import type { CanvasInputInfo } from '../../canvas/generate'
 import { useCanvasDialogs } from './composables/useCanvasDialogs'
 import { useCanvasAutobuild } from './composables/useCanvasAutobuild'
 import { useCanvasGroup } from './composables/useCanvasGroup'
@@ -914,9 +916,28 @@ function syncAudioTrimOutputMirror(nodeId: string, outputPath: string): void {
   store.updateNodeQuiet(nodeId, { outputExt: ext })
 }
 
+/**
+ * 图片修剪与扩展节点产物扩展名镜像同步（静默、不入撤销栈）：
+ * 应用成功（纯前端 canvas 合成后上传落盘）后，把实际落盘扩展名写回 config.outputExt，
+ * 供无输入链路上下文处的固定产物路径推导兜底（画布加载刷新 node-info、保存为/自定义资产
+ * 对话框、下游输入收集等），并保证产物存在性/mtime 查询路径与所选格式一致。
+ * 先于乐观展示与 refreshNodeOutput 调用，使刷新按新扩展名推导产物路径。
+ *
+ * @param nodeId 节点 id
+ * @param outputPath 上传落盘的产物相对路径（output.png / output.jpg）
+ */
+function syncImageCropOutputMirror(nodeId: string, outputPath: string): void {
+  const node = nodeMap.value[nodeId]
+  if (!node || node.prototypeId !== 'image-crop') return
+  const ext = outputPath.replace(/\\/g, '/').split('.').pop()?.toLowerCase()
+  if (!isImageCropOutputExt(ext) || node.config.outputExt === ext) return
+  store.updateNodeQuiet(nodeId, { outputExt: ext })
+}
+
 /** 生成完成回调：产物已由服务端落盘，刷新该节点展示（先乐观更新，再取真实 mtime） */
 function handleNodeResult(nodeId: string, outputPath: string): void {
   syncAudioTrimOutputMirror(nodeId, outputPath)
+  syncImageCropOutputMirror(nodeId, outputPath)
   nodeOutputs.value = { ...nodeOutputs.value, [nodeId]: { path: outputPath, mtime: Date.now(), exists: true } }
   void refreshNodeOutput(nodeId)
 }
@@ -961,10 +982,12 @@ function getOutputMtime(nodeId: string): number | null | undefined {
  * @param nodeId 节点 id
  * @returns 媒体输入条目；该原型不使用输入预览时 undefined
  */
-function cardInputsOf(nodeId: string): LlmMediaInputItem[] | undefined {
+function cardInputsOf(nodeId: string): LlmMediaInputItem[] | CanvasInputInfo[] | undefined {
   const proto = nodeMap.value[nodeId]?.prototypeId
   if (proto === 'text-ai') return llmMediaInputsOf(nodeId)
   if (proto === 'input-preview') return previewInputsOf(nodeId)?.media
+  // 图片修剪与扩展：节点主体只读预览需要本节点自己的图片输入（占位文案与提示用）
+  if (proto === 'image-crop') return imageInputsOf(nodeId)
   return undefined
 }
 
@@ -1770,7 +1793,7 @@ const autobuild = useCanvasAutobuild({ store, nodeMap, project: props.project, t
 // 组合式导出解构（模板绑定用）
 const { renamingNodeId, renameInput, startRename, commitRename, cancelRename } = rename
 const { editorPanel, isMultiSelected, selectedNodeIds, selectedGroupIds, onEdgeClick, onNodeDragStart: onNodeDragStartBase } = selection
-const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, previewInputsOf, editorTextInputs, disconnectInput } = nodeOps
+const { generateNode, onInterrupt, extractNodeFrame, isNodeRunning, inputsOf, imageInputsOf, videoInputGroups, isUpstreamUpdated, onUpdateConfig, onUpdateConfigQuiet, llmMediaInputsOf, textInputsOf, previewInputsOf, editorTextInputs, disconnectInput } = nodeOps
 const { flowNodes, flowEdges, relatedInputEdgeIds, relatedOutputEdgeIds, selectedEdgeClassId, adjacentInputNodeIds, adjacentOutputNodeIds, runningInputEdgeIds, runningInputNodeIds, onNodeResizeEnd, isValidConnection, onConnect, onEdgesChange, edgeMenu, disconnectEdge } = flow
 const { historyDialog, historyNode, saveDialog, saveDialogNode, saveSourcePath, saveAsDialog, saveAsDialogNode, saveAsSourcePath, sceneDialog, sceneDialogNode, openSetAsScene, openSetAsShotVideo, logDialog, openNodeLog, picker, pickerTabs, pickerSelected, openAssetPicker, onPickerConfirm, openHistory } = dialogs
 const { contextMenu, contextMenuNode, canGenerateOf, hasHistoryOf, canSaveImage, saveTargetsOf, contextGenerate, contextHistory, contextSaveAs, nodeHasConnections, contextDisconnect, contextRename, contextCopy, contextDelete, groupEntityMenu, groupEntityRename, groupEntityColor, groupEntityDissolve, addMenu, addNodeAt } = menus
