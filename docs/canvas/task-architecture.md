@@ -160,3 +160,6 @@ interface TaskRecord {
 - **轮询日志必须降噪**：2 秒一次无条件写日志曾让 `task_logs` 表 + 索引占到数据库的 87%（其中 92.6% 是连续重复行）。现为「状态/进度变化才记（`info`）+ 心跳兜底（`debug`，默认 60 秒，可配 0 关闭）」，见 [`../task-manager/log.md`](../task-manager/log.md)。
 - **判定磁盘回收看 `freelist_count`，不看文件大小**：`VACUUM` 会把文件截断到实际数据量，但 Windows 等平台的 `stat` 大小可能不缩小（甚至因重新分配而变大），只按文件大小校验会得出「清理无效」的错误结论。
 - **进度不可伪造**：`progress` 的语义是「真实上报过」，「有值」直接决定节点遮罩与任务管理器渲染确定百分比还是不确定动画。禁止在登记时预置 `0`（无 `duration` 的取帧任务会永久显示「0%」）、禁止按耗时估算、禁止按轮询次数假推进；**provider 侧同样不得把「未上报」兜底成 0**（ComfyUI Bridge 排队期间不报 `progress`，曾经的 `progress ?? 0` 会让视频任务在队列里挂几十分钟的「0%」，现已改为缺省）。判定统一走 `nodeProgressPercent()`，不要在组件里各写一套 `?? 0`。
+- **切换画布的 Loading 恢复必须双份隔离**（`AssetCanvas`，两个坑都踩过，见 [`../plans/bug/2026-09-12-ai-text-node-loading-lost-on-canvas-switch.md`](../plans/bug/2026-09-12-ai-text-node-loading-lost-on-canvas-switch.md)）：
+  1. **世代号分离**——切换流程的守卫（`switchGuard.beginSwitch/isCurrentSwitch`）不得与视口适应的世代号（`beginFit/isCurrentFit`）共用；共用时 `applySwitch` 中途的 `scheduleFitCanvas()` 会把切换自己的守卫顶掉，收尾的 `restoreLlmSessions()` 恒不执行（表现为「生成中切走再切回，Thinking 丢失，刷新才恢复」）。
+  2. **跨画布状态成对清理**——组件跨分镜切换**不卸载**，`gen.switchTarget()` 只重置 `statusByNode`；按画布隔离的 `llmRestore`（恢复订阅表）必须在切换时一并 `resetLlmRestore()`，否则切回原画布时「`llmRestore.has(taskId)` → 跳过恢复」会成立，Loading 既不重建也不重新订阅。

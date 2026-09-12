@@ -695,6 +695,7 @@ import type { RectLike } from '../../canvas/groups'
 import type { CanvasScope } from '../../canvas/paths'
 import { llmSocket, type LlmCanvasTarget, type LlmFinishedInfo, type LlmSessionInfo, type LlmTaskEvent } from '../../canvas/llmSocket'
 import { applyLlmEvent, buildLlmFinishedAdopt, createLlmStreamState, createThrottledCommit, sameCanvasTarget, type LlmStreamState, type ThrottledCommit } from '../../canvas/llmEvents'
+import { createSwitchGuard } from '../../canvas/switchGuard'
 import type { CanvasStreamStatePayload } from './CanvasNodeCard.vue'
 import AssetPickerDialog from '../asset-picker/AssetPickerDialog.vue'
 import CanvasAssertHistoryDialog from './CanvasAssertHistoryDialog.vue'
@@ -1030,10 +1031,18 @@ const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1, duration: 0 } as const
 
 /** 组件是否已卸载（异步 load / fitView 完成后不再改视口或恢复任务） */
 let disposed = false
-/** 待执行的适应视图世代号（快速切换分镜时丢弃过期请求） */
-let fitViewSeq = 0
+/**
+ * 画布淘汰守卫：**画布切换**与**视口适应**各自独立的世代号。
+ *
+ * 二者不可共用计数器——切换流程中途会调用 `scheduleFitCanvas()`（推进视口世代号），
+ * 共用时切换自身的守卫会被中途顶掉，收尾步骤（如 AI 文本节点 Loading 恢复）恒不执行；
+ * 缺陷记录见 `docs/plans/bug/2026-09-12-ai-text-node-loading-lost-on-canvas-switch.md`。
+ */
+const guard = createSwitchGuard()
 /** 是否仍需在节点尺寸就绪 / 画布变为可见后重试适应视图 */
 let pendingFitView = false
+/** 当前待完成视口任务的世代号（onNodesInitialized / 容器尺寸就绪后按它重试） */
+let fitViewPendingSeq = 0
 /** 串行化 fitView，避免过期请求在新画布对准之后又把视口改回旧包围盒 */
 let fitViewChain: Promise<void> = Promise.resolve()
 
@@ -1130,11 +1139,11 @@ function vueFlowMatchesStore(): boolean {
  * Vue Flow 的 fitView 要求节点已测出宽高；测量未完成、节点尚未切到当前画布、或容器尺寸为 0 时保持 pending，
  * 由 onNodesInitialized / 容器 ResizeObserver 再试。快速切换分镜时以世代号丢弃过期请求。
  *
- * @param seq scheduleFitCanvas 分配的世代号
+ * @param seq scheduleFitCanvas 分配的视口世代号
  */
 function fitCanvasToNodes(seq: number): Promise<void> {
   const task = async (): Promise<void> => {
-    if (!pendingFitView || disposed || seq !== fitViewSeq) return
+    if (!pendingFitView || disposed || !guard.isCurrentFit(seq)) return
     if (store.nodes.value.length === 0 && store.groups.value.length === 0) {
       pendingFitView = false
       await setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 })
@@ -1142,10 +1151,10 @@ function fitCanvasToNodes(seq: number): Promise<void> {
     }
     if ((flowEl.value?.clientWidth ?? 0) <= 0 || (flowEl.value?.clientHeight ?? 0) <= 0) return
     await nextTick()
-    if (!pendingFitView || disposed || seq !== fitViewSeq) return
+    if (!pendingFitView || disposed || !guard.isCurrentFit(seq)) return
     if (!vueFlowMatchesStore()) return
     const ok = await fitView({ ...FIT_VIEW_OPTIONS })
-    if (ok && seq === fitViewSeq && !disposed) pendingFitView = false
+    if (ok && guard.isCurrentFit(seq) && !disposed) pendingFitView = false
   }
   fitViewChain = fitViewChain.then(task).catch((e: unknown) => {
     console.error('[asset-canvas] 适应视图失败', e)
@@ -1159,12 +1168,12 @@ function fitCanvasToNodes(seq: number): Promise<void> {
  */
 function scheduleFitCanvas(): void {
   pendingFitView = true
-  const seq = ++fitViewSeq
-  void fitCanvasToNodes(seq)
+  fitViewPendingSeq = guard.beginFit()
+  void fitCanvasToNodes(fitViewPendingSeq)
 }
 
 onNodesInitialized(() => {
-  if (pendingFitView) void fitCanvasToNodes(fitViewSeq)
+  if (pendingFitView) void fitCanvasToNodes(fitViewPendingSeq)
 })
 
 /** 画布根节点 DOM（用于自动计算高度铺满页面） */
@@ -2403,8 +2412,14 @@ async function forceAndSwitch(): Promise<void> {
  * @param opts.discard 为 true 时放弃旧画布未保存修改直接切换（对话框「放弃本地修改」）
  */
 async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } = {}): Promise<void> {
-  const seq = ++fitViewSeq
+  // 画布切换世代号（**独立于视口适应世代号**）：本次切换中途会 scheduleFitCanvas()，
+  // 两者共用计数器会让下面每处守卫被自己顶掉，收尾的 Loading 恢复恒不执行（历史缺陷）
+  const seq = guard.beginSwitch()
   pendingFitView = false
+  // LLM 恢复订阅按画布隔离：本组件跨分镜/场景切换**不卸载**（gen.switchTarget 只重置
+  // statusByNode 等展示态），若不清空 llmRestore，切回原画布时残留条目会让
+  // 「已订阅 → 跳过恢复」成立，节点 Loading（Thinking）无法重建（历史缺陷）
+  resetLlmRestore()
   selection.reset()
   rename.reset()
   menus.reset()
@@ -2418,9 +2433,9 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
   // 连线箭头时序缓存按连线 id 记忆几何，切换画布后 id 复用但几何全新 → 清空避免沿用旧时长
   edgeFlowCache.clear()
   await gen.switchTarget(newTarget)
-  if (disposed || seq !== fitViewSeq) return
+  if (disposed || !guard.isCurrentSwitch(seq)) return
   const st = await store.switchTarget(newTarget, opts)
-  if (disposed || seq !== fitViewSeq) return
+  if (disposed || !guard.isCurrentSwitch(seq)) return
   // 节点加载完成后再按 scope 恢复运行中的 ffmpeg 任务（需 nodeMap 过滤已删除节点）
   void gen.restore(new Set(Object.keys(nodeMap.value)))
   if (st === 'conflict') {
@@ -2437,8 +2452,10 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
   await refreshNodeOutputs()
   // 采纳版本记录按画布隔离（新画布重新计数）
   resetAdoptedLlmRevs()
-  // 恢复本画布的 LLM 活跃会话（服务端会话列表按 scope 过滤；Loading 跨页面存活）
-  if (!disposed && seq === fitViewSeq) restoreLlmSessions()
+  // 恢复本画布的 LLM 活跃会话（服务端会话列表按 scope 过滤；Loading 跨页面存活）。
+  // **只受「本切换是否仍是最新」约束**：视口适应世代号（scheduleFitCanvas）与其无关，
+  // 不得参与本判断（否则切回画布时 AI 文本节点 Loading 恢复会被静默跳过）
+  if (!disposed && guard.isCurrentSwitch(seq)) restoreLlmSessions()
 }
 
 /** 切换分镜/场景时：重置各组合式状态，并让 store/生成组合式切换到新目标加载 */
@@ -2508,7 +2525,7 @@ watch(flowEl, (flow) => {
       flowWidth.value = flowEl.value?.clientWidth ?? 0
       // 画布 Tab 隐藏时容器尺寸为 0，fitView 会失败；显示后按 pending 重试，不在每次 resize 时抢用户视口
       if (pendingFitView && flowWidth.value > 0 && flowHeight.value > 0) {
-        void fitCanvasToNodes(fitViewSeq)
+        void fitCanvasToNodes(fitViewPendingSeq)
       }
     })
     flowResizeObserver.observe(flow)
