@@ -166,15 +166,15 @@ describe('useCanvasStore', () => {
     expect(store.nodes.value).toHaveLength(2)
   })
 
-  it('pasteNode(source)：外部节点源（如系统剪贴板标记）粘贴到源节点之外（不叠压）', () => {
+  it('pasteNode(source)：外部节点源（如系统剪贴板标记）按固定 30px 偏移粘贴为新节点', () => {
     const store = useCanvasStore('p', TARGET)
     const a = store.addNode('text', 0, 0)
     const b = store.pasteNode({ ...a, id: 'external', x: 100, y: 100 })
     expect(b).toBeTruthy()
     expect(b!.id).not.toBe('external')
-    // 落点 = 源内容右下方向外错开一个身位 + 间隙：不与源节点矩形重叠
-    expect(b!.x).toBe(100 + a.width + PASTE_CASCADE_GAP)
-    expect(rectsOverlap(a, b!)).toBe(false)
+    // 纯节点载荷（不含分组）沿用历史固定偏移：+30 / +30
+    expect(b!.x).toBe(130)
+    expect(b!.y).toBe(130)
     expect(store.nodes.value).toHaveLength(2)
     // 外部源不写入内部剪贴板
     expect(store.canPaste.value).toBe(false)
@@ -586,7 +586,7 @@ describe('useCanvasStore', () => {
 
   // ── 多选群组批量操作 ──────────────────────────────────
 
-  it('copyNodes/pasteNodes：多节点复制粘贴重建 id 与组内连线，副本整体错出源内容包围盒', () => {
+  it('copyNodes/pasteNodes：多节点复制粘贴重建 id 与组内连线，纯节点载荷按固定 30px 偏移', () => {
     const store = useCanvasStore('p', TARGET)
     const a = store.addNode('image-loader', 0, 0)
     const b = store.addNode('image-generate', 100, 100)
@@ -602,14 +602,10 @@ describe('useCanvasStore', () => {
     expect(store.connections.value).toHaveLength(2)
     const newConn = store.connections.value.find((cn) => pastedIds.has(cn.fromNodeId) && pastedIds.has(cn.toNodeId))
     expect(newConn).toBeTruthy()
-    // 落点 = 源内容包围盒（两节点并集）右下方一个身位 + 间隙 ⇒ 副本节点不与任何源节点重叠
-    const sourceBounds = clipboardBounds({ nodes: [a, b], connections: [], groups: [] })!
+    // 载荷不含分组 ⇒ 沿用历史固定偏移（不做避让）
     const pastedA = pasted.find((n) => n.prototypeId === 'image-loader')!
-    expect(pastedA.x).toBe(a.x + PASTE_CASCADE_GAP + sourceBounds.width)
-    expect(pastedA.y).toBe(a.y + PASTE_CASCADE_GAP + sourceBounds.height)
-    expect(rectsOverlap(pastedA, a)).toBe(false)
-    expect(rectsOverlap(pasted.find((n) => n.prototypeId === 'image-generate')!, b)).toBe(false)
-    // 首选落点未被占用：不算「被探测挪动」
+    expect(pastedA.x).toBe(a.x + PASTE_CASCADE_GAP)
+    expect(pastedA.y).toBe(a.y + PASTE_CASCADE_GAP)
     expect(pastedResult.cascaded).toBe(false)
   })
 

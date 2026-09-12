@@ -13,11 +13,14 @@
  * 2. 拖原分组 → 副本节点同样被带走（两个分组互相抓对方节点）；
  * 3. 副本节点与原节点几乎重合，肉眼与操作上都「分不开」。
  *
- * 故本模块把落点规则收敛为一条**硬约束**：
+ * 故本模块把「含分组」的粘贴落点收敛为一条**硬约束**：
  * **副本包围盒（节点 ∪ 分组）必须与画布上已有的任何节点 / 分组矩形零重叠，且留有
  * 不小于 `PASTE_CLEARANCE` 的净距**（不允许贴边紧邻：贴边后轻推十几像素即变重叠）。
  * 首选落点为「原内容右下方向外错开一个身位 + `PASTE_CASCADE_GAP`」，被已有内容占据时
  * 沿 +x 逐级探测（再换下方泳道），最终兜底把副本放到全部阻挡内容的右侧 —— 绝不退回重叠位置。
+ *
+ * 例外（路径 2）：**载荷不含分组时**（纯节点复制）沿用历史固定偏移 `PASTE_CASCADE_GAP`，
+ * 不做避让 —— 节点不参与成员派生，副本压住原件不会产生「拖 A 带走 B」的联动故障。
  */
 
 import { boundingRect, rectsOverlap, type RectLike } from './groups'
@@ -25,7 +28,10 @@ import { remapNodeConfig } from './groupSelection'
 import type { NodeClipboardPayload } from './nodeClipboard'
 import { newId, type CanvasConnection, type CanvasGroupData, type NodeConfig } from './types'
 
-/** 首选落点与源内容之间的间隙（流坐标像素；= 原内容包围盒尺寸 + 该值） */
+/** 落点间隙（流坐标像素）：
+ * - 载荷**不含分组**时为固定粘贴偏移（等价历史 `PASTE_OFFSET`）；
+ * - 载荷**含分组**时为「原内容包围盒尺寸 + 该值」的首选错位量。
+ */
 export const PASTE_CASCADE_GAP = 30
 
 /**
@@ -115,31 +121,45 @@ interface PasteCandidate {
 }
 
 /**
- * 计算粘贴落点（**保证副本包围盒与画布已有内容零重叠且留有不小于 `PASTE_CLEARANCE` 的净距**）。
+ * 计算粘贴落点。
  *
- * 候选顺序：
- * 1. **首选错位**：`(宽 + 间隙, 高 + 间隙)` —— 副本落在原内容右下方一个身位，
- *    保留副本与原内容的相对空间关系（分组相对位置完全不变）；
- * 2. **向右探测**：沿 +x 以 `PASTE_PROBE_STEP` 逐级右移（每条泳道最多 `PASTE_PROBE_LIMIT` 步），
- *    用于首选落点被画布上其他内容占据、但右侧存在空隙的场景；
- * 3. **换泳道**：仍未命中时向下换 `PASTE_PROBE_LANES` 条泳道重复向右探测
- *    （每条泳道 y 下移「源内容高度 + 间隙」，保证不同泳道之间不会互相重叠）；
- * 4. **兜底**：把副本整体放到「与首选落点相交的全部阻挡内容」并集的右侧 + 净距 + 间隙
- *    （y 取首选值），保证函数一定返回一个满足净距要求的落点（永不退回重叠位置）。
+ * ## 两条路径（按载荷是否含分组分流）
  *
- * 注 1：源内容本身（被复制的原件）永远占据其原始矩形，故它总是参与碰撞判定 ——
- * 这是「副本不与原件重叠」这一核心保证的来源。
+ * 1. **载荷不含分组**（`payload.groups.length === 0`，纯节点复制）→ 沿用历史行为：
+ *    相对原位置固定偏移 `PASTE_CASCADE_GAP`(30px)，**不做避让**。
+ *    依据：节点不参与分组成员派生，副本节点压住原件节点只会「看起来叠在一起」，
+ *    不会产生「拖 A 带走 B」的联动故障；此时保持与旧版本完全一致的粘贴手感更重要。
+ * 2. **载荷含分组** → **保证副本包围盒与画布已有内容零重叠且留有不小于
+ *    `PASTE_CLEARANCE` 的净距**，候选顺序：
+ *    - **首选错位**：`(宽 + 间隙, 高 + 间隙)` —— 副本落在原内容右下方一个身位，
+ *      保留副本与原内容的相对空间关系（分组相对位置完全不变）；
+ *    - **向右探测**：沿 +x 以 `PASTE_PROBE_STEP` 逐级右移（每条泳道最多 `PASTE_PROBE_LIMIT` 步），
+ *      用于首选落点被画布上其他内容占据、但右侧存在空隙的场景；
+ *    - **换泳道**：仍未命中时向下换 `PASTE_PROBE_LANES` 条泳道重复向右探测
+ *      （每条泳道 y 下移「源内容高度 + 间隙」，保证不同泳道之间不会互相重叠）；
+ *    - **兜底**：把副本整体放到「与首选落点相交的全部阻挡内容」并集的右侧 + 净距 + 间隙
+ *      （y 取首选值），保证函数一定返回一个满足净距要求的落点（永不退回重叠位置）。
+ *
+ * 注 1：含分组路径中，源内容本身（被复制的原件）永远占据其原始矩形，故它总是参与碰撞
+ * 判定 —— 这是「副本分组不压住原件」这一核心保证的来源。
  * 注 2：判定带 `PASTE_CLEARANCE` 净距，故副本与已有内容不会「贴边紧邻」
  * （贴边后轻推十几像素即变重叠，等于把老问题推迟一次操作）。
  *
  * @param payload 粘贴载荷（节点列表 + 组内连线 + 分组列表）
- * @param occupied 画布当前占用矩形（已有节点与分组；见 `CanvasNodeData` / `CanvasGroupData` 均满足 `RectLike`）
+ * @param occupied 画布当前占用矩形（已有节点与分组；见 `CanvasNodeData` / `CanvasGroupData` 均满足 `RectLike`）；
+ *   载荷不含分组时该参数被忽略
  * @returns 落点（无内容可粘贴时返回零偏移且 `cascaded=false`）
  */
 export function clipboardPlacementOffset(
   payload: NodeClipboardPayload,
   occupied: { nodes?: readonly RectLike[]; groups?: readonly RectLike[] },
 ): PastePlacement {
+  // 无内容可粘贴：零偏移（调用方据此判断是否真的产生了副本）
+  if (payload.nodes.length === 0 && payload.groups.length === 0) return { offset: { x: 0, y: 0 }, cascaded: false }
+  // 不含分组：纯节点复制，沿用历史固定偏移（不避让，见上方路径 1 说明）
+  if (payload.groups.length === 0) {
+    return { offset: { x: PASTE_CASCADE_GAP, y: PASTE_CASCADE_GAP }, cascaded: false }
+  }
   const bounds = clipboardBounds(payload)
   if (!bounds) return { offset: { x: 0, y: 0 }, cascaded: false }
 

@@ -124,14 +124,47 @@ describe('clipboardPlacementOffset：首选错位落点', () => {
     expectClearance(payload, placement.offset, [node, group])
   })
 
-  it('仅复制节点（无分组）：同样不叠压在源节点上', () => {
-    const node = makeNode('n', 0, 0)
-    const placement = clipboardPlacementOffset(makePayload([node]), { nodes: [node] })
+  it('载荷含分组但分组内无节点：仍走避让落点（不与源分组重叠）', () => {
+    const group = makeGroup('g', 0, 0, 400, 300)
+    const payload = makePayload([], [group])
+    const placement = clipboardPlacementOffset(payload, { groups: [group] })
+    expect(placement.offset).toEqual({ x: 400 + PASTE_CASCADE_GAP, y: 300 + PASTE_CASCADE_GAP })
     expect(placement.cascaded).toBe(false)
-    expectZeroOverlap(makePayload([node]), placement.offset, [node])
+    expectZeroOverlap(payload, placement.offset, [group])
+    expectClearance(payload, placement.offset, [group])
   })
 
-  it('空画布（无占用内容）：仍按首选错位落点，不与源内容重叠', () => {
+  it('仅复制节点（无分组）：回到历史固定 30px 偏移，不做避让', () => {
+    const node = makeNode('n', 0, 0)
+    const placement = clipboardPlacementOffset(makePayload([node]), { nodes: [node] })
+    expect(placement).toEqual({ offset: { x: PASTE_CASCADE_GAP, y: PASTE_CASCADE_GAP }, cascaded: false })
+    // 固定偏移与节点尺寸、画布占用无关
+    const big = makeNode('big', 200, 300, 1000, 800)
+    expect(clipboardPlacementOffset(makePayload([big]), { nodes: [big] }).offset).toEqual({
+      x: PASTE_CASCADE_GAP,
+      y: PASTE_CASCADE_GAP,
+    })
+    const blocker = makeGroup('other', 10, 10, 400, 300)
+    expect(clipboardPlacementOffset(makePayload([node]), { nodes: [node], groups: [blocker] }).offset).toEqual({
+      x: PASTE_CASCADE_GAP,
+      y: PASTE_CASCADE_GAP,
+    })
+  })
+
+  it('仅复制节点：连续粘贴各再偏移 30px（第二份落在 +60，与历史行为一致）', () => {
+    const node = makeNode('n', 0, 0)
+    const first = clipboardPlacementOffset(makePayload([node]), { nodes: [node] })
+    const placed: CanvasNodeData = { ...node, x: node.x + first.offset.x, y: node.y + first.offset.y }
+    const second = clipboardPlacementOffset(makePayload([placed]), { nodes: [node, placed] })
+    expect(second.offset).toEqual({ x: PASTE_CASCADE_GAP, y: PASTE_CASCADE_GAP })
+    expect(second.cascaded).toBe(false)
+    expect({ x: placed.x + second.offset.x, y: placed.y + second.offset.y }).toEqual({
+      x: PASTE_CASCADE_GAP * 2,
+      y: PASTE_CASCADE_GAP * 2,
+    })
+  })
+
+  it('空画布（无占用内容）：含分组时仍按首选错位落点，不与源内容重叠', () => {
     const node = makeNode('n', 0, 0)
     const group = makeGroup('g', -20, -40, 400, 300)
     const placement = clipboardPlacementOffset(makePayload([node], [group]), {})
@@ -147,28 +180,34 @@ describe('clipboardPlacementOffset：首选错位落点', () => {
 describe('clipboardPlacementOffset：碰撞探测', () => {
   it('首选落点被已有分组占据时向右逐级探测（步长 = PASTE_PROBE_STEP）', () => {
     const node = makeNode('n', 0, 0, 100, 100)
-    const source = makePayload([node])
-    // blocker 占 x[120,220]：首选落点 x=130 直接重叠；x=160 虽零重叠但仍贴在净距内，
-    // 故命中 x=250（= 100 + 间隙 30 + 探测步长 30 × 4）——与「净距不少于 PASTE_CLEARANCE」一致
+    // 避让仅作用于「含分组」载荷：这里带一个远离落点的小分组保证走避让路径
+    // （该分组占 x[-20,40]、y[-20,40]，不与 blocker 相交，故不干扰下面的推演）
+    const own = makeGroup('own', -20, -20, 60, 60)
+    const source = makePayload([node], [own])
+    const bounds = clipboardBounds(source)!
+    expect(bounds).toEqual({ x: -20, y: -20, width: 120, height: 120 })
+    // blocker 占 x[120,220]：首选落点 x[-20,100] + 150 = [130,250] 与之重叠；
+    // 因净距要求（判定时外扩 30）需连推 4 步才脱离，落点 = 首选 150 + 30 × 4 = 270
     const blocker = makeGroup('other', 120, 100, 100, 200)
-    const placement = clipboardPlacementOffset(source, { nodes: [node], groups: [blocker] })
+    const placement = clipboardPlacementOffset(source, { nodes: [node], groups: [own, blocker] })
     expect(placement.cascaded).toBe(true)
-    expect(placement.offset).toEqual({ x: 250, y: 130 })
-    // 250 = 首选落点 (100 + 间隙 30) + 探测步长 30 × 4
-    expect(placement.offset.x).toBe(100 + PASTE_CASCADE_GAP + PASTE_PROBE_STEP * 4)
-    expectZeroOverlap(source, placement.offset, [node, blocker])
-    expectClearance(source, placement.offset, [node, blocker])
+    expect(placement.offset).toEqual({ x: 270, y: 150 })
+    expect(placement.offset.x).toBe(bounds.width + PASTE_CASCADE_GAP + PASTE_PROBE_STEP * 4)
+    expectZeroOverlap(source, placement.offset, [node, own, blocker])
+    expectClearance(source, placement.offset, [node, own, blocker])
   })
 
   it('未知占用内容导致首选落点与全部探测点都相交时走兜底：仍零重叠且有净距', () => {
     const node = makeNode('n', 0, 0, 100, 100)
-    const source = makePayload([node])
+    // 同上：带一个远离落点的小分组以进入避让路径
+    const own = makeGroup('own', -20, -20, 60, 60)
+    const source = makePayload([node], [own])
     // 覆盖首选落点右侧全部探测范围（含换泳道后的 y 范围）的巨大分组
     const wall = makeGroup('wall', 130, 130, PASTE_PROBE_STEP * (PASTE_PROBE_LIMIT + 2), 20000)
-    const placement = clipboardPlacementOffset(source, { nodes: [node], groups: [wall] })
+    const placement = clipboardPlacementOffset(source, { nodes: [node], groups: [own, wall] })
     expect(placement.cascaded).toBe(true)
-    expectZeroOverlap(source, placement.offset, [node, wall])
-    expectClearance(source, placement.offset, [node, wall])
+    expectZeroOverlap(source, placement.offset, [node, own, wall])
+    expectClearance(source, placement.offset, [node, own, wall])
   })
 
   it('连续粘贴：第二份副本不会贴边紧邻第一份（净距 ≥ PASTE_CLEARANCE）', () => {
