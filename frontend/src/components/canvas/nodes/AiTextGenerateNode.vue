@@ -142,9 +142,14 @@
       />
     </div>
 
-    <!-- 中部：用户输入 | AI 响应（1:1 自适应） -->
+    <!-- 中部：用户输入 | AI 响应（1:1 自适应）
+         注：已连接文本输入（textInputCount > 0）时用户输入栏整体隐藏（内容来自外部连线），
+         AI 响应栏独占整行；多个文本连线输入的告警随之迁移到 AI 响应标题栏。 -->
     <div class="ai-text-node__main">
-      <div class="ai-text-node__pane">
+      <div
+        v-if="textInputCount === 0"
+        class="ai-text-node__pane"
+      >
         <div class="ai-text-node__pane-title">
           用户输入
           <span
@@ -153,15 +158,9 @@
           >
             生成时将替换到预设提示词 {user_prompt}
           </span>
-          <span
-            v-if="textInputCount > 1"
-            class="ai-text-node__warn"
-          >
-            存在多个文本连线输入（{{ textInputCount }} 个），生成已禁用，请仅保留一个
-          </span>
         </div>
         <textarea
-          :value="userInputDisplay"
+          :value="inputText"
           class="ai-text-node__area nodrag nowheel"
           :class="{ 'ai-text-node__area--disabled': userInputDisabled }"
           :disabled="userInputDisabled"
@@ -174,6 +173,13 @@
         <div class="ai-text-node__pane-title ai-text-node__pane-title--actions">
           <span class="ai-text-node__pane-title-text">
             AI 响应
+            <span
+              v-if="textInputCount > 1"
+              class="ai-text-node__warn"
+              :title="multiTextInputMsg"
+            >
+              多个文本输入
+            </span>
             <span
               v-if="warnings.length > 0"
               class="ai-text-node__warn"
@@ -204,13 +210,14 @@
       </div>
     </div>
 
-    <!-- 底行：生成 / 停止 -->
+    <!-- 底行：生成 / 停止（左侧提示：多个文本连线输入的完整告警 > 常规 hint） -->
     <div class="ai-text-node__bottom">
       <span
-        v-if="hint"
+        v-if="bottomHint"
         class="ai-text-node__hint"
+        :class="{ 'ai-text-node__hint--warn': textInputCount > 1 }"
       >
-        {{ hint }}
+        {{ bottomHint }}
       </span>
       <v-spacer />
       <v-btn
@@ -482,8 +489,19 @@ const mediaByType = computed<{ images: CanvasInputInfo[]; videos: CanvasInputInf
 /** 文本输入数量（来源为「文本」节点的非空内容） */
 const textInputCount = computed(() => props.textInputs?.length ?? 0)
 
-/** 是否禁用用户输入（生成中 / 已连接文本输入时禁用，输入内容来自外部连线） */
-const userInputDisabled = computed(() => active.value || textInputCount.value > 0)
+/** 多个文本连线输入的完整告警文案（标题栏只显示短标记「多个文本输入」，完整文案作悬浮提示 + 底部提示） */
+const multiTextInputMsg = computed(
+  () => `存在多个文本连线输入（${textInputCount.value} 个），生成已禁用，请仅保留一个`,
+)
+
+/** 底部提示：多个文本连线输入的告警优先，其次为常规 hint（如预设被删除的提示） */
+const bottomHint = computed(() => (textInputCount.value > 1 ? multiTextInputMsg.value : hint.value))
+
+/**
+ * 是否禁用用户输入文本域：仅生成中禁用。
+ * （已连接文本输入时该文本域整体不渲染，见模板 `v-if="textInputCount === 0"`）
+ */
+const userInputDisabled = computed(() => active.value)
 
 /** 节点是否处于运行态（本会话生成中 或 父级下发恢复态运行中）：禁用控件、显示 Thinking 条 */
 const active = computed(() => generating.value || props.isRunning === true)
@@ -507,16 +525,14 @@ const outputAreaReadonly = computed(
   () => active.value || (outputText.value.trim().length === 0 && !!errorMsg.value),
 )
 
-/** 用户输入占位提示（按文本输入连接情况区分） */
+/**
+ * 用户输入占位提示（仅未连接文本输入时渲染本栏，故不再区分连线情况）。
+ * 多个文本连线输入的告警显示在 AI 响应标题栏（见模板）。
+ */
 const userInputPlaceholder = computed(() => {
-  if (textInputCount.value > 1) return '存在多个文本连线输入，无法执行生成，请仅保留一个'
-  if (textInputCount.value === 1) return '（来自外部输入）输入的内容'
   if (activePreset.value) return '输入内容…（生成时将替换到预设提示词 {user_prompt}）'
   return '输入内容…（可连接文本/图片/音频/视频输入）'
 })
-
-/** 用户输入框显示值（连接文本输入时清空显示，内容来自外部连线，改由占位提示说明） */
-const userInputDisplay = computed(() => (textInputCount.value > 0 ? '' : inputText.value))
 
 /** 是否满足生成条件（模型已选 + 输入非空；选择预设时必须提供用户输入；多个文本输入禁止生成） */
 const canGenerate = computed(() => {
@@ -1042,5 +1058,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 告警态提示（多个文本连线输入）：橙色，与标题栏告警一致 */
+.ai-text-node__hint--warn {
+  color: rgb(251, 140, 0);
 }
 </style>
