@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { CanvasNodeData } from './types'
+import type { CanvasConnection, CanvasNodeData } from './types'
 import {
   GROUP_DOT_ID,
   GROUP_FRAME_ID,
@@ -108,6 +108,19 @@ describe('groupOutputTypes', () => {
       makeNode('aud', 0, 0, 'audio-loader'),
     ])
     expect(types).toEqual(['image', 'video', 'audio'])
+  })
+
+  it('输入转发节点：传 ctx 时按上游来源解析实际输出类型（未传 ctx 退化为占位 media）', () => {
+    const img = makeNode('img', 0, 0, 'image-loader')
+    const fw = makeNode('fw', 0, 0, 'forward-input')
+    const conns: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'img', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+    ]
+    const nodes = [img, fw]
+    // 传 ctx：转发图片 → 群组输出类型为 image（可连「裁剪视频」等类型专一下游时才不会误列）
+    expect(groupOutputTypes([fw], { nodes, connections: conns })).toEqual(['image'])
+    // 未传 ctx（旧口径）：读原型占位声明
+    expect(groupOutputTypes([fw])).toEqual(['media'])
   })
 })
 

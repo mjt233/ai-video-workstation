@@ -168,6 +168,7 @@
               :upstream-updated="isBlueprint ? false : isUpstreamUpdated(id)"
               :inputs="cardInputsOf(id)"
               :text-inputs="cardTextInputsOf(id)"
+              :output-type="forwardOutputTypeOf(id)"
               :source-label="nodeMap[id]?.prototypeId === 'input-preview' ? previewInputsOf(id)?.sourceLabel : undefined"
               :source-input-count="nodeMap[id]?.prototypeId === 'input-preview' ? previewInputCountOf(id) : undefined"
               :renaming="renamingNodeId === id"
@@ -682,9 +683,10 @@ import { blueprintCanvasPersistence } from '../../api/blueprints'
 import { getProjects } from '../../api/client'
 import { useAutoComputeHeight } from '../../composables/useAutoComputeHeight'
 import { confirm } from '../../utils/confirm'
-import type { CanvasGroupData, CanvasNodeData } from '../../canvas/types'
+import type { CanvasGroupData, CanvasNodeData, PortType } from '../../canvas/types'
 import { canvasRelPath, type CanvasTarget } from '../../canvas/api'
 import { getNodeCurrentAssetPath } from '../../canvas/generate'
+import { getNodeOutputType } from '../../canvas/connection'
 import { getPrototype } from '../../canvas/registry'
 import { createEdgeFlowCache } from '../../canvas/edgeFlow'
 import { getCanvasNodeInfo } from '../../canvas/api'
@@ -987,9 +989,27 @@ function cardInputsOf(nodeId: string): LlmMediaInputItem[] | CanvasInputInfo[] |
   const proto = nodeMap.value[nodeId]?.prototypeId
   if (proto === 'text-ai') return llmMediaInputsOf(nodeId)
   if (proto === 'input-preview') return previewInputsOf(nodeId)?.media
+  // 输入转发：节点主体展示「本节点接入的媒体输入」，并支持组内拖拽排序与悬浮断开
+  if (proto === 'forward-input') return llmMediaInputsOf(nodeId)
   // 图片修剪与扩展：节点主体只读预览需要本节点自己的图片输入（占位文案与提示用）
   if (proto === 'image-crop') return imageInputsOf(nodeId)
   return undefined
+}
+
+/**
+ * 输入转发节点解析出的实际输出类型（供节点主体类型徽标展示）。
+ *
+ * 与连线校验同一口径（`getEffectiveOutputType`）：上游全为同一类型 → 该类型；
+ * 多种媒体混合或媒体与文本混合 → `'media'`（任意媒体）；**未接输入 → 空数组**
+ * （类型待定，连线校验放行任意下游）。非转发节点返回 undefined。
+ *
+ * @param nodeId 节点 id
+ * @returns 输出类型；非转发节点返回 undefined
+ */
+function forwardOutputTypeOf(nodeId: string): PortType | undefined {
+  const node = nodeMap.value[nodeId]
+  if (!node || node.prototypeId !== 'forward-input') return undefined
+  return getNodeOutputType(nodeId, store.nodes.value, store.connections.value)
 }
 
 /**
@@ -1005,6 +1025,8 @@ function cardTextInputsOf(nodeId: string): string[] | undefined {
   const proto = nodeMap.value[nodeId]?.prototypeId
   if (proto === 'text-ai') return textInputsOf(nodeId)
   if (proto === 'input-preview') return previewInputsOf(nodeId)?.texts
+  // 输入转发：本节点接入的文本输入（原样透传给下游作为外部提示词）
+  if (proto === 'forward-input') return textInputsOf(nodeId)
   return undefined
 }
 

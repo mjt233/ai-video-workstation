@@ -15,6 +15,7 @@ import ImageCropNode from '../components/canvas/nodes/ImageCropNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
 import AiTextGenerateNode from '../components/canvas/nodes/AiTextGenerateNode.vue'
 import InputPreviewNode from '../components/canvas/nodes/InputPreviewNode.vue'
+import ForwardInputNode from '../components/canvas/nodes/ForwardInputNode.vue'
 import ImageGenerateEditor from '../components/canvas/editors/ImageGenerateEditor.vue'
 import ImageLoaderEditor from '../components/canvas/editors/ImageLoaderEditor.vue'
 import AudioLoaderEditor from '../components/canvas/editors/AudioLoaderEditor.vue'
@@ -98,6 +99,22 @@ export interface NodePrototype {
    * 未声明时 getNodeCurrentAssetPath 按画布约定默认读 config.current.path。
    */
   getOutputAssetPath?: (config: NodeConfig) => string | undefined
+  /**
+   * 是否为**输入转发**节点（收到什么就输出什么，自身不产出资产也不改变类型）。
+   *
+   * 声明后该节点参与「按连线解析」的数据流语义（全部解析入口统一处理，勿在调用点分支）：
+   * - 输出类型 = 上游来源的实际类型（`connection.getEffectiveOutputType`，支持转发链）：
+   *   同类型来源 → 该类型；混合来源 → 类型并集数组；**没有任何入边 → 空数组**
+   *   （类型尚未确定，`canConnect` 放行任意下游端口，即「先搭拓扑、后接来源」）；
+   * - 输出资产 = 上游来源的资产路径（`generate.getNodeCurrentAssetPath` 穿透，故下游
+   *   `collectInputs` 拿到的 nodeId/path/label 均指向**最终上游节点**，不复制不落盘）；
+   * - 文本 = 上游来源的文本内容（`generate.collectTextContents` 穿透）。
+   *
+   * 因此转发节点**不声明** `outputExt`（无产物文件）与 `getOutputAssetPath`，
+   * 也不要进入 `canGenerate`/`hasHistory`（无可重新生成/可查看的自身产物）；
+   * 原型 `outputPorts[0].type` 仅为端口渲染占位（运行时以解析结果为准）。
+   */
+  passThrough?: boolean
   /**
    * 生成类节点产物扩展名（无点号，如 jpg / mp4 / png / flac）。
    * 声明后，产物路径按固定文件名推导：assert/{scope}/canvas/{nodeId}/output.{ext}
@@ -267,6 +284,32 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       text: '',
       refText: '',
       prompt: '',
+    },
+  },
+  {
+    id: 'forward-input',
+    name: '输入转发',
+    icon: 'mdi-swap-horizontal',
+    category: 'tool',
+    // 语义：收到什么输入就输出什么，自身不做任何加工（节点主体只负责展示与排序）。
+    // 单一输入口（type: ['media','text']）可接任意来源、可多路；输出端口类型为**声明占位**：
+    // 运行时其输出类型由上游来源实时解析（见 NodePrototype.passThrough）——同类型来源 → 该类型；
+    // 混合来源 → 类型并集数组；未接输入 → 空数组（类型待定，放行任意下游）。因输出端口
+    // 不能为空数组，此处 'media' 仅为占位声明（端口渲染用，不参与连线校验的类型解析）。
+    inputPorts: [{ id: 'in', type: ['media', 'text'], label: '输入' }],
+    outputPorts: [{ id: 'out', type: 'media', label: '转发' }],
+    resizeable: true,
+    passThrough: true,
+    // 默认尺寸 320×260：头部行（类型徽标）+ 最多三组媒体缩略图 + 文本块；
+    // 内容超出高度时由节点整体滚动（主体根元素带 nowheel），用户可再手动缩放
+    defaultSize: { width: 320, height: 260 },
+    bodyComponent: ForwardInputNode,
+    // 无 editorComponent：全部交互在节点主体内（与 AI 文本生成 / 输入预览节点同形态）；
+    // 未声明 canGenerate / hasHistory → 右键菜单自动无「重新生成」「历史」入口
+    defaultConfig: {
+      // 媒体输入顺序（跨类型全局 nodeId 顺序，组内拖拽排序经 mergeInputOrder 合并写回）；
+      // 文本输入不参与排序（与生成节点一致，按连接顺序读取）
+      inputOrder: [],
     },
   },
   {

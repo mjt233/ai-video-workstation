@@ -125,7 +125,7 @@ export function useCanvasGroup(options: UseCanvasGroupOptions) {
     const nodes = ids
       .map((id) => nodeMap.value[id])
       .filter((n): n is CanvasNodeData => !!n)
-    return groupConnectOptions(groupOutputTypes(nodes))
+    return groupConnectOptions(groupOutputTypes(nodes, { nodes: store.nodes.value, connections: store.connections.value }))
   })
 
   /** 当前悬停目标节点（非选中节点，供高亮） */

@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含十四个内置节点', () => {
+  it('包含十五个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'audio-trim',
+      'forward-input',
       'image-crop',
       'image-generate',
       'image-loader',
@@ -19,6 +20,27 @@ describe('NODE_PROTOTYPES', () => {
       'video-loader',
       'video-trim',
     ])
+  })
+
+  it('输入转发节点：单一输入端口接受任意来源，输出端口为占位声明，passThrough 为真，无配置面板', () => {
+    const p = getPrototype('forward-input')!
+    expect(p.name).toBe('输入转发')
+    expect(p.category).toBe('tool')
+    expect(p.inputPorts).toHaveLength(1)
+    expect(p.inputPorts[0].id).toBe('in')
+    expect(p.inputPorts[0].type).toEqual(['media', 'text'])
+    // 输出端口「不能为空数组」，故声明 'media' 为占位；实际类型由 getEffectiveOutputType 按连线解析    expect(p.outputPorts).toHaveLength(1)
+    expect(p.outputPorts[0].id).toBe('out')
+    expect(p.outputPorts[0].type).toBe('media')
+    expect(p.passThrough).toBe(true)
+    expect(p.editorComponent).toBeUndefined()
+    // 无自身产物：不声明产物扩展名与产物解析器，也不进入重新生成/历史入口
+    expect(p.outputExt).toBeUndefined()
+    expect(p.getOutputAssetPath).toBeUndefined()
+    expect(p.canGenerate ?? false).toBe(false)
+    expect(p.hasHistory ?? false).toBe(false)
+    expect(p.defaultSize).toEqual({ width: 320, height: 260 })
+    expect(p.defaultConfig).toEqual({ inputOrder: [] })
   })
 
   it('输入预览节点：单一输入端口（media+text 多类型），无输出端口，无配置面板', () => {
@@ -50,9 +72,16 @@ describe('NODE_PROTOTYPES', () => {
   it('AI 文本生成与输入预览节点声明更大默认尺寸（其余节点未声明走 240×160 兜底）', () => {
     expect(getPrototype('text-ai')!.defaultSize).toEqual({ width: 360, height: 240 })
     expect(getPrototype('input-preview')!.defaultSize).toEqual({ width: 320, height: 300 })
+    expect(getPrototype('forward-input')!.defaultSize).toEqual({ width: 320, height: 260 })
     for (const p of NODE_PROTOTYPES) {
-      if (p.id === 'text-ai' || p.id === 'input-preview') continue
+      if (p.id === 'text-ai' || p.id === 'input-preview' || p.id === 'forward-input') continue
       expect(p.defaultSize, `${p.id} 不应声明 defaultSize`).toBeUndefined()
+    }
+  })
+
+  it('仅输入转发节点声明 passThrough（其余节点输出均为自身产物/值）', () => {
+    for (const p of NODE_PROTOTYPES) {
+      expect(p.passThrough === true, `${p.id} 的 passThrough 应为 false/undefined`).toBe(p.id === 'forward-input')
     }
   })
 

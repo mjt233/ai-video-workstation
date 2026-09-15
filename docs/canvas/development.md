@@ -11,6 +11,14 @@
 5. `config` 字段与既有节点保持兼容（未知字段不影响读取）。
 6. **节点主体不要自行渲染 running/error 遮罩**：loading/错误状态是节点的通用能力，由 `CanvasNodeCard` 按 `status` prop 统一叠加（含「中断」按钮）；生成类节点只要经 `gen.generate` / ffmpeg 同步函数进入 running，即自动获得 loading 展示与中断能力。**例外（唯一）**：AI 文本节点声明 `statusOverlay` 为**空组件**（`() => null`）——节点主体完全自绘运行/错误状态 UI（节点内 Thinking 条 + 「停止」按钮 + 响应区错误红字），画布不渲染任何遮罩；声明空组件仅为让 `CanvasNodeCard` 跳过默认整体阻塞遮罩（默认遮罩会拦截流式输出与节点内控件）。需要同样形态的节点类型按此扩展点自行声明（见 [llm-session.md](./llm-session.md)）。
 7. **LLM 会话节点（text-ai）状态机接入约定**：节点内生成经 `stream-state` emit（running/log/taskId → 父级 `gen.beginClientRun`；终态 result{status/patch/rev} → `adoptExternalChange` + `endClientRun`），`isRunning`/`activeTaskId`/`runningLog`/`canvasTarget` 由父级按 `statusByNode` 下发 prop（恢复态同样禁用控件、「停止」可用）；流式输出走 `update:output-view` → `store.viewOnlyUpdate`（**纯内存，不写盘、不入撤销栈**）。
+8. **转发类节点（`passThrough: true`，现有唯一实例：输入转发 `forward-input`）**：语义是「收到什么就输出什么」，自身不产出资产。除原型声明外，以下四处解析入口**已统一按 `passThrough` 处理**，新增同类节点时**不要**在调用点分支，只需正确声明标志：
+   - **输出类型**：`connection.getEffectiveOutputType(nodeId, nodes, connections)` 沿连线递归解析上游类型（支持转发链、`visited` 路径回溯防环）：同类型来源 → 该类型；混合来源 → **并集数组**；未接输入 → **空数组**（类型待定，`canConnect` 放行任意端口）。原型声明的 `outputPorts[0].type`（`'media'`）只用于端口渲染占位；`getNodeOutputType` 已把 `connections` 改为**必传参数**（编译期保证没有调用点漏传，否则转发节点会被静默当成占位 `media`）。注意 `canConnect` 的三条特殊规则：`media` 是**通配类型**（端口声明用，任一端为它即兼容）、**来源为空数组**与任意端口兼容、**目标为空数组**恒不可连。
+   - **输出资产**：`generate.getNodeCurrentAssetPath(node, scope, ctx)` 穿透转发链取上游来源资产（未接输入返回 undefined）；`ctx` 即 `{ nodes, connections }`，供转发解析用。
+   - **下游输入收集**：`generate.collectInputs` 穿透转发节点，返回条目的 `nodeId` 是**最终上游节点**（不是转发节点）——下游的排序/断开/媒体分组都据此操作原始来源。
+   - **文本**：`generate.collectTextContents` 穿透转发链读取原始「文本」/「AI文本生成」节点的内容。
+   - **群组连接菜单**：`groupSelection.groupOutputTypes(nodes, ctx)` / `nodeCanConnectToPrototype(node, proto, ctx)` 传 `ctx` 时同样按实际类型判定兼容性。
+   - 转发节点**不要**声明 `outputExt` / `getOutputAssetPath` / `canGenerate` / `hasHistory`（无自身产物与历史）。
+   - **加载时的一致性**：`useCanvasStore.load` 会剔除类型不兼容的持久连线（Vue Flow 对已存在连线同样校验，不合法者只从视图静默消失，见 [interactions.md](./interactions.md)）——新增会改变类型解析规则的功能时，务必考虑「旧画布重载后哪些连线会失效」。
 
 ## 测试与验证
 
@@ -23,6 +31,7 @@
 - **Vue Flow 双向绑定**：`v-model:nodes` 绑 computed 报 readonly 写入错误，用单向绑定 + 事件回写。
 - **服务端任务终态**：`completed` / `failed`（无 success/error），轮询按 `completed` 判成功。
 - **产物固定文件名**：节点产物统一 `output.{ext}`（原型 `outputExt`），**勿再引入版本号文件名**；历史由服务端 history 目录管理，前端不要读写 `config.current`/`config.history`（旧字段仅兼容读取）。
+- **输入转发节点没有产物文件，`node-info` 探测为空属预期**：`refreshNodeOutput` 对转发节点会按上游来源路径去探测（`getNodeCurrentAssetPath` 穿透），故 `outputOf(转发节点)` 可能返回上游产物 → 这是**有意行为**（节点内不渲染 `output`，"保存为"按上游类型可用），不要为转发节点去创建产物目录或写 `config.current`。另：转发节点不显示「上游已更新角标」（`isUpstreamUpdated` 只对 `image-generate` 生效）。
 - **生成节点上传走 `/api/canvas/upload`**：`useCanvasUpload` 按 `isCanvasNodeOutputPath(dest)` 自动选择端点（画布节点固定产物路径 → canvas 上传端点，其余 → `/fs/upload`）；上传目标必须是固定产物路径，服务端先归档旧产物再覆盖；图片统一落盘 `output.jpg`（png/webp 原样写入），视频仅接受 mp4；前端与服务端两处路径正则（`paths.ts: isCanvasNodeOutputPath` 与 `canvas-upload.ts: assertCanvasNodeOutputPath`）须同步修改。
 - **节点展示用 `output` prop**：AssetCanvas 按固定路径 + node-info mtime 推导并下发给节点主体/编辑器（`outputOf`）；组件内优先 `props.output`，`config.current` 仅作旧数据回落。
 - **预览 watch 需同时监听 path 与 token**：固定路径产物每次重新生成路径不变，预览 URL 只由 token（产物 mtime）区分；节点主体若只 `watch(currentPath)`，新产物覆盖后不会刷新 URL、浏览器命中旧缓存——必须 `watch([currentPath, currentToken])`（实测踩坑，4 个节点主体均已按此实现）。

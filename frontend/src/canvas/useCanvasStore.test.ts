@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import { useCanvasStore } from './useCanvasStore'
 import { collectDragFollowSet, rectsOverlap } from './groups'
 import { clipboardBounds, PASTE_CASCADE_GAP } from './pastePlacement'
+import type { CanvasConnection, CanvasNodeData } from './types'
 
 vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
@@ -17,7 +18,7 @@ import { loadCanvas, saveCanvas, CanvasVersionError } from './api'
 const TARGET = { kind: 'scene' as const, episode: '1', shot: '1' }
 
 /** 构造 loadCanvas 的模拟返回（画布 + 版本号） */
-function canvasResult(nodes: unknown[] = [], rev = 0) {
+function canvasResult(nodes: CanvasNodeData[] = [], rev = 0) {
   return {
     canvas: {
       version: 2,
@@ -1059,8 +1060,11 @@ describe('useCanvasStore', () => {
     const persistence = {
       load: vi.fn().mockResolvedValue({
         canvas: {
-          nodes: [{ id: 'a', prototypeId: 'text', name: 'n', x: 1, y: 2, width: 10, height: 10, config: {} }],
-          connections: [{ id: 'c', fromNodeId: 'a', fromPortId: 'out', toNodeId: 'a', toPortId: 'in' }],
+          nodes: [
+            { id: 'a', prototypeId: 'text', name: 'n', x: 1, y: 2, width: 10, height: 10, config: {} },
+            { id: 'b', prototypeId: 'forward-input', name: 'f', x: 30, y: 2, width: 10, height: 10, config: {} },
+          ],
+          connections: [{ id: 'c', fromNodeId: 'a', fromPortId: 'out', toNodeId: 'b', toPortId: 'in' }],
           groups: [{ id: 'g', name: 'g', color: '#1976D2', x: 0, y: 0, width: 100, height: 100 }],
         },
         rev: 7,
@@ -1071,7 +1075,7 @@ describe('useCanvasStore', () => {
     await store.load()
     expect(store.loaded.value).toBe(true)
     expect(store.savedRev.value).toBe(7)
-    expect(store.nodes.value).toHaveLength(1)
+    expect(store.nodes.value).toHaveLength(2)
     expect(store.connections.value).toHaveLength(1)
     expect(store.groups.value).toHaveLength(1)
     // 缺省字段由 createCanvasData 兜底
@@ -1079,6 +1083,41 @@ describe('useCanvasStore', () => {
     expect(store.data.value.version).toBeGreaterThan(0)
     // 适配器注入后不再走画布定义接口
     expect(loadCanvas).not.toHaveBeenCalled()
+  })
+
+  it('加载时剔除类型不兼容的持久连线（避免不可见又删不掉的死连线）', async () => {
+    // 场景：转发节点接上图片来源后输出类型收敛为 image，原先指向「裁剪视频」（仅接受 video）的
+    // 连线随之失效——Vue Flow 的 createGraphEdges 只会把它从视图丢掉（文件与 store 里仍在），
+    // 故 store 必须在加载时显式剔除并告警。
+    const nodes: CanvasNodeData[] = [
+      { id: 'img', prototypeId: 'image-loader', name: '图', x: 0, y: 0, width: 10, height: 10, config: { assetPath: 'assert/a.jpg' } },
+      { id: 'fw', prototypeId: 'forward-input', name: '转发', x: 0, y: 0, width: 10, height: 10, config: {} },
+      { id: 'vt', prototypeId: 'video-trim', name: '裁剪视频', x: 0, y: 0, width: 10, height: 10, config: {} },
+    ]
+    const connections: CanvasConnection[] = [
+      { id: 'ok', fromNodeId: 'img', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+      { id: 'bad', fromNodeId: 'fw', fromPortId: 'out', toNodeId: 'vt', toPortId: 'in' },
+    ]
+    vi.mocked(loadCanvas).mockResolvedValue({
+      canvas: {
+        version: 2,
+        kind: 'scene',
+        nodes,
+        connections,
+        groups: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      rev: 3,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    const store = useCanvasStore('p', TARGET)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    await store.load()
+    // 不兼容连线被剔除、兼容连线保留，并给出告警
+    expect(store.connections.value.map((c) => c.id)).toEqual(['ok'])
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 
   it('持久化适配器：save 以 CAS 版本号写入并回写新 rev', async () => {

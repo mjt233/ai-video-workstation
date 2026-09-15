@@ -294,3 +294,135 @@ describe('collectPreviewSourceInputs（输入预览节点：穿透一层收集�
     ])
   })
 })
+
+describe('输入转发节点（passThrough）：资产路径与文本原样向下游透传', () => {
+  /** 转发节点（单一输入口可多路，无自身产物） */
+  const fw: CanvasNodeData = {
+    id: 'fw', prototypeId: 'forward-input', name: '输入转发', x: 0, y: 0, width: 320, height: 260,
+    config: { inputOrder: [] },
+  }
+  /** 第二个转发节点（构造转发链） */
+  const fw2: CanvasNodeData = {
+    id: 'fw2', prototypeId: 'forward-input', name: '输入转发2', x: 0, y: 0, width: 320, height: 260,
+    config: { inputOrder: [] },
+  }
+  const audioNode: CanvasNodeData = {
+    id: 'aud', prototypeId: 'audio-loader', name: '加载音频', x: 0, y: 0, width: 10, height: 10,
+    config: { assetPath: 'assert/custom/b.flac' },
+  }
+  const textNode: CanvasNodeData = {
+    id: 't1', prototypeId: 'text', name: '文本', x: 0, y: 0, width: 10, height: 10,
+    config: { text: '夕阳下的天台' },
+  }
+  /** 下游消费节点（生成视频：单一 media 输入口） */
+  const downstream: CanvasNodeData = {
+    id: 'vg', prototypeId: 'video-generate', name: '生成视频', x: 0, y: 0, width: 10, height: 10,
+    config: { inputOrder: [] },
+  }
+  /** 转发节点 ← 加载图片（loader: assert/character/张三/appearance.jpg） */
+  const connsToForward: CanvasConnection[] = [
+    { id: 'c1', fromNodeId: 'l1', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+  ]
+  /** 转发节点 → 下游消费节点 */
+  const connsToDownstream: CanvasConnection[] = [
+    { id: 'c2', fromNodeId: 'fw', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+  ]
+
+  it('转发节点的输出资产路径 = 上游来源资产路径（未接输入为 undefined）', () => {
+    const ctx = { nodes: [loader, fw], connections: connsToForward }
+    expect(getNodeCurrentAssetPath(fw, undefined, ctx)).toBe('assert/character/张三/appearance.jpg')
+    // 未接输入：无输入即无输出
+    expect(getNodeCurrentAssetPath(fw, undefined, { nodes: [loader, fw], connections: [] })).toBeUndefined()
+    // 缺 ctx（旧调用口径）时不解析转发节点
+    expect(getNodeCurrentAssetPath(fw, undefined)).toBeUndefined()
+  })
+
+  it('转发节点自身产物路径按 scope 推导为上游生成类节点的固定产物', () => {
+    const scope = { kind: 'scene' as const, primary: '1', secondary: '1' }
+    const conns: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'g1', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+    ]
+    const ctx = { nodes: [gen, fw], connections: conns }
+    expect(getNodeCurrentAssetPath(fw, scope, ctx)).toBe('assert/scene/1/1/canvas/g1/output.jpg')
+  })
+
+  it('下游 collectInputs 穿透转发节点：返回最终上游节点（nodeId/path/label 均为原始来源）', () => {
+    const inputs = collectInputs('vg', [...connsToForward, ...connsToDownstream], [loader, fw, downstream])
+    expect(inputs).toEqual([
+      { nodeId: 'l1', path: 'assert/character/张三/appearance.jpg', label: 'appearance.jpg' },
+    ])
+  })
+
+  it('多路媒体输入全部向下游转发；转发节点自身 config.inputOrder 决定下游收到的顺序', () => {
+    const conns: CanvasConnection[] = [
+      ...connsToForward,
+      { id: 'c3', fromNodeId: 'aud', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+      ...connsToDownstream,
+    ]
+    const nodes = [loader, audioNode, fw, downstream]
+    // 下游无需排序：转发节点已按自己的 config.inputOrder 排列，转发顺序即下游收到的顺序
+    expect(collectInputs('vg', conns, nodes).map((i) => i.nodeId)).toEqual(['l1', 'aud'])
+    // 转发节点自身（节点主体内拖拽排序写 config.inputOrder）→ 转发顺序随之改变
+    // （config 由调用方显式传入，与 useCanvasNodeOps.inputsOf 的调用口径一致）
+    const orderedFw: CanvasNodeData = { ...fw, config: { inputOrder: ['aud', 'l1'] } }
+    const orderedInputs = collectInputs('fw', conns, [loader, audioNode, orderedFw, downstream], orderedFw.config)
+    expect(orderedInputs.map((i) => i.nodeId)).toEqual(['aud', 'l1'])
+    expect(orderedInputs[0].path).toBe('assert/custom/b.flac')
+  })
+
+  it('转发链（转发 → 转发 → 下游）整链透传，不复制不落盘', () => {
+    const conns: CanvasConnection[] = [
+      ...connsToForward,
+      { id: 'c3', fromNodeId: 'fw', fromPortId: 'out', toNodeId: 'fw2', toPortId: 'in' },
+      { id: 'c4', fromNodeId: 'fw2', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    ]
+    const inputs = collectInputs('vg', conns, [loader, fw, fw2, downstream])
+    expect(inputs.map((i) => i.nodeId)).toEqual(['l1'])
+    expect(inputs[0].path).toBe('assert/character/张三/appearance.jpg')
+  })
+
+  it('未接输入的转发节点不向下游产出条目（空路径不进入收集结果）', () => {
+    expect(collectInputs('vg', connsToDownstream, [fw, downstream])).toEqual([])
+  })
+
+  it('环形连线数据防御：不递归不终止', () => {
+    const conns: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'fw', fromPortId: 'out', toNodeId: 'fw2', toPortId: 'in' },
+      { id: 'c2', fromNodeId: 'fw2', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+      { id: 'c3', fromNodeId: 'fw', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    ]
+    expect(collectInputs('vg', conns, [fw, fw2, downstream])).toEqual([])
+  })
+
+  it('文本经转发节点原样透传给下游（下游可作为外部提示词取值）', () => {
+    const conns: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 't1', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+      { id: 'c2', fromNodeId: 'fw', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    ]
+    expect(collectTextContents('vg', conns, [textNode, fw, downstream])).toEqual(['夕阳下的天台'])
+  })
+
+  it('文本经转发链同样透传；未接输入的转发节点不产出文本', () => {
+    const chain: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 't1', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+      { id: 'c2', fromNodeId: 'fw', fromPortId: 'out', toNodeId: 'fw2', toPortId: 'in' },
+      { id: 'c3', fromNodeId: 'fw2', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    ]
+    expect(collectTextContents('vg', chain, [textNode, fw, fw2, downstream])).toEqual(['夕阳下的天台'])
+    const emptyForward: CanvasConnection[] = [
+      { id: 'c1', fromNodeId: 'fw', fromPortId: 'out', toNodeId: 'vg', toPortId: 'in' },
+    ]
+    expect(collectTextContents('vg', emptyForward, [fw, downstream])).toEqual([])
+  })
+
+  it('媒体与文本混合接入：媒体进 collectInputs、文本进 collectTextContents（各归其位）', () => {
+    const conns: CanvasConnection[] = [
+      ...connsToForward,
+      { id: 'c3', fromNodeId: 't1', fromPortId: 'out', toNodeId: 'fw', toPortId: 'in' },
+      ...connsToDownstream,
+    ]
+    const nodes = [loader, textNode, fw, downstream]
+    expect(collectInputs('vg', conns, nodes).map((i) => i.nodeId)).toEqual(['l1'])
+    expect(collectTextContents('vg', conns, nodes)).toEqual(['夕阳下的天台'])
+  })
+})

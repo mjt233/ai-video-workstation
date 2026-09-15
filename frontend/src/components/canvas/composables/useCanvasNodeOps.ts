@@ -336,7 +336,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   function audioInputsOf(nodeId: string): CanvasInputInfo[] {
     const node = nodeMap.value[nodeId]
     const all = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope()))
-    return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === 'audio')
+    return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value, store.connections.value) === 'audio')
   }
 
   /**
@@ -351,7 +351,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   function imageInputsOf(nodeId: string): CanvasInputInfo[] {
     const node = nodeMap.value[nodeId]
     const all = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope()))
-    return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === 'image')
+    return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value, store.connections.value) === 'image')
   }
 
   /** 节点当前输入资产信息（含来源节点，供编辑器预览/拖拽排序；生成类来源按固定产物路径推导） */
@@ -373,7 +373,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
   function videoInputsOf(nodeId: string, type: 'image' | 'video' | 'audio'): CanvasInputInfo[] {
     const node = nodeMap.value[nodeId]
     const all = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node?.config, undefined, getScope()))
-    return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value) === type)
+    return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value, store.connections.value) === type)
   }
 
   /** 视频生成/拼接节点三组输入（非这两类节点为空数组；按 config.inputOrder 排序） */
@@ -476,7 +476,7 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     const collected = withVersions(collectInputs(nodeId, store.connections.value, store.nodes.value, node.config, undefined, getScope()))
     const out: LlmMediaInputItem[] = []
     for (const i of collected) {
-      const type = getNodeOutputType(i.nodeId, store.nodes.value)
+      const type = getNodeOutputType(i.nodeId, store.nodes.value, store.connections.value)
       if (!isMediaOutputType(type)) continue
       out.push({ nodeId: i.nodeId, path: i.path, type, label: i.label, version: i.version })
     }

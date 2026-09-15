@@ -6,9 +6,9 @@
  * components/canvas/composables/useCanvasGroup.ts 与 useCanvasSelection.ts。
  */
 
-import type { CanvasNodeData, DataType, NodeConfig, PortType } from './types'
+import type { CanvasConnection, CanvasNodeData, DataType, NodeConfig, PortType } from './types'
 import { getPrototype, NODE_PROTOTYPES, type NodePrototype } from './registry'
-import { canConnect } from './connection'
+import { canConnect, getNodeOutputType } from './connection'
 
 /** 群组虚线框合成节点 id（不入 store，仅用于渲染与整组拖动） */
 export const GROUP_FRAME_ID = '__group-frame'
@@ -115,17 +115,26 @@ export function findNodeAt(
 }
 
 /**
- * 收集群组输出类型（按原型输出端口去重，v1 每节点单输出端口且为单一类型）。
+ * 收集群组输出类型（按节点实际输出类型去重，v1 每节点单输出端口且为单一类型）。
+ *
+ * 传入 `ctx` 时按连线解析**实际输出类型**（输入转发节点的输出类型取决于其上游来源，
+ * 读原型声明会把「转发图片」误判为任意媒体，从而把裁剪视频等类型专一下游列成可选）；
+ * 未传 `ctx` 时为纯原型声明口径（旧调用/单测兼容，转发节点退化为其占位类型 'media'）。
  *
  * @param nodes 选中节点列表
+ * @param ctx 画布解析上下文（可选；解析输入转发节点的输出类型需要）
  * @returns 去重后的输出类型列表
  */
-export function groupOutputTypes(nodes: CanvasNodeData[]): DataType[] {
+export function groupOutputTypes(
+  nodes: CanvasNodeData[],
+  ctx?: { nodes: CanvasNodeData[]; connections: CanvasConnection[] },
+): DataType[] {
   const types = new Set<DataType>()
   for (const n of nodes) {
     const proto = getPrototype(n.prototypeId)
-    const t = proto?.outputPorts[0]?.type
-    // 输出端口不声明数组类型（v1 约定单类型输出）；数组防御性跳过
+    // 输出端口不声明数组类型（v1 约定单类型输出；转发节点声明 'media' 为占位）
+    const t = ctx ? getNodeOutputType(n.id, ctx.nodes, ctx.connections) : proto?.outputPorts[0]?.type
+    // 数组/无法解析（未接输入的转发节点）防御性跳过
     if (t && !Array.isArray(t)) types.add(t)
   }
   return [...types]
@@ -212,14 +221,21 @@ function getPrototypeWithInputs(): NodePrototype[] {
 /**
  * 某节点输出是否能连接到指定原型的任一输入端口。
  *
+ * 传入 `ctx` 时同样按连线解析实际输出类型（输入转发节点口径一致）。
+ *
  * @param node 源节点
  * @param prototype 目标原型
+ * @param ctx 画布解析上下文（可选）
  * @returns 可连接返回 true
  */
-export function nodeCanConnectToPrototype(node: CanvasNodeData, prototype: NodePrototype): boolean {
+export function nodeCanConnectToPrototype(
+  node: CanvasNodeData,
+  prototype: NodePrototype,
+  ctx?: { nodes: CanvasNodeData[]; connections: CanvasConnection[] },
+): boolean {
   const proto = getPrototype(node.prototypeId)
   if (!proto) return false
-  const outType = proto.outputPorts[0]?.type
+  const outType = ctx ? getNodeOutputType(node.id, ctx.nodes, ctx.connections) : proto.outputPorts[0]?.type
   if (!outType) return false
   return prototype.inputPorts.some((port) => canConnect(outType, port.type))
 }

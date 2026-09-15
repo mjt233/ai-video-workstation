@@ -60,6 +60,7 @@
         :text-inputs="textInputs"
         :source-label="sourceLabel"
         :source-input-count="sourceInputCount"
+        :output-type="outputType"
         :is-running="isRunning"
         :active-task-id="status?.taskId"
         :running-log="status?.lastLog"
@@ -236,7 +237,7 @@ import { NodeResizer } from '@vue-flow/node-resizer'
 import type { OnResizeEnd } from '@vue-flow/node-resizer'
 import '@vue-flow/node-resizer/dist/style.css'
 import { getPrototype } from '../../canvas/registry'
-import type { CanvasNodeData } from '../../canvas/types'
+import type { CanvasNodeData, PortType } from '../../canvas/types'
 import type { GenerateStatus } from '../../canvas/useCanvasGeneration'
 import { nodeProgressPercent } from '../../canvas/useCanvasGeneration'
 import { formatBytes, type CanvasUploadFilePayload, type CanvasUploadState } from './composables/useCanvasUpload'
@@ -299,15 +300,19 @@ const props = defineProps<{
   /** 上游已更新角标 */
   upstreamUpdated: boolean
   /** AI 文本生成节点：媒体输入条目（来源节点输出类型为图片/音频/视频；单一输入口按来源类型归类）；
-   *  输入预览节点：上游来源节点的媒体输入（穿透一层预览来源节点的输入） */
+   *  输入预览节点：上游来源节点的媒体输入（穿透一层预览来源节点的输入）；
+   *  输入转发节点：本节点接入的媒体输入（节点主体内支持组内拖拽排序与悬浮断开） */
   inputs?: unknown[]
   /** AI 文本生成节点：文本输入内容（来源为「文本」节点，取其 config.text）；
-   *  输入预览节点：上游来源节点的文本输入内容 */
+   *  输入预览节点：上游来源节点的文本输入内容；
+   *  输入转发节点：本节点接入的文本输入内容（原样透传给下游） */
   textInputs?: string[]
   /** 输入预览节点：上游来源节点显示名（未连接时 undefined，节点主体显示「未连接上游节点」） */
   sourceLabel?: string
   /** 输入预览节点：上游来源节点的输入总数（媒体 + 文本；未连接时 undefined） */
   sourceInputCount?: number
+  /** 输入转发节点：解析出的实际输出类型（节点主体类型徽标；未接输入时为原型占位声明） */
+  outputType?: PortType
   /** AI 文本生成节点：是否在运行（父级按 statusByNode 下发；恢复态据此禁用控件、显示 Thinking 条） */
   isRunning?: boolean
   /** AI 文本生成节点：画布定位（生成请求携带；服务端会话落盘定位） */

@@ -44,7 +44,7 @@ export function applyConnectionSync(data: CanvasData, event: ConnectionSyncEvent
   }
 
   // connect：按来源节点输出类型归类
-  const srcType = getNodeOutputType(event.connection.fromNodeId, data.nodes)
+  const srcType = getNodeOutputType(event.connection.fromNodeId, data.nodes, data.connections)
   if (srcType === 'image') {
     const imageClips = d.imageClips ?? []
     if (imageClips.some((c) => c.sourceNodeId === event.connection.fromNodeId)) return data

@@ -4,7 +4,9 @@
 
 ## 连线规则（`frontend/src/canvas/connection.ts`）
 
-- 按**端口数据类型**判断兼容（ComfyUI 思路），v1 仅支持同类型：`image→image`、`text→text`；端口类型为**数组**（如 AI文本生成节点的 `['media','text']`、生成图片节点的 `['image','text']`）时任一匹配即可连接；`media` 输入口（生成视频）可接受任意来源（`canConnect`）。
+- 按**端口数据类型**判断兼容（ComfyUI 思路），v1 仅支持同类型：`image→image`、`text→text`；端口类型为**数组**（如 AI文本生成节点的 `['media','text']`、生成图片节点的 `['image','text']`）时任一匹配即可连接。两个特殊取值：`media` 是**通配类型**（仅用于端口声明，含义「任意类型」——作输入口接受任意来源，如生成视频节点；作混合输入口成员同样接受任意来源）；**空数组**表示「类型尚未确定」（未接入输入的「输入转发」节点输出），与任意端口兼容 → 允许先搭拓扑后接来源（而**目标端口为空数组**表示不接受任何类型，恒不可连）。
+- **输入转发节点的输出类型按连线实时解析**（`getEffectiveOutputType`，支持转发链）：上游来源全为同一类型 → 该类型；**混合来源 → 各来源类型的并集数组**（video+audio → `['video','audio']`、媒体+文本 → `['image','text']`），并集在连线校验中取乐观语义（任一成员兼容即可连，实际输入由下游按类型过滤）；未接输入 → 空数组（任意下游）。**所有连线校验入口都必须把 `connections` 传给 `getNodeOutputType`**（已改为必传参数，编译期保证）。
+- **加载时剔除不兼容连线**：Vue Flow 的 `createGraphEdges` 对已存在的连线同样会校验，不合法者只被**静默丢弃出视图**（store 与 `canvas.json` 仍在），形成「看不见、点不到、删不掉」的死连线。故 `useCanvasStore.load` 显式过滤一次（`dropInvalidConnections`，`canConnectNodes` 判定）并 `console.warn`，保证数据与视图只有一个事实源。典型场景：转发节点接上来源后输出类型由「未确定」收敛为具体类型，原先指向类型专一下游的连线随之失效。
 - **生成图片的单一 `in` 口同时接受图片（参考图，可多路）与文本（外部提示词）**：连接后按来源节点输出类型自动归类，文本来源作为 `prompt` 取值（见 [node-types.md](./node-types.md)）。**文本输入在生成时限制为一个**（与生成视频节点同规则）：连接多个文本来源时不提交生成，编辑器红字 + `useCanvasNodeOps.generateNode` snackbar 拦截；连线本身允许建立（不做连线期拦截）。
 - `canConnectNodes` = 类型兼容 + 不成环（`wouldCreateCycle` 反向可达性检测）+ 目标输入未满。
 - 建立连线：从源节点输出手柄拖到目标节点输入手柄（`@connect` → `store.connect`）；连接失败静默忽略。
@@ -18,7 +20,7 @@
   - 右键连线 → 「断开连接」（`@edge-context-menu`，需 `event.preventDefault()` 阻止浏览器默认菜单）；
   - 右键节点 → 「断开连接」（断开该节点全部连线）；
   - 选中连线后按 `Delete`；
-  - **编辑器/节点输入缩略图右上角红色 x → 快捷断开该输入**（生成图片/生成视频/拼接视频/AI文本生成节点）：悬浮缩略图时显示，点击即断开该来源节点→本节点的连线并同步清理 `config.inputOrder` 中该来源 id（`nodeOps.disconnectInput` → `store.disconnect` + `removeInputOrderEntry`，两者合并为单次撤销，Ctrl+Z 可整体恢复；生成视频节点经 connectionSync 自动移除导演台对应素材块）。
+  - **编辑器/节点输入缩略图右上角红色 x → 快捷断开该输入**（生成图片/生成视频/拼接视频/AI文本生成/输入转发节点）：悬浮缩略图时显示，点击即断开该来源节点→本节点的连线并同步清理 `config.inputOrder` 中该来源 id（`nodeOps.disconnectInput` → `store.disconnect` + `removeInputOrderEntry`，两者合并为单次撤销，Ctrl+Z 可整体恢复；生成视频节点经 connectionSync 自动移除导演台对应素材块）。
 
 ## 画布交互
 

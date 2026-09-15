@@ -58,3 +58,4 @@
 - 悬浮快捷断开：输入缩略图右上角悬浮显示红色 x，点击断开该输入连接（断开规则见 [interactions.md](./interactions.md)；`remove` 事件 → `disconnect-input`）。
 - 拖拽排序：组内 HTML5 DnD，容器 `dragover` 按鼠标水平位置计算插入下标并高亮插入位置；drop 后 `reorder` 事件上报本组新 nodeId 顺序，编辑器经 `mergeInputOrder` 合并回全局 `config.inputOrder` 持久化（只影响本组相对顺序，其他组保持不动）。
 - 顺序生效点：`generate.ts: collectInputs / collectInputPaths` 遵循 `config.inputOrder`（未记录的节点按连接顺序排末尾）；生成节点发起生成时也会把该顺序的输入图传给 `image-edit` 工作流。
+- **节点主体内的实例（无配置面板的节点）**：AI文本生成、输入转发、输入预览三个节点把 `CanvasInputPreview` 直接渲染在**节点主体**内。三者的差异：AI文本生成与输入转发**可交互**（监听 `reorder` → `mergeInputOrder` 合并回**本节点**的 `config.inputOrder`；监听 `remove` → 上抛 `disconnect-input`），容器必须加 `nodrag nowheel` 类避免预览内 HTML5 拖拽/滚动与 Vue Flow 节点拖拽、画布滚轮缩放冲突；输入预览节点**只读**（预览对象是其上游来源节点的输入，排序/断开应在来源节点上操作）。

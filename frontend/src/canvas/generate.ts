@@ -31,24 +31,86 @@ export interface CanvasInputInfo {
 }
 
 /**
+ * 输入转发（`passThrough` 节点）解析所需的上下文：节点与连线都要有。
+ *
+ * 转发节点的输出不是自己的产物，而是上游来源的资产路径/文本/类型，故任何需要
+ * 「解析转发节点输出」的入口都必须能拿到整图连线；整体传入（而非拆成两个可选参数）
+ * 可避免「只传节点漏传连线」导致转发节点被静默当成普通节点。
+ */
+export interface CanvasResolveContext {
+  /** 画布全部节点 */
+  nodes: CanvasNodeData[]
+  /** 画布全部连线 */
+  connections: CanvasConnection[]
+}
+
+/**
+ * 解析节点在当前画布中的输入来源（含**穿透转发节点**）。
+ *
+ * 转发节点（`passThrough`）自身没有资产与文本，只是一段「透传管道」：收到什么就输出什么。
+ * 本函数把「转发链接」折叠掉，直接返回**最终上游**的节点：
+ * - 普通来源节点 → 原样返回；
+ * - 来源节点是转发节点 → 继续向上取其来源（支持转发链 A→转发→转发→下游）；
+ * - 未接输入的转发节点 → 不产出条目（「无输入即无输出」，下游不会收到空路径）。
+ *
+ * `visited` 集合防御旧数据/损坏文件中的环（正常连线由 canConnectNodes 拦截成环），
+ * 否则递归不终止。返回顺序为连线顺序；`config.inputOrder` 的排序由调用方（collectInputs）负责。
+ *
+ * @param nodeId 目标节点 id
+ * @param ctx 画布上下文（全部节点与连线）
+ * @param visited 已访问节点 id 集合（内部递归用，防环）
+ * @returns 最终上游来源节点数组（按连线顺序；重复来源节点会重复出现）
+ */
+function resolveSourceNodes(
+  nodeId: string,
+  ctx: CanvasResolveContext,
+  visited: Set<string> = new Set<string>(),
+): CanvasNodeData[] {
+  if (visited.has(nodeId)) return []
+  visited.add(nodeId)
+  const out: CanvasNodeData[] = []
+  for (const c of ctx.connections) {
+    if (c.toNodeId !== nodeId) continue
+    const src = ctx.nodes.find((n) => n.id === c.fromNodeId)
+    if (!src) continue
+    if (getPrototype(src.prototypeId)?.passThrough) {
+      out.push(...resolveSourceNodes(src.id, ctx, visited))
+      continue
+    }
+    out.push(src)
+  }
+  return out
+}
+
+/**
  * 获取节点当前的资产相对路径。
  *
  * 输出资产解析优先级：
- * 1. 生成类节点（原型声明 outputExt）且已提供 scope → 固定产物路径
+ * 1. 输入转发节点（`passThrough`）且已提供 ctx → 上游来源的资产路径
+ *    （穿透整条转发链；未接输入返回 undefined）；
+ * 2. 生成类节点（原型声明 outputExt）且已提供 scope → 固定产物路径
  *    assert/{scope}/canvas/{nodeId}/output.{ext}（"当前结果"为文件系统事实，不依赖元数据）；
- * 2. 原型声明的解析器（加载类读 config.assetPath）；
- * 3. 未声明解析器的节点按画布约定默认读 config.current.path（旧数据兼容）。
+ * 3. 原型声明的解析器（加载类读 config.assetPath）；
+ * 4. 未声明解析器的节点按画布约定默认读 config.current.path（旧数据兼容）。
  *
  * @param node 节点数据（可为 undefined）
  * @param scope 画布作用域（生成类节点推导固定产物路径需要）
+ * @param ctx 画布上下文（解析转发节点的上游来源需要；转发节点缺此参数时返回 undefined）
  * @returns 项目内相对路径或 undefined
  */
 export function getNodeCurrentAssetPath(
   node: CanvasNodeData | undefined,
   scope?: CanvasScope,
+  ctx?: CanvasResolveContext,
 ): string | undefined {
   if (!node) return undefined
   const proto = getPrototype(node.prototypeId)
+  // 输入转发节点：输出即上游来源资产（穿透转发链，自身无产物文件）
+  if (proto?.passThrough) {
+    if (!ctx) return undefined
+    const sources = resolveSourceNodes(node.id, ctx)
+    return sources.length > 0 ? getNodeCurrentAssetPath(sources[0], scope, ctx) : undefined
+  }
   // 生成类节点：产物为固定文件名，按 scope+nodeId+扩展名恒等推导
   if (proto?.outputExt) {
     // 扩展名随节点配置变化的例外（其余生成节点取原型声明扩展名）：
@@ -75,6 +137,10 @@ export function getNodeCurrentAssetPath(
  * 收集某节点的输入资产信息（图片路径 + 来源节点），顺序遵循节点 config.inputOrder；
  * inputOrder 中未记录的节点按连接顺序排在末尾。
  *
+ * 上游为**输入转发节点**时自动穿透（见 resolveSourceNodes）：返回条目的 `nodeId` 是
+ * 最终上游节点 id 而非转发节点 id——下游的输入排序、悬浮断开、媒体分组都据此操作
+ * 原始来源节点（转发节点自身没有资产，若返回其 id 会让这些动作打错对象）。
+ *
  * @param nodeId 目标节点 id
  * @param connections 全部连线
  * @param nodes 全部节点
@@ -92,14 +158,20 @@ export function collectInputs(
   scope?: CanvasScope,
 ): CanvasInputInfo[] {
   const order: string[] = Array.isArray(config?.inputOrder) ? (config.inputOrder as string[]) : []
+  const ctx: CanvasResolveContext = { nodes, connections }
   const list: CanvasInputInfo[] = []
   for (const c of connections) {
     if (c.toNodeId !== nodeId) continue
     if (portId && c.toPortId !== portId) continue
     const src = nodes.find((n) => n.id === c.fromNodeId)
-    const p = getNodeCurrentAssetPath(src, scope)
-    if (!src || !p) continue
-    list.push({ nodeId: src.id, path: p, label: p.split('/').pop() ?? p })
+    if (!src) continue
+    // 转发节点穿透：取最终上游来源（未接输入的转发节点不产出条目）
+    const sources = getPrototype(src.prototypeId)?.passThrough ? resolveSourceNodes(src.id, ctx) : [src]
+    for (const finalSrc of sources) {
+      const p = getNodeCurrentAssetPath(finalSrc, scope, ctx)
+      if (!p) continue
+      list.push({ nodeId: finalSrc.id, path: p, label: p.split('/').pop() ?? p })
+    }
   }
   list.sort((a, b) => {
     const ia = order.indexOf(a.nodeId)
@@ -110,11 +182,14 @@ export function collectInputs(
 }
 
 /**
- * 收集某节点的文本输入内容（来源节点输出类型为 text）。
+ * 收集某节点的文本输入内容（来源节点实际输出类型为 text）。
  *
  * 文本来源包括「文本」节点（读 config.text）与「AI 文本生成」节点（读 config.output，
  * 该节点产物写入 output 而非 text）；空白内容（空串/纯空白）不收集——无内容的输入
  * 不能作为提示词。顺序按连接顺序（文本输入不参与 config.inputOrder 排序）。
+ *
+ * 上游为**输入转发节点**时自动穿透（文本经转发链路原样传递，故读取最终上游的
+ * config.text / config.output）；未接输入的转发节点不产出文本。
  *
  * @param nodeId 目标节点 id
  * @param connections 全部连线
@@ -133,7 +208,13 @@ export function collectTextContents(
     if (c.toNodeId !== nodeId) continue
     if (portId && c.toPortId !== portId) continue
     const src = nodes.find((n) => n.id === c.fromNodeId)
-    if (!src || getNodeOutputType(src.id, nodes) !== 'text') continue
+    if (!src) continue
+    if (getPrototype(src.prototypeId)?.passThrough) {
+      // 转发节点穿透：文本语义原样传递（「文本」/「AI文本生成」节点都可经转发链路传入）
+      out.push(...collectTextContents(src.id, connections, nodes))
+      continue
+    }
+    if (getNodeOutputType(src.id, nodes, connections) !== 'text') continue
     const raw = src.config.text ?? src.config.output
     const text = typeof raw === 'string' ? raw : ''
     if (text.trim()) out.push(text)
@@ -200,7 +281,7 @@ export function collectPreviewSourceInputs(
   if (!source) return null
   const media: PreviewMediaInput[] = []
   for (const info of collectInputs(source.id, connections, nodes, source.config, undefined, scope)) {
-    const type = getNodeOutputType(info.nodeId, nodes)
+    const type = getNodeOutputType(info.nodeId, nodes, connections)
     if (type !== 'image' && type !== 'video' && type !== 'audio') continue
     media.push({ nodeId: info.nodeId, path: info.path, type, label: info.label })
   }
@@ -227,3 +308,4 @@ export function mergeInputOrder(inputOrder: string[], orderedIds: string[]): str
   const rest = inputOrder.filter((id) => !groupIds.has(id))
   return [...rest, ...orderedIds]
 }
+

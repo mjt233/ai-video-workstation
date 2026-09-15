@@ -8,7 +8,7 @@ import { computed, reactive } from 'vue'
 import { getPrototype } from '../../../canvas/registry'
 import { getNodeOutputType } from '../../../canvas/connection'
 import { getNodeCurrentAssetPath } from '../../../canvas/generate'
-import type { CanvasNodeData } from '../../../canvas/types'
+import type { CanvasConnection, CanvasNodeData } from '../../../canvas/types'
 import type { CanvasScope } from '../../../canvas/paths'
 import type { CanvasStoreApi, NodeMap, SaveAsType } from './types'
 
@@ -93,12 +93,24 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
    * 节点是否显示「保存为」菜单：有当前产物即可
    * （图片/视频/音频输出节点均支持；各节点可保存的目标类型见 saveTargetsOf）。
    *
+   * 输入转发节点无自身产物，但输出即上游来源资产，故同样可「保存为」
+   * （传 ctx 穿透解析，见 getNodeCurrentAssetPath）。
+   *
    * @param node 右键菜单对应节点
    * @returns 显示「保存为」返回 true
    */
   function canSaveImage(node: CanvasNodeData | undefined): boolean {
     if (!node || !contextMenu.nodeId) return false
-    return !!getNodeCurrentAssetPath(node, getScope())
+    return !!getNodeCurrentAssetPath(node, getScope(), resolveCtx())
+  }
+
+  /**
+   * 画布解析上下文（解析输入转发节点的上游来源/输出类型需要）。
+   *
+   * @returns { nodes, connections }
+   */
+  function resolveCtx(): { nodes: CanvasNodeData[]; connections: CanvasConnection[] } {
+    return { nodes: store.nodes.value, connections: store.connections.value }
   }
 
   /**
@@ -112,8 +124,8 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
    */
   function saveTargetsOf(node: CanvasNodeData | undefined): SaveAsType[] {
     if (!node || !contextMenu.nodeId) return []
-    if (!getNodeCurrentAssetPath(node, getScope())) return []
-    const outputType = getNodeOutputType(contextMenu.nodeId, store.nodes.value)
+    if (!getNodeCurrentAssetPath(node, getScope(), resolveCtx())) return []
+    const outputType = getNodeOutputType(contextMenu.nodeId, store.nodes.value, store.connections.value)
     if (outputType === 'image') {
       return ['character', 'character-variant', 'stage', 'stage-variant', 'prop-image', 'custom']
     }

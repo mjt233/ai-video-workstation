@@ -391,7 +391,7 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
   function probeDirectorAudioDuration(sourceId: string, targetId: string): void {
     const target = nodeMap.value[targetId]
     const source = nodeMap.value[sourceId]
-    if (target?.prototypeId !== 'video-generate' || getNodeOutputType(sourceId, store.nodes.value) !== 'audio') return
+    if (target?.prototypeId !== 'video-generate' || getNodeOutputType(sourceId, store.nodes.value, store.connections.value) !== 'audio') return
     const path = getNodeCurrentAssetPath(source)
     if (!path) return
     getAudioInfo(project, path)

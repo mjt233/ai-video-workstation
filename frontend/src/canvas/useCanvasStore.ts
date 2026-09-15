@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { createCanvasData, newId, type CanvasConnection, type CanvasData, type CanvasGroupData, type CanvasNodeData, type NodeConfig } from './types'
 import { loadCanvas, saveCanvas, CanvasVersionError, type CanvasTarget } from './api'
-import { canConnect, canConnectNodes, getNodeInputPortId, getNodeOutputPortId } from './connection'
+import { canConnect, canConnectNodes, getNodeInputPortId, getNodeOutputPortId, getNodeOutputType } from './connection'
 import { getPrototype } from './registry'
 import { applyConnectionSync } from './connectionSync'
 import { serializeNodeClipboard, type NodeClipboardPayload } from './nodeClipboard'
@@ -17,6 +17,40 @@ export const DEFAULT_NODE_SIZE = { width: 240, height: 160 }
 
 /** 撤销/重做历史栈容量上限 */
 const HISTORY_LIMIT = 50
+
+/**
+ * 剔除类型不兼容的持久连线（画布加载时的一致性修复）。
+ *
+ * 为什么必须在加载时剔除：Vue Flow 的 `createGraphEdges` 对**已存在的**连线同样会调用
+ * `isValidConnection`，不合法者只被**静默丢弃出视图**（store 与 canvas.json 里仍然存在），
+ * 于是形成「看不见、点不到、也删不掉」的死连线；下次保存又会把这条不可见连线写回文件。
+ * 数据与视图必须只有一个事实源，故此处显式过滤 + 告警。
+ *
+ * 何时会出现不兼容的持久连线：① 画布文件被手工编辑/外部导入；② 类型解析规则变化
+ * （如「输入转发」节点接上来源后输出类型由占位 `media` 收敛为具体类型，原先指向
+ * 类型专一下游的连线随之失效，见 docs/canvas/node-types.md）。
+ *
+ * 只做类型校验，不做成环校验——加载的图在有向图意义上必然无环（成环连线无法建立）。
+ *
+ * @param nodes 画布节点列表
+ * @param connections 画布连线列表
+ * @returns 过滤后的连线列表 + 被剔除条数
+ */
+function dropInvalidConnections(
+  nodes: CanvasNodeData[],
+  connections: CanvasConnection[],
+): { connections: CanvasConnection[]; dropped: number } {
+  const valid: CanvasConnection[] = []
+  let dropped = 0
+  for (const c of connections) {
+    if (canConnectNodes(valid, c.fromNodeId, c.toNodeId, nodes, c.toPortId)) {
+      valid.push(c)
+    } else {
+      dropped += 1
+    }
+  }
+  return { connections: valid, dropped }
+}
 
 /** 群组连接忽略原因 */
 export type GroupConnectSkipReason = 'incompatible' | 'cycle' | 'in-group' | 'duplicate'
@@ -196,6 +230,19 @@ export function useCanvasStore(
         nodes: existing.canvas.nodes ?? [],
         connections: existing.canvas.connections ?? [],
         groups: existing.canvas.groups ?? [],
+      }
+      const { connections: validConnections, dropped } = dropInvalidConnections(
+        data.value.nodes,
+        data.value.connections,
+      )
+      if (dropped > 0) {
+        // 有意修改并落盘：Vue Flow 的 createGraphEdges 会**静默丢弃**类型不合法的连线
+        // （只从视图消失、store 与文件里仍在），留下「看不见又删不掉」的死连线。
+        // 这里显式剔除并告警，保证画布数据与视图一致（典型场景：转发节点接上来源后
+        // 输出类型由占位 media 收敛为具体类型，原有指向类型专一下游的连线随之失效）。
+        data.value.connections = validConnections
+        console.warn(`[canvas] 已剔除 ${dropped} 条类型不兼容的连线（画布数据已同步）`)
+        markDirty()
       }
       savedRev.value = existing.rev
     } else {
@@ -943,9 +990,9 @@ export function useCanvasStore(
   ): GroupConnectSkipReason {
     const source = nodesList.find((n) => n.id === connection.fromNodeId)
     const target = nodesList.find((n) => n.id === connection.toNodeId)
-    const sourceProto = source ? getPrototype(source.prototypeId) : undefined
     const targetProto = target ? getPrototype(target.prototypeId) : undefined
-    const outType = sourceProto?.outputPorts[0]?.type
+    // 输出类型按连线实时解析（输入转发节点的输出类型取决于其上游来源，不能读原型声明）
+    const outType = source ? getNodeOutputType(source.id, nodesList, data.value.connections) : undefined
     const port = targetProto?.inputPorts.find((p) => p.id === connection.toPortId)
     if (outType && port && !canConnect(outType, port.type)) return 'incompatible'
     return 'cycle'
