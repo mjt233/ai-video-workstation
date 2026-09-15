@@ -77,16 +77,16 @@
               color="primary"
               variant="tonal"
               prepend-icon="mdi-plus"
-              :disabled="!canAdd"
+              :disabled="!canSave"
               @click="addNewFrame"
             >
               新增场景图
             </v-btn>
             <span
-              v-if="!canAdd"
+              v-if="isNoBaseFrame"
               class="text-body-small text-grey"
             >
-              无可用的基础场景引用，可先在「场景图片」页签添加场景帧
+              无基础场景引用：将直接把当前图片作为独立分镜场景图
             </span>
           </div>
         </template>
@@ -114,10 +114,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { readFs, copyFs } from '../../api/client'
 import { createSceneStageFrame } from '../../api/assets'
-import { buildSceneFrameOptions, deriveStageFrameBody, type SceneFrameOption } from '../../canvas/sceneFrame'
+import { buildSceneFrameOptions, deriveStageFrameBody, type SceneFrameBody, type SceneFrameOption } from '../../canvas/sceneFrame'
 import type { CanvasInputInfo } from '../../canvas/generate'
 import type { CanvasNodeData } from '../../canvas/types'
 
@@ -156,10 +156,15 @@ const loading = ref(false)
 const frames = ref<SceneFrameOption[]>([])
 /** 当前选中的场景帧下标；null 表示未选中 */
 const selectedIndex = ref<number | null>(null)
-/** 新增场景图可推导的新帧定义（null 表示禁用新增） */
-const newFrameBody = ref<{ 基础场景: string; 登场角色: string[]; prompt: string } | null>(null)
-/** 新增场景图是否可用 */
-const canAdd = ref(false)
+/** 新增场景图可推导的新帧定义（无基础场景时为基础场景为空的独立场景图帧） */
+const newFrameBody = ref<SceneFrameBody>({ 基础场景: '', 登场角色: [], prompt: '' })
+/** 是否有可复制的当前产物（「新增场景图」按钮可用性） */
+const canSave = computed(() => {
+  const cur = props.output?.path || (props.node?.config.current as { path?: string } | undefined)?.path
+  return !!cur
+})
+/** 无基础场景引用：新增帧将作为独立场景图（纯图片，无合成来源） */
+const isNoBaseFrame = computed(() => !newFrameBody.value.基础场景.trim())
 
 /**
  * 打开对话框：读取 stage.json 列出场景帧，并推导可新增的新帧定义。
@@ -169,8 +174,6 @@ async function open(): Promise<void> {
   if (!node) return
   loading.value = true
   frames.value = []
-  canAdd.value = false
-  newFrameBody.value = null
   selectedIndex.value = null
   try {
     const raw = await readFs(props.project, `prompt/scene/${props.episode}/${props.shot}/stage.json`)
@@ -187,11 +190,9 @@ async function open(): Promise<void> {
       (i) => `/api/fs/${props.project}/assert/scene/${props.episode}/${props.shot}/stage/${i}.jpg?t=${ts}`,
     )
     newFrameBody.value = deriveStageFrameBody(props.inputs, defs, node.config.prompt)
-    canAdd.value = newFrameBody.value !== null
   } catch {
-    // stage.json 不存在：按空帧处理，仅可新增（若有可用基础场景）
+    // stage.json 不存在：按空帧处理，新增帧定义按无基础场景推导（独立场景图帧）
     newFrameBody.value = deriveStageFrameBody(props.inputs, [], node.config.prompt)
-    canAdd.value = newFrameBody.value !== null
   } finally {
     loading.value = false
   }
@@ -237,7 +238,7 @@ async function applySetAsScene(frame: SceneFrameOption | null): Promise<void> {
   try {
     if (frame) {
       await copyFs(props.project, cur.path, `assert/scene/${ep}/${shot}/stage/${frame.index}.jpg`)
-    } else if (newFrameBody.value) {
+    } else {
       const res = await createSceneStageFrame(props.project, ep ?? '', shot ?? '', newFrameBody.value)
       await copyFs(props.project, cur.path, `assert/scene/${ep}/${shot}/stage/${res.index}.jpg`)
     }

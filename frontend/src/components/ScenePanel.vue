@@ -443,7 +443,9 @@
                     >
                       {{
                         isDirectStageRef(stage)
-                          ? (isPrevStageRef(stage.基础场景) ? '直接引用上一分镜最后场景' : '直接引用基础场景')
+                          ? (isPrevStageRef(stage.基础场景)
+                            ? '直接引用上一分镜最后场景'
+                            : (isNoBaseStage(stage) ? '独立场景图（无基础场景）' : '直接引用基础场景'))
                           : '无'
                       }}
                     </div>
@@ -456,7 +458,9 @@
                       {{
                         stage.prompt
                           || (isDirectStageRef(stage)
-                            ? (isPrevStageRef(stage.基础场景) ? '（直接引用上一分镜最后场景，不做修改）' : '（直接引用，不做修改）')
+                            ? (isPrevStageRef(stage.基础场景)
+                              ? '（直接引用上一分镜最后场景，不做修改）'
+                              : (isNoBaseStage(stage) ? '（独立场景图，不做修改）' : '（直接引用，不做修改）'))
                             : '（空）')
                       }}
                     </div>
@@ -1350,6 +1354,11 @@ const PREV_STAGE_REF = 'prev'
 /** 登场角色与 prompt 同时为空 = 直接引用基础场景 / prev */
 function isDirectStageRef(stage: Pick<StageDefinition, '登场角色' | 'prompt'>): boolean {
   return !(stage.登场角色?.length) && !(stage.prompt ?? '').trim()
+}
+
+/** 无基础场景引用（独立场景图帧）：仅展示纯图片，无合成来源 */
+function isNoBaseStage(stage: Pick<StageDefinition, '基础场景'>): boolean {
+  return !(stage.基础场景 ?? '').trim()
 }
 
 /**

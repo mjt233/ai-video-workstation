@@ -91,6 +91,15 @@
         >
           prev 仅支持直接引用：将复制上一分镜最后一帧场景图，不可叠加角色或合成 Prompt。
         </v-alert>
+        <v-alert
+          v-if="isNoBase"
+          type="info"
+          density="compact"
+          variant="tonal"
+          class="mb-4"
+        >
+          未选择基础场景时，该帧为独立场景图（直接使用当前图片，不叠加角色或合成 Prompt）。图片可在分镜「资产画布」用「设为分镜场景图」填入，或在本页签直接上传。
+        </v-alert>
 
         <div class="text-body-small text-medium-emphasis mb-1">
           登场角色
@@ -99,7 +108,7 @@
           <v-chip
             v-for="name in form.登场角色"
             :key="name"
-            :closable="!isPrevRef"
+            :closable="!isPrevRef && !isNoBase"
             @click:close="removeCharacter(name)"
           >
             <v-avatar
@@ -122,11 +131,15 @@
           <span
             v-if="!form.登场角色.length"
             class="text-grey text-body-medium"
-          >{{ isPrevRef ? '无（prev 仅直接引用）' : '无（直接引用基础场景时可不选）' }}</span>
+          >{{
+            isPrevRef
+              ? '无（prev 仅直接引用）'
+              : (isNoBase ? '无（独立场景图帧不带角色）' : '无（直接引用基础场景时可不选）')
+          }}</span>
           <v-btn
             size="small"
             variant="tonal"
-            :disabled="isPrevRef"
+            :disabled="isPrevRef || isNoBase"
             @click="characterPickerOpen = true"
           >
             选择角色
@@ -147,8 +160,10 @@
           rows="5"
           auto-grow
           variant="outlined"
-          :disabled="isPrevRef"
-          :hint="isPrevRef ? 'prev 仅直接引用，不可填写合成 Prompt' : '直接引用基础场景时留空；有登场角色时必填'"
+          :disabled="isPrevRef || isNoBase"
+          :hint="isPrevRef
+            ? 'prev 仅直接引用，不可填写合成 Prompt'
+            : (isNoBase ? '独立场景图帧无合成来源，不可填写合成 Prompt' : '直接引用基础场景时留空；有登场角色时必填')"
           persistent-hint
         />
       </v-card-text>
@@ -337,6 +352,11 @@ const form = reactive({
 const isPrevRef = computed(() => form.基础场景.trim() === PREV_STAGE_REF)
 
 /**
+ * 当前基础场景是否为空（独立场景图帧：无基础场景合成来源，该帧为纯图片）。
+ */
+const isNoBase = computed(() => !form.基础场景.trim())
+
+/**
  * 当前分镜是否允许使用 prev（同集 shot > 1）。
  */
 const canUsePrev = computed(() => {
@@ -349,7 +369,7 @@ const canUsePrev = computed(() => {
  * @param name 角色引用
  */
 function removeCharacter(name: string) {
-  if (isPrevRef.value) return
+  if (isPrevRef.value || isNoBase.value) return
   form.登场角色 = form.登场角色.filter((n) => n !== name)
 }
 
@@ -510,7 +530,7 @@ function onStageAssetPicked(paths: string[]) {
  * 将 assert 路径转换为角色引用格式。
  */
 function onCharacterAssetPicked(paths: string[]) {
-  if (isPrevRef.value) return
+  if (isPrevRef.value || isNoBase.value) return
   const refs = paths.map((p) => assertPathToCharacterRef(p)).filter(Boolean) as string[]
   form.登场角色 = refs
   void refreshCharacterPreviews(refs)
@@ -518,14 +538,11 @@ function onCharacterAssetPicked(paths: string[]) {
 
 /**
  * 提交新增/编辑场景帧。
+ * 基础场景为空时保存为独立场景图帧（纯图片，角色与 Prompt 强制为空）。
  */
 async function submit() {
   error.value = ''
   const base = form.基础场景.trim()
-  if (!base) {
-    error.value = '请选择基础场景'
-    return
-  }
   if (base === PREV_STAGE_REF) {
     if (!canUsePrev.value) {
       error.value = '第 1 个分镜不能使用 prev'
@@ -542,10 +559,12 @@ async function submit() {
 
   saving.value = true
   try {
+    // prev 与空基础场景（独立场景图）均为直接引用：角色与 prompt 强制为空
+    const isDirectRef = base === PREV_STAGE_REF || !base
     const body = {
       基础场景: base,
-      登场角色: base === PREV_STAGE_REF ? [] : form.登场角色,
-      prompt: base === PREV_STAGE_REF ? '' : form.prompt.trim(),
+      登场角色: isDirectRef ? [] : form.登场角色,
+      prompt: isDirectRef ? '' : form.prompt.trim(),
     }
     if (props.mode === 'edit') {
       if (props.index == null) throw new Error('缺少场景索引')
@@ -568,7 +587,8 @@ watch(() => props.modelValue, (open) => {
   form.基础场景 = props.initial?.基础场景 ?? ''
   form.登场角色 = [...(props.initial?.登场角色 ?? [])]
   form.prompt = props.initial?.prompt ?? ''
-  if (form.基础场景.trim() === PREV_STAGE_REF) {
+  // prev 与空基础场景（独立场景图）均为直接引用：角色与 prompt 清空
+  if (form.基础场景.trim() === PREV_STAGE_REF || !form.基础场景.trim()) {
     form.登场角色 = []
     form.prompt = ''
   }

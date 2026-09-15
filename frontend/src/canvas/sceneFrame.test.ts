@@ -37,8 +37,12 @@ describe('deriveStageFrameBody', () => {
     expect(body?.基础场景).toBe('公园/白天')
   })
 
-  it('完全无基础场景返回 null', () => {
-    expect(deriveStageFrameBody([], [{ 基础场景: '' }], 'prompt')).toBeNull()
+  it('完全无基础场景时返回独立场景图帧（基础场景/角色/prompt 均为空）', () => {
+    expect(deriveStageFrameBody([], [{ 基础场景: '' }], 'prompt')).toEqual({
+      基础场景: '',
+      登场角色: [],
+      prompt: '',
+    })
   })
 
   it('有登场角色但无 prompt 时清空角色（服务端约束）', () => {

@@ -4,9 +4,10 @@ import { pathExists, resolveProjectPath } from './paths.js';
 
 /**
  * 分镜关键帧输入。
- * @property 基础场景 场景引用：`场景名/标签`、`场景名/标签@变体id`，或关键字 `prev`（同集上一分镜最后一帧）
- * @property 登场角色 可选角色引用列表；`prev` 时必须为空
- * @property prompt 合成提示词；`prev` 时必须为空
+ * @property 基础场景 场景引用：`场景名/标签`、`场景名/标签@变体id`，或关键字 `prev`（同集上一分镜最后一帧）；
+ *   也可为空字符串，表示「独立场景图帧」——该帧为纯图片（直接使用当前图片，无基础场景合成来源）
+ * @property 登场角色 可选角色引用列表；`prev` 与空基础场景时必须为空
+ * @property prompt 合成提示词；`prev` 与空基础场景时必须为空
  * @property disabled 是否禁用该关键帧：true 时视频生成（image-to-video）会跳过此帧
  */
 export interface StageFrameInput {
@@ -67,13 +68,21 @@ async function writeStageJson(
  * 规范化分镜关键帧字段。
  * - 普通引用：`场景名/标签` 或 `场景名/标签@变体`
  * - `prev`：仅允许直接引用（角色与 prompt 必须为空）
+ * - 空字符串：独立场景图帧（纯图片），角色与 prompt 强制为空
  * @param input 原始输入
  * @returns 规范化后的帧定义
  */
 export function normalizeStageFrame(input: StageFrameInput): StageFrameInput {
   const base = (input.基础场景 ?? '').trim();
+  // 空基础场景 = 独立场景图帧（纯图片，直接使用已有图片，无合成来源）：
+  // 角色与 prompt 强制清空（防御前端绕过禁用直接提交），保留 disabled 标记
   if (!base) {
-    throw Object.assign(new Error('基础场景必填'), { code: 'INVALID' });
+    return {
+      基础场景: '',
+      登场角色: [],
+      prompt: '',
+      ...(input.disabled === true ? { disabled: true } : {}),
+    };
   }
 
   const characters = Array.isArray(input.登场角色)
