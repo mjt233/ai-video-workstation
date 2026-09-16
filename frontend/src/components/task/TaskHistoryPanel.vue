@@ -1,10 +1,14 @@
 <template>
   <!--
     任务管理器「历史」页签：展示 SQLite 中持久化的任务（默认最近 14 天，与日志保留期一致）。
-    任务行可展开查看完整日志（级别过滤 + 尾部片段 + 查看全部）。
+
+    列表由 Vuetify 的 <v-infinite-scroll> **组件**承载（注意：Vuetify 4 已无同名指令）：
+    组件根元素自带滚动容器，滚到底自动加载下一批；内容不足一屏时也会自动续拉
+    （组件在 done('ok') 后用 3 帧 rAF 重新检查哨兵）。任务行的日志在「任务详情」对话框里看，
+    因此每行高度恒定，不存在展开态与滚动加载互相干扰的问题。
   -->
   <div class="task-history">
-    <!-- 筛选条 -->
+    <!-- 筛选条：固定一行（时间范围 / 状态 / 刷新；「项目」筛选已移除） -->
     <div class="task-history__filters">
       <v-select
         v-model="filters.days"
@@ -30,25 +34,16 @@
         class="task-history__filter"
         @update:model-value="() => void reload()"
       />
-      <v-text-field
-        v-model="filters.project"
-        label="项目（留空 = 全部）"
-        variant="outlined"
-        density="compact"
-        hide-details
-        clearable
-        class="task-history__filter"
-        @keyup.enter="() => void reload()"
-      />
       <v-btn
+        icon="mdi-refresh"
         size="small"
         variant="tonal"
         color="primary"
+        aria-label="刷新"
+        title="刷新"
         :loading="loading"
         @click="() => void reload()"
-      >
-        刷新
-      </v-btn>
+      />
     </div>
 
     <v-alert
@@ -61,114 +56,10 @@
       {{ error }}
     </v-alert>
 
-    <!-- 任务列表 -->
+    <!-- 首屏加载 / 空态：不挂载无限滚动组件，避免与「已加载完」的空态混淆 -->
     <div
-      v-if="tasks.length > 0"
-      class="task-history__list"
-    >
-      <div
-        v-for="t in tasks"
-        :key="t.taskId"
-        class="task-history__row"
-      >
-        <div class="task-history__main">
-          <!-- 产物缩略图（仅已完成且有图片/视频产物的任务）：点击放大预览 -->
-          <button
-            v-if="thumbPathOf(t)"
-            type="button"
-            class="task-history__thumb"
-            :title="`预览产物：${t.result?.path ?? ''}`"
-            @click="openPreview(t)"
-          >
-            <img
-              v-if="mediaKindOfPath(t.result?.path) === 'image'"
-              :src="previewUrlOf(t)"
-              :alt="artifactName(t)"
-            >
-            <video
-              v-else
-              :src="`${previewUrlOf(t)}#t=0.1`"
-              muted
-              preload="metadata"
-            />
-          </button>
-          <div class="task-history__detail">
-            <div class="task-history__head">
-              <v-chip
-                :color="statusColor(t.status)"
-                size="x-small"
-                variant="tonal"
-                class="mr-2"
-              >
-                {{ statusLabel(t.status) }}
-              </v-chip>
-              <span class="task-history__name">{{ t.workflowId }}</span>
-              <span class="task-history__meta">{{ t.impl }}</span>
-              <v-spacer />
-              <span class="task-history__meta">{{ formatDateTime(t.createdAt) }}</span>
-              <v-btn
-                size="x-small"
-                variant="text"
-                color="primary"
-                class="ml-2"
-                @click="() => void toggle(t.taskId)"
-              >
-                {{ expandedId === t.taskId ? '收起' : '查看日志' }}
-              </v-btn>
-            </div>
-            <div class="task-history__meta-line">
-              <span>{{ locationText(t) || '无画布定位' }}</span>
-              <template v-if="t.errorMsg">
-                <span class="mx-1">·</span>
-                <span class="text-error">{{ t.errorMsg }}</span>
-              </template>
-              <template v-else-if="t.result?.path">
-                <span class="mx-1">·</span>
-                <span>{{ t.result.path }}</span>
-              </template>
-            </div>
-          </div>
-        </div>
-
-        <!-- 展开的日志区（按需加载：点开才请求） -->
-        <div
-          v-if="expandedId === t.taskId"
-          class="task-history__logs"
-        >
-          <TaskLogViewer
-            v-model:level-filter="levelFilter"
-            :logs="logs.logs"
-            :total="logs.total"
-            :truncated="logs.truncated"
-            :loading="logs.loading"
-            :error="logs.error"
-            :max-height="300"
-            @load-all="() => void logs.loadAll()"
-            @refresh="() => void logs.reload()"
-          />
-        </div>
-      </div>
-    </div>
-
-    <div
-      v-else-if="!loading"
-      class="text-body-medium text-medium-emphasis text-center py-6"
-    >
-      <v-icon
-        icon="mdi-history"
-        size="36"
-        class="mb-2"
-        color="grey"
-      />
-      <div>该时间范围内暂无历史任务</div>
-      <div class="text-body-small mt-1">
-        历史任务列表保留在数据库中；任务日志默认保留 {{ retentionDays }} 天
-      </div>
-    </div>
-
-    <div
-      v-else
-      class="text-center py-6"
+      v-if="loading && tasks.length === 0"
+      class="task-history__center"
     >
       <v-progress-circular
         indeterminate
@@ -176,32 +67,152 @@
         size="24"
       />
     </div>
-
-    <!-- 分页 -->
     <div
-      v-if="total > PAGE_SIZE"
-      class="task-history__pager"
+      v-else-if="tasks.length === 0"
+      class="task-history__center"
     >
-      <v-btn
-        size="small"
-        variant="text"
-        icon="mdi-chevron-left"
-        aria-label="上一页"
-        :disabled="page === 0"
-        @click="() => void goPage(page - 1)"
+      <v-icon
+        icon="mdi-history"
+        size="36"
+        class="mb-2"
+        color="grey"
       />
-      <span class="text-body-small text-medium-emphasis">
-        第 {{ page + 1 }} / {{ pageCount }} 页 · 共 {{ total }} 个任务
-      </span>
-      <v-btn
-        size="small"
-        variant="text"
-        icon="mdi-chevron-right"
-        aria-label="下一页"
-        :disabled="page >= pageCount - 1"
-        @click="() => void goPage(page + 1)"
-      />
+      <div class="text-body-medium text-medium-emphasis">
+        该时间范围内暂无历史任务
+      </div>
     </div>
+
+    <!--
+      任务列表：组件根元素即滚动容器（自带 overflow-y: auto）。
+      :key 自增即重建——比调用组件的 reset() 更不易漏（empty/error 状态与滚动位置一起复位）。
+    -->
+    <v-infinite-scroll
+      v-else
+      :key="listKey"
+      class="task-history__list"
+      :margin="120"
+      @load="onLoadMore"
+      @scroll.passive="onScroll"
+    >
+      <div
+        v-for="t in tasks"
+        :key="t.taskId"
+        class="task-history__row"
+      >
+        <!-- 产物缩略图（仅已完成且有图片/视频产物）：点击放大预览 -->
+        <button
+          v-if="thumbPathOf(t) && !brokenThumbs.has(t.taskId)"
+          type="button"
+          class="task-history__thumb"
+          :title="`预览产物：${t.result?.path ?? ''}`"
+          @click="openPreview(t)"
+        >
+          <img
+            v-if="mediaKindOfPath(t.result?.path) === 'image'"
+            :src="previewUrlOf(t)"
+            :alt="artifactName(t)"
+            @error="markThumbBroken(t.taskId)"
+          >
+          <video
+            v-else
+            :src="`${previewUrlOf(t)}#t=0.1`"
+            muted
+            preload="metadata"
+            @error="markThumbBroken(t.taskId)"
+          />
+        </button>
+
+        <!-- 无产物（失败任务 / 音频 / 非媒体）：占位同宽，保证各行文字左边界对齐 -->
+        <div
+          v-else
+          class="task-history__thumb task-history__thumb--empty"
+          aria-hidden="true"
+        >
+          <v-icon
+            icon="mdi-image-off-outline"
+            size="18"
+          />
+        </div>
+
+        <div class="task-history__detail">
+          <!-- 第一行：状态 + 工作流 + 时间 + 日志入口（全部定宽/省略，不换行） -->
+          <div class="task-history__head">
+            <v-chip
+              :color="statusColor(t.status)"
+              size="x-small"
+              variant="tonal"
+              class="task-history__chip"
+            >
+              {{ statusLabel(t.status) }}
+            </v-chip>
+            <span
+              class="task-history__name"
+              :title="t.workflowId"
+            >{{ t.workflowId }}</span>
+            <v-spacer />
+            <span class="task-history__time">{{ formatDateTime(t.createdAt) }}</span>
+            <v-btn
+              icon="mdi-text-box-search-outline"
+              size="x-small"
+              variant="text"
+              color="primary"
+              aria-label="查看日志"
+              title="查看日志"
+              class="task-history__logs-btn"
+              @click="openLogs(t)"
+            />
+          </div>
+          <!-- 第二行：定位 · 实现简称 · 产物文件名或错误原因（单行省略，完整文本进 title） -->
+          <div
+            class="task-history__line"
+            :title="rowSecondaryTooltip(t)"
+          >
+            {{ rowSecondaryText(t) }}
+          </div>
+        </div>
+      </div>
+
+      <!--
+        尾部状态区（组件 end side）。intersect 模式下 #error 槽**不可省**：
+        缺少它时组件在 error 状态下什么都不渲染，且不再自动加载（永久卡死）。
+      -->
+      <template #loading>
+        <!--
+          注意：intersect 模式下组件对 `ok`（空闲）状态**同样**渲染 #loading 槽，
+          因此必须用 loadingMore 自行判断，否则列表底部会永久挂着一个转圈。
+        -->
+        <div
+          v-if="loadingMore"
+          class="task-history__tail"
+        >
+          <v-progress-circular
+            indeterminate
+            color="primary"
+            size="16"
+            class="mr-2"
+          />
+          <span class="text-body-small text-medium-emphasis">正在加载…</span>
+        </div>
+      </template>
+      <template #empty>
+        <div class="task-history__tail text-body-small text-medium-emphasis">
+          已显示全部 {{ total }} 个任务
+        </div>
+      </template>
+      <template #error="{ props: slotProps }">
+        <div class="task-history__tail">
+          <span class="text-body-small text-error mr-2">加载失败：{{ moreError }}</span>
+          <v-btn
+            size="x-small"
+            variant="text"
+            color="primary"
+            @click="slotProps.onClick"
+          >
+            重试
+          </v-btn>
+        </div>
+      </template>
+    </v-infinite-scroll>
 
     <!-- 产物放大预览（图片/视频；与完成通知气泡共用同一组件） -->
     <CanvasMediaPreviewDialog
@@ -211,31 +222,49 @@
       :title="preview.title"
       :file-name="preview.fileName"
     />
+
+    <!-- 任务详情：状态 / 耗时 / 错误摘要 + 日志（与画布节点「详情」共用同一对话框） -->
+    <CanvasNodeLogDialog
+      v-model="logDialog.show"
+      :task-id="logDialog.taskId"
+      :node-name="logDialog.name"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, toRef, watch } from 'vue'
-import TaskLogViewer from './TaskLogViewer.vue'
+import { reactive, ref, watch } from 'vue'
 import CanvasMediaPreviewDialog from '../canvas/CanvasMediaPreviewDialog.vue'
+import CanvasNodeLogDialog from '../canvas/CanvasNodeLogDialog.vue'
 import { listTasks, type TaskResponse } from '../../api/workflow'
-import { getSystemSettings } from '../../api/system'
-import { buildPreviewUrl, mediaKindOfPath, type MediaKind } from '../../canvas/preview'
-import { useTaskLogs, type TaskLogLevelFilter } from '../../composables/useTaskLogs'
+import { mediaKindOfPath, type MediaKind } from '../../canvas/preview'
+import { workflowFinishedTick } from '../../canvas/notify'
+import {
+  artifactName,
+  formatDateTime,
+  previewUrlOf,
+  rowSecondaryText,
+  rowSecondaryTooltip,
+  thumbKindOf,
+  thumbPathOf,
+} from './historyFormat'
 
 const props = defineProps<{
-  /** 面板是否可见（关闭时停止后续请求） */
+  /** 面板是否可见（不可见时不因自动刷新打断；首次可见才做首批加载） */
   active: boolean
   /**
    * 外部刷新令牌（自增即重新拉取第一页）：
-   * 「进行中」页签的「查看最近完成 →」与完成气泡的「查看日志」都需要拿到最新列表，
+   * 完成气泡的「查看日志」与「进行中」页签的「查看最近完成 →」都需要拿到最新列表，
    * 而本面板只在首次激活时自动加载。
    */
   reloadToken?: number
 }>()
 
-/** 每页任务数 */
-const PAGE_SIZE = 20
+/** 每批条数（首批与后续追加同批大小） */
+const PAGE_SIZE = 30
+
+/** 无限滚动 done() 的状态（与 Vuetify 内部 InfiniteScrollStatus 一致；该类型未从 vuetify/components 导出） */
+type LoadStatus = 'ok' | 'empty' | 'loading' | 'error'
 
 /** 时间范围选项（value = 最近天数；0 = 不限） */
 const dayOptions = [
@@ -256,28 +285,39 @@ const statusOptions = [
   { label: '排队中', value: 'pending' },
 ]
 
-/** 筛选条件 */
-const filters = reactive({ days: 14, status: '', project: '' })
+/**
+ * 筛选条件。
+ *
+ * 仅有时间范围与状态两项：「项目」筛选已移除（见 `docs/task-manager/ui.md` 的设计取舍），
+ * 服务端 `GET /api/workflow/tasks` 的 `project` 参数本身保留给其他调用方。
+ */
+const filters = reactive({ days: 14, status: '' })
 
-/** 当前页任务 */
+/** 已加载的任务（滚动加载累积，按 taskId 去重） */
 const tasks = ref<TaskResponse[]>([])
-/** 满足条件的任务总数 */
+/** 满足当前筛选条件的任务总数（服务端返回；用于判断是否还有更多） */
 const total = ref(0)
-/** 当前页码（0 起） */
-const page = ref(0)
-/** 是否正在加载列表 */
+/** 首批/刷新是否在请求中 */
 const loading = ref(false)
-/** 列表加载失败信息 */
+/** 首批加载失败信息（列表保留原有数据） */
 const error = ref<string | null>(null)
-/** 当前展开日志的任务 id（空串 = 未展开） */
-const expandedId = ref('')
-/** 日志级别筛选（切换任务时复位） */
-const levelFilter = ref<TaskLogLevelFilter>('all')
-/** 日志保留期（空态提示用；读取失败时回退默认值） */
-const retentionDays = ref(14)
-
-/** 日志状态（taskId 为空时不请求） */
-const logs = useTaskLogs(toRef(expandedId))
+/** 追加批次失败信息（由无限滚动的 error 槽展示） */
+const moreError = ref('')
+/** 追加批次是否在请求中（并发保护） */
+const loadingMore = ref(false)
+/** 首批查询使用的时间下界（追加批次复用，保证 offset 与首批同一边界） */
+const sinceIso = ref<string | undefined>(undefined)
+/** 列表滚动位置（自动刷新时判断用户是否正在翻看旧任务） */
+const lastScrollTop = ref(0)
+/** 列表重建键：自增即重建 <v-infinite-scroll>（复位其 empty/error 状态与滚动位置） */
+const listKey = ref(0)
+/**
+ * 缩略图加载失败的任务 id 集合。
+ *
+ * 任务行永不删除，而其产物所在项目可能已被删除/回收（`assert/...` 404），
+ * 这类行回退为「无产物」占位样式，避免显示成一块黑方块。
+ */
+const brokenThumbs = ref<Set<string>>(new Set())
 
 /** 产物放大预览对话框状态（图片/视频；点缩略图打开） */
 const preview = reactive({
@@ -288,45 +328,97 @@ const preview = reactive({
   fileName: '',
 })
 
-/** 总页数 */
-const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+/** 任务详情对话框状态（状态/耗时/错误摘要 + 日志） */
+const logDialog = reactive({
+  show: false,
+  taskId: null as string | null,
+  name: '',
+})
 
 /**
- * 任务产物缩略图路径（仅**已完成**且产物为图片/视频时返回，其余返回空串）。
+ * 组装查询参数（筛选 + 时间下界 + 分页）。
  *
- * 音频产物不渲染缩略图（可在画布节点/完成气泡中试听），失败任务无产物。
- *
- * @param t 任务响应
- * @returns 产物相对路径；不适用时为空串
+ * @param offset 起始偏移（首批 0，追加批次为已加载条数）
+ * @returns `listTasks` 的查询参数
  */
-function thumbPathOf(t: TaskResponse): string {
-  if (t.status !== 'completed' || !t.result?.path) return ''
-  const kind = mediaKindOfPath(t.result.path)
-  return kind === 'image' || kind === 'video' ? t.result.path : ''
+function queryParams(offset: number): { status?: string, since?: string, limit: number, offset: number } {
+  return {
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(sinceIso.value ? { since: sinceIso.value } : {}),
+    limit: PAGE_SIZE,
+    offset,
+  }
 }
 
 /**
- * 任务产物预览 URL（以任务 updatedAt 作缓存键：同一任务多次渲染 URL 稳定，避免反复重新加载）。
- *
- * @param t 任务响应
- * @returns 预览 URL（无 project 时返回空串）
+ * 拉取第一页并重建列表（筛选变化 / 手动刷新 / 外部令牌 / 自动刷新都走这里）。
  */
-function previewUrlOf(t: TaskResponse): string {
-  const path = t.result?.path ?? ''
-  if (!path || !t.project) return ''
-  const parsed = Date.parse(t.updatedAt?.includes('T') ? t.updatedAt : `${(t.updatedAt ?? '').replace(' ', 'T')}Z`)
-  return buildPreviewUrl(t.project, path, Number.isNaN(parsed) ? 0 : parsed)
+async function reload(): Promise<void> {
+  loading.value = true
+  error.value = null
+  moreError.value = ''
+  try {
+    // 时间下界在首批固定：追加批次若重算，边界漂移会让 offset 与已加载数据错位
+    sinceIso.value = filters.days > 0
+      ? new Date(Date.now() - filters.days * 86400000).toISOString()
+      : undefined
+    const result = await listTasks(queryParams(0))
+    tasks.value = result.tasks
+    total.value = result.total
+    lastScrollTop.value = 0
+    listKey.value += 1
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+    console.error('[task-history] 读取历史任务失败:', e)
+  } finally {
+    loading.value = false
+  }
 }
 
 /**
- * 产物文件名（预览对话框标题与下载文件名）。
+ * 无限滚动回调：滚动到底（提前 120px）追加下一批。
  *
- * @param t 任务响应
- * @returns 路径最后一段；无产物时返回「产物」
+ * `done(status)` 的语义：`ok` = 还有更多（组件会在 3 帧后重新检查哨兵，首屏不满自动续拉）、
+ * `empty` = 已全部加载（收敛，不再自动触发）、`error` = 失败（渲染 error 槽等待用户重试）。
+ *
+ * @param options 组件回调参数（只需 `done`）
  */
-function artifactName(t: TaskResponse): string {
-  const path = t.result?.path ?? ''
-  return path.split('/').pop() || '产物'
+async function onLoadMore({ done }: { done: (status: LoadStatus) => void }): Promise<void> {
+  if (tasks.value.length >= total.value) {
+    done('empty')
+    return
+  }
+  if (loadingMore.value) {
+    // 上一批仍在请求中：交给组件下一轮再查
+    done('ok')
+    return
+  }
+  loadingMore.value = true
+  try {
+    const batch = await listTasks(queryParams(tasks.value.length))
+    const seen = new Set(tasks.value.map((t) => t.taskId))
+    const added = batch.tasks.filter((t) => !seen.has(t.taskId))
+    tasks.value = [...tasks.value, ...added]
+    total.value = batch.total
+    moreError.value = ''
+    // 没有新增（整页都是重复项）也收敛，避免哨兵始终可见时的无限续查
+    done(added.length > 0 && tasks.value.length < total.value ? 'ok' : 'empty')
+  } catch (e) {
+    moreError.value = e instanceof Error ? e.message : String(e)
+    console.error('[task-history] 加载更多失败:', e)
+    done('error')
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+/**
+ * 记录列表滚动位置（自动刷新时据此判断用户是否正在翻看旧任务）。
+ *
+ * @param e 滚动事件
+ */
+function onScroll(e: Event): void {
+  lastScrollTop.value = (e.target as HTMLElement | null)?.scrollTop ?? 0
 }
 
 /**
@@ -337,76 +429,33 @@ function artifactName(t: TaskResponse): string {
 function openPreview(t: TaskResponse): void {
   const path = thumbPathOf(t)
   if (!path) return
-  const kind = mediaKindOfPath(path)
   preview.url = previewUrlOf(t)
-  preview.kind = kind === 'video' ? 'video' : 'image'
+  preview.kind = thumbKindOf(t)
   preview.title = `${t.workflowId} · ${artifactName(t)}`
   preview.fileName = artifactName(t)
   preview.show = true
 }
 
 /**
- * 拉取当前筛选条件下的任务列表。
+ * 打开「任务详情」对话框（状态 / 耗时 / 错误摘要 + 日志）。
  *
- * @param resetPage 是否重置到第一页（筛选变化时传 true）
+ * @param t 任务响应
  */
-async function reload(resetPage = true): Promise<void> {
-  if (resetPage) page.value = 0
-  loading.value = true
-  error.value = null
-  try {
-    const since = filters.days > 0
-      ? new Date(Date.now() - filters.days * 86400000).toISOString()
-      : undefined
-    const result = await listTasks({
-      ...(filters.project?.trim() ? { project: filters.project.trim() } : {}),
-      ...(filters.status ? { status: filters.status } : {}),
-      ...(since ? { since } : {}),
-      limit: PAGE_SIZE,
-      offset: page.value * PAGE_SIZE,
-    })
-    tasks.value = result.tasks
-    total.value = result.total
-    // 当前页可能因数据变化越界（如筛选后总数变少）：回退到最后一页
-    if (tasks.value.length === 0 && page.value > 0) {
-      page.value = Math.max(0, pageCount.value - 1)
-      await reload(false)
-    }
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-    console.error('[task-history] 读取历史任务失败:', e)
-  } finally {
-    loading.value = false
-  }
+function openLogs(t: TaskResponse): void {
+  logDialog.taskId = t.taskId
+  logDialog.name = t.workflowId
+  logDialog.show = true
 }
 
 /**
- * 翻页。
+ * 标记某任务的缩略图加载失败（产物文件不存在：项目已删除/被回收）。
  *
- * @param next 目标页码（0 起）
- */
-async function goPage(next: number): Promise<void> {
-  if (next < 0 || next >= pageCount.value) return
-  page.value = next
-  await reload(false)
-}
-
-/**
- * 展开/收起某个任务的日志（展开时按需拉取尾部片段）。
+ * 浏览器对 404 的报错无法拦截，这里只负责把该行切回占位样式。
  *
  * @param taskId 任务 id
  */
-async function toggle(taskId: string): Promise<void> {
-  if (expandedId.value === taskId) {
-    expandedId.value = ''
-    levelFilter.value = 'all'
-    logs.reset()
-    return
-  }
-  expandedId.value = taskId
-  levelFilter.value = 'all'
-  logs.reset()
-  await logs.load()
+function markThumbBroken(taskId: string): void {
+  brokenThumbs.value = new Set(brokenThumbs.value).add(taskId)
 }
 
 /**
@@ -435,112 +484,93 @@ function statusColor(status: string): string {
   return 'primary'
 }
 
-/**
- * 任务画布定位文案（params.canvas + params.nodeId）。
- *
- * @param t 任务响应
- * @returns 定位文本（无定位时返回空串）
- */
-function locationText(t: TaskResponse): string {
-  const parts: string[] = []
-  if (t.params?.canvas) {
-    const c = t.params.canvas
-    if (c.kind === 'scene') parts.push(`分镜 ${c.episode ?? ''}-${c.shot ?? ''}`)
-    else parts.push(`场景 ${c.stage ?? ''}/${c.label ?? ''}`)
-  }
-  if (t.params?.nodeId) parts.push(`节点 ${t.params.nodeId.slice(0, 8)}`)
-  return parts.join(' · ')
-}
-
-/**
- * 时间格式化（SQLite UTC 串 → 本地 `MM-DD HH:MM`）。
- *
- * @param raw 服务端时间字符串
- * @returns 展示文本；无法解析时原样返回
- */
-function formatDateTime(raw: string): string {
-  const parsed = Date.parse(raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`)
-  if (Number.isNaN(parsed)) return raw
-  const d = new Date(parsed)
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-/** 页签首次激活时加载列表与保留期 */
+/** 页签首次激活时加载首批（已有数据则保持，避免每次切页签都重查） */
 watch(
   () => props.active,
-  async (active) => {
-    if (!active || tasks.value.length > 0) return
-    await reload()
-    try {
-      const settings = await getSystemSettings()
-      retentionDays.value = settings.settings.taskLog.autoClean.retentionDays
-    } catch (e) {
-      // 保留期仅用于空态提示文案：读取失败回退默认值并打日志，不阻断历史列表
-      console.error('[task-history] 读取日志保留期失败:', e)
-    }
+  (active) => {
+    if (!active || tasks.value.length > 0 || loading.value) return
+    void reload()
   },
   { immediate: true },
 )
-
-onBeforeUnmount(() => {
-  logs.reset()
-})
 
 /** 外部刷新令牌变化（「查看最近完成 →」/ 完成气泡「查看日志」）：重新拉取第一页 */
 watch(
   () => props.reloadToken,
   (token) => {
     if (!token) return
-    void reload(true)
+    void reload()
   },
 )
+
+/**
+ * 工作流任务收敛（成功 / 失败 / 用户中断）→ 刷新历史列表。
+ *
+ * 历史数据来自 SQLite，不会自动感知新任务；本监听与抽屉开关无关（抽屉关闭期间完成的任务，
+ * 下次展开「历史」看到的就是最新列表）。用户正滚动翻看旧任务时不打断——顶部新任务由右下角
+ * 完成气泡负责提醒；抽屉停在「进行中」页签时照常刷新，保证切回「历史」即为最新。
+ */
+watch(workflowFinishedTick, () => {
+  if (props.active && lastScrollTop.value > 4) return
+  void reload()
+})
 </script>
 
 <style scoped>
+/* 面板满高三段式：筛选条固定 + 列表撑满内部滚动 + 尾部状态区随列表 */
+.task-history {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 4px 16px 8px;
+}
+
 .task-history__filters {
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
   align-items: center;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
 .task-history__filter {
-  flex: 1 1 140px;
-  max-width: 200px;
+  flex: 1 1 0;
+  min-width: 96px;
 }
 
-.task-history__list {
+.task-history__center {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 8px;
-  max-height: 460px;
-  overflow-y: auto;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 滚动容器由 <v-infinite-scroll> 根元素承担（flex 撑满剩余高度 + 自带 overflow-y） */
+.task-history__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 6px;
+}
+
+/* 组件的 side 区自带 8px 内边距，会与行内边距叠加：清零后用 .task-history__tail 控制 */
+.task-history__list :deep(.v-infinite-scroll__side) {
+  padding: 0;
 }
 
 .task-history__row {
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 4px;
-  padding: 8px;
-}
-
-/* 缩略图 + 详情两列（窄栏抽屉内仍保留缩略图，详情列自适应收窄） */
-.task-history__main {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-}
-
-.task-history__detail {
-  flex: 1 1 auto;
-  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
 }
 
 .task-history__thumb {
   flex: 0 0 auto;
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 4px;
@@ -557,37 +587,70 @@ watch(
   display: block;
 }
 
+/* 无产物占位：虚框 + 低对比图标，只占位不抢视觉（让有/无缩略图的行文字左边界一致） */
+.task-history__thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  border-color: rgba(0, 0, 0, 0.1);
+  background: transparent;
+  color: rgba(0, 0, 0, 0.26);
+  cursor: default;
+}
+
+.task-history__detail {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .task-history__head {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+
+/* 状态 chip 不参与收缩：否则会被长工作流名挤成一字一行的竖排 */
+.task-history__chip {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .task-history__name {
   font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.task-history__meta {
+.task-history__time {
+  flex: 0 0 auto;
   font-size: 12px;
   color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
 }
 
-.task-history__meta-line {
-  margin-top: 4px;
+.task-history__logs-btn {
+  flex: 0 0 auto;
+}
+
+/* 第二行强制单行省略：完整文本通过 title 悬浮查看 */
+.task-history__line {
+  margin-top: 2px;
   font-size: 12px;
   color: rgba(0, 0, 0, 0.6);
-  word-break: break-all;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.task-history__logs {
-  margin-top: 8px;
-}
-
-.task-history__pager {
+.task-history__tail {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin-top: 12px;
+  padding: 8px 0;
 }
 </style>

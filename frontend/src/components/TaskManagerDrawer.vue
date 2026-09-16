@@ -163,7 +163,7 @@
         </v-window-item>
 
         <v-window-item value="history">
-          <div class="task-manager-drawer__body">
+          <div class="task-manager-drawer__body task-manager-drawer__body--history">
             <TaskHistoryPanel
               :active="tab === 'history'"
               :reload-token="historyReloadToken"
@@ -178,7 +178,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { taskSocket, type LlmCanvasTarget, type TaskInfo, type TaskType } from '../canvas/taskSocket'
-import { workflowFinishedTick } from '../canvas/notify'
 import TaskHistoryPanel from './task/TaskHistoryPanel.vue'
 
 /** 抽屉宽度（像素；窄屏由 CSS `max-width: 92vw` 兜底） */
@@ -265,15 +264,11 @@ watch(
 )
 
 /**
- * 工作流任务收敛（成功 / 失败 / 用户中断）→ 刷新「历史」列表。
- *
- * 历史数据来自 SQLite，不会自动感知新任务；本监听与抽屉开关**无关**：
- * 抽屉关闭期间完成任务时也会让已挂载的历史面板在后台重新拉取，
- * 用户下次展开「历史」看到的就是最新列表（未挂载过则首帧激活时本就会加载）。
+ * 工作流任务收敛（成功 / 失败 / 用户中断）后的「历史」自动刷新**不在这里**：
+ * 由 `TaskHistoryPanel` 自行监听 `workflowFinishedTick`（它需要判断用户是否正在滚动翻看旧任务，
+ * 已滚动时不打断）。本令牌只服务"用户显式要求跳到最新"的两条路径：外部 `openToken` 与
+ * 「查看最近完成 →」。
  */
-watch(workflowFinishedTick, () => {
-  historyReloadToken.value += 1
-})
 
 /** 任务数量下降（终态移除）→ 完成计数 +1（抽屉打开期间） */
 watch(
@@ -435,6 +430,12 @@ function onInterrupt(t: TaskInfo): void {
   height: 100%;
   overflow-y: auto;
   padding: 4px 16px 16px;
+}
+
+/* 「历史」页签：满高与内部滚动交给 TaskHistoryPanel（body 自身不滚动，否则会出现双层滚动条与底部空白） */
+.task-manager-drawer__body--history {
+  padding: 0;
+  overflow: hidden;
 }
 
 .task-manager-drawer__row {

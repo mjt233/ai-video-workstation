@@ -253,7 +253,7 @@ for (const entry of await collectRunningTasks(knownNodeIds)) {
 |----|------|
 | 数据源 | 由 `App.vue` 注入 `:tasks="taskSocket.tasks.value"`（**进行中页签只读 `taskSocket.tasks`**，无自己的请求） |
 | 活跃列表 | `props.tasks.filter(t => t.status==='running' \|\| 'pending').sort(by startedAt desc)` |
-| 页签 | `active`（进行中，内存注册表）/ `history`（历史，`<TaskHistoryPanel>` 走 SQLite 任务 + 产物缩略图 + 日志）；`openTab` + `openToken` 支持外部定位与刷新 |
+| 页签 | `active`（进行中，内存注册表）/ `history`（历史，`<TaskHistoryPanel>` 走 SQLite 任务 + 产物缩略图 + **滚动加载**，日志在「任务详情」对话框里看）；`openTab` + `openToken` 支持外部定位与刷新（自增 `reloadToken` → 面板重新拉首批） |
 | 展示 | 类型标记（AI 生成 / LLM 会话 / 视频处理）、状态文案（`排队中` / `Thinking…` / `正在响应…` / `处理中 {n}%` / `运行中…`）、进度条、已运行时长（客户端每秒刷新）、画布位置（`分镜第{episode}集 {shot}#` 或 `场景 {stage} / {label}`） |
 | 中断 | `taskSocket.cancel(t.id)`（WS + HTTP 兜底）；`cancelable === false` 置灰并以 `title` 显示 `cancelBlockReason` |
 | 完成提示 | 抽屉打开期间监听活跃数量下降 → 「已完成 N 个」计数 + 「查看最近完成 →」跳历史并刷新；关闭时复位页签并停止计时器 |
