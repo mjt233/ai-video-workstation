@@ -7,94 +7,8 @@
     <div
       :class="['video-generate-editor', { 'video-generate-editor--fullscreen': isFullscreen }]"
     >
-      <!-- 导演台模式：保持既有布局（首行工作流+模式+全屏 → 输出规格 → 参数表单 → 导演台） -->
+      <!-- 导演台模式：VideoDirector 主体（含 prompt）在上，统一参数行紧随其下 -->
       <template v-if="mode === 'director'">
-        <!-- 工作流 + 生成模式 + 全屏切换（同一行显示；全屏按钮位于组件右上角） -->
-        <div class="d-flex ga-2 mb-2 align-center">
-          <v-select
-            :model-value="workflowImpl"
-            :items="workflowItems"
-            item-title="label"
-            item-value="value"
-            label="工作流"
-            placeholder="请选择工作流实现"
-            density="compact"
-            variant="outlined"
-            :disabled="workflowsLoaded && impls.length === 0"
-            :error="!!implError"
-            :error-messages="implError ? [implError] : []"
-            class="flex-grow-1"
-            @update:model-value="onWorkflowChange"
-          >
-            <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
-            <template #item="{ item, props: itemProps }">
-              <v-list-item v-bind="itemProps">
-                <template #append>
-                  <v-chip
-                    v-if="providerLabel(item)"
-                    size="x-small"
-                    label
-                    variant="tonal"
-                    color="secondary"
-                    class="ml-1"
-                  >
-                    {{ providerLabel(item) }}
-                  </v-chip>
-                </template>
-              </v-list-item>
-            </template>
-          </v-select>
-
-          <!-- 模式切换（所选实现声明多种模式时显示） -->
-          <v-select
-            v-if="currentModes.length > 1"
-            :model-value="mode"
-            :items="modeItems"
-            item-title="label"
-            item-value="value"
-            label="生成模式"
-            density="compact"
-            variant="outlined"
-            hide-details
-            class="flex-grow-1"
-            @update:model-value="onModeChange"
-          />
-
-          <!-- 全屏切换按钮（组件右上角；全屏时变为退出） -->
-          <v-btn
-            class="video-generate-editor__fullscreen-btn"
-            :icon="isFullscreen ? 'mdi-fullscreen-exit' : 'mdi-fullscreen'"
-            size="small"
-            variant="text"
-            :title="isFullscreen ? '退出全屏' : '全屏显示'"
-            @click="toggleFullscreen"
-          />
-        </div>
-
-        <!-- 输出规格：时长（菜单式）+ 输出尺寸（菜单式） -->
-        <div class="d-flex ga-2 mb-1">
-          <DurationPicker
-            :model-value="duration"
-            @update:model-value="onDurationChange"
-          />
-          <WorkflowSizePicker
-            :size-capabilities="currentImpl?.capabilities?.size"
-            :model-value="sizeConfigState"
-            class="flex-grow-1"
-            @update:model-value="onSizeConfigChange"
-          />
-        </div>
-
-        <!-- 自定义工作流参数：所选实现声明 params 时展示（尺寸类参数已剔除，由上方 WorkflowSizePicker 处理） -->
-        <WorkflowParamsForm
-          v-model="workflowParams"
-          :declarations="currentDeclarations"
-          :provider="currentImpl?.providerInstanceId"
-          :provider-type="currentImpl?.provider"
-          :project="props.project"
-          class="mb-2"
-        />
-
         <!-- 多个文本连线输入：报错并禁止生成（仅保留一个） -->
         <div
           v-if="multiTextInput"
@@ -117,7 +31,7 @@
         />
       </template>
 
-      <!-- 首尾帧 / 参考模式：统一布局（输入预览 → 提示词 → 参数行） -->
+      <!-- 首尾帧 / 参考模式：输入预览 → 提示词（参数行两种模式共用，见下方） -->
       <template v-else>
         <!-- 输入预览（统一组件）：图片/视频/音频按类型分组，无对应的输入不显示该组 -->
         <CanvasInputPreview
@@ -163,90 +77,34 @@
           class="mb-2"
           @update:model-value="(v) => emit('update:config', { prompt: v })"
         />
-
-        <!-- 参数行：生成模式 + 工作流 + 时长 + 输出尺寸 + 工作流参数 + 全屏 -->
-        <div class="generation-params-row mb-2">
-          <v-select
-            v-if="currentModes.length > 1"
-            :model-value="mode"
-            :items="modeItems"
-            item-title="label"
-            item-value="value"
-            label="生成模式"
-            density="compact"
-            variant="outlined"
-            hide-details
-            class="generation-params-row__mode"
-            @update:model-value="onModeChange"
-          />
-
-          <v-select
-            :model-value="workflowImpl"
-            :items="workflowItems"
-            item-title="label"
-            item-value="value"
-            label="工作流"
-            placeholder="请选择工作流实现"
-            density="compact"
-            variant="outlined"
-            hide-details
-            :disabled="workflowsLoaded && impls.length === 0"
-            :error="!!implError"
-            :error-messages="implError ? [implError] : []"
-            class="generation-params-row__workflow"
-            @update:model-value="onWorkflowChange"
-          >
-            <!-- 下拉选项最右侧显示提供商 chip（v-bind="itemProps" 保留 title 与选中态） -->
-            <template #item="{ item, props: itemProps }">
-              <v-list-item v-bind="itemProps">
-                <template #append>
-                  <v-chip
-                    v-if="providerLabel(item)"
-                    size="x-small"
-                    label
-                    variant="tonal"
-                    color="secondary"
-                    class="ml-1"
-                  >
-                    {{ providerLabel(item) }}
-                  </v-chip>
-                </template>
-              </v-list-item>
-            </template>
-          </v-select>
-
-          <!-- 时长：点击弹出菜单（1~15 秒快捷选择 + 手动输入） -->
-          <DurationPicker
-            :model-value="duration"
-            @update:model-value="onDurationChange"
-          />
-
-          <!-- 输出尺寸：点击弹出菜单配置 -->
-          <WorkflowSizePicker
-            :size-capabilities="currentImpl?.capabilities?.size"
-            :model-value="sizeConfigState"
-            @update:model-value="onSizeConfigChange"
-          />
-
-          <!-- 工作流参数：点击弹出菜单配置 -->
-          <WorkflowParamsTrigger
-            v-model="workflowParams"
-            :declarations="currentDeclarations"
-            :provider="currentImpl?.providerInstanceId"
-            :provider-type="currentImpl?.provider"
-            :project="props.project"
-          />
-
-          <v-btn
-            class="generation-params-row__fullscreen"
-            :icon="isFullscreen ? 'mdi-fullscreen-exit' : 'mdi-fullscreen'"
-            size="small"
-            variant="text"
-            :title="isFullscreen ? '退出全屏' : '全屏显示'"
-            @click="toggleFullscreen"
-          />
-        </div>
       </template>
+
+      <!-- 统一参数行：生成模式 + 工作流 + 时长 + 输出尺寸 + 工作流参数 + 全屏（两种布局共用同一组件） -->
+      <VideoGenerateParamsRow
+        class="mb-2"
+        :class="{ 'mt-2': mode === 'director' }"
+        :mode="mode"
+        :modes="currentModes"
+        :workflow-impl="workflowImpl"
+        :workflow-items="workflowItems"
+        :workflows-loaded="workflowsLoaded"
+        :impl-error="implError"
+        :size-capabilities="currentImpl?.capabilities?.size"
+        :duration="duration"
+        :size-config="sizeConfigState"
+        :declarations="currentDeclarations"
+        :workflow-params="workflowParams"
+        :provider="currentImpl?.providerInstanceId"
+        :provider-type="currentImpl?.provider"
+        :project="props.project"
+        :is-fullscreen="isFullscreen"
+        @update:mode="onModeChange"
+        @update:workflow="onWorkflowChange"
+        @update:duration="onDurationChange"
+        @update:size="onSizeConfigChange"
+        @update:workflow-params="onWorkflowParamsChange"
+        @toggle-fullscreen="toggleFullscreen"
+      />
 
       <!-- 生成 / 中断 / 历史 / 设为分镜视频（蓝图模式全部隐藏：蓝图不产生产物） -->
       <div
@@ -323,28 +181,38 @@ import {
 import type { CanvasNodeData, CanvasKind } from '../../../canvas/types'
 import { mergeInputOrder as mergeGlobalInputOrder, type CanvasInputInfo } from '../../../canvas/generate'
 import { canvasDirectorToProject, projectToCanvasDirector } from '../../../canvas/videoDirectorBridge'
-import type { CanvasDirectorConfig, VideoGenerateMode } from '../../../canvas/videoTypes'
+import { readVideoSpec, VIDEO_DURATION_FALLBACK } from '../../../canvas/videoSpec'
+import type {
+  CanvasDirectorAudioClip,
+  CanvasDirectorClips,
+  CanvasDirectorImageClip,
+  VideoGenerateMode,
+} from '../../../canvas/videoTypes'
 import { findSizeParamKeys, inferSizeConfigFromWidthHeight } from '../../../utils/workflowSize'
-import WorkflowParamsForm from '../../WorkflowParamsForm.vue'
-import WorkflowParamsTrigger from '../../WorkflowParamsTrigger.vue'
-import WorkflowSizePicker from '../../WorkflowSizePicker.vue'
-import DurationPicker from '../../DurationPicker.vue'
 import VideoDirector from '../../video-director/VideoDirector.vue'
 import CanvasInputPreview from './CanvasInputPreview.vue'
+import VideoGenerateParamsRow from './VideoGenerateParamsRow.vue'
 import { useCanvasMode } from '../../../canvas/canvasMode'
 import type { CanvasUploadFilePayload } from '../composables/useCanvasUpload'
 
 /**
  * 视频生成节点配置组件。
  *
- * 支持三种生成模式（由所选工作流实现的能力声明决定）：
- * - director：保持既有布局——首行（工作流/模式/全屏）、输出规格（时长/尺寸菜单）、
- *   参数表单、内嵌 VideoDirector 导演台（编辑结果实时写回 config.director，内含 prompt 输入）
- * - first-last-frame / reference：统一布局——输入预览（CanvasInputPreview 按图片/视频/音频
- *   分组）→ 提示词 → 参数行（生成模式 + 工作流 + 时长 + 输出尺寸 + 工作流参数 + 全屏）。
- *   首尾帧按 config.inputOrder 排列帧图片（首帧 0、尾帧 1，中间均匀分布），所选实现支持
- *   音频输入（video.audio）时额外显示音频分组；参考模式按图片/视频/音频三组展示输入并
- *   支持组内拖拽排序，校验参考素材数量上限。
+ * 支持三种生成模式（由所选工作流实现的能力声明决定），**两种布局**：
+ * - director（导演台）：`VideoDirector` 主体（时间轴素材 + prompt）在上，
+ *   统一参数行紧随其下；
+ * - first-last-frame / reference：输入预览（`CanvasInputPreview` 按图片/视频/音频分组）
+ *   → 提示词 → 统一参数行。首尾帧按 config.inputOrder 排列帧图片（首帧 0、尾帧 1，
+ *   中间均匀分布），所选实现支持音频输入（video.audio）时额外显示音频分组；
+ *   参考模式按图片/视频/音频三组展示输入并支持组内拖拽排序，校验参考素材数量上限。
+ *
+ * 两种布局共用同一个参数行组件（`VideoGenerateParamsRow`：生成模式 + 工作流 + 时长 +
+ * 输出尺寸 + 工作流参数 + 全屏），保证交互与视觉一致。
+ *
+ * 输出规格（时长/宽高/帧率）以 `config.duration / config.resolution / config.sizeConfig /
+ * config.fps` 为唯一权威（统一经 `readVideoSpec` 读取；`config.director` 的
+ * duration/width/height/fps 为遗留字段，仅作旧画布回退且不再写入），因此导演台时间轴的
+ * 「总长」与其它模式的「时长」天然同源，无需任何双向同步逻辑。
  */
 const props = defineProps<{
   /** 项目名（用于资产预览 URL 与导演台素材） */
@@ -405,7 +273,7 @@ const emit = defineEmits<{
 const isFullscreen = ref(false)
 
 /**
- * 切换全屏显示状态：由组件右上角图标按钮触发。
+ * 切换全屏显示状态：由参数行内全屏图标按钮触发。
  * 全屏时编辑器经 Teleport 移至 body，以 fixed 浮层覆盖视口（见 --fullscreen 样式）。
  */
 function toggleFullscreen() {
@@ -512,12 +380,24 @@ const mode = computed<VideoGenerateMode>(() => {
   return 'director'
 })
 
-/** 当前导演台配置（config.director；缺失时返回空轨配置） */
-const directorConfig = computed<CanvasDirectorConfig>(() => {
+/** 节点 config.director 原对象（保留遗留规格字段，回写时原样带过；缺失时为 {}） */
+const directorRaw = computed<Record<string, unknown>>(() => {
   const d = props.node.config.director
-  if (d && typeof d === 'object') return d as CanvasDirectorConfig
-  return { duration: 0, width: 0, height: 0, fps: 0, imageClips: [], audioClips: [] }
+  return d && typeof d === 'object' ? (d as Record<string, unknown>) : {}
 })
+
+/** 当前导演台时间轴素材（config.director 的 imageClips/audioClips；缺失时为空轨） */
+const directorClips = computed<CanvasDirectorClips>(() => ({
+  imageClips: Array.isArray(directorRaw.value.imageClips)
+    ? (directorRaw.value.imageClips as CanvasDirectorImageClip[])
+    : [],
+  audioClips: Array.isArray(directorRaw.value.audioClips)
+    ? (directorRaw.value.audioClips as CanvasDirectorAudioClip[])
+    : [],
+}))
+
+/** 当前输出规格（时长/宽高/帧率；统一读取，config.* 优先、director.* 仅旧画布回退） */
+const videoSpec = computed(() => readVideoSpec(props.node.config))
 
 /** 当前选择的工作流实现（未选择/找不到时为 undefined） */
 const currentImpl = computed(() =>
@@ -548,19 +428,6 @@ const workflowItems = computed(() =>
   impls.value.map((i) => ({ value: i.impl, label: i.name, providerName: i.providerName, provider: i.provider })),
 )
 
-/**
- * 解析工作流实现条目的服务商显示名。
- *
- * 优先展示服务商实例名（providerName，来自 /api/workflows）；未提供时回退显示
- * provider 类型 ID；均缺失返回空串（下拉选项不渲染 chip）。
- *
- * @param raw 下拉原始条目（含可选 providerName / provider 字段）
- * @returns 服务商显示名；未声明时为空串
- */
-function providerLabel(raw: { providerName?: string; provider?: string }): string {
-  return raw?.providerName ?? raw?.provider ?? ''
-}
-
 /** 自定义工作流参数（key → 值；与 config.workflowParams 双向同步） */
 const workflowParams = ref<Record<string, WorkflowUserParamValue>>({})
 
@@ -577,14 +444,6 @@ const currentDeclarations = computed<WorkflowUserParamDeclaration[]>(() => {
   return params.filter((d) => !excluded.has(d.key))
 })
 
-/** 生成模式下拉选项（按当前实现支持的模式生成中文标签） */
-const modeItems = computed(() =>
-  currentModes.value.map((m) => ({
-    value: m,
-    label: m === 'director' ? '导演台' : m === 'first-last-frame' ? '首尾帧' : '参考',
-  })),
-)
-
 /**
  * 切换工作流实现：直接选择图生视频类型下的某个实现，重置工作流参数为默认。
  * 模式由「模式回退」watch 收敛到新实现支持的第一个模式。
@@ -594,6 +453,16 @@ const modeItems = computed(() =>
 function onWorkflowChange(v: string) {
   implError.value = ''
   emit('update:config', { workflowImpl: v, workflowParams: {} })
+}
+
+/**
+ * 工作流参数变更（参数行菜单内编辑）：写入本地 ref，
+ * 由下方 watch 同步进 config.workflowParams。
+ *
+ * @param v 最新参数值（key → 值）
+ */
+function onWorkflowParamsChange(v: Record<string, WorkflowUserParamValue>) {
+  workflowParams.value = v
 }
 
 /**
@@ -653,31 +522,16 @@ watch(
   },
 )
 
-/**
- * 切入导演台模式时初始化时长：config.director.duration 为 0/缺失时，
- * 继承其它模式设定的 config.duration（>0 用其值，否则回退 5），保持导演台
- * 「总长」与「时长」控件一致。不 immediate——节点直接以导演台模式
- * 新建/加载时只靠显示层回退，不自动写盘；用户编辑导演台后才持久化。
- */
-watch(mode, (m) => {
-  if (m !== 'director') return
-  const dur = directorConfig.value.duration
-  if (typeof dur === 'number' && dur > 0) return
-  const inherit = Number(props.node.config.duration)
-  const target = Number.isFinite(inherit) && inherit > 0 ? inherit : 5
-  emit('update:config', { director: { ...directorConfig.value, duration: target } })
-})
+// ── 导演台数据桥（仅时间轴素材；输出规格由 readVideoSpec 统一读取） ─────
 
-// ── 导演台数据桥 ─────────────────────────────────────────────
-
-/** sourceNodeId → 资产相对路径（config.director 转 DirectorProject 渲染用） */
+/** sourceNodeId → 资产相对路径（config.director 素材转 DirectorProject 渲染用） */
 const sourceToPath = computed<Record<string, string>>(() => {
   const m: Record<string, string> = {}
   for (const inp of props.inputs) m[inp.nodeId] = inp.path
   return m
 })
 
-/** 资产相对路径 → sourceNodeId（DirectorProject 回写 config.director 用） */
+/** 资产相对路径 → sourceNodeId（DirectorProject 回写素材用） */
 const pathToSource = computed<Record<string, string>>(() => {
   const m: Record<string, string> = {}
   for (const inp of props.inputs) m[inp.path] = inp.nodeId
@@ -686,23 +540,29 @@ const pathToSource = computed<Record<string, string>>(() => {
 
 /**
  * 导演台项目数据（供 VideoDirector 渲染；素材路径由 sourceToPath 解析，缺失时为空串）。
- * 时长缺省回退 5：与「时长」控件（同为 || 5 回退）保持一致，避免
- * config.director.duration 为 0 时导演台「总长」显示 0.0s 而控件显示 5s 的割裂。
+ * 时长取统一规格（`duration` 计算属性），避免规格未设置时时间轴「总长」显示 0.0s
+ * 而参数行「时长」控件显示 5s 的割裂。
  */
 const directorProject = computed(() =>
-  canvasDirectorToProject(
-    { ...directorConfig.value, duration: Number(directorConfig.value.duration) || 5 },
-    sourceToPath.value,
-  ),
+  canvasDirectorToProject(directorClips.value, sourceToPath.value, {
+    ...videoSpec.value,
+    duration: duration.value,
+  }),
 )
 
 /**
- * 用户编辑导演台后回写 config.director（素材 path 反查 sourceNodeId）。
+ * 用户编辑导演台后回写 config.director 素材（path 反查 sourceNodeId）。
+ *
+ * 只回写 imageClips/audioClips：时间轴编辑不产生输出规格变更（规格只由参数行的
+ * 时长/尺寸控件修改），因此不会把陈旧的 duration/width/height 写回节点配置；
+ * 遗留规格字段原样保留、不参与读取。
  *
  * @param project VideoDirector 上报的最新导演台项目数据
  */
 function onDirectorUpdate(project: ReturnType<typeof canvasDirectorToProject>) {
-  emit('update:config', { director: projectToCanvasDirector(project, pathToSource.value) })
+  emit('update:config', {
+    director: { ...directorRaw.value, ...projectToCanvasDirector(project, pathToSource.value) },
+  })
 }
 
 /**
@@ -714,7 +574,7 @@ function onPromptUpdate(v: string) {
   emit('update:config', { prompt: v })
 }
 
-// ── 参考模式输入顺序（复用全局 inputOrder，按组过滤） ─────────
+// ── 输入顺序（复用全局 inputOrder，按组过滤） ─────────
 
 /** 全局输入顺序（config.inputOrder；非数组时为空列表） */
 const inputOrder = computed<string[]>(() =>
@@ -742,25 +602,11 @@ function onRemoveInput(input: CanvasInputInfo): void {
   emit('disconnect-input', input.nodeId)
 }
 
-/** 当前输出时长（秒）：导演台存 config.director.duration；首尾帧/参考存 config.duration，缺省 5 */
-const duration = computed(() => {
-  if (mode.value === 'director') return Number(directorConfig.value.duration) || 5
-  return Number(props.node.config.duration) || 5
-})
+/** 当前输出时长（秒；统一规格，未设置时回退 5；三种模式同源） */
+const duration = computed(() => videoSpec.value.duration || VIDEO_DURATION_FALLBACK)
 
-/**
- * 当前输出尺寸（按模式读取）：
- * - director：config.director.width/height
- * - first-last-frame / reference：config.resolution.width/height
- * 未设置时宽高为 0（对应 WorkflowSizePicker「不指定」，提交时回退默认尺寸）。
- */
-const currentResolution = computed(() => {
-  if (mode.value === 'director') {
-    return { width: directorConfig.value.width || 0, height: directorConfig.value.height || 0 }
-  }
-  const r = props.node.config.resolution as { width?: number; height?: number } | undefined
-  return { width: r?.width || 0, height: r?.height || 0 }
-})
+/** 当前输出尺寸（统一规格读取；未设置时宽高为 0，对应 WorkflowSizePicker「不指定」） */
+const currentResolution = computed(() => ({ width: videoSpec.value.width, height: videoSpec.value.height }))
 
 /**
  * 统一尺寸配置（WorkflowSizePicker 外部回显值）：
@@ -795,8 +641,10 @@ const sizeConfigState = computed<WorkflowSizeConfig | null>(() => {
 /**
  * 尺寸变化（WorkflowSizePicker 输出）回写配置：
  * - 持久化 config.sizeConfig（含比例/尺寸档与最终宽高），供视频 wire 提交给引擎；
- * - 按当前模式同步写宽高到 director.width/height 或 resolution（后端 resolution 链路兼容）；
+ * - 同步写 config.resolution（后端 resolution 链路兼容）；
  * - 「自动 / 自动」→ 宽高清 0（提交时回退默认尺寸）。
+ *
+ * 三种模式共用同一份规格字段（config.director 的遗留宽高不再写入）。
  *
  * @param v 组件输出的统一尺寸配置（ratio/size + 可选 width/height）
  */
@@ -804,38 +652,24 @@ function onSizeConfigChange(v: WorkflowSizeConfig) {
   const w = Number(v.width)
   const h = Number(v.height)
   const has = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
-  const patch: Record<string, unknown> = {
+  emit('update:config', {
     sizeConfig: {
       ratio: v.ratio,
       size: v.size,
       ...(has ? { width: w, height: h } : {}),
     },
-  }
-  if (mode.value === 'director') {
-    patch.director = { ...directorConfig.value, width: has ? w : 0, height: has ? h : 0 }
-  } else {
-    // first-last-frame / reference
-    patch.resolution = has ? { width: w, height: h } : { width: 0, height: 0 }
-  }
-  emit('update:config', patch)
+    resolution: has ? { width: w, height: h } : { width: 0, height: 0 },
+  })
 }
 
 /**
- * 输出时长变化，按当前模式回写：
- * - director：config.director.duration
- * - first-last-frame / reference：config.duration
+ * 输出时长变化（统一写入 config.duration，三种模式同源）。
  *
  * @param v 新时长（秒；菜单控件保证为合法正数）
  */
 function onDurationChange(v: number) {
   const value = Number.isFinite(v) ? v : 0
-  if (mode.value === 'director') {
-    emit('update:config', {
-      director: { ...directorConfig.value, duration: value },
-    })
-  } else {
-    emit('update:config', { duration: value })
-  }
+  emit('update:config', { duration: value })
 }
 
 /** 参考模式限制提示（各类型输入超出能力上限时提示；非参考模式为空串） */
@@ -858,7 +692,7 @@ const refLimitHint = computed(() => {
 const canGenerate = computed(() => {
   if (multiTextInput.value) return false
   if (mode.value === 'director') {
-    return directorConfig.value.imageClips.length > 0
+    return directorClips.value.imageClips.length > 0
   }
   if (mode.value === 'first-last-frame') {
     return props.imagesInputs.length > 0
@@ -876,36 +710,6 @@ getWorkflows()
 </script>
 
 <style scoped>
-/* 参数行：紧凑横排，空间不足时换行（工作流下拉优先占满剩余宽度） */
-.generation-params-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.generation-params-row__mode {
-  flex: 0 0 auto;
-  width: 100px;
-}
-
-.generation-params-row__workflow {
-  flex: 1 1 180px;
-  min-width: 180px;
-  max-width: 260px;
-}
-
-.generation-params-row__fullscreen {
-  align-self: center;
-  flex: 0 0 auto;
-}
-
-/* 导演台首行全屏切换按钮：垂直居中 */
-.video-generate-editor__fullscreen-btn {
-  align-self: center;
-  flex: 0 0 auto;
-}
-
 /* 全屏显示：Teleport 到 body 后覆盖整个视口。
    z-index 取 1200：高于页面内容（最高 1000），低于 Vuetify 浮层（默认 2400），
    保证全屏内的下拉/菜单仍正常显示在最上层。 */

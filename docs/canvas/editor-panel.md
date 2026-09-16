@@ -38,18 +38,22 @@
 
 ### 生成节点统一布局
 
-生成图片 / 生成视频（非导演台模式）/ TTS 三个生成节点的配置组件采用统一骨架：**输入预览 → 提示词/文本字段 → 参数行**，让用户聚焦 prompt 编写与输入资源，其余细节参数收纳进可开关的菜单中调整。
+生成图片 / 生成视频 / TTS 三个生成节点的配置组件采用统一骨架：**输入预览 → 提示词/文本字段 → 参数行**，让用户聚焦 prompt 编写与输入资源，其余细节参数收纳进可开关的菜单中调整。
 
 - **连线文本输入优先于节点内提示词**（生成图片/生成视频）：编辑器接收父级下发的 `textInputs`（`nodeOps.editorTextInputs`，来源为「文本」/「AI文本生成」节点的非空内容），非空时提示词输入框**禁用**并把「（已连接外部输入）」作为**字段值**显示（禁用态 `textarea` 的 `placeholder` 在浏览器中不渲染文本，因此不能用 placeholder 实现，与生成视频节点一致；另用 scoped 样式把禁用态文字提到 0.75 不透明度保证可读），实际提交的 prompt 取第一条外部文本（`gen.generate` 的 `textPromptOverride` 参数，见 [generation.md](./generation.md)）；`config.prompt` 不被覆盖，断开连线后恢复原文。存在**多个**文本连线输入时编辑器红字提示并禁止生成（生成入口 `useCanvasNodeOps.generateNode` 同样拦截）。
 
 - **输入预览**（`editors/CanvasInputPreview.vue`）：按图片/视频/音频三组展示连接到的输入资源（内部复用 `editors/VideoRefInputGroup.vue`），**仅该类型存在输入时渲染对应组**（无输入不显示条目），全部为空时显示占位文案；组内拖拽排序（`reorder` 事件上报本组新顺序，编辑器经 `mergeInputOrder` 合并回全局 `config.inputOrder`）+ 悬浮放大 tooltip（图片/视频/音频可播放）+ 缩略图右上角红色 x 快捷断开（`disconnect-input`）。
 - **参数行**（各编辑器内 `.generation-params-row` 紧凑横排，空间不足自动换行）：
   - 工作流：生成图片 = 工作流类型 + 工作流实现两个紧凑下拉；生成视频 = 单个工作流下拉（模式放其前）；TTS = 单个工作流实现下拉；
-  - `DurationPicker`（`components/DurationPicker.vue`，时长）：**仅生成视频节点显示**；点击触发行弹出菜单——1~15 秒按钮组（点击即选即关）+ 手动输入（支持小数秒，回车/「应用」确认，非法忽略）；写回按生成模式走 `config.director.duration` / `config.duration`；
+  - `DurationPicker`（`components/DurationPicker.vue`，时长）：**仅生成视频节点显示**；点击触发行弹出菜单——1~15 秒按钮组（点击即选即关）+ 手动输入（支持小数秒，回车/「应用」确认，非法忽略）；统一写回 `config.duration`（三种生成模式同源，未设置时界面回退 5s）；
   - `WorkflowSizePicker`（输出尺寸）：**仅生成图片/视频节点显示**，点击弹出菜单（比例/分辨率/自定义宽高），图片节点直接绑 `config.sizeConfig`；
   - `WorkflowParamsTrigger`（`components/WorkflowParamsTrigger.vue`，工作流参数）：点击触发行弹出菜单，菜单内嵌 `WorkflowParamsForm`；触发行显示「工作流参数」+ 已配置非默认参数数量徽标。
 - **拼接视频节点编辑器**（`editors/ConcatVideoEditor.vue`）在输入预览下方增加：**输入规格探测**（`GET /api/canvas/video-info`，逐段展示 分辨率/帧率/编码/有无音轨）、**编码方式**下拉（重编码 / copy）、**输出尺寸**下拉（取最大的一段 / 取最小的一段 / 自定义；`copy` 时禁用并提示「仅重编码可用」）、`自定义` 时的宽高输入框、目标尺寸提示（`max`/`min` 按像素面积推算）与 copy 规格不一致红字提示（不一致时禁用「拼接」按钮）。
-- **导演台模式例外**：生成视频的 `director` 模式保持内嵌导演台布局（首行工作流/模式/全屏、输出规格、内嵌参数表单、`VideoDirector`），仅把「时长(秒)」输入框换成 `DurationPicker`。
+- **参数行两种布局共用同一组件**（`editors/VideoGenerateParamsRow.vue`）：生成视频节点的导演台模式与首尾帧/参考模式使用**同一个**参数行组件，保证「生成模式 + 工作流 + 时长 `DurationPicker` + 输出尺寸 `WorkflowSizePicker` + 工作流参数 `WorkflowParamsTrigger` + 全屏按钮」的位置与交互完全一致，避免两处模板各自演化。两种模式的差异只在参数行**之上**的主体：
+  - `director`：`VideoDirector` 主体（时间轴素材双轨 + prompt 文本域，见 [node-types.md](./node-types.md)）在上，统一参数行紧随其下；
+  - `first-last-frame` / `reference`：`CanvasInputPreview` 输入预览 + 参考模式限制提示 + 提示词文本域在上，统一参数行在其下（`generation-params-row` 样式也内聚在该组件内）。
+  工作流实现校验错误（未选择实现时）由参数行组件在行下以红字展示（下拉用 `hide-details` 保持行高恒定），三种模式表现一致。
+- **输出规格单一事实源**：生成视频节点的时长/宽高/帧率以 `config.duration` / `config.resolution` / `config.sizeConfig` / `config.fps` 为唯一权威（统一经 `canvas/videoSpec.ts: readVideoSpec` 读取），`config.director` 的 `duration/width/height/fps` 为**遗留字段**——仅作旧画布读取回退、任何写入路径都不再更新（时间轴编辑只回写 `imageClips/audioClips`）。因此参数行时长与导演台时间轴「总长」天然同源，无需任何双向同步逻辑。
 
 ## 输入预览（`CanvasInputPreview.vue`，生成节点统一输入区）
 

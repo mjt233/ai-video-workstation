@@ -53,6 +53,48 @@ describe('buildVideoSubmitParams', () => {
     expect(params.extraParams).toEqual({})
   })
 
+  it('导演台模式：输出规格以 config.* 为准（优先于 config.director 遗留字段）', () => {
+    const node = mkNode({
+      mode: 'director',
+      prompt: 'p',
+      // 唯一权威：config.duration / config.resolution / config.fps
+      duration: 20,
+      resolution: { width: 720, height: 1280 },
+      fps: 30,
+      // 遗留字段：不应参与计算
+      director: {
+        duration: 10,
+        width: 1080,
+        height: 1920,
+        fps: 24,
+        imageClips: [{ id: 'a', sourceNodeId: 'img1', startOffset: 5, duration: 2 }],
+        audioClips: [],
+      },
+      workflowParams: {},
+    })
+    const inputs = { images: [mkInput('img1', 'assert/a.png')], videos: [], audios: [] }
+    const params = buildVideoSubmitParams(node, inputs)
+    expect(params.duration).toBe(20)
+    expect(params.resolution).toEqual({ width: 720, height: 1280 })
+    expect(params.fps).toBe(30)
+    // cursor 按 config.duration 归一化：5 / 20
+    expect(params.director?.frames[0].cursor).toBeCloseTo(0.25)
+  })
+
+  it('首尾帧模式：config.duration 缺失时回退旧画布的 config.director.duration', () => {
+    const node = mkNode({
+      mode: 'first-last-frame',
+      prompt: 'p',
+      inputOrder: ['img1'],
+      resolution: {},
+      director: { duration: 8, width: 0, height: 0, fps: 0, imageClips: [], audioClips: [] },
+      workflowParams: {},
+    })
+    const inputs = { images: [mkInput('img1', 'assert/1.png')], videos: [], audios: [] }
+    const params = buildVideoSubmitParams(node, inputs)
+    expect(params.duration).toBe(8)
+  })
+
   it('首尾帧模式：按 inputOrder 排列帧图片，cursor 自动均匀分布', () => {
     const node = mkNode({
       mode: 'first-last-frame',

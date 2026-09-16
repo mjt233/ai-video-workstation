@@ -40,8 +40,13 @@ const TEXT_TO_IMAGE_STRUCTURAL_KEYS = new Set(['seed', 'enhance_prompt', 'enable
 const IMAGE_EDIT_STRUCTURAL_KEYS = new Set(['seed', 'enable_specified_size', 'width', 'height']);
 /** tts 提交按结构字段处理的用户参数键（从透传排除） */
 const TTS_STRUCTURAL_KEYS = new Set(['seed']);
-/** image-to-video 提交按结构字段处理的用户参数键（从透传排除） */
-const VIDEO_STRUCTURAL_KEYS = new Set(['seed', 'width', 'height', 'duration', 'fps', 'auto_generate_audio', 'mid_frame_cursor', 'frame_define']);
+/**
+ * image-to-video 提交按结构字段处理的用户参数键（从透传排除）。
+ *
+ * 注意：`auto_generate_audio` **不在**排除集内——该参数已不由服务端按「是否提供音频」
+ * 自动设置，改由工作流自定义参数原样透传（未声明/未配置时不发送，由远端工作流默认值决定）。
+ */
+const VIDEO_STRUCTURAL_KEYS = new Set(['seed', 'width', 'height', 'duration', 'fps', 'mid_frame_cursor', 'frame_define']);
 
 /**
  * 提取待透传的用户参数：从 ctx.userParams（引擎按声明类型转换后的原生值）中排除

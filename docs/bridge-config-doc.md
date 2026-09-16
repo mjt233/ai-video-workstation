@@ -127,8 +127,8 @@ Bridge 工作流 id：`tts_voice_design`
 | `height` | number | 输出高度px |
 | `duration` | number | 视频时长（秒） |
 | `fps` | number | 帧率 |
-| `auto_generate_audio` | boolean | 自动生成音频（默认 true） |
-| `audio` | audio（可选） | 背景音频（提供时 `auto_generate_audio` 置 false） |
+| `auto_generate_audio` | boolean（可选） | 自动生成音频；**服务端不再自动设置**，仅当工作流把它声明为用户参数且用户配置了才随请求下发（`audio` 提供与否都不再改写它） |
+| `audio` | audio（可选） | 背景音频（仅上传音频文件，不改写 `auto_generate_audio`） |
 | `seed` | number（可选） | 随机种子 |
 
 **b. MiniMax H3（`minimax-h3-fl2v`，1~2 帧）**
@@ -152,10 +152,10 @@ Bridge 工作流 id：`tts_voice_design`
 | `height` | number | 输出高度px |
 | `duration` | number | 视频时长（秒） |
 | `fps` | number | 帧率 |
-| `auto_generate_audio` | boolean | 自动生成音频（默认 true） |
+| `auto_generate_audio` | boolean（可选） | 自动生成音频；**服务端不再自动设置**，仅当工作流把它声明为用户参数且用户配置了才随请求下发（`audio` 提供与否都不再改写它） |
 | `frame_define` | text | 关键帧定义 JSON 字符串（见下方说明） |
 | `image_{frameSeq}` | image | 关键帧图（与 `frame_define` 中 `frameSeq` 一一对应） |
-| `audio` | audio（可选） | 背景音频（提供时 `auto_generate_audio` 置 false） |
+| `audio` | audio（可选） | 背景音频（仅上传音频文件，不改写 `auto_generate_audio`） |
 | `seed` | number（可选） | 随机种子 |
 
 > `frame_define` 格式：`[{ frameSeq, cursor }]`，`frameSeq` 0-based（对应文件 `image_{frameSeq}`），`cursor` 为该帧在视频长度中的位置比值（0~1）。

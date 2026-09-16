@@ -73,9 +73,10 @@ describe('buildImageEditPayload', () => {
 });
 
 describe('buildFirstLastFramePayload', () => {
-  it('1 帧 image_0，auto_generate_audio=true', () => {
+  it('1 帧 image_0，不带 auto_generate_audio（改由工作流自定义参数透传）', () => {
     const p = buildFirstLastFramePayload({ workflowId: 'I2V', prompt: 'p', width: 1280, height: 720, duration: 5, fps: 24, frames: [img('f0.png')] });
-    expect(p.params).toMatchObject({ prompt: 'p', width: 1280, height: 720, duration: 5, fps: 24, auto_generate_audio: true });
+    expect(p.params).toMatchObject({ prompt: 'p', width: 1280, height: 720, duration: 5, fps: 24 });
+    expect(p.params.auto_generate_audio).toBeUndefined();
     expect(Object.keys(p.files!)).toEqual(['image_0']);
     expect(p.params.mid_frame_cursor).toBeUndefined();
   });
@@ -84,8 +85,16 @@ describe('buildFirstLastFramePayload', () => {
     expect(Object.keys(p.files!)).toEqual(['image_0', 'image_1', 'image_2']);
     expect(p.params.mid_frame_cursor).toBe(0.5);
   });
-  it('提供 audio 时 audio 键 + auto_generate_audio=false', () => {
+  it('提供 audio 时只上传 audio 键，不改写 auto_generate_audio', () => {
     const p = buildFirstLastFramePayload({ workflowId: 'FL2V', prompt: 'p', width: 1280, height: 720, duration: 5, fps: 24, frames: [img('a'), img('b')], audio: aud });
+    expect(p.params.auto_generate_audio).toBeUndefined();
+    expect(p.files!.audio).toBe(aud);
+  });
+  it('auto_generate_audio 由 extraParams（工作流自定义参数）原样透传', () => {
+    const p = buildFirstLastFramePayload({
+      workflowId: 'FL2V', prompt: 'p', width: 1280, height: 720, duration: 5, fps: 24,
+      frames: [img('a')], audio: aud, extraParams: { auto_generate_audio: false },
+    });
     expect(p.params.auto_generate_audio).toBe(false);
     expect(p.files!.audio).toBe(aud);
   });
@@ -99,8 +108,18 @@ describe('buildDirectorPayload', () => {
       frameFiles: [img('a'), img('b')], audio: aud,
     });
     expect(p.params.frame_define).toBe(JSON.stringify([{ frameSeq: 0, cursor: 0 }, { frameSeq: 1, cursor: 0.5 }]));
-    expect(p.params.auto_generate_audio).toBe(false);
+    // 不再按「是否提供音频」自动改写 auto_generate_audio
+    expect(p.params.auto_generate_audio).toBeUndefined();
     expect(Object.keys(p.files!)).toEqual(['image_0', 'image_1', 'audio']);
+  });
+  it('auto_generate_audio 由 extraParams（工作流自定义参数）原样透传', () => {
+    const p = buildDirectorPayload({
+      workflowId: 'ltx-2.3-director', prompt: 'p', width: 1920, height: 1080, duration: 5, fps: 24,
+      frameDefines: [{ frameSeq: 0, cursor: 0 }], frameFiles: [img('a')], audio: aud,
+      extraParams: { auto_generate_audio: true },
+    });
+    expect(p.params.auto_generate_audio).toBe(true);
+    expect(p.files!.audio).toBe(aud);
   });
 });
 

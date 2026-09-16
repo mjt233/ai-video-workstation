@@ -181,7 +181,8 @@ export function buildImageEditPayload(args: {
  * 首尾帧模式图生视频提交载荷（文件 key image_{0..n-1}）。
  *
  * - 恰好 3 帧时附带 params.mid_frame_cursor=0.5（对应 FML2V 约定）；
- * - 提供 audio 时以 audio 键上传并将 auto_generate_audio 置 false；
+ * - 提供 audio 时以 audio 键上传（**不**自动改写 auto_generate_audio；
+ *   该参数由工作流自定义参数透传，未配置时不下发，由远端工作流默认值决定）；
  * - 调用方须校验帧数 1~3（本构建器不做数量校验）。
  *
  * @param args.workflowId Bridge 工作流 id
@@ -214,16 +215,12 @@ export function buildFirstLastFramePayload(args: {
     height: args.height,
     duration: args.duration,
     fps: args.fps,
-    auto_generate_audio: true,
   };
   if (args.seed != null) params.seed = args.seed;
   if (args.frames.length === 3) params.mid_frame_cursor = 0.5;
   const files: Record<string, File> = {};
   args.frames.forEach((f, idx) => { files[`image_${idx}`] = f; });
-  if (args.audio) {
-    files.audio = args.audio;
-    params.auto_generate_audio = false;
-  }
+  if (args.audio) files.audio = args.audio;
   return { workflowId: args.workflowId, params, files };
 }
 
@@ -232,7 +229,8 @@ export function buildFirstLastFramePayload(args: {
  *
  * - body 中 frame_define 为 JSON.stringify(FrameDefine[]) 字符串；
  * - 文件以动态键 image_{frameSeq} 上传，frameSeq 与 frameDefines 一一对应；
- * - 提供 audio 时以 audio 键上传并将 auto_generate_audio 置 false。
+ * - 提供 audio 时以 audio 键上传（**不**自动改写 auto_generate_audio；
+ *   该参数由工作流自定义参数透传，未配置时不下发，由远端工作流默认值决定）。
  *
  * @param args.workflowId Bridge 工作流 id
  * @param args.prompt 视频描述提示词
@@ -268,16 +266,12 @@ export function buildDirectorPayload(args: {
     height: args.height,
     duration: args.duration,
     fps: args.fps,
-    auto_generate_audio: true,
     frame_define: JSON.stringify(args.frameDefines),
   };
   if (args.seed != null) params.seed = args.seed;
   const files: Record<string, File> = {};
   args.frameFiles.forEach((f, idx) => { files[`image_${idx}`] = f; });
-  if (args.audio) {
-    files.audio = args.audio;
-    params.auto_generate_audio = false;
-  }
+  if (args.audio) files.audio = args.audio;
   return { workflowId: args.workflowId, params, files };
 }
 

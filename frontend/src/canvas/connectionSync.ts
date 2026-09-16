@@ -1,6 +1,7 @@
 import type { CanvasConnection, CanvasData } from './types'
 import { newId } from './types'
 import { getNodeOutputType } from './connection'
+import { readVideoSpec } from './videoSpec'
 import type { CanvasDirectorConfig, CanvasDirectorImageClip, CanvasDirectorAudioClip } from './videoTypes'
 
 /** 自动追加图片块时的默认占位时长（秒） */
@@ -20,6 +21,9 @@ export interface ConnectionSyncEvent {
  *   video → 不进导演台轨道（仅在参考模式作为参考素材）；
  * - disconnect：删除 sourceNodeId 匹配的 clip。
  * 只增删、不重排——保留用户已拖好的滑块位置。
+ *
+ * 新增图片块的落位以「节点输出时长」为时间轴总长（`readVideoSpec` 读取，
+ * config.duration 优先、config.director.duration 仅作旧画布回退）。
  *
  * @param data 画布数据
  * @param event 连线变化事件
@@ -49,7 +53,9 @@ export function applyConnectionSync(data: CanvasData, event: ConnectionSyncEvent
     const imageClips = d.imageClips ?? []
     if (imageClips.some((c) => c.sourceNodeId === event.connection.fromNodeId)) return data
     const maxStart = imageClips.reduce((m, c) => Math.max(m, c.startOffset + c.duration), 0)
-    const total = typeof d.duration === 'number' && d.duration > 0 ? d.duration : maxStart + DEFAULT_IMAGE_CLIP_DURATION
+    // 时间轴总长即节点输出时长（config.* 为唯一权威，director.duration 仅旧画布回退）
+    const specDuration = readVideoSpec(node.config).duration
+    const total = specDuration > 0 ? specDuration : maxStart + DEFAULT_IMAGE_CLIP_DURATION
     const clip: CanvasDirectorImageClip = {
       id: newId(),
       sourceNodeId: event.connection.fromNodeId,

@@ -1,6 +1,7 @@
 import type { VideoWorkflowSubmitParams } from '../api/workflow'
 import type { CanvasNodeData } from './types'
 import type { CanvasInputInfo } from './generate'
+import { readVideoSpec, VIDEO_DURATION_FALLBACK } from './videoSpec'
 import type { CanvasDirectorConfig, VideoGenerateMode } from './videoTypes'
 
 /** 提交参数类型复用 api/workflow.ts 的 VideoWorkflowSubmitParams（与后端 wire 形态一致） */
@@ -61,16 +62,20 @@ function sizeConfigOf(config: CanvasNodeData['config']): VideoSubmitParams['size
  * - director：按 config.director.imageClips.startOffset 升序生成 frames（cursor = startOffset / duration），
  *   音频取第一条 audioClip 对应输入（仅此模式加载导演台）；
  * - first-last-frame：按 config.inputOrder 排列帧图片，cursor 按首尾帧自动均匀分布
- *   （首帧 0、尾帧 1），时长/分辨率取 config.duration / config.resolution，音频取第一条音频输入；
+ *   （首帧 0、尾帧 1），音频取第一条音频输入；
  * - reference：按 config.inputOrder 对三组端口输入统一排序，分组生成 references。
+ *
+ * 时长/分辨率/帧率统一由 `readVideoSpec` 读取（config.duration / config.resolution /
+ * config.sizeConfig / config.fps 为唯一权威，config.director.* 仅作旧画布回退），
+ * 三种模式同源，不再有「导演台另存一套规格」的分叉。
  *
  * 统一尺寸配置（config.sizeConfig：比例/尺寸档 + 可选自定义宽高）随 wire 携带，
  * 引擎合并进 ctx.sizeConfig 供工作流实现消费（如 MiniMax ratio）。
  *
  * workflowParams.seed 会从 extraParams 中剥离并转换为数字型 seed（字符串数字也可转换）。
  *
- * @param node 视频生成节点（config 含 mode/prompt/workflowParams；director 模式用 config.director，
- *             首尾帧/参考模式用 config.inputOrder + config.resolution + config.duration）
+ * @param node 视频生成节点（config 含 mode/prompt/workflowParams；director 模式另用
+ *             config.director 的素材块，首尾帧/参考模式用 config.inputOrder）
  * @param inputs 按端口分组的输入资产
  * @param textPrompt 外部文本输入（连线「文本」节点提供的提示词；提供时优先于 config.prompt，
  *                   未提供（undefined）时使用 config.prompt）
@@ -112,11 +117,11 @@ export function buildVideoSubmitParams(
       ...sortByOrder(inputs.videos).map((i) => ({ type: 'video' as const, path: i.path })),
       ...sortByOrder(inputs.audios).map((i) => ({ type: 'audio' as const, path: i.path })),
     ]
-    const r = config.resolution as { width?: number; height?: number } | undefined
-    const duration = Number(config.duration) || 5
+    const spec = readVideoSpec(config)
+    const duration = spec.duration || VIDEO_DURATION_FALLBACK
     return {
       mode,
-      resolution: { width: r?.width || 1280, height: r?.height || 720 },
+      resolution: { width: spec.width || 1280, height: spec.height || 720 },
       duration,
       prompt,
       ...(seed != null && !Number.isNaN(seed) ? { seed } : {}),
@@ -126,25 +131,29 @@ export function buildVideoSubmitParams(
     }
   }
 
-  // 导演台模式：按 config.director 的 imageClips（startOffset）生成关键帧，音频取第一条 audioClip
+  // 导演台模式：按 config.director 的 imageClips（startOffset）生成关键帧，音频取第一条 audioClip。
+  // 输出规格（时长/宽高/帧率）统一由 readVideoSpec 读取（config.* 为唯一权威，
+  // config.director.* 仅旧画布回退），因此导演台时间轴「总长」与其它模式的「时长」同源。
   if (mode === 'director') {
     const d = (config.director ?? {}) as Partial<CanvasDirectorConfig>
+    const spec = readVideoSpec(config)
     const bySource = new Map(inputs.images.concat(inputs.videos).concat(inputs.audios).map((i) => [i.nodeId, i.path]))
     const imageClips = (d.imageClips ?? []).slice()
     const audioClips = d.audioClips ?? []
+    const duration = spec.duration || VIDEO_DURATION_FALLBACK
     const frames = [...imageClips]
       .sort((a, b) => a.startOffset - b.startOffset)
       .map((c) => ({
         path: bySource.get(c.sourceNodeId) ?? '',
-        cursor: d.duration && d.duration > 0 ? Math.min(Math.max(c.startOffset / d.duration, 0), 1) : 0,
+        cursor: duration > 0 ? Math.min(Math.max(c.startOffset / duration, 0), 1) : 0,
       }))
       .filter((f) => f.path)
     const audioPath = audioClips.length > 0 ? bySource.get(audioClips[0].sourceNodeId) : undefined
     return {
       mode,
-      resolution: { width: d.width || 1280, height: d.height || 720 },
-      ...(d.fps ? { fps: d.fps } : {}),
-      duration: d.duration || 5,
+      resolution: { width: spec.width || 1280, height: spec.height || 720 },
+      ...(spec.fps ? { fps: spec.fps } : {}),
+      duration,
       prompt,
       ...(seed != null && !Number.isNaN(seed) ? { seed } : {}),
       ...(sizeConfig ? { sizeConfig } : {}),
@@ -157,7 +166,7 @@ export function buildVideoSubmitParams(
   }
 
   // 首尾帧模式：按 config.inputOrder 排列帧图片（首帧 0、尾帧 1，中间均匀分布），
-  // 时长/分辨率取 config.duration / config.resolution，音频取第一条音频输入
+  // 时长/分辨率由 readVideoSpec 统一读取，音频取第一条音频输入
   const order: string[] = Array.isArray(config.inputOrder) ? (config.inputOrder as string[]) : []
   const sortByOrder = (list: CanvasInputInfo[]): CanvasInputInfo[] =>
     [...list].sort((a, b) => {
@@ -165,7 +174,7 @@ export function buildVideoSubmitParams(
       const ib = order.indexOf(b.nodeId)
       return (ia === -1 ? Number.MAX_SAFE_INTEGER : ia) - (ib === -1 ? Number.MAX_SAFE_INTEGER : ib)
     })
-  const r = config.resolution as { width?: number; height?: number } | undefined
+  const spec = readVideoSpec(config)
   const frames = sortByOrder(inputs.images)
     .map((i) => i.path)
     .filter(Boolean)
@@ -173,8 +182,8 @@ export function buildVideoSubmitParams(
   const audioPath = inputs.audios[0]?.path
   return {
     mode,
-    resolution: { width: r?.width || 1280, height: r?.height || 720 },
-    duration: Number(config.duration) || 5,
+    resolution: { width: spec.width || 1280, height: spec.height || 720 },
+    duration: spec.duration || VIDEO_DURATION_FALLBACK,
     prompt,
     ...(seed != null && !Number.isNaN(seed) ? { seed } : {}),
     ...(sizeConfig ? { sizeConfig } : {}),

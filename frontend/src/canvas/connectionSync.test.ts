@@ -36,6 +36,25 @@ describe('applyConnectionSync', () => {
     expect((data.nodes.find((n) => n.id === 'vg')!.config.director as { imageClips: unknown[] }).imageClips).toHaveLength(1)
   })
 
+  it('新增图片块以 config.duration（唯一权威）为时间轴总长，优先于 director 遗留字段', () => {
+    const data = baseData()
+    const vg = data.nodes.find((n) => n.id === 'vg')!
+    // config.duration=4（权威）覆盖 director.duration=10；已有块占位到 8s
+    vg.config.duration = 4
+    ;(vg.config.director as { imageClips: unknown[] }).imageClips = [
+      { id: 'old', sourceNodeId: 'img0', startOffset: 6, duration: 2 },
+    ]
+    const next = applyConnectionSync(data, { type: 'connect', connection: imgConn })
+    const clips = (
+      next.nodes.find((n) => n.id === 'vg')!.config.director as {
+        imageClips: Array<{ sourceNodeId: string; startOffset: number }>
+      }
+    ).imageClips
+    expect(clips.map((c) => c.sourceNodeId)).toEqual(['img0', 'img1'])
+    // 总长 4 - 默认块长 2 = 2（若用 director.duration=10 则为 8）
+    expect(clips[1].startOffset).toBe(2)
+  })
+
   it('连接音频来源节点自动追加 audioClip', () => {
     let data = baseData()
     data = applyConnectionSync(data, { type: 'connect', connection: audConn })

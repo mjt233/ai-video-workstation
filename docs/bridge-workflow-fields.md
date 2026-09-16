@@ -78,11 +78,12 @@
 
 | 帧数 | 工作流 | params | 文件 |
 |---|---|---|---|
-| 1 | `I2V` | `prompt`、`width`、`height`、`duration`、`fps`、`auto_generate_audio=true`、`seed?` | `image_0` |
+| 1 | `I2V` | `prompt`、`width`、`height`、`duration`、`fps`、`seed?` | `image_0` |
 | 2 | `FL2V` | 同上 | `image_0`、`image_1` |
 | 3 | `FML2V` | 同上 + `mid_frame_cursor=0.5` | `image_0`、`image_1`、`image_2` |
 
-- 提供背景音频时以 `audio` 键上传，并将 `auto_generate_audio` 置 false。
+- 提供背景音频时以 `audio` 键上传。
+- `auto_generate_audio` **不再由服务端自动设置**（此前无音频时补 `true`、有音频时改写 `false` 的行为已移除）：工作流若声明该用户参数，则按用户配置原样透传；未声明/未配置时不下发该字段，由远端工作流默认值决定。
 
 **b. MiniMax H3（`minimax-h3-fl2v`，1~2 帧）**
 
@@ -95,8 +96,9 @@
 
 | 项 | 字段 |
 |---|---|
-| params | `prompt`、`width`、`height`、`duration`、`fps`、`auto_generate_audio=true`、`frame_define`（JSON 字符串）、`seed?` |
+| params | `prompt`、`width`、`height`、`duration`、`fps`、`frame_define`（JSON 字符串）、`seed?` |
 | 文件 | `image_{frameSeq}`（与 `frame_define` 中 `frameSeq` 一一对应）+ `audio?` |
 
 - `frame_define`：`[{ frameSeq, cursor }]`，`frameSeq` 0-based（对应文件 `image_{frameSeq}`），`cursor` 为该帧在视频长度中的位置比值（0~1）。
-- 提供背景音频时以 `audio` 键上传，并将 `auto_generate_audio` 置 false。
+- 提供背景音频时以 `audio` 键上传。
+- `auto_generate_audio` 同上：不由服务端自动设置，改由工作流自定义参数透传（未配置则不下发）。
