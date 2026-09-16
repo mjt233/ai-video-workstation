@@ -14,8 +14,8 @@ tasks/task-ws.ts  wsHub（挂载 /llm-ws）
    │ tasks 全量 + task-update 增量 + LLM 专属消息
    ▼
 frontend/src/canvas/taskSocket.ts（全局单例）
-   ├─ tasks（响应式）→ App.vue → TaskManagerDialog（进行中页签）
-   ├─ onTaskUpdate(task) → useCanvasGeneration（ffmpeg 进度/终态）
+   ├─ tasks（响应式）→ App.vue → TaskManagerDrawer（进行中页签）
+   ├─ onTaskUpdate(task) → useCanvasGeneration（ffmpeg 进度/终态）+ canvas/notify（工作流完成气泡）
    ├─ onFinished(info)   → AssetCanvas（LLM 终态补丁 + savedRev 对齐）
    └─ subscribe(taskId)  → LLM 流式增量（thinking/text/warning）
                     ▲
@@ -245,16 +245,19 @@ for (const entry of await collectRunningTasks(knownNodeIds)) {
 
 切换画布目标 / 卸载组件时清掉 `pollTimers`、`llmConvergeTimers`、`statusByNode`、`taskIdByNode`、`ffmpegOutputByNode` 等本地映射——**不动服务端任务**。任务继续执行，回到本画布时由 `restore()` 按 scope 重新接管。这正是"Loading 跨页面保留"的前端半边。
 
-## 七、任务管理器（`frontend/src/components/TaskManagerDialog.vue`）
+## 七、任务管理器（`frontend/src/components/TaskManagerDrawer.vue`）
+
+**右侧抽屉**（`v-navigation-drawer` `location="right"` `temporary`，宽 460px）：`temporary` 浮层不挤压主内容，避免画布重排；抽屉打开时右下角完成气泡整栈隐藏。
 
 | 项 | 实现 |
 |----|------|
 | 数据源 | 由 `App.vue` 注入 `:tasks="taskSocket.tasks.value"`（**进行中页签只读 `taskSocket.tasks`**，无自己的请求） |
 | 活跃列表 | `props.tasks.filter(t => t.status==='running' \|\| 'pending').sort(by startedAt desc)` |
-| 页签 | `active`（进行中，内存注册表）/ `history`（历史，`<TaskHistoryPanel>` 走 SQLite 任务 + 日志） |
+| 页签 | `active`（进行中，内存注册表）/ `history`（历史，`<TaskHistoryPanel>` 走 SQLite 任务 + 产物缩略图 + 日志）；`openTab` + `openToken` 支持外部定位与刷新 |
 | 展示 | 类型标记（AI 生成 / LLM 会话 / 视频处理）、状态文案（`排队中` / `Thinking…` / `正在响应…` / `处理中 {n}%` / `运行中…`）、进度条、已运行时长（客户端每秒刷新）、画布位置（`分镜第{episode}集 {shot}#` 或 `场景 {stage} / {label}`） |
 | 中断 | `taskSocket.cancel(t.id)`（WS + HTTP 兜底）；`cancelable === false` 置灰并以 `title` 显示 `cancelBlockReason` |
-| 完成提示 | 面板打开期间监听活跃数量下降 → 「已完成 N 个」计数；关闭时复位页签并停止计时器 |
+| 完成提示 | 抽屉打开期间监听活跃数量下降 → 「已完成 N 个」计数 + 「查看最近完成 →」跳历史并刷新；关闭时复位页签并停止计时器 |
+| 工作流完成气泡 | `App.vue` 另装一份 `canvas/notify.ts` 的 `onTaskUpdate` 监听，消费**工作流**终态弹右下角气泡（30s 固定自动关闭、最多 3 张、产物预览放大），见 [../canvas/notification.md](../canvas/notification.md) |
 
 ## 八、三个"为什么"
 

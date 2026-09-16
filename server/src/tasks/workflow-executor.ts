@@ -208,9 +208,10 @@ class WorkflowExecutor {
    *
    * @param taskId 任务 id
    * @param status 终态
+   * @param error 失败原因（可选；携带时随终态广播下发，供前端完成通知气泡展示原因）
    */
-  finish(taskId: string, status: 'completed' | 'failed' | 'cancelled'): void {
-    taskRegistry.finish(taskId, { status });
+  finish(taskId: string, status: 'completed' | 'failed' | 'cancelled', error?: string): void {
+    taskRegistry.finish(taskId, { status, ...(error ? { error } : {}) });
   }
 
   /**

@@ -1,19 +1,25 @@
 <template>
-  <!-- 全局「任务管理器」面板（Header 右上角图标展开；展示系统当前全部异步任务） -->
-  <v-dialog
+  <!--
+    全局「任务管理器」抽屉（Header 右上角图标从右侧滑出；展示系统当前全部异步任务）。
+    用 temporary 浮层而非挤压主内容：画布（Vue Flow）尺寸/滚轮交互不因抽屉开合重排。
+  -->
+  <v-navigation-drawer
     :model-value="modelValue"
-    max-width="760"
+    location="right"
+    temporary
+    :width="DRAWER_WIDTH"
+    class="task-manager-drawer"
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
   >
-    <v-card class="task-manager-dialog">
-      <v-card-title class="d-flex align-center">
+    <div class="task-manager-drawer__inner">
+      <div class="task-manager-drawer__head">
         <v-icon
           icon="mdi-progress-clock"
           size="20"
           class="mr-2"
           color="primary"
         />
-        任务管理器
+        <span class="text-subtitle-1 font-weight-medium">任务管理器</span>
         <span
           v-if="activeTasks.length > 0"
           class="text-body-small text-medium-emphasis ml-2"
@@ -28,9 +34,9 @@
           aria-label="关闭"
           @click="emit('update:modelValue', false)"
         />
-      </v-card-title>
+      </div>
 
-      <!-- 「进行中」= 统一任务注册表（内存运行态）；「历史」= SQLite 持久化任务（含日志） -->
+      <!-- 「进行中」= 统一任务注册表（内存运行态）；「历史」= SQLite 持久化任务（含日志与产物） -->
       <v-tabs
         v-model="tab"
         density="comfortable"
@@ -45,17 +51,20 @@
         </v-tab>
       </v-tabs>
 
-      <v-window v-model="tab">
+      <v-window
+        v-model="tab"
+        class="task-manager-drawer__window"
+      >
         <v-window-item value="active">
-          <v-card-text class="task-manager-dialog__body">
+          <div class="task-manager-drawer__body">
             <template v-if="activeTasks.length > 0">
               <div
                 v-for="t in activeTasks"
                 :key="t.id"
-                class="task-manager-dialog__row"
+                class="task-manager-drawer__row"
               >
-                <div class="task-manager-dialog__info">
-                  <div class="task-manager-dialog__title">
+                <div class="task-manager-drawer__info">
+                  <div class="task-manager-drawer__title">
                     <v-progress-circular
                       v-if="t.status === 'running'"
                       :size="14"
@@ -79,9 +88,9 @@
                     >
                       {{ typeLabel(t.type) }}
                     </v-chip>
-                    <span class="task-manager-dialog__name">{{ t.label }}</span>
+                    <span class="task-manager-drawer__name">{{ t.label }}</span>
                   </div>
-                  <div class="task-manager-dialog__meta">
+                  <div class="task-manager-drawer__meta">
                     <span>{{ statusText(t) }}</span>
                     <span class="mx-1">·</span>
                     <span>已运行 {{ formatElapsed(t.startedAt) }}</span>
@@ -111,7 +120,7 @@
                         size="small"
                         variant="tonal"
                         color="error"
-                        class="task-manager-dialog__interrupt"
+                        class="task-manager-drawer__interrupt"
                         :disabled="!t.cancelable"
                         @click="onInterrupt(t)"
                       >
@@ -124,7 +133,7 @@
             </template>
             <div
               v-else
-              class="task-manager-dialog__empty"
+              class="task-manager-drawer__empty"
             >
               <v-icon
                 icon="mdi-progress-clock"
@@ -138,40 +147,61 @@
             </div>
             <div
               v-if="finishedNoticeCount > 0"
-              class="task-manager-dialog__finished-note"
+              class="task-manager-drawer__finished-note"
             >
-              本次面板打开期间已有 {{ finishedNoticeCount }} 个任务完成
+              <span>本次打开期间已有 {{ finishedNoticeCount }} 个任务完成</span>
+              <v-btn
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click="showRecent()"
+              >
+                查看最近完成 →
+              </v-btn>
             </div>
-          </v-card-text>
+          </div>
         </v-window-item>
 
         <v-window-item value="history">
-          <v-card-text class="task-manager-dialog__body">
-            <TaskHistoryPanel :active="tab === 'history'" />
-          </v-card-text>
+          <div class="task-manager-drawer__body">
+            <TaskHistoryPanel
+              :active="tab === 'history'"
+              :reload-token="historyReloadToken"
+            />
+          </div>
         </v-window-item>
       </v-window>
-    </v-card>
-  </v-dialog>
+    </div>
+  </v-navigation-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { taskSocket, type LlmCanvasTarget, type TaskInfo, type TaskType } from '../canvas/taskSocket'
+import { workflowFinishedTick } from '../canvas/notify'
 import TaskHistoryPanel from './task/TaskHistoryPanel.vue'
 
+/** 抽屉宽度（像素；窄屏由 CSS `max-width: 92vw` 兜底） */
+const DRAWER_WIDTH = 460
+
 /**
- * 全局「任务管理器」面板（由原 LLM 活跃会话面板升级）：
+ * 全局「任务管理器」抽屉：
  * - 任务列表实时来自 `taskSocket.tasks`（服务端 begin/update/finish 广播，含 ffmpeg 真实进度）；
  * - 每行展示：类型标记 / 名称 / 状态 / 已运行时长（按 startedAt 客户端每秒刷新）/ 画布位置 / 进度条；
  * - 「中断」按钮统一走 `taskSocket.cancel`（ffmpeg kill 子进程、LLM abort 上游、工作流 Bridge 取消）；
- *   不可中断的任务按钮置灰并以 tooltip 显示原因（如「该工作流不支持中断」）。
+ *   不可中断的任务按钮置灰并以 tooltip 显示原因（如「该工作流不支持中断」）；
+ * - 「历史」页签 = SQLite 持久任务（跨刷新保留，含产物缩略图与日志），也是"看刚完成的任务"的入口
+ *   （列表按 `created_at DESC`，第一条即最近完成的）。
  */
 const props = defineProps<{
-  /** 面板可见性（v-model） */
+  /** 抽屉可见性（v-model） */
   modelValue: boolean
   /** 活跃任务列表（taskSocket.tasks 注入） */
   tasks: TaskInfo[]
+  /** 外部请求打开的页签（配合 openToken；缺省保持当前页签） */
+  openTab?: 'active' | 'history'
+  /** 外部请求令牌：自增即按 openTab 切换页签并刷新历史列表 */
+  openToken?: number
 }>()
 
 const emit = defineEmits<{
@@ -187,10 +217,13 @@ const activeTasks = computed(() =>
     .sort((a, b) => b.startedAt - a.startedAt),
 )
 
-/** 当前页签：active = 进行中（内存注册表）；history = 历史（SQLite 任务 + 日志） */
+/** 当前页签：active = 进行中（内存注册表）；history = 历史（SQLite 任务 + 产物 + 日志） */
 const tab = ref<'active' | 'history'>('active')
 
-/** 已完成计数提示（本次面板打开期间收敛的任务数；面板打开时清零） */
+/** 历史列表刷新令牌（自增即触发 TaskHistoryPanel 重新拉取第一页） */
+const historyReloadToken = ref(0)
+
+/** 已完成计数提示（本次抽屉打开期间收敛的任务数；打开时清零） */
 const finishedNoticeCount = ref(0)
 /** 上次任务快照（数量减少判定完成） */
 let prevCount = activeTasks.value.length
@@ -199,7 +232,7 @@ let prevCount = activeTasks.value.length
 const nowTick = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
 
-/** 面板打开时启动秒级计时；关闭时停止并清零完成计数（同时复位页签） */
+/** 抽屉打开时启动秒级计时；关闭时停止并清零完成计数（同时复位页签） */
 watch(
   () => props.modelValue,
   (open) => {
@@ -221,7 +254,28 @@ watch(
   { immediate: true },
 )
 
-/** 任务数量下降（终态移除）→ 完成计数 +1（面板打开期间） */
+/** 外部请求（如完成气泡的「查看日志」）打开指定页签并刷新历史 */
+watch(
+  () => props.openToken,
+  () => {
+    if (!props.openToken) return
+    tab.value = props.openTab ?? 'active'
+    if (tab.value === 'history') historyReloadToken.value += 1
+  },
+)
+
+/**
+ * 工作流任务收敛（成功 / 失败 / 用户中断）→ 刷新「历史」列表。
+ *
+ * 历史数据来自 SQLite，不会自动感知新任务；本监听与抽屉开关**无关**：
+ * 抽屉关闭期间完成任务时也会让已挂载的历史面板在后台重新拉取，
+ * 用户下次展开「历史」看到的就是最新列表（未挂载过则首帧激活时本就会加载）。
+ */
+watch(workflowFinishedTick, () => {
+  historyReloadToken.value += 1
+})
+
+/** 任务数量下降（终态移除）→ 完成计数 +1（抽屉打开期间） */
 watch(
   () => activeTasks.value.length,
   (count) => {
@@ -233,7 +287,31 @@ watch(
 
 onBeforeUnmount(() => {
   if (tickTimer) clearInterval(tickTimer)
+  window.removeEventListener('keydown', onKeydown)
 })
+
+/**
+ * ESC 关闭抽屉：`v-navigation-drawer` 自带遮罩点击关闭但**不处理 ESC**，
+ * 这里补上与全站对话框一致的行为。
+ *
+ * 上层仍有打开的对话框（如历史行的产物放大预览）时直接返回：让对话框先关闭，
+ * 避免一次 ESC 连关两层。
+ *
+ * @param e 键盘事件
+ */
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key !== 'Escape' || !props.modelValue) return
+  if (document.querySelector('.v-dialog.v-overlay--active')) return
+  emit('update:modelValue', false)
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+
+/** 从「进行中」跳转「历史」并刷新（列表第一条即最近完成的任务） */
+function showRecent(): void {
+  tab.value = 'history'
+  historyReloadToken.value += 1
+}
 
 /**
  * 格式化任务耗时（毫秒时间差 → mm:ss 或 h:mm:ss）。
@@ -311,7 +389,7 @@ function locationText(t: TaskInfo): string {
 
 /**
  * 中断任务（取消非删除，无需 confirm）：WS 优先 + HTTP 兜底；
- * 服务端收敛后广播任务列表更新（LLM 另有 finished 广播），面板列表实时移除。
+ * 服务端收敛后广播任务列表更新（LLM 另有 finished 广播），列表实时移除。
  *
  * @param t 任务摘要
  */
@@ -322,13 +400,44 @@ function onInterrupt(t: TaskInfo): void {
 </script>
 
 <style scoped>
-.task-manager-dialog__body {
-  max-height: 460px;
-  overflow-y: auto;
-  padding-top: 0;
+.task-manager-drawer {
+  max-width: 92vw;
 }
 
-.task-manager-dialog__row {
+/* 抽屉内部满高纵向布局：头部 + 页签固定，内容区各自滚动 */
+.task-manager-drawer__inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.task-manager-drawer :deep(.v-navigation-drawer__content) {
+  overflow: hidden;
+}
+
+.task-manager-drawer__head {
+  display: flex;
+  align-items: center;
+  padding: 12px 12px 8px 16px;
+}
+
+.task-manager-drawer__window {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.task-manager-drawer__window :deep(.v-window__container),
+.task-manager-drawer__window :deep(.v-window-item) {
+  height: 100%;
+}
+
+.task-manager-drawer__body {
+  height: 100%;
+  overflow-y: auto;
+  padding: 4px 16px 16px;
+}
+
+.task-manager-drawer__row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -336,22 +445,22 @@ function onInterrupt(t: TaskInfo): void {
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
-.task-manager-dialog__row:last-child {
+.task-manager-drawer__row:last-child {
   border-bottom: none;
 }
 
-.task-manager-dialog__info {
+.task-manager-drawer__info {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.task-manager-dialog__title {
+.task-manager-drawer__title {
   display: flex;
   align-items: center;
   min-width: 0;
 }
 
-.task-manager-dialog__name {
+.task-manager-drawer__name {
   font-size: 13px;
   font-weight: 600;
   overflow: hidden;
@@ -359,7 +468,7 @@ function onInterrupt(t: TaskInfo): void {
   white-space: nowrap;
 }
 
-.task-manager-dialog__meta {
+.task-manager-drawer__meta {
   font-size: 11px;
   color: rgba(0, 0, 0, 0.5);
   margin-top: 2px;
@@ -368,11 +477,11 @@ function onInterrupt(t: TaskInfo): void {
   white-space: nowrap;
 }
 
-.task-manager-dialog__interrupt {
+.task-manager-drawer__interrupt {
   flex: 0 0 auto;
 }
 
-.task-manager-dialog__empty {
+.task-manager-drawer__empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -380,10 +489,13 @@ function onInterrupt(t: TaskInfo): void {
   padding: 28px 12px;
 }
 
-.task-manager-dialog__finished-note {
+.task-manager-drawer__finished-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   margin-top: 8px;
   font-size: 11px;
   color: rgba(0, 0, 0, 0.5);
-  text-align: center;
 }
 </style>

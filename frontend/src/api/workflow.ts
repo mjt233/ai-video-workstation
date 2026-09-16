@@ -149,6 +149,8 @@ export interface TaskParams {
 
 export interface TaskResponse {
   taskId: string
+  /** 项目名（任务管理器「历史」行按产物路径拼预览 URL：`/api/fs/{project}/...`） */
+  project: string
   workflowId: string
   impl: string
   status: string

@@ -9,6 +9,7 @@
    - `prompt` 取值：`textPromptOverride`（外部连线文本，非空时生效）优先于 `config.prompt`，与生成视频节点的外部文本规则一致。
    - 产物路径 `computeOutputPath`：**固定文件名** `output.{ext}`（扩展名取原型 `outputExt`，无版本号计算）。
 3. 提交后轮询 `poll`（2s，首轮立即查一次）：**服务端终态为 `completed` / `failed`**（无 success/error）。轮询**只更新 `statusByNode` 展示**，成功时经 `onResult(nodeId, outputPath)` 回调通知 UI 刷新（AssetCanvas 更新节点产物信息 node-info）；**不回写 `config.current`/`config.history`**——结果落盘由服务端完成，页面离开/关闭后结果依然存在。
+   **完成通知气泡**（与轮询无关的独立提醒层）：工作流任务终态由服务端统一任务注册表经 WS 广播，`App.vue` 安装的监听据此在右下角弹出气泡卡片（产物预览 / 点击放大 / 30s 固定自动关闭 / 最多 3 张），详见 [notification.md](./notification.md)。
 4. 状态机：`statusByNode[nodeId]` = `running | success | error`。
    **loading 是节点的通用能力**（不再是某类节点私有）：`CanvasNodeCard` 统一按 `status` prop 在节点内容上叠加遮罩——`running` 显示加载动画 + 「中断」按钮，`error` 显示错误信息 + 「重试」按钮；各节点 body 组件不再自行渲染遮罩，生成视频等原先无遮罩的节点也自动获得 loading 展示。配置面板编辑器的 `isRunning` 展示与中断按钮不变。
 5. 运行中任务状态来源与**画布恢复 Loading**（见 [task-architecture.md](./task-architecture.md)）：提交时随任务携带**画布定位**（`nodeId` + `canvas`），供画布加载/切换/刷新后恢复节点加载态。

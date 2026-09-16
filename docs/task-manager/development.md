@@ -22,7 +22,8 @@
 | `server/src/assets/ffmpeg-command.ts` | `FfmpegCommandSpec`（`outputAbs` / `build` / `duration?` / `info?`），assets 与 tasks 的共享类型 |
 | `frontend/src/canvas/taskSocket.ts` | 前端任务模型 `TaskInfo` 与 `taskSocket` 单例（`tasks` / `snapshotReady` / `onTaskUpdate` / `onFinished` / `subscribe` / `cancel`） |
 | `frontend/src/canvas/useCanvasGeneration.ts` | 提交 → 跟踪 → 终态收敛 → `restore()` 恢复 |
-| `frontend/src/components/TaskManagerDialog.vue` | 任务管理器（「进行中」读 `taskSocket.tasks`，「历史」读 SQLite） |
+| `frontend/src/components/TaskManagerDrawer.vue` | 任务管理器抽屉（「进行中」读 `taskSocket.tasks`，「历史」读 SQLite + 产物缩略图） |
+| `frontend/src/canvas/notify.ts` + `components/canvas/WorkflowNotifyStack.vue` | 工作流完成通知气泡（消费 `onTaskUpdate` 的工作流终态） |
 
 ## 一、新增一种任务类型的接入清单
 
@@ -79,7 +80,7 @@
 | `server/src/tasks/task-ws.ts` | `interface TaskInfo { type: 'workflow' \| 'llm' \| 'ffmpeg' }` |
 | `frontend/src/canvas/taskSocket.ts` | `export type TaskType` |
 | `frontend/src/api/tasks.ts` | `interface TaskInfo { type: ... }` |
-| `frontend/src/components/TaskManagerDialog.vue` | `typeLabel()` / `typeColor()` / `statusText()`（if/else 兜底，新类型会落到「视频处理」/teal/「运行中…」） |
+| `frontend/src/components/TaskManagerDrawer.vue` | `typeLabel()` / `typeColor()` / `statusText()`（if/else 兜底，新类型会落到「视频处理」/teal/「运行中…」） |
 
 漏掉前四处 → `npm run typecheck` 报错；漏掉第五处 → 类型检查通过但 UI 显示错。
 
@@ -155,7 +156,7 @@
 | 清理后数据库文件大小没变小，误判「没回收」 | `VACUUM` 在 Windows 上截断文件后仍保留磁盘分配，`stat` 大小可能不变 | 判定空间回收看 `freelist_count`（`VACUUM` 后为 0）与 `page_count × page_size` 得到的 `allocatedBytes`，**不要用文件大小**；`scripts/verify-log-cleanup.mjs` 的 PASS/FAIL 也按这套口径 |
 | 删了几万行日志，`page_count` 与占用纹丝不动 | SQLite 只把页放回空闲链表，文件高水位（`page_count`）不下降 | 「腾出空间」的信号是 `freelist_count > 0`（`LogStats.freelistCount` / `freelistBytes`）；要真正回落需 `wal_checkpoint(TRUNCATE)` + `VACUUM` |
 | `VACUUM` 报错（事务内无法执行） | `VACUUM` **不能在事务里执行** | 清理路径不使用显式事务，靠分批 `DELETE`（`CLEANUP_BATCH_SIZE = 5000`）的原子性保证一致性；`VACUUM` 前先 `wal_checkpoint(TRUNCATE)`（否则 WAL 仍占旧空间） |
-| 新类型加完了，`typecheck` 报错或任务管理器标签显示成「视频处理」 | `TaskType` 联合在服务端/前端各写死一份，UI 用 if/else 兜底 | 同步改 5 处：`tasks/registry.ts`、`tasks/task-ws.ts`（`TaskInfo.type`）、`canvas/taskSocket.ts`、`api/tasks.ts`、`TaskManagerDialog.vue` |
+| 新类型加完了，`typecheck` 报错或任务管理器标签显示成「视频处理」 | `TaskType` 联合在服务端/前端各写死一份，UI 用 if/else 兜底 | 同步改 5 处：`tasks/registry.ts`、`tasks/task-ws.ts`（`TaskInfo.type`）、`canvas/taskSocket.ts`、`api/tasks.ts`、`TaskManagerDrawer.vue` |
 | 执行器在 `finish` 之后又 `update`，前端毫无反应 | `update()` 对终态任务直接 `return`（不广播） | 终态信息一次给全；需要额外载荷就放进 `finish` 前的 `payload`，或走类型专属通道（如 LLM 的 `finished` 广播） |
 | `startFfmpegTask` 传 spec 时类型不对 | `buildTrimAudioCommand()` 返回 `{ spec, result }`（附带产物相对路径与实际时长），其余三个 `buildXxxCommand()` 直接返回 `FfmpegCommandSpec` | 调用处先解构：`const { spec } = await buildTrimAudioCommand(...)`（见 `routes/canvas.ts`） |
 | 恢复后节点直接报成功，但产物其实不存在 | 任务终态（尤其 `not-found`、订阅时任务已结束）≠ 产物已落盘 | 收敛 `completed` 前用 `getCanvasNodeInfo()` 做产物存在性核验，缺失时提示重试；新类型的恢复路径照做 |

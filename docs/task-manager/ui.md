@@ -8,9 +8,11 @@
 
 | 入口 | 组件 | 数据来源 |
 |------|------|----------|
-| 顶部栏右上角「任务管理器」图标（`mdi-progress-clock`，红色徽标 = 活跃任务数） | `frontend/src/App.vue` → `components/TaskManagerDialog.vue` | `taskSocket.tasks`（WS 广播） |
-| 任务管理器 →「进行中」页签 | `TaskManagerDialog.vue` | `taskSocket.tasks`（内存注册表快照） |
-| 任务管理器 →「历史」页签 | `components/task/TaskHistoryPanel.vue` | `GET /api/workflow/tasks` + `GET /api/system/settings`（读保留期） |
+| 顶部栏右上角「任务管理器」图标（`mdi-progress-clock`，红色徽标 = 活跃任务数） | `frontend/src/App.vue` → `components/TaskManagerDrawer.vue` | `taskSocket.tasks`（WS 广播） |
+| 任务管理器抽屉（**右侧 `v-navigation-drawer`，temporary 浮层**）→「进行中」页签 | `TaskManagerDrawer.vue` | `taskSocket.tasks`（内存注册表快照） |
+| 任务管理器抽屉 →「历史」页签（含**行内产物缩略图**与放大预览） | `components/task/TaskHistoryPanel.vue` | `GET /api/workflow/tasks` + `GET /api/system/settings`（读保留期） |
+| 工作流完成通知气泡（右下角，固定 30s 自动关闭，最多 3 张） | `components/canvas/WorkflowNotifyStack.vue` ← `canvas/notify.ts` | `taskSocket.onTaskUpdate`（工作流任务终态广播） |
+| 产物放大预览对话框（气泡与历史行共用） | `components/canvas/CanvasMediaPreviewDialog.vue` | 纯展示（URL 由父级传入） |
 | 日志查看器（复用组件） | `components/task/TaskLogViewer.vue` | 纯展示：数据由父级经 `useTaskLogs` 传入 |
 | 日志状态与级别过滤 | `composables/useTaskLogs.ts` | `GET /api/workflow/tasks/:taskId/log` |
 | 画布节点错误遮罩「详情」按钮 | `components/canvas/CanvasNodeCard.vue` | 节点生成状态 `status.taskId` |
@@ -34,8 +36,8 @@
 
 ### (b) 任务管理器 → 历史 → 筛选/翻页 → 展开日志
 
-1. 点顶部栏「任务管理器」图标 → 打开对话框（默认停在「进行中」页签）。
-2. 切到「历史」页签 → `TaskHistoryPanel` 首次激活（`active` 由 `tab === 'history'` 驱动，且 `tasks.length === 0`）才发请求：按默认筛选（最近 14 天、全部状态、全部项目）取第 1 页（`limit: 20, offset: 0`），同时读一次系统设置拿日志保留期用于空态提示。
+1. 点顶部栏「任务管理器」图标 → **右侧滑出抽屉**（`v-navigation-drawer` `location="right"` `temporary`，宽 460px、窄屏 `max-width: 92vw`；点遮罩或按 ESC 关闭；**浮层不挤压主内容**，画布不重排）。默认停在「进行中」页签；抽屉打开期间右下角的工作流完成气泡整栈隐藏。
+2. 切到「历史」页签 → `TaskHistoryPanel` 首次激活（`active` 由 `tab === 'history'` 驱动，且 `tasks.length === 0`）才发请求：按默认筛选（最近 14 天、全部状态、全部项目）取第 1 页（`limit: 20, offset: 0`），同时读一次系统设置拿日志保留期用于空态提示。**外部跳转刷新**：`reloadToken` prop 自增（来自「进行中」的「查看最近完成 →」或完成气泡的「查看日志」）会重新拉取第一页。
 3. 改筛选：时间范围 / 状态下拉**立即**重新拉取并重置到第 1 页；项目输入框按回车或点「刷新」触发（留空 = 全部项目）。
 4. 翻页：底部分页条（仅 `total > 20` 时出现）「第 X / Y 页 · 共 N 个任务」；点箭头 `goPage()` → `reload(false)` 保持当前页号。若当前页因数据变化变空且 `page > 0`，自动回退到最后一页重取。
 5. 点某行右侧「查看日志」→ `toggle(taskId)`：`expandedId = taskId`、`levelFilter = 'all'`、`logs.reset()`、`await logs.load()`（尾部 200 条，**按需加载**）。
@@ -63,9 +65,11 @@
 
 数据来源两条路都汇到 `GenerateStatus.progress`：工作流读轮询响应里的 `progress` 标准字段，ffmpeg 读 `task-update` 广播（见 [events.md](./events.md) 第六节）。
 
-## 任务管理器对话框（`TaskManagerDialog.vue`）
+## 任务管理器抽屉（`TaskManagerDrawer.vue`）
 
-标题「任务管理器」，右侧显示「（N 个进行中）」（`activeTasks.length > 0` 时才渲染）；右上角关闭按钮。`props.modelValue` 控制显隐，`props.tasks` 由 `App.vue` 注入 `taskSocket.tasks.value`。
+**右侧抽屉**（`v-navigation-drawer` `location="right"` `temporary`，宽 `460px`，CSS `max-width: 92vw`），头部为图标 + 「任务管理器」+「（N 个进行中）」（`activeTasks.length > 0` 时才渲染）+ 关闭按钮；下方为页签（**进行中 / 历史**）与满高内容区（各页签内部滚动）。`props.modelValue` 控制显隐，`props.tasks` 由 `App.vue` 注入 `taskSocket.tasks.value`；`props.openTab` + `props.openToken` 支持外部请求定位页签（令牌自增即切页签并刷新历史）。
+
+选择 `temporary` 浮层而非挤压主内容，是为了避免画布（Vue Flow）在抽屉开合时发生尺寸重排。抽屉打开期间右下角的工作流完成气泡整栈隐藏（见 [../canvas/notification.md](../canvas/notification.md)）。
 
 ### 「进行中」页签
 
@@ -77,16 +81,16 @@
 | 类型 chip | `workflow` → 「AI 生成」（primary）；`llm` → 「LLM 会话」（purple）；`ffmpeg` → 「视频处理」（teal） |
 | 名称 | `t.label`（任务展示名） |
 | 状态文本 | `pending` → 「排队中」；`llm` running → `phase === 'responding'` ? 「正在响应…」: 「Thinking…」；其余 running **有真实 `progress` 时一律「处理中 N%」**（ffmpeg 与上报中间进度的工作流）；无进度时 `ffmpeg` → 「处理中…」、`workflow` → 「运行中…」；终态回退为「已完成 / 失败 / 已中断」 |
-| 已运行时长 | `formatElapsed(startedAt)`：`mm:ss`，超过 1 小时为 `h:mm:ss`；由面板打开期间的 1 秒定时器刷新 |
+| 已运行时长 | `formatElapsed(startedAt)`：`mm:ss`，超过 1 小时为 `h:mm:ss`；由抽屉打开期间的 1 秒定时器刷新 |
 | 画布位置 | `locationText(t)`：`project` + 画布中文标签（`kind === 'scene'` → 「分镜第{episode}集 {shot}#」；`stage` → 「场景 {stage} / {label}」）；无定位信息时整段（含分隔符）不渲染 |
 | 进度条 | `v-if="t.status === 'running'"`；`progress` 为数字时显示真实百分比，否则 `indeterminate` |
 | 「中断」按钮 | `variant="tonal"` `color="error"`；`:disabled="!t.cancelable"`；tooltip 文案 = `cancelable` ? 「中断该任务」: (`cancelBlockReason` \|\| 「该任务不支持中断」)。tooltip 用 `<span>` 包住按钮，保证 disabled 状态下仍能悬浮读原因 |
 | 空态 | 图标 + 「暂无进行中的任务」 |
-| 完成提示 | 底部「本次面板打开期间已有 N 个任务完成」 |
+| 完成提示 | 底部「本次打开期间已有 N 个任务完成」+ **「查看最近完成 →」**按钮（切到「历史」页签并把 `historyReloadToken` 自增，触发历史列表重新拉取第一页——历史按 `created_at DESC`，第一条即最近完成的任务） |
 
 「中断」点击 → `taskSocket.cancel(t.id)`（WS 优先 + HTTP 兜底，见 [api.md](./api.md) 第五节）+ 上抛 `notify('已请求中断「label」', 'primary')`。**不弹确认**：中断不是删除，任务记录与产物保留。
 
-`finishedNoticeCount` 由「活跃列表条数下降」推断：面板打开时清零并把当前条数记为基线，之后每次 `activeTasks.length` 变小就累加差值；关闭面板时复位为「进行中」页签并停止计时器。
+`finishedNoticeCount` 由「活跃列表条数下降」推断：抽屉打开时清零并把当前条数记为基线，之后每次 `activeTasks.length` 变小就累加差值；关闭抽屉时复位为「进行中」页签并停止计时器。
 
 ### 「历史」页签（`TaskHistoryPanel.vue`）
 
@@ -95,7 +99,8 @@
 | 时间范围 | 最近 1 / 3 / 7 / 14 / 30 天、「不限时间」（默认 14 天）；除「不限」外转成 `since = now - N 天` 的 ISO 串传给接口 |
 | 状态 | 全部状态（`''`）/ 已完成 / 失败 / 运行中 / 排队中 |
 | 项目 | 文本框，占位「项目（留空 = 全部）」；回车触发；与下拉不同，**不自动**重查 |
-| 刷新 | 手动重新拉取当前筛选的第一页 |
+| 刷新 | 手动重新拉取当前筛选的第一页；**工作流任务收敛时自动刷新**（`canvas/notify.ts` 的 `workflowFinishedTick` → 抽屉自增 `reloadToken`，与抽屉开关无关：关闭期间完成的任务也会让已挂载的面板后台重取），筛选条本身 `flex-wrap` 换行以适配 460px 窄栏 |
+| 行 - **产物缩略图** | 仅 `completed` 且产物为**图片/视频**时渲染（`mediaKindOfPath(t.result.path)`）：56×56 缩略图（图片 `<img>`、视频 `<video preload="metadata">` 取首帧），`title` 为产物路径，**点击打开 `CanvasMediaPreviewDialog` 放大预览**（与完成气泡共用组件）；音频/非媒体产物不渲染缩略图 |
 | 行 - 状态 chip | `completed` → 「已完成」（success）；`failed` → 「失败」（error）；其余 → 「运行中」/「排队中」（primary） |
 | 行 - 主信息 | `workflowId`（工作流类型）+ `impl`（实现标识）+ `createdAt`（本地 `MM-DD HH:MM`） |
 | 行 - 次信息 | `locationText(t)`：「分镜 {episode}-{shot}」或「场景 {stage}/{label}」，附「节点 {nodeId 前 8 位}」；无定位时显示「无画布定位」。其后若有 `errorMsg` 显示红色错误文案，否则若有 `result.path` 显示产物路径 |
@@ -194,7 +199,7 @@
 | 位置 | 触发条件 | 文案 |
 |------|----------|------|
 | 进行中列表 | 无活跃任务 | 「暂无进行中的任务」 |
-| 进行中列表底部 | 面板打开期间有任务收敛 | 「本次面板打开期间已有 N 个任务完成」 |
+| 进行中列表底部 | 抽屉打开期间有任务收敛 | 「本次打开期间已有 N 个任务完成」+ 「查看最近完成 →」 |
 | 历史列表 | 当前筛选无数据且非加载中 | 「该时间范围内暂无历史任务」+「历史任务列表保留在数据库中；任务日志默认保留 N 天」 |
 | 历史列表 | 加载中且无数据 | 转圈 |
 | 历史列表 | 请求失败 | 「{error}」alert |
@@ -216,8 +221,10 @@
 - **级别过滤藏在客户端**：过滤只作用于已加载的条目，不改变服务端请求。所以「仅显示最后 200 条……筛选后 3 条」的意思是「这 200 条里有 3 条命中筛选」，想找更早的命中项要先「查看全部」。
 - **「中断」不弹确认，「清空日志」一定弹**：中断不是删除（任务记录、产物、历史版本都保留，且可重试），误点代价低；而 `task-log/purge` 不可撤销，必须走 `confirm` 工具函数并显示受影响行数——与仓库「所有删除类操作必须弹窗确认」的约束一致。
 - **两个页签来自两个事实源**：「进行中」来自内存注册表（WS 广播），「历史」来自 SQLite。因此 `ffmpeg` / `llm` 任务完成后**不会**出现在「历史」里——它们不落盘。要查它们的执行过程，只能在运行期间看「进行中」的日志尾行或节点遮罩。
-- **完成计数是推断值**：「本次面板打开期间已有 N 个任务完成」通过活跃条数下降推断，只能得到数量，既不知道是哪个任务，也区分不了完成 / 失败 / 中断。
-- **固定高度 + 内部滚动**：面板 body、历史列表、日志区都有固定 `max-height`（460 / 460 / 300 或 420），页面本身不因日志变长而抖动；秒级计时器只在面板打开期间运行，关闭即清理。
+- **完成计数是推断值，但不再是唯一出口**：「本次打开期间已有 N 个任务完成」通过活跃条数下降推断，只能得到数量，既不知道是哪个任务，也区分不了完成 / 失败 / 中断。因此该提示右侧提供「查看最近完成 →」跳到「历史」页签（真实记录，按 `created_at DESC` 第一条即最近完成）；**主动提醒**则由右下角的工作流完成气泡承担（见 [../canvas/notification.md](../canvas/notification.md)）——两者分工：气泡负责"不用操作就能看到"，历史负责"回看与排障"。
+- **抽屉而非对话框（`temporary` 浮层）**：任务管理器是"边干活边看"的面板，抽屉可长时间开着且不挤压主内容；`temporary` 保证画布（Vue Flow）不因开合重排尺寸。抽屉宽度 460px，历史筛选条 `flex-wrap` 换行适配；抽屉打开时右下角气泡整栈隐藏，避免与抽屉互相遮挡。抽屉的 ESC 关闭由组件自行监听（`v-navigation-drawer` 只处理遮罩点击），且上层有打开的对话框（如产物放大预览）时让对话框先关。
+- **历史列表的自动保鲜**：历史页签只在首次激活时自动加载（`active` watch 的 `tasks.length === 0` 守卫），因此**任务收敛必须另行触发刷新**——`notify.ts` 的 `workflowFinishedTick`（任何工作流终态，含用户中断）→ 抽屉自增 `reloadToken`。这样"正在看历史时任务完成"与"关闭抽屉期间完成、稍后打开看"两种场景拿到的都是最新列表。
+- **固定高度 + 内部滚动**：抽屉内容区满高、历史列表与日志区仍有固定 `max-height`（460 / 300 或 420），页面本身不因日志变长而抖动；秒级计时器只在抽屉打开期间运行，关闭即清理。
 - **系统设置子类是注册表驱动**：新增系统属性时在 `SECTIONS` 里注册 key 并挂载组件、同步扩展 `SystemSettingsSection` 类型即可，`openSystemSettings(key)` 的定位逻辑无需改动。
 
 相关文档：[api.md](./api.md)（接口与字段）、[log.md](./log.md)（日志级别、降噪、保留期与清理）、[data-model.md](./data-model.md)（`TaskInfo` / `TaskResponse` / `LogEntry` 字段来源）、[events.md](./events.md)（WS 协议与 `taskSocket`）、[../canvas/generation.md](../canvas/generation.md)（画布节点生成与状态机）、[../canvas/task-architecture.md](../canvas/task-architecture.md)（画布视角的统一任务架构）。

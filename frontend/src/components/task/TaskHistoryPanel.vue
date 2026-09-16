@@ -71,39 +71,63 @@
         :key="t.taskId"
         class="task-history__row"
       >
-        <div class="task-history__head">
-          <v-chip
-            :color="statusColor(t.status)"
-            size="x-small"
-            variant="tonal"
-            class="mr-2"
+        <div class="task-history__main">
+          <!-- 产物缩略图（仅已完成且有图片/视频产物的任务）：点击放大预览 -->
+          <button
+            v-if="thumbPathOf(t)"
+            type="button"
+            class="task-history__thumb"
+            :title="`预览产物：${t.result?.path ?? ''}`"
+            @click="openPreview(t)"
           >
-            {{ statusLabel(t.status) }}
-          </v-chip>
-          <span class="task-history__name">{{ t.workflowId }}</span>
-          <span class="task-history__meta">{{ t.impl }}</span>
-          <v-spacer />
-          <span class="task-history__meta">{{ formatDateTime(t.createdAt) }}</span>
-          <v-btn
-            size="x-small"
-            variant="text"
-            color="primary"
-            class="ml-2"
-            @click="() => void toggle(t.taskId)"
-          >
-            {{ expandedId === t.taskId ? '收起' : '查看日志' }}
-          </v-btn>
-        </div>
-        <div class="task-history__meta-line">
-          <span>{{ locationText(t) || '无画布定位' }}</span>
-          <template v-if="t.errorMsg">
-            <span class="mx-1">·</span>
-            <span class="text-error">{{ t.errorMsg }}</span>
-          </template>
-          <template v-else-if="t.result?.path">
-            <span class="mx-1">·</span>
-            <span>{{ t.result.path }}</span>
-          </template>
+            <img
+              v-if="mediaKindOfPath(t.result?.path) === 'image'"
+              :src="previewUrlOf(t)"
+              :alt="artifactName(t)"
+            >
+            <video
+              v-else
+              :src="`${previewUrlOf(t)}#t=0.1`"
+              muted
+              preload="metadata"
+            />
+          </button>
+          <div class="task-history__detail">
+            <div class="task-history__head">
+              <v-chip
+                :color="statusColor(t.status)"
+                size="x-small"
+                variant="tonal"
+                class="mr-2"
+              >
+                {{ statusLabel(t.status) }}
+              </v-chip>
+              <span class="task-history__name">{{ t.workflowId }}</span>
+              <span class="task-history__meta">{{ t.impl }}</span>
+              <v-spacer />
+              <span class="task-history__meta">{{ formatDateTime(t.createdAt) }}</span>
+              <v-btn
+                size="x-small"
+                variant="text"
+                color="primary"
+                class="ml-2"
+                @click="() => void toggle(t.taskId)"
+              >
+                {{ expandedId === t.taskId ? '收起' : '查看日志' }}
+              </v-btn>
+            </div>
+            <div class="task-history__meta-line">
+              <span>{{ locationText(t) || '无画布定位' }}</span>
+              <template v-if="t.errorMsg">
+                <span class="mx-1">·</span>
+                <span class="text-error">{{ t.errorMsg }}</span>
+              </template>
+              <template v-else-if="t.result?.path">
+                <span class="mx-1">·</span>
+                <span>{{ t.result.path }}</span>
+              </template>
+            </div>
+          </div>
         </div>
 
         <!-- 展开的日志区（按需加载：点开才请求） -->
@@ -178,19 +202,36 @@
         @click="() => void goPage(page + 1)"
       />
     </div>
+
+    <!-- 产物放大预览（图片/视频；与完成通知气泡共用同一组件） -->
+    <CanvasMediaPreviewDialog
+      v-model="preview.show"
+      :url="preview.url"
+      :kind="preview.kind"
+      :title="preview.title"
+      :file-name="preview.fileName"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, toRef, watch } from 'vue'
 import TaskLogViewer from './TaskLogViewer.vue'
+import CanvasMediaPreviewDialog from '../canvas/CanvasMediaPreviewDialog.vue'
 import { listTasks, type TaskResponse } from '../../api/workflow'
 import { getSystemSettings } from '../../api/system'
+import { buildPreviewUrl, mediaKindOfPath, type MediaKind } from '../../canvas/preview'
 import { useTaskLogs, type TaskLogLevelFilter } from '../../composables/useTaskLogs'
 
 const props = defineProps<{
   /** 面板是否可见（关闭时停止后续请求） */
   active: boolean
+  /**
+   * 外部刷新令牌（自增即重新拉取第一页）：
+   * 「进行中」页签的「查看最近完成 →」与完成气泡的「查看日志」都需要拿到最新列表，
+   * 而本面板只在首次激活时自动加载。
+   */
+  reloadToken?: number
 }>()
 
 /** 每页任务数 */
@@ -238,8 +279,71 @@ const retentionDays = ref(14)
 /** 日志状态（taskId 为空时不请求） */
 const logs = useTaskLogs(toRef(expandedId))
 
+/** 产物放大预览对话框状态（图片/视频；点缩略图打开） */
+const preview = reactive({
+  show: false,
+  url: '',
+  kind: 'image' as Extract<MediaKind, 'image' | 'video'>,
+  title: '',
+  fileName: '',
+})
+
 /** 总页数 */
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+
+/**
+ * 任务产物缩略图路径（仅**已完成**且产物为图片/视频时返回，其余返回空串）。
+ *
+ * 音频产物不渲染缩略图（可在画布节点/完成气泡中试听），失败任务无产物。
+ *
+ * @param t 任务响应
+ * @returns 产物相对路径；不适用时为空串
+ */
+function thumbPathOf(t: TaskResponse): string {
+  if (t.status !== 'completed' || !t.result?.path) return ''
+  const kind = mediaKindOfPath(t.result.path)
+  return kind === 'image' || kind === 'video' ? t.result.path : ''
+}
+
+/**
+ * 任务产物预览 URL（以任务 updatedAt 作缓存键：同一任务多次渲染 URL 稳定，避免反复重新加载）。
+ *
+ * @param t 任务响应
+ * @returns 预览 URL（无 project 时返回空串）
+ */
+function previewUrlOf(t: TaskResponse): string {
+  const path = t.result?.path ?? ''
+  if (!path || !t.project) return ''
+  const parsed = Date.parse(t.updatedAt?.includes('T') ? t.updatedAt : `${(t.updatedAt ?? '').replace(' ', 'T')}Z`)
+  return buildPreviewUrl(t.project, path, Number.isNaN(parsed) ? 0 : parsed)
+}
+
+/**
+ * 产物文件名（预览对话框标题与下载文件名）。
+ *
+ * @param t 任务响应
+ * @returns 路径最后一段；无产物时返回「产物」
+ */
+function artifactName(t: TaskResponse): string {
+  const path = t.result?.path ?? ''
+  return path.split('/').pop() || '产物'
+}
+
+/**
+ * 打开产物放大预览（图片/视频）。
+ *
+ * @param t 任务响应
+ */
+function openPreview(t: TaskResponse): void {
+  const path = thumbPathOf(t)
+  if (!path) return
+  const kind = mediaKindOfPath(path)
+  preview.url = previewUrlOf(t)
+  preview.kind = kind === 'video' ? 'video' : 'image'
+  preview.title = `${t.workflowId} · ${artifactName(t)}`
+  preview.fileName = artifactName(t)
+  preview.show = true
+}
 
 /**
  * 拉取当前筛选条件下的任务列表。
@@ -382,6 +486,15 @@ watch(
 onBeforeUnmount(() => {
   logs.reset()
 })
+
+/** 外部刷新令牌变化（「查看最近完成 →」/ 完成气泡「查看日志」）：重新拉取第一页 */
+watch(
+  () => props.reloadToken,
+  (token) => {
+    if (!token) return
+    void reload(true)
+  },
+)
 </script>
 
 <style scoped>
@@ -394,7 +507,8 @@ onBeforeUnmount(() => {
 }
 
 .task-history__filter {
-  max-width: 180px;
+  flex: 1 1 140px;
+  max-width: 200px;
 }
 
 .task-history__list {
@@ -409,6 +523,38 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 4px;
   padding: 8px;
+}
+
+/* 缩略图 + 详情两列（窄栏抽屉内仍保留缩略图，详情列自适应收窄） */
+.task-history__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.task-history__detail {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.task-history__thumb {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+  background: #111;
+  cursor: zoom-in;
+}
+
+.task-history__thumb img,
+.task-history__thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .task-history__head {

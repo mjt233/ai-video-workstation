@@ -51,7 +51,7 @@
 | GET | `/api/workflows` | 工作流类型及其**可执行**实现（未绑定服务商实例的候选不返回） | 无 | `{ workflows: WorkflowInfo[] }`：`{ type, implementations: [{ impl, name, description?, provider?, providerInstanceId?, providerName?, params?, capabilities? }] }` |
 | GET | `/api/workflow-types` | 系统支持的**工作流类型键**列表（注册表真实键集合，`getAllWorkflowTypes()`） | 无 | `{ types: string[] }` |
 
-`TaskResponse`（`toTaskResponse()`）：`taskId`、`workflowId`、`impl`、`status`、`result`（`{path}` 或 `null`）、`errorMsg`、`createdAt`、`updatedAt`、`params`（已解析的 JSON 对象，含 `nodeId` / `canvas`）、**`progress?`**（进度标准结果字段，取值规则见下）。`LogEntry`：`{ id, level, message, metadata?, created_at }` —— `created_at` 为 SQLite UTC 串 `YYYY-MM-DD HH:MM:SS`。
+`TaskResponse`（`toTaskResponse()`）：`taskId`、**`project`**（任务所属项目；任务管理器「历史」行按产物路径拼预览 URL 用）、`workflowId`、`impl`、`status`、`result`（`{path}` 或 `null`）、`errorMsg`、`createdAt`、`updatedAt`、`params`（已解析的 JSON 对象，含 `nodeId` / `canvas`）、**`progress?`**（进度标准结果字段，取值规则见下）。`LogEntry`：`{ id, level, message, metadata?, created_at }` —— `created_at` 为 SQLite UTC 串 `YYYY-MM-DD HH:MM:SS`。
 
 **`TaskResponse.progress` 的三态**（`taskProgress()`）：`completed` → 恒为 `100`；`running`/`pending` → 读内存注册表的真实上报值（引擎轮询远端后写入），**注册表无记录（服务重启 / 尚未登记）或服务商未上报时为 `undefined`（字段省略）**；`failed` 及终态其他情况 → 省略。**进度不落 SQLite**，故不能靠它做持久化统计；缺省时前端必须回退不确定动画，不得当作 `0`。
 

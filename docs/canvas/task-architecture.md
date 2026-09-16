@@ -21,7 +21,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 前端 TaskManagerDialog / 画布节点 Loading / taskSocket       │
+│ 前端 TaskManagerDrawer / 画布节点 Loading / taskSocket       │
 └───────────────────────────┬─────────────────────────────────┘
                             │ WS（/llm-ws）：tasks 全量 + task-update 增量
 ┌───────────────────────────▼─────────────────────────────────┐
@@ -117,7 +117,8 @@ interface TaskRecord {
 |------|------|
 | `canvas/taskSocket.ts` | 统一任务 WS 客户端（全局单例）：`tasks` 响应式列表、`task-update` 增量合并、`snapshotReady`（首个全量快照是否到达，恢复对账用）、`subscribe/unsubscribe/cancel`、断线指数退避重连 + 重订阅、`onFinished`（LLM 终态）、`onTaskUpdate`（任务增量）；`sessions` computed 兼容既有 LLM 视图 |
 | `canvas/llmSocket.ts` | **兼容再导出**（既有 `llmSocket.xxx` 调用点无需改动；新代码用 `taskSocket`） |
-| `components/TaskManagerDialog.vue` | 顶栏图标（`mdi-progress-clock` + 活跃任务数徽标）展开的面板：类型标记 / 状态（有真实进度显示「处理中 N%」）/ 进度条（有进度确定态、否则不确定）/ 已运行时长 / 画布位置 / 中断（不可中断置灰 + tooltip 原因） |
+| `components/TaskManagerDrawer.vue` | 顶栏图标（`mdi-progress-clock` + 活跃任务数徽标）展开的**右侧抽屉**（`temporary` 浮层，不挤压画布）：类型标记 / 状态（有真实进度显示「处理中 N%」）/ 进度条（有进度确定态、否则不确定）/ 已运行时长 / 画布位置 / 中断（不可中断置灰 + tooltip 原因）；「历史」页签含产物缩略图与放大预览 |
+| `canvas/notify.ts` + `components/canvas/WorkflowNotifyStack.vue` | 工作流完成通知气泡：消费同一 `onTaskUpdate` 广播的工作流终态，右下角弹独立卡片（产物预览 / 点击放大 / 固定 30s 自动关闭 / 最多 3 张），见 [notification.md](./notification.md) |
 | `api/tasks.ts` | `listTasks` / `cancelTask`（HTTP 兜底） |
 | `canvas/useCanvasGeneration.ts` | 提交时携带 `nodeId`/`canvas`；ffmpeg 任务：提交拿 taskId → `trackFfmpegTask` 订阅，进度与终态由 `onTaskUpdate` 统一消费；工作流任务：`poll()` 读响应里的 `progress`；两者都汇到 `GenerateStatus.progress`，由导出的 `nodeProgressPercent()` 决定节点遮罩渲染确定圆环+百分比还是不确定转圈；`restore(knownNodeIds)` 合并注册表 + SQLite 工作流任务恢复 Loading |
 

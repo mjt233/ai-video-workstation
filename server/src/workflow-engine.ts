@@ -1082,7 +1082,8 @@ export async function runTask(taskId: string): Promise<void> {
     // 失败直接标记 failed，不做自动重试/重新提交：避免长时间任务因轮询超时被重复提交远端生成
     // （旧任务被遗弃仍消耗算力/费用）。需要重试时由用户通过节点「重试」/ POST /workflow/retry/:taskId 手动触发。
     db.updateTaskStatus(taskId, 'failed', { error_msg: msg });
-    workflowExecutor.finish(taskId, 'failed');
+    // 失败原因随终态广播下发（前端完成通知气泡据此展示原因，无需再查接口）
+    workflowExecutor.finish(taskId, 'failed', msg);
   }
 }
 

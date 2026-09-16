@@ -493,6 +493,8 @@ export function toTaskResponse(task: db.TaskRecord) {
   const progress = taskProgress(task);
   return {
     taskId: task.id,
+    /** 项目名：任务管理器「历史」行按产物路径拼预览 URL（`/api/fs/{project}/...`）用 */
+    project: task.project,
     workflowId: task.workflow_id,
     impl: task.impl,
     status: task.status,

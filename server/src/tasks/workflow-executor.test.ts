@@ -206,3 +206,37 @@ describe('cancelWorkflowTask（延迟取消分支）', () => {
     warnSpy.mockRestore();
   });
 });
+
+describe('workflowExecutor.finish 终态广播', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    taskRegistry.clear();
+    mockGetImpl.mockReturnValue(bridgeWf());
+  });
+
+  it('失败终态携带 error：随注册表 finish 事件下发（前端完成通知气泡据此展示失败原因）', () => {
+    mockDb.getTask.mockReturnValue(dbTask());
+    createTask();
+    const events: Array<{ status: string; error?: string }> = [];
+    const off = taskRegistry.on((e) => {
+      if (e.type !== 'finish') return;
+      events.push({ status: e.task.status, ...(e.task.error ? { error: e.task.error } : {}) });
+    });
+    workflowExecutor.finish('task-1', 'failed', '远端任务超时');
+    off();
+    expect(events).toEqual([{ status: 'failed', error: '远端任务超时' }]);
+  });
+
+  it('不传 error 的终态不写 error 字段（成功任务不携带失败原因）', () => {
+    mockDb.getTask.mockReturnValue(dbTask());
+    createTask();
+    const events: Array<{ status: string; error?: string }> = [];
+    const off = taskRegistry.on((e) => {
+      if (e.type !== 'finish') return;
+      events.push({ status: e.task.status, ...(e.task.error ? { error: e.task.error } : {}) });
+    });
+    workflowExecutor.finish('task-1', 'completed');
+    off();
+    expect(events).toEqual([{ status: 'completed' }]);
+  });
+});

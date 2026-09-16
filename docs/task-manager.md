@@ -34,7 +34,7 @@
 | [events.md](./task-manager/events.md) | **传输层与前端接入**：`/llm-ws` 消息协议、`taskSocket` 单例与重连、HTTP 兜底、画布 Loading 恢复对账 |
 | [api.md](./task-manager/api.md) | **服务端接口清单**：任务查询 / 日志查询 / 中断 / 系统日志统计与清理，逐个标注方法与语义 |
 | [log.md](./task-manager/log.md) | **任务日志专项**：日志分级语义、轮询降噪规则、保留期与清理实现、占用统计口径、读取接口的 `limit/truncated` |
-| [ui.md](./task-manager/ui.md) | **前端界面**：任务管理器（进行中 / 历史）、日志查看器、画布节点错误「详情」按钮、系统设置「日志」子类 |
+| [ui.md](./task-manager/ui.md) | **前端界面**：任务管理器抽屉（进行中 / 历史，含产物缩略图放大预览）、工作流完成通知气泡、日志查看器、画布节点错误「详情」按钮、系统设置「日志」子类 |
 | [development.md](./task-manager/development.md) | **开发指南**：新增任务类型的接入清单、常见坑、测试与验证方式 |
 
 ## 相关既有文档
