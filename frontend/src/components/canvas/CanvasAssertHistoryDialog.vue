@@ -63,13 +63,15 @@
           </div>
           <!-- 右侧历史列表（首条为当前产物虚拟项，其余来自服务端历史目录） -->
           <v-list
+            ref="listRoot"
             class="history-list"
             density="compact"
           >
             <v-list-item
               v-for="(h, idx) in entries"
               :key="h.path"
-              :class="{ 'history-item--current': h.isCurrent }"
+              :active="isSelected(h)"
+              :class="{ 'history-item--current': h.isCurrent, 'history-item--selected': isSelected(h) }"
               @click="selectEntry(h)"
             >
               <template #prepend>
@@ -112,9 +114,20 @@
                   v-if="h.isCurrent"
                   size="x-small"
                   color="primary"
+                  variant="tonal"
                   class="ml-1"
                 >
                   当前
+                </v-chip>
+                <v-chip
+                  v-if="isSelected(h)"
+                  size="x-small"
+                  color="primary"
+                  variant="flat"
+                  prepend-icon="mdi-eye-outline"
+                  class="ml-1"
+                >
+                  查看中
                 </v-chip>
               </v-list-item-title>
               <v-list-item-subtitle class="text-body-small">
@@ -160,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { CanvasNodeData } from '../../canvas/types'
 import { buildPreviewUrl } from '../../canvas/preview'
 import { activateAssetHistory, deleteAssetHistory, listAssetHistory } from '../../api/assets'
@@ -202,11 +215,49 @@ const loading = ref(false)
 /** 当前选中的条目（驱动左侧大图预览；初始/激活后跟随当前项） */
 const selected = ref<DialogEntry | null>(null)
 
+/** 历史列表根元素（`v-list` 组件实例；用于把选中行滚入可视区） */
+const listRoot = ref<unknown>(null)
+
 /** 大图预览加载失败标记 */
 const previewBroken = ref(false)
 
 /** 缩略图加载失败的下标集合（按列表下标记忆） */
 const brokenIndexes = ref<Set<number>>(new Set())
+
+/** 当前查看的条目是否为给定条目（驱动列表行选中态与「查看中」标记） */
+function isSelected(h: DialogEntry): boolean {
+  return selected.value?.path === h.path
+}
+
+/**
+ * 把当前选中行滚入列表可视区（历史版本较多时选中项可能落在可视区之外）。
+ * 只在历史列表根元素内查找选中行，避免影响对话框之外的滚动容器。
+ */
+function scrollSelectedIntoView(): void {
+  const root = (listRoot.value as { $el?: HTMLElement } | null)?.$el
+  const el = root?.querySelector<HTMLElement>('.history-item--selected')
+  el?.scrollIntoView({ block: 'nearest' })
+}
+
+/**
+ * 刷新后决定选中的条目：优先按路径精确匹配（如「设为当前」后的当前产物），
+ * 其次按原下标就近（越界回落末条），都无法恢复时选中首条（当前版本）。
+ *
+ * @param list 刷新后的完整条目列表（首条为当前产物虚拟项）
+ * @param keep 期望保持的位置：`path` 优先，其次 `index`
+ * @returns 应当选中的条目；列表为空时为 null
+ */
+function pickEntry(list: DialogEntry[], keep?: { path?: string; index?: number }): DialogEntry | null {
+  if (list.length === 0) return null
+  if (keep?.path) {
+    const byPath = list.find((e) => e.path === keep.path)
+    if (byPath) return byPath
+  }
+  if (typeof keep?.index === 'number' && keep.index >= 0) {
+    return list[Math.min(keep.index, list.length - 1)]
+  }
+  return list[0]
+}
 
 /** 当前产物路径（优先 AssetCanvas 下发的固定路径产物，回落到 config.current 旧数据） */
 function currentOutputPath(): string | null {
@@ -226,13 +277,18 @@ function markBroken(idx: number): void {
   brokenIndexes.value = new Set(brokenIndexes.value).add(idx)
 }
 
-/** 从服务端加载历史列表（含当前产物虚拟首条） */
-async function loadHistory(): Promise<void> {
+/**
+ * 从服务端加载历史列表（含当前产物虚拟首条）。
+ *
+ * @param keep 刷新后希望保持的选中位置（见 `pickEntry`）；省略时选中首条（当前版本）
+ */
+async function loadHistory(keep?: { path?: string; index?: number }): Promise<void> {
   const node = props.node
   if (!node || !props.modelValue) return
   const path = currentOutputPath()
   if (!path) {
     entries.value = []
+    selected.value = null
     return
   }
   loading.value = true
@@ -250,8 +306,11 @@ async function loadHistory(): Promise<void> {
       list.push({ path: v.path, date: new Date(v.mtime).toISOString(), name: v.name, isCurrent: false })
     }
     entries.value = list
-    selected.value = list[0] ?? null
+    selected.value = pickEntry(list, keep)
+    previewBroken.value = false
     brokenIndexes.value = new Set()
+    await nextTick()
+    scrollSelectedIntoView()
   } finally {
     loading.value = false
   }
@@ -299,15 +358,17 @@ function thumbUrl(h: DialogEntry): string {
   return buildPreviewUrl(props.project, h.path)
 }
 
-/** 点击列表行：仅更新大图预览（不激活） */
+/** 点击列表行：仅更新大图预览（不激活），并把该行滚入可视区 */
 function selectEntry(h: DialogEntry): void {
   selected.value = h
   previewBroken.value = false
+  void nextTick(scrollSelectedIntoView)
 }
 
 /**
  * 「设为当前」：服务端激活历史版本（history 文件换回当前产物固定路径）。
- * 成功后刷新列表与父级产物展示。
+ * 成功后刷新列表与父级产物展示，并让选中停留在被激活的那一条
+ * （激活后其内容即当前产物固定路径，对应刷新后列表首条「当前版本」）。
  *
  * @param h 历史条目
  */
@@ -320,7 +381,7 @@ async function activateEntry(h: DialogEntry): Promise<void> {
     await activateAssetHistory(props.project, path, h.path)
     emit('refresh', props.node?.id ?? '')
     emit('notify', '已设为当前版本', 'success')
-    await loadHistory()
+    await loadHistory({ path })
   } catch (e) {
     emit('notify', e instanceof Error ? e.message : '激活历史版本失败', 'error')
   } finally {
@@ -330,7 +391,8 @@ async function activateEntry(h: DialogEntry): Promise<void> {
 
 /**
  * 「删除」：确认后调用服务端删除该历史版本文件；成功后刷新列表。
- * 当前版本不可删除（列表已禁用）；删除后对话框保持打开。
+ * 当前版本不可删除（列表已禁用）；删除后对话框保持打开，
+ * 选中落到被删条目的原位置（邻近条目），避免高亮突然消失。
  *
  * @param h 历史条目
  */
@@ -345,11 +407,12 @@ async function deleteEntry(h: DialogEntry): Promise<void> {
     confirmColor: 'error',
   })
   if (!ok) return
+  const removedIndex = entries.value.findIndex((e) => e.path === h.path)
   loading.value = true
   try {
     await deleteAssetHistory(props.project, path, h.path)
     emit('notify', '已删除历史版本', 'success')
-    await loadHistory()
+    await loadHistory({ index: removedIndex })
   } catch (e) {
     emit('notify', e instanceof Error ? e.message : '删除历史版本失败', 'error')
   } finally {
@@ -377,12 +440,15 @@ function formatDate(iso: string): string {
   }
 }
 
-// 打开时加载历史（服务端）；关闭时清空
+// 打开时加载历史（服务端）；关闭时清空列表与选中
 watch(
   () => props.modelValue,
   (open) => {
     if (open) void loadHistory()
-    else entries.value = []
+    else {
+      entries.value = []
+      selected.value = null
+    }
   },
 )
 </script>
@@ -444,6 +510,12 @@ watch(
 
 .history-item--current {
   background: rgba(25, 118, 210, 0.08);
+}
+
+/* 正在查看的条目：左侧强调条 + 更明显底色（声明在 --current 之后，两条同时命中时以选中态为准） */
+.history-item--selected {
+  background: rgba(25, 118, 210, 0.16);
+  box-shadow: inset 3px 0 0 rgb(var(--v-theme-primary));
 }
 
 .history-item__actions {

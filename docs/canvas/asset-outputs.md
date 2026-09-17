@@ -4,7 +4,7 @@
 
 ## 产物历史对话框
 
-生成节点「历史」打开的是独立组件 `CanvasAssertHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（当前产物虚拟项 + 服务端历史目录条目，按时间戳文件名/生成时间展示）；点「设为当前」→ 服务端 `POST /api/assets/:project/history/activate`（history 文件换回当前产物固定路径），成功后通知父级刷新产物展示；点「删除」→ `confirm` 弹窗确认 → `DELETE /api/assets/:project/history` 删除历史文件，对话框保持打开并刷新列表。**历史数据完全由服务端管理，前端不再维护 `config.history`**。例外：AI 文本生成节点（无产物文件）的历史见下节「AI 文本生成节点的文本历史版本」，由 `AssetCanvas` 按 `historyNode.prototypeId === 'text-ai'` 把同一 `historyDialog` 状态分支到不同对话框。
+生成节点「历史」打开的是独立组件 `CanvasAssertHistoryDialog.vue`（`components/canvas/` 下）：左侧大图预览 + 右侧历史列表（当前产物虚拟项 + 服务端历史目录条目，按时间戳文件名/生成时间展示）。**两种列表标记互相独立**：「当前版本」虚拟首条用浅色底 + `当前` chip 表示「节点当前产物是哪一条」；点选任意行进入**查看中状态**（`v-list-item :active` 选中态 + 左侧 primary 强调条 + `查看中` chip），左侧大图与底部标签随之切换，历史较长时选中行会自动 `scrollIntoView({ block: 'nearest' })` 滚入可视区——同一行既是当前版本又被查看时两枚 chip 并列。点「设为当前」→ 服务端 `POST /api/assets/:project/history/activate`（history 文件换回当前产物固定路径），成功后通知父级刷新产物展示，并让**选中停留在被激活的那一条**（激活后其内容即当前产物固定路径，对应刷新后的首条「当前版本」）；点「删除」→ `confirm` 弹窗确认 → `DELETE /api/assets/:project/history` 删除历史文件，对话框保持打开并刷新列表，选中落到被删条目的原位置（邻近条目），避免高亮突然消失。列表刷新一律走 `loadHistory(keep)` + `pickEntry`：路径优先、其次原下标就近（越界回落末条）、兜底首条。**历史数据完全由服务端管理，前端不再维护 `config.history`**。例外：AI 文本生成节点（无产物文件）的历史见下节「AI 文本生成节点的文本历史版本」，由 `AssetCanvas` 按 `historyNode.prototypeId === 'text-ai'` 把同一 `historyDialog` 状态分支到不同对话框。
 
 ## AI 文本生成节点的文本历史版本
 
