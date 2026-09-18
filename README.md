@@ -15,6 +15,10 @@
 
 ComfyUI工作流接入需要基于 [ComfyUI Easy Bridge](https://github.com/mjt233/comfyui-easy-bridge) 项目，请参考[ComfyUI Easy Bridge 对接配置说明](./docs/bridge-config-doc.md)
 
+| 无限画布 | 自定义ComfyUI工作流参数 |
+| ----- | ----------- |
+| ![img](./imgs/Snipaste_2026-09-18_15-37-22.png) | ![img2](./imgs/Snipaste_2026-09-18_15-39-36.png)
+
 ## 技术栈
 
 | 层 | 技术 |
