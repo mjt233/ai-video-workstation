@@ -1747,6 +1747,18 @@ const flow = useCanvasFlow({
 /** 对话框与资产选择器 */
 const dialogs = useCanvasDialogs({ store, nodeMap, project: props.project, target, getScope: () => scope.value, showSnackbar })
 
+/**
+ * 关闭由其它组合式持有的画布菜单：连线右键菜单、群组连接目标菜单、分组色板菜单、资产拖放菜单。
+ * 注入给 `useCanvasMenus`，使 `menus.closeAll()` 成为**画布菜单关闭的唯一入口**
+ * （历史缺陷：连线右键菜单不在 useCanvasMenus 内，点击空白/Esc/点击节点都关不掉它）。
+ */
+function closeSiblingMenus(): void {
+  flow.closeEdgeMenu()
+  group.closeConnectMenu()
+  canvasGroups.closeColorMenu()
+  drop.close()
+}
+
 /** 右键菜单、群组菜单、分组实体菜单与添加节点菜单 */
 const menus = useCanvasMenus({
   store,
@@ -1767,6 +1779,7 @@ const menus = useCanvasMenus({
   dialogs: { openHistory: dialogs.openHistory, openSaveAsset: dialogs.openSaveAsset, openSaveAs: dialogs.openSaveAs },
   getScope: () => scope.value,
   generate: (nodeId: string) => void nodeOps.generateNode(nodeId),
+  closeSiblingMenus,
 })
 
 /** 剪贴板粘贴（文件/文本/画布内复制节点与分组）与 Ctrl+D 复制粘贴整组 */
@@ -1792,13 +1805,6 @@ const paste = useCanvasPaste({
   mediaBlockedReason: () => (isBlueprint.value && !assetContextReady.value ? '请先在蓝图中选择资产项目，再粘贴媒体' : null),
 })
 
-/** 关闭全部菜单（含群组连接目标菜单与分组色板菜单） */
-function closeAllMenus(): void {
-  menus.closeAll()
-  group.closeConnectMenu()
-  canvasGroups.closeColorMenu()
-}
-
 /** 键盘快捷键 */
 const keyboard = useCanvasKeyboard({
   store,
@@ -1808,7 +1814,8 @@ const keyboard = useCanvasKeyboard({
     selectedEdgeId: selection.selectedEdgeId,
     deleteSelected: selection.deleteSelected,
   },
-  menus: { closeAll: closeAllMenus },
+  // Esc 关闭全部画布菜单（含连线右键菜单——由 menus 注入的 closeSiblingMenus 统一处理）
+  menus: { closeAll: menus.closeAll },
   rename: { cancelRename: rename.cancelRename },
   groups: { cancelRename: canvasGroups.cancelRenameGroup, closeColorMenu: canvasGroups.closeColorMenu },
   panel: { close: selection.dismissPanel },
@@ -2032,15 +2039,13 @@ function onNodeDragStop(payload: NodeDragEvent): void {
 }
 
 /**
- * 分组右键：打开分组实体菜单（重命名 / 更改颜色 / 解散分组），并关闭其他菜单。
+ * 分组右键：打开分组实体菜单（重命名 / 更改颜色 / 解散分组）。
+ * 打开前的「关闭其它菜单」由 `menus.openGroupEntityMenu` 内部统一处理（含连线右键菜单）。
  *
  * @param event 鼠标右键事件
  * @param groupId 分组 id
  */
 function openGroupEntityContextMenu(event: MouseEvent, groupId: string): void {
-  flow.closeEdgeMenu()
-  menus.closeNodeMenu()
-  canvasGroups.closeColorMenu()
   menus.openGroupEntityMenu(event, groupId, flowEl.value)
 }
 
@@ -2235,7 +2240,13 @@ function onRenameInput(value: string): void {
 
 // ── 跨组合式接线（菜单互斥关闭/双击加节点）────────────────
 
-/** 节点右键（卡片事件 → 打开右键菜单） */
+/**
+ * 节点右键（卡片事件 → 打开右键菜单）。
+ * 打开前的「关闭其它菜单」由 `menus.openContextMenu` 内部统一处理（含连线右键菜单）。
+ *
+ * @param event 鼠标右键事件
+ * @param nodeId 节点 id
+ */
 function openNodeContextMenu(event: MouseEvent, nodeId: string): void {
   menus.openContextMenu(event, nodeId, flowEl.value)
 }
@@ -2246,11 +2257,14 @@ function onNodeClick(payload: NodeMouseEvent): void {
   menus.closeAll()
 }
 
-/** 空白处点击：取消选中/关闭菜单；双击在鼠标处弹出添加节点菜单 */
+/**
+ * 空白处点击：取消选中 + 关闭全部菜单（含连线右键菜单）；双击在鼠标处弹出添加节点菜单。
+ *
+ * @param event pane 点击事件（`detail >= 2` 即双击）
+ */
 function onPaneClick(event: MouseEvent): void {
   selection.onPaneClick()
   menus.closeAll()
-  group.closeConnectMenu()
   if (event.detail >= 2) {
     const p = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
     menus.openAddMenu(event, Math.round(p.x - 60), Math.round(p.y - 40), flowEl.value)
@@ -2266,15 +2280,20 @@ function onPaneClick(event: MouseEvent): void {
 function onPaneContextMenu(event: MouseEvent): void {
   event.preventDefault()
   menus.closeAll()
-  group.closeConnectMenu()
   const p = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
   menus.openAddMenu(event, Math.round(p.x - 60), Math.round(p.y - 40), flowEl.value)
 }
 
-/** 连线右键：记录选中 + 打开连线菜单（同时关闭节点右键菜单） */
+/**
+ * 连线右键：记录选中 + 打开连线菜单。
+ * 注意顺序：先 `menus.closeAll()`（它经 closeSiblingMenus 也会关闭连线菜单）
+ * **再**打开连线菜单，否则刚打开的菜单会被立刻关掉。
+ *
+ * @param payload Vue Flow 连线右键事件
+ */
 function onEdgeContextMenu(payload: EdgeMouseEvent): void {
+  menus.closeAll()
   flow.onEdgeContextMenu(payload, flowEl.value)
-  menus.closeNodeMenu()
 }
 
 /** 工具栏「＋」：在固定流坐标弹出添加节点菜单 */
@@ -2444,8 +2463,8 @@ async function applySwitch(newTarget: CanvasTarget, opts: { discard?: boolean } 
   resetLlmRestore()
   selection.reset()
   rename.reset()
+  // 关闭全部画布菜单（含连线右键菜单，经注入的 closeSiblingMenus）
   menus.reset()
-  flow.closeEdgeMenu()
   paste.reset()
   group.reset()
   canvasGroups.reset()

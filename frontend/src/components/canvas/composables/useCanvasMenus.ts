@@ -1,7 +1,13 @@
 /**
  * 右键菜单与添加节点菜单组合式：节点右键菜单（重新生成/历史/保存为（子菜单）/断开/重命名/复制/删除）、
- * 添加节点菜单（双击空白/工具栏「＋」）的状态与动作。
+ * 分组实体右键菜单、添加节点菜单（双击空白/工具栏「＋」）的状态与动作。
  * 菜单能力显隐由节点原型能力标志（registry.canGenerate/hasHistory）与运行状态推导。
+ *
+ * **画布菜单的开关只有一条路径**：打开任一菜单前先 `closeAll()`（互斥），
+ * 关闭全部菜单统一走 `closeAll()`（点击空白/点击节点/空白右键/Esc/切换画布都调它）。
+ * 由其它组合式持有的菜单（连线右键菜单 / 群组连接目标菜单 / 分组色板菜单 / 资产拖放菜单）
+ * 经注入的 `closeSiblingMenus` 一并关闭——历史缺陷：连线右键菜单不在本组合式内，
+ * 各调用点各自 `closeNodeMenu()`，导致点空白处关不掉它。
  */
 
 import { computed, reactive } from 'vue'
@@ -48,6 +54,13 @@ export interface UseCanvasMenusOptions {
   getScope: () => CanvasScope
   /** 生成调度（右键「重新生成」） */
   generate: (nodeId: string) => void
+  /**
+   * 关闭由**其它组合式**持有的画布菜单：连线右键菜单（useCanvasFlow）、
+   * 群组连接目标菜单（useCanvasGroup）、分组色板菜单（useCanvasGroups）、
+   * 资产拖放菜单（useCanvasAssetDrop）。
+   * 由 AssetCanvas 注入，保证「关闭全部菜单」不漏菜单；缺省不关闭（单测/蓝图等无这些菜单时可不传）。
+   */
+  closeSiblingMenus?: () => void
 }
 
 /**
@@ -57,7 +70,7 @@ export interface UseCanvasMenusOptions {
  * @returns 菜单状态与操作 API
  */
 export function useCanvasMenus(options: UseCanvasMenusOptions) {
-  const { store, nodeMap, selection, rename, groupActions, dialogs, getScope, generate } = options
+  const { store, nodeMap, selection, rename, groupActions, dialogs, getScope, generate, closeSiblingMenus } = options
 
   // ── 节点右键菜单 ────────────────────────────────────────
 
@@ -136,12 +149,14 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
 
   /**
    * 打开节点右键菜单（相对画布容器定位）。
+   * 先关闭其它全部菜单（含连线右键菜单），保证同屏只有一个画布菜单。
    *
    * @param event 鼠标右键事件
    * @param nodeId 节点 id
    * @param flowEl 画布容器 DOM（定位基准）
    */
   function openContextMenu(event: MouseEvent, nodeId: string, flowEl: HTMLElement | null): void {
+    closeAll()
     selection.setSelectedNode(nodeId)
     contextMenu.nodeId = nodeId
     const rect = flowEl?.getBoundingClientRect()
@@ -221,6 +236,7 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
 
   /**
    * 打开分组实体右键菜单（不改变当前选中状态）。
+   * 先关闭其它全部菜单（含连线右键菜单），保证同屏只有一个画布菜单。
    *
    * @param event 鼠标右键事件
    * @param groupId 分组 id
@@ -230,6 +246,7 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     if (!store.groups.value.some((g) => g.id === groupId)) return
     event.preventDefault()
     event.stopPropagation()
+    closeAll()
     const rect = flowEl?.getBoundingClientRect()
     groupEntityMenu.x = Math.round(event.clientX - (rect?.left ?? 0))
     groupEntityMenu.y = Math.round(event.clientY - (rect?.top ?? 0))
@@ -266,6 +283,7 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
 
   /**
    * 打开添加节点菜单：锚点定位到鼠标位置，并指定新建节点放置的流坐标。
+   * 先关闭其它全部菜单（含连线右键菜单），保证同屏只有一个画布菜单。
    *
    * @param event 触发打开的鼠标事件（提供菜单弹出位置）
    * @param flowX 新建节点在画布流坐标系中的 x
@@ -273,6 +291,7 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
    * @param flowEl 画布容器 DOM（定位基准）
    */
   function openAddMenu(event: MouseEvent, flowX: number, flowY: number, flowEl: HTMLElement | null): void {
+    closeAll()
     const rect = flowEl?.getBoundingClientRect()
     addMenu.x = Math.round(event.clientX - (rect?.left ?? 0))
     addMenu.y = Math.round(event.clientY - (rect?.top ?? 0))
@@ -287,16 +306,21 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     addMenu.show = false
   }
 
-  /** 关闭全部菜单（节点/连线右键菜单 + 分组实体菜单 + 添加节点菜单） */
-  function closeAll(): void {
+  /** 关闭本组合式持有的菜单（节点右键菜单 / 分组实体菜单 / 添加节点菜单） */
+  function closeOwnMenus(): void {
     contextMenu.show = false
     addMenu.show = false
     groupEntityMenu.show = false
   }
 
-  /** 关闭节点右键菜单 */
-  function closeNodeMenu(): void {
-    contextMenu.show = false
+  /**
+   * 关闭全部画布菜单：本组合式的三个菜单 + 其它组合式持有的菜单（连线右键菜单等，经 closeSiblingMenus）。
+   * **这是画布菜单关闭的唯一入口**：点击空白/点击节点/空白右键/Esc/切换画布都必须调它，
+   * 新增菜单类型时也要在这里（或 closeSiblingMenus）登记，否则会出现「关不掉的菜单」。
+   */
+  function closeAll(): void {
+    closeOwnMenus()
+    closeSiblingMenus?.()
   }
 
   /** 重置菜单状态（切换画布目标时调用） */
@@ -331,7 +355,6 @@ export function useCanvasMenus(options: UseCanvasMenusOptions) {
     openAddMenu,
     addNodeAt,
     closeAll,
-    closeNodeMenu,
     reset,
   }
 }

@@ -54,7 +54,7 @@ frontend/src/
     │   ├── useCanvasSelection.ts # 选中状态（单/多选 selectedNodeIds + 持久分组 selectedGroupIds）、配置面板信息、整组/分组删除
     │   ├── useCanvasGroup.ts     # 多选包围盒（选中节点 ∪ 选中分组）/输出点拖拽连接/目标原型菜单/成组连接执行与忽略反馈
     │   ├── useCanvasGroups.ts    # 持久分组交互（创建/自定义拖动 R2/缩放回写/改名/改色/解散/框选完全包含判定/多选拖动跟随/Ctrl 穿透状态）
-    │   ├── useCanvasMenus.ts     # 右键菜单（节点/群组/分组实体）与添加节点菜单状态/动作
+    │   ├── useCanvasMenus.ts     # 右键菜单（节点/分组实体）与添加节点菜单状态/动作；**画布菜单开关的唯一入口**（open 前先 closeAll、closeAll 经注入的 closeSiblingMenus 一并关闭连线右键菜单等，见 interactions.md）
     │   ├── useCanvasRename.ts    # 内联重命名状态
     │   ├── useCanvasPaste.ts     # 剪贴板粘贴（文件/文本/画布内复制节点）+ Ctrl+V 兜底 + Ctrl+D 复制粘贴整组
     │   ├── useCanvasKeyboard.ts  # 全局快捷键（撤销/重做/复制/粘贴/删除/Esc；多选整组语义）

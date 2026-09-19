@@ -427,12 +427,18 @@ export function useCanvasFlow(options: UseCanvasFlowOptions) {
     }
   }
 
-  /** 连线右键菜单状态（断开连接） */
+  /**
+   * 连线右键菜单状态（断开连接）。
+   * 关闭入口只有两个：`closeEdgeMenu`（由 AssetCanvas 注入 useCanvasMenus 的
+   * closeSiblingMenus 统一调用——点击空白/点击节点/空白右键/Esc/切换画布都会经过它）
+   * 与 `disconnectEdge`（执行「断开连接」后自行关闭）。
+   */
   const edgeMenu = reactive({ show: false, x: 0, y: 0 })
 
   /**
    * 打开连线右键菜单（相对画布容器定位）。
-   * 节点右键菜单的关闭由 AssetCanvas 接线统一处理。
+   * 其中「关闭其余画布菜单」由 AssetCanvas 在调用本函数**之前**完成
+   * （`menus.closeAll()`：它经 closeSiblingMenus 也会关闭连线菜单本身，故不能放在本函数之后）。
    *
    * @param payload Vue Flow 连线右键事件（含事件与连线）
    * @param flowEl 画布容器 DOM（定位基准）
