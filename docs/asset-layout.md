@@ -30,7 +30,45 @@ design/{project}/
 - 集数、分镜目录名必须是正整数，且同一集内分镜编号连续为 `1..N`
 - 剧本分集文件名必须是正整数 `.md`，同一项目内编号连续为 `1..N`
 
+### 1.1 目录与文件 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/projects` | 列出全部项目（`.trash` 等保留目录不出现） |
+| `GET` | `/api/fs/:project/*` | 读文件内容，或路径为目录时返回目录列表 |
+| `POST` | `/api/fs/:project/*` | 写入文件（文本 / JSON / Markdown 为 UTF-8） |
+
 **API 写入范围：** 允许写入 `prompt/`、`assert/` 前缀，以及项目根级 `overview.md`、`project.json`；路径不得越出 `design/{project}/`。
+
+传输约定：图片 / 音频 / 视频等二进制以**二进制流**传输（`GET /api/fs/:project/assert/...`）；文本 / Markdown / JSON 以 **UTF-8** 传输。
+资产 CRUD、上传、历史版本等专用接口见 [canvas/module-structure.md](./canvas/module-structure.md) 与本文第 3 节。
+
+### 1.2 前端 URL 状态（查询参数即状态）
+
+前端 Project 视图的**全部状态由 URL 查询参数驱动**（刷新、浏览器前进/后退、URL 直达均能还原），不使用前端路由状态或 localStorage：
+
+| 参数 | 含义 | 取值 |
+|------|------|------|
+| `project` | 当前项目 | 项目名 |
+| `type` | 资产类型 | `character` / `stage` / `scene` / `prop` / `script` / `project` 等 |
+| `name` | 资产名 | 角色名 / 场景名 / 道具名（按 `type` 解释） |
+| `category` | 道具一级分类 | 仅 `type=prop` 时有效 |
+| `subscene` | 子场景标签 | 仅 `type=stage` 时有效 |
+| `episode` | 集数 | `type=scene` 或 `type=script&section=episodes` 时有效 |
+| `shot` | 分镜编号 | 仅 `type=scene` 时有效 |
+| `section` | 剧本区块 | 仅 `type=script` 时有效：`outline`（大纲）/ `episodes`（分集） |
+| `tab` | 详情面板当前页签 | 见下表 |
+
+**页签（`tab`）** 由 `frontend/src/composables/usePanelTab.ts` 统一同步：合法值写回 URL（`router.replace` 合并写入，不产生额外历史记录）；URL 中非法值（旧书签、跨类型残留）会被自动移除，保证 URL 与界面一致。各面板候选值：
+
+| 面板 | 页签候选（默认值加粗） |
+|------|------------------------|
+| 分镜（ScenePanel） | **overview** / script / images / video / custom / canvas |
+| 场景（StagePanel） | **overview** / canvas |
+| 角色（CharacterPanel） | **overview** / appearance / voice |
+| 道具（PropPanel） | **image** / video / audio |
+
+**切换资产时的页签保留规则**：同类型资产之间切换**保留**当前 `tab`（如分镜 1 → 分镜 2 仍停在 `canvas`）；**跨类型**切换（`type` 变化）时清除 `tab`，回到目标面板的默认页签（见 `AssetTree.vue: clearTabOnTypeChange`）。
 
 ---
 

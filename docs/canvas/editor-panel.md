@@ -57,6 +57,10 @@
 
 ## 输入预览（`CanvasInputPreview.vue`，生成节点统一输入区）
 
+> **硬约束（新增节点类型时必须遵守）**：任何节点主体或配置面板需要展示**已连接的媒体输入**（图片 / 音频 / 视频）时，**必须复用统一输入预览组件 `frontend/src/components/canvas/editors/CanvasInputPreview.vue`**（现有实例：生成图片、生成视频、TTS、AI文本生成、文本生成、输入转发、输入预览节点），**禁止为单个节点另写一套预览 / 徽标 UI**——分组口径、缓存键（`version`）、排序与断开语义、`nodrag nowheel` 防冲突都内聚在该组件里，另起一套必然与其行为漂移。
+
+新增节点接入时按以下五条对齐（细节见下文各条）：**输入条目用 `CanvasInputInfo`** 并附来源产物 mtime 作 `version` 缓存键（`nodeOps.withVersions` 经 `getOutputMtime` 提供）→ 按来源输出类型**拆三组传入** → `reorder` 经 `mergeInputOrder` 合并回 `config.inputOrder`（只影响本组相对顺序）→ `remove` 上抛 `disconnect-input` 由 `nodeOps.disconnectInput` 断线（单次撤销、不弹确认）→ 节点主体内渲染时容器加 `nodrag nowheel`。其中 `version` = **来源节点产物的 mtime**，作为预览 URL 缓存键——源资产未变化时预览 URL 保持稳定，避免无关重渲染导致媒体反复重新加载（约定见 [development.md](./development.md)）。
+
 - 生成图片/生成视频（首尾帧、参考）/TTS 三个生成节点的配置组件顶部统一由 `CanvasInputPreview` 渲染输入预览：按**图片/视频/音频**三种类型分组（每组复用 `editors/VideoRefInputGroup.vue`，标题形如「图片（2/4）」，前缀 图/视/音，或按模式定制如 帧、图像），**仅存在对应输入的组才渲染**（如生成图片节点只有图片组、TTS 只有音频组、首尾帧只渲染帧图片+可选音频）；全部为空时显示编排编辑器传入的占位文案（如生成图片的「无输入图，默认使用文生图工作流」、TTS 克隆模式的「需先连接加载音频节点」）。
 - 悬浮放大：`v-tooltip location="top"` 显示放大内容（图片最大 320px、视频/音频可播放），悬浮在输入**上方**；tooltip 必须带 `interactive`（非交互态内容 `pointer-events: none`，鼠标悬停其上会穿透关闭、无法交互）并配 `close-delay`（宽限指针从缩略图移入内容的时间；进入后由 Vuetify open-on-hover 保持打开，视频/音频可点击播放、拖进度条）。
 - 悬浮快捷断开：输入缩略图右上角悬浮显示红色 x，点击断开该输入连接（断开规则见 [interactions.md](./interactions.md)；`remove` 事件 → `disconnect-input`）。
