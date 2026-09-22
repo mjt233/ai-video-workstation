@@ -217,6 +217,19 @@ describe('normalizeWorkflowResult / normalizeProgress', () => {
     expect(() => normalizeWorkflowResult({ failed: true, errorMessage: 1 }, '提取')).toThrow(/errorMessage/);
   });
 
+  it('text（文本产物）：字符串原样保留，空串/纯空白视为未返回', () => {
+    expect(normalizeWorkflowResult({ isFinish: true, text: '正文' }, '提取'))
+      .toMatchObject({ isFinish: true, failed: false, text: '正文' });
+    // 空内容不产生 text 字段（取用侧据此给「未返回内容」的失败原因）
+    expect(normalizeWorkflowResult({ isFinish: true, text: '   ' }, '提取').text).toBeUndefined();
+    expect(normalizeWorkflowResult({ isFinish: true, text: '' }, '提取').text).toBeUndefined();
+  });
+
+  it('text 非字符串时报错（避免把对象/null 当文本产物）', () => {
+    expect(() => normalizeWorkflowResult({ isFinish: true, text: 123 }, '提取')).toThrow(/text 必须是字符串/);
+    expect(() => normalizeWorkflowResult({ isFinish: true, text: { a: 1 } }, '提取')).toThrow(/text 必须是字符串/);
+  });
+
   it('progress 钳制与未知值', () => {
     expect(normalizeProgress(50)).toBe(50);
     expect(normalizeProgress(150)).toBe(100);

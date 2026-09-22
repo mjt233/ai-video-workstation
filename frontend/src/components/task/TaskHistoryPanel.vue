@@ -104,11 +104,11 @@
           v-if="thumbPathOf(t) && !brokenThumbs.has(t.taskId)"
           type="button"
           class="task-history__thumb"
-          :title="`预览产物：${t.result?.path ?? ''}`"
+          :title="`预览产物：${resultPathOf(t)}`"
           @click="openPreview(t)"
         >
           <img
-            v-if="mediaKindOfPath(t.result?.path) === 'image'"
+            v-if="mediaKindOfPath(resultPathOf(t)) === 'image'"
             :src="previewUrlOf(t)"
             :alt="artifactName(t)"
             @error="markThumbBroken(t.taskId)"
@@ -119,6 +119,20 @@
             muted
             preload="metadata"
             @error="markThumbBroken(t.taskId)"
+          />
+        </button>
+
+        <!-- 文本生成产物（无文件）：文本图标占位，点击打开任务详情查看全文 -->
+        <button
+          v-else-if="resultTextOf(t)"
+          type="button"
+          class="task-history__thumb task-history__thumb--text"
+          :title="`文本产物：${textSummary(resultTextOf(t))}`"
+          @click="openLogs(t)"
+        >
+          <v-icon
+            icon="mdi-text-box-outline"
+            size="18"
           />
         </button>
 
@@ -243,8 +257,11 @@ import {
   artifactName,
   formatDateTime,
   previewUrlOf,
+  resultPathOf,
+  resultTextOf,
   rowSecondaryText,
   rowSecondaryTooltip,
+  textSummary,
   thumbKindOf,
   thumbPathOf,
 } from './historyFormat'
@@ -597,6 +614,17 @@ watch(workflowFinishedTick, () => {
   background: transparent;
   color: rgba(0, 0, 0, 0.26);
   cursor: default;
+}
+
+/* 文本产物占位（无文件产物）：浅底 + 文本图标，点击打开任务详情查看全文 */
+.task-history__thumb--text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-color: rgba(var(--v-theme-primary), 0.35);
+  background: rgba(var(--v-theme-primary), 0.06);
+  color: rgb(var(--v-theme-primary));
+  cursor: pointer;
 }
 
 .task-history__detail {

@@ -61,28 +61,61 @@ export function locationText(t: TaskResponse): string {
 }
 
 /**
+ * 任务结果的**文件产物路径**（文本生成类无文件产物时为空串）。
+ *
+ * 任务结果有两种形态：媒体类 `{ path }`（assert/ 下的产物文件）与文本生成类
+ * `{ text, patch?, rev? }`（无文件）。本函数统一收敛取值，避免各处直接读 `.path`
+ * 时对文本任务报类型错误或显示虚假路径。
+ *
+ * @param t 任务响应
+ * @returns 产物相对路径；文本生成类/无产物时为空串
+ */
+export function resultPathOf(t: TaskResponse): string {
+  const result = t.result
+  if (!result || typeof result !== 'object') return ''
+  return typeof (result as { path?: unknown }).path === 'string'
+    ? (result as { path: string }).path
+    : ''
+}
+
+/**
+ * 文本生成任务的产物文本（非文本任务返回空串）。
+ *
+ * @param t 任务响应
+ * @returns 生成的文本；非文本生成任务为空串
+ */
+export function resultTextOf(t: TaskResponse): string {
+  const result = t.result
+  if (!result || typeof result !== 'object') return ''
+  const text = (result as { text?: unknown }).text
+  return typeof text === 'string' ? text : ''
+}
+
+/**
  * 产物文件名（预览对话框标题与下载文件名）。
  *
  * @param t 任务响应
- * @returns 路径最后一段；无产物时返回「产物」
+ * @returns 路径最后一段；无文件产物时返回「产物」
  */
 export function artifactName(t: TaskResponse): string {
-  const path = t.result?.path ?? ''
+  const path = resultPathOf(t)
   return path.split('/').pop() || '产物'
 }
 
 /**
  * 任务产物缩略图路径（仅**已完成**且产物为图片/视频时返回，其余返回空串）。
  *
- * 音频产物不渲染缩略图（可在完成气泡中试听），失败任务无产物。
+ * 音频产物不渲染缩略图（可在完成气泡中试听），失败任务无产物，
+ * 文本生成任务无文件产物（在任务详情中查看文本）。
  *
  * @param t 任务响应
  * @returns 产物相对路径；不适用时为空串
  */
 export function thumbPathOf(t: TaskResponse): string {
-  if (t.status !== 'completed' || !t.result?.path) return ''
-  const kind = mediaKindOfPath(t.result.path)
-  return kind === 'image' || kind === 'video' ? t.result.path : ''
+  const path = resultPathOf(t)
+  if (t.status !== 'completed' || !path) return ''
+  const kind = mediaKindOfPath(path)
+  return kind === 'image' || kind === 'video' ? path : ''
 }
 
 /**
@@ -102,13 +135,13 @@ export function thumbKindOf(t: TaskResponse): Extract<MediaKind, 'image' | 'vide
  * @returns 预览 URL；无产物或无项目名时返回空串
  */
 export function previewUrlOf(t: TaskResponse): string {
-  const path = t.result?.path ?? ''
+  const path = resultPathOf(t)
   if (!path || !t.project) return ''
   return buildPreviewUrl(t.project, path, parseServerTime(t.updatedAt) ?? 0)
 }
 
 /**
- * 历史行第二行文案：画布定位 · 实现简称 · 错误原因（优先）或产物文件名。
+ * 历史行第二行文案：画布定位 · 实现简称 · 错误原因（优先）或产物文件名/文本摘要。
  *
  * 该行在模板中强制单行省略，完整文本请用 {@link rowSecondaryTooltip} 作 `title`。
  *
@@ -120,12 +153,13 @@ export function rowSecondaryText(t: TaskResponse): string {
   const impl = shortImpl(t.impl)
   if (impl) parts.push(impl)
   if (t.errorMsg) parts.push(t.errorMsg)
-  else if (t.result?.path) parts.push(artifactName(t))
+  else if (resultPathOf(t)) parts.push(artifactName(t))
+  else if (resultTextOf(t)) parts.push(textSummary(resultTextOf(t)))
   return parts.join(' · ')
 }
 
 /**
- * 历史行第二行的悬浮提示文本（与 {@link rowSecondaryText} 同序，但用**未截短**的实现 id 与**完整**产物路径）。
+ * 历史行第二行的悬浮提示文本（与 {@link rowSecondaryText} 同序，但用**未截短**的实现 id 与**完整**产物路径/文本）。
  *
  * @param t 任务响应
  * @returns 完整副信息文本
@@ -134,8 +168,24 @@ export function rowSecondaryTooltip(t: TaskResponse): string {
   const parts: string[] = [locationText(t) || '无画布定位']
   if (t.impl) parts.push(t.impl)
   if (t.errorMsg) parts.push(t.errorMsg)
-  else if (t.result?.path) parts.push(t.result.path)
+  else if (resultPathOf(t)) parts.push(resultPathOf(t))
+  else if (resultTextOf(t)) parts.push(resultTextOf(t))
   return parts.join(' · ')
+}
+
+/** 文本产物在行内展示的截短长度（完整内容在任务详情的「文本产物」区查看） */
+export const TEXT_SUMMARY_MAX = 60
+
+/**
+ * 文本产物的单行摘要（换行折叠为空格 + 超长截断加省略号）。
+ *
+ * @param text 产物文本
+ * @returns 单行摘要；空文本返回空串
+ */
+export function textSummary(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  if (!flat) return ''
+  return flat.length > TEXT_SUMMARY_MAX ? `${flat.slice(0, TEXT_SUMMARY_MAX)}…` : flat
 }
 
 /**

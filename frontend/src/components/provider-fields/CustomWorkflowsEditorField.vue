@@ -165,7 +165,7 @@
             item-title="title"
             item-value="value"
             label="工作流类型"
-            hint="选择该工作流支持的系统工作流类型（可多选）；ctx.params 按所选类型动态提示"
+            hint="选择该工作流支持的系统工作流类型（可多选）；ctx.params 与产物形态按所选类型确定（「文本生成」的产物是文本，不写 assert/ 文件）"
             persistent-hint
             density="comfortable"
             variant="outlined"
@@ -173,6 +173,20 @@
             chips
             class="mb-2"
           />
+
+          <!-- 文本生成类型提示：产物是文本，脚本两种返回方式 -->
+          <v-alert
+            v-if="form.types.includes('text-generation')"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mb-2"
+          >
+            文本生成工作流的产物是<strong>文本</strong>（不写 assert/ 文件、无需输出尺寸）：
+            【结果提取】可直接返回 <code>text: "内容"</code>，或返回 <code>outputs: [文本文件/文本接口的 url]</code>
+            （服务端拉取后解码为文本）；<code>ctx.params</code> 为
+            <code>prompt</code> + <code>imagePaths</code> + <code>mediaPaths</code>。
+          </v-alert>
 
           <!-- 是否异步 / 中断能力说明 -->
           <div class="d-flex ga-6 mb-2">
@@ -636,6 +650,8 @@ import {
   EXTRACT_CODE_TEMPLATE,
   SIZE_CONFIG_RATIO_OPTIONS,
   SIZE_CONFIG_SIZE_OPTIONS,
+  TEXT_CALL_CODE_TEMPLATE,
+  TEXT_EXTRACT_CODE_TEMPLATE,
   duplicateWorkflowEntry,
   insertCodeTemplate,
   normalizeWorkflowEntries,
@@ -665,7 +681,7 @@ const emit = defineEmits<{
 /** 规范化后的工作流条目列表 */
 const entries = computed<CustomWorkflowFormEntry[]>(() => normalizeWorkflowEntries(props.modelValue))
 
-/** 系统工作流类型下拉选项（GET /api/workflow-types；失败回退内置 5 类） */
+/** 系统工作流类型下拉选项（GET /api/workflow-types；失败回退内置类型列表） */
 const workflowTypes = ref<string[]>([])
 const typesError = ref('')
 
@@ -687,7 +703,7 @@ const userConfigFieldTypeOptions = [
   { title: '布尔', value: 'boolean' },
 ] as Array<{ title: string; value: UserConfigFieldType }>
 
-/** 支持输出尺寸配置的工作流类型（生图 / 生视频；TTS 无尺寸概念） */
+/** 支持输出尺寸配置的工作流类型（生图 / 生视频；TTS 与文本生成无尺寸概念） */
 const GRAPHIC_TYPES = ['text-to-image', 'image-edit', 'image-to-video']
 
 /** 是否勾选了生图/生视频类型（决定是否显示「输出尺寸配置」区） */
@@ -810,13 +826,17 @@ function openCreate() {
 /**
  * 向当前页签对应代码插入模板（空编辑器直接填充；已有代码在末尾追加）。
  *
+ * 模板按所选工作流类型选择：勾选「文本生成」时用文本类模板
+ * （产物是文本：调用发起演示 chat 请求、结果提取演示直接返回 text 字段）。
+ *
  * @param kind 页签种类（call / extract / cancel）
  */
 function insertTabTemplate(kind: 'call' | 'extract' | 'cancel') {
+  const isTextGeneration = form.value.types.includes('text-generation')
   const template = kind === 'call'
-    ? CALL_CODE_TEMPLATE
+    ? (isTextGeneration ? TEXT_CALL_CODE_TEMPLATE : CALL_CODE_TEMPLATE)
     : kind === 'extract'
-      ? EXTRACT_CODE_TEMPLATE
+      ? (isTextGeneration ? TEXT_EXTRACT_CODE_TEMPLATE : EXTRACT_CODE_TEMPLATE)
       : CANCEL_CODE_TEMPLATE
   if (kind === 'call') form.value.callCode = insertCodeTemplate(form.value.callCode, template)
   else if (kind === 'extract') form.value.extractCode = insertCodeTemplate(form.value.extractCode, template)

@@ -194,6 +194,58 @@ interface WorkflowCallContext {
 - 编辑器类型提示联动：单选且不允许自定义 → value 字面量联合（如 `'realism' | 'anime'`）；
   单选允许自定义 → 联合附加 `(string & {})`；多选 → `string`（逗号拼接串）
 
+## 文本生成类型（`text-generation`）
+
+「工作流类型」下拉新增 **文本生成**：产物是**文本**而非媒体文件（不写 `assert/`、不需要
+`outputPath`、无输出尺寸概念），用于把任意文本接口（自定义 HTTP、ComfyUI Bridge 文本工作流）
+接进资产画布的「文本生成」节点。
+
+### ctx.params（脚本侧输入）
+
+```ts
+declare interface TextGenerationParams {
+  /** 提示词（画布节点：连线文本输入优先，否则取节点配置的提示词） */
+  prompt: string
+  /** 输入图片相对路径列表（服务端已解析为数组；无输入时为空数组） */
+  imagePaths: string[]
+  /** 其他媒体（音频/视频）相对路径列表（服务端已解析为数组） */
+  mediaPaths: string[]
+  /** 随机种子（字符串） */
+  seed?: string
+  [key: string]: any
+}
+```
+
+媒体路径分开两组是刻意的：视觉理解类接口通常把图片放进独立的 `image_url` 等字段，
+视频/音频走另一套字段；统一数组会让脚本无法区分。脚本可用 `ctx.readFileToBase64(path, true)`
+把图片转成 data URL 后直接塞进请求体。
+
+### 产物返回方式（二选一，同时存在时 `text` 优先）
+
+| 写法 | 服务端行为 |
+|------|-----------|
+| `return { isFinish: true, text: '正文' }` | 直接取文本作为产物（**推荐**：接口已把文本放在响应里时无需先上传成文件） |
+| `return { isFinish: true, outputs: ['https://…/result.txt'] }` | 拉取该 URL，校验 `Content-Type` 为 `text/*` / JSON / XML 且不超过 2MB，UTF-8 解码后作为产物 |
+| 两者都返回 | 以 `text` 为准，并对被忽略的 `outputs` 打 warn |
+| 都没有 | 任务失败：「文本工作流未返回内容…」 |
+
+- `text` 必须是字符串（非字符串报「返回的 text 必须是字符串」；空串/纯空白视为未返回）；
+- 在**未勾选「文本生成」类型**的工作流上返回 `text` 会被忽略并告警（不静默当成产物）：
+  `getOutput` 抛出「…返回了 text 文本产物，但其类型未勾选「文本生成」…」；
+- URL 拉取到非文本内容时抛出可操作的中文错误（提示改返回文本接口 URL 或 `text` 字段）。
+
+### 产物落地
+
+画布节点提交的任务带 `params.nodeId` + `params.canvas`，引擎在产物阶段把文本写回节点
+`config.output` 并追加一条 `config.outputHistory`（服务端单写者，CAS + 版本冲突重试；
+详见 [../canvas/node-types.md](../canvas/node-types.md) 的「文本生成」条目）。
+非画布调用（无节点定位）时文本只落在任务 `result.text`，不写画布文件。
+
+### 编辑器模板
+
+勾选「文本生成」后，「插入模板」按钮会用文本类模板：调用发起演示 chat 请求
+（`ctx.params.prompt`），结果提取演示 `return { isFinish: true, text: content }`。
+
 ## ctx.readFileToBase64
 
 `ctx.readFileToBase64(relPath: string, withDataPrefix?: boolean): Promise<string>`
@@ -206,8 +258,8 @@ interface WorkflowCallContext {
 ## ctx.workflowType
 
 `ctx.workflowType?: WorkflowTypeId` —— 本次调用的工作流类型，类型约束为系统支持的工作流类型
-联合（`'text-to-image' | 'image-edit' | 'tts-voice-design' | 'tts-voice-clone' | 'image-to-video'`，
-与 `workflows/types.ts` 的 `WorkflowTypeId` 一致）。由同步器按注册的工作流类型注入；
+联合（`'text-to-image' | 'image-edit' | 'tts-voice-design' | 'tts-voice-clone' | 'image-to-video' |
+'text-generation'`，与 `workflows/types.ts` 的 `WorkflowTypeId` 一致）。由同步器按注册的工作流类型注入；
 测试连接等非工作流执行场景不存在该字段。前端 Monaco 声明库同样以联合类型约束
 （`CustomWorkflowTypeId`，与 `FALLBACK_WORKFLOW_TYPES` 保持一致），编辑器内赋值/比较
 非系统类型会直接报 TS 错误。

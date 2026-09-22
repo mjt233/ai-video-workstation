@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import { mimeTypeForFile, resolvePollHeartbeatMs, runTask, toBase64Object, toBase64Output } from './workflow-engine.js';
@@ -24,6 +24,8 @@ const {
   mockReadFile,
   mockAccess,
   mockCopyFile,
+  mockPersistTextResult,
+  mockIsCancelRequested,
 } = vi.hoisted(() => {
   const mockClient = {
     execute: vi.fn(),
@@ -53,6 +55,29 @@ const {
     mockAccess: vi.fn(async () => undefined),
     /** 资产复制（默认空实现） */
     mockCopyFile: vi.fn(async () => undefined),
+    /** 文本产物落盘（文本生成任务用；默认「已写入」） */
+    mockPersistTextResult: vi.fn(
+      async (_opts: {
+        project: string;
+        canvas?: unknown;
+        nodeId?: string;
+        text: string;
+        input: string;
+        modelName?: string;
+      }): Promise<{
+        wrote: boolean;
+        rev?: number;
+        prevRev?: number;
+        patch?: { output: string; outputHistory: unknown[] };
+      }> => ({
+        wrote: true,
+        rev: 5,
+        prevRev: 4,
+        patch: { output: '文本', outputHistory: [] },
+      }),
+    ),
+    /** 取消标记探测（与真实签名一致；默认未取消，用例可覆盖为 mockReturnValue(true)） */
+    mockIsCancelRequested: vi.fn((_params: object): boolean => false) as unknown as Mock,
   };
 });
 
@@ -75,6 +100,17 @@ vi.mock('./routes/workflow.js', () => ({
 vi.mock('./assets/history.js', () => ({
   copyExistingAssetToHistory: mockCopyExistingAssetToHistory,
 }));
+// 文本产物落盘（画布定义文件写入）与取消标记：由用例注入结果，避免真实文件 IO
+vi.mock('./canvas/text-result.js', () => ({
+  persistTextResult: mockPersistTextResult,
+}));
+vi.mock('./workflows/cancel.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./workflows/cancel.js')>();
+  // 默认委托真实实现（既有用例用 params.cancelRequested 驱动取消语义）；
+  // 需要强制取消的用例再 mockReturnValue(true)
+  mockIsCancelRequested.mockImplementation(mod.isCancelRequested);
+  return { ...mod, isCancelRequested: mockIsCancelRequested };
+});
 // 系统设置：心跳间隔由测试注入（真实实现读 server/config/system.json）
 vi.mock('./system/system-settings.js', () => ({
   readSystemSettings: mockReadSystemSettings,
@@ -156,7 +192,6 @@ beforeEach(() => {
     createClient: mockCreateClient,
   });
 });
-
 describe('runTask provider 解析（按实例）', () => {
   it('按 wf.providerInstanceId 精确查实例，用实例配置创建客户端并注入 submit', async () => {
     mockDb.getTask.mockReturnValue(taskRecord());
@@ -448,6 +483,127 @@ describe('轮询日志降噪（变化才记 + 心跳）', () => {
     await runTaskWithFakeTimers();
 
     expect(loggedEntries()).toContainEqual(['error', 'Task failed: 敏感内容拦截']);
+  });
+});
+
+// ── 文本产物（text-generation）：不写 assert/、不需要 outputPath ────────────────
+
+/** 文本生成任务记录（params 无 outputPath，带画布定位） */
+const textTaskRecord = (params: Record<string, unknown> = {}): TaskRecord => taskRecord({
+  workflow_id: 'text-generation',
+  impl: 'custom-wf-text-inst-1',
+  params: JSON.stringify({
+    vars: { prompt: '写一段旁白', imagePaths: '[]', mediaPaths: '[]', purpose: 'canvas-text' },
+    nodeId: 'node-text',
+    canvas: { kind: 'scene', episode: '1', shot: '1' },
+    ...params,
+  }),
+});
+
+/** 文本生成工作流实现（绑定 inst-1） */
+const textWf = (over: Partial<WorkflowDefinition> = {}): WorkflowDefinition => wf({
+  type: 'text-generation',
+  impl: 'custom-wf-text-inst-1',
+  name: '文本工作流A',
+  provider: 'custom',
+  submit: vi.fn(async () => ({ taskId: 'remote-text' })),
+  ...over,
+});
+
+describe('runTask 文本产物（text-generation）', () => {
+  beforeEach(() => {
+    mockReadSystemSettings.mockResolvedValue(defaultSettings);
+    mockIsCancelRequested.mockReturnValue(false);
+    mockPersistTextResult.mockResolvedValue({
+      wrote: true,
+      rev: 5,
+      prevRev: 4,
+      patch: { output: '生成的文本', outputHistory: [{ id: 'h1' }] },
+    });
+  });
+
+  it('无 outputPath 也完成：文本写入画布节点，任务 result 携带文本与版本号', async () => {
+    mockDb.getTask.mockReturnValue(textTaskRecord());
+    mockGetImpl.mockReturnValue(textWf());
+    mockGetInstance.mockResolvedValue(instance({ type: 'custom' }));
+    mockResolveInstanceConfig.mockReturnValue({ apiKey: 'key' });
+    mockClient.getOutput.mockResolvedValue({ type: 'text', text: '生成的文本' });
+    scriptPoll([{ status: 'completed', progress: 100, done: true }]);
+
+    await runTaskWithFakeTimers();
+
+    // 落盘入参：项目 + 画布定位 + 节点 + 文本 + 输入快照 + 工作流展示名
+    expect(mockPersistTextResult).toHaveBeenCalledWith({
+      project: 'test-project',
+      canvas: { kind: 'scene', episode: '1', shot: '1' },
+      nodeId: 'node-text',
+      text: '生成的文本',
+      input: '写一段旁白',
+      modelName: '文本工作流A',
+    });
+    // 任务终态：result 携带文本 + 补丁 + 版本号（前端据此与 savedRev 比对后采纳）
+    expect(mockDb.updateTaskStatus).toHaveBeenCalledWith('task-1', 'completed', {
+      result: {
+        text: '生成的文本',
+        patch: { output: '生成的文本', outputHistory: [{ id: 'h1' }] },
+        prevRev: 4,
+        rev: 5,
+      },
+    });
+    expect(loggedEntries().map(([, m]) => m)).toContain(
+      '文本结果已写入画布节点 node-text（画布版本 4 → 5）',
+    );
+    // 文本任务不写 assert/ 产物、不归档历史版本
+    expect(mockCopyExistingAssetToHistory).not.toHaveBeenCalled();
+    expect(taskRegistry.listActive().find((t) => t.id === 'task-1')).toBeUndefined();
+  });
+
+  it('服务端跳过写盘（画布/节点不存在）时任务仍完成，只记 warn', async () => {
+    mockDb.getTask.mockReturnValue(textTaskRecord());
+    mockGetImpl.mockReturnValue(textWf());
+    mockGetInstance.mockResolvedValue(instance({ type: 'custom' }));
+    mockResolveInstanceConfig.mockReturnValue({ apiKey: 'key' });
+    mockClient.getOutput.mockResolvedValue({ type: 'text', text: '文本' });
+    mockPersistTextResult.mockResolvedValue({ wrote: false });
+    scriptPoll([{ status: 'completed', progress: 100, done: true }]);
+
+    await runTaskWithFakeTimers();
+
+    expect(mockDb.updateTaskStatus).toHaveBeenCalledWith('task-1', 'completed', {
+      result: { text: '文本' },
+    });
+    expect(loggedEntries().some(([level, m]) => level === 'warn' && m.includes('未写入画布'))).toBe(true);
+  });
+
+  it('被中断（cancelRequested）时不写文本、不落产物，任务收敛为失败', async () => {
+    mockDb.getTask.mockReturnValue(textTaskRecord({ cancelRequested: true }));
+    mockGetImpl.mockReturnValue(textWf());
+    mockGetInstance.mockResolvedValue(instance({ type: 'custom' }));
+    mockResolveInstanceConfig.mockReturnValue({ apiKey: 'key' });
+    mockClient.getOutput.mockResolvedValue({ type: 'text', text: '不该落盘的文本' });
+    mockIsCancelRequested.mockReturnValue(true);
+    scriptPoll([{ status: 'completed', progress: 100, done: true }]);
+
+    await runTaskWithFakeTimers();
+
+    expect(mockPersistTextResult).not.toHaveBeenCalled();
+    expect(mockDb.updateTaskStatus).toHaveBeenCalledWith('task-1', 'failed', { error_msg: '用户中断' });
+  });
+
+  it('文本产物为空（provider 抛错）时任务失败并透出原因，不写画布', async () => {
+    mockDb.getTask.mockReturnValue(textTaskRecord());
+    mockGetImpl.mockReturnValue(textWf());
+    mockGetInstance.mockResolvedValue(instance({ type: 'custom' }));
+    mockResolveInstanceConfig.mockReturnValue({ apiKey: 'key' });
+    mockClient.getOutput.mockRejectedValue(new Error('文本工作流未返回内容'));
+    scriptPoll([{ status: 'completed', progress: 100, done: true }]);
+
+    await runTaskWithFakeTimers();
+
+    expect(mockPersistTextResult).not.toHaveBeenCalled();
+    expect(mockDb.updateTaskStatus).toHaveBeenCalledWith('task-1', 'failed', {
+      error_msg: '文本工作流未返回内容',
+    });
   });
 });
 

@@ -161,7 +161,8 @@
               :adjacent-side="adjacentSideOf(id)"
               :running-adjacent="isBlueprint ? false : runningInputNodeIds.has(id)"
               :status="isBlueprint ? undefined : statusByNode[id]"
-              :is-running="isBlueprint ? undefined : (nodeMap[id]?.prototypeId === 'text-ai' ? statusByNode[id]?.status === 'running' : undefined)"
+              :is-running="isBlueprint ? undefined : (isInlineStatusNode(id) ? statusByNode[id]?.status === 'running' : undefined)"
+              :error-msg="isBlueprint ? undefined : (isInlineStatusNode(id) ? statusByNode[id]?.errorMsg : undefined)"
               :canvas-target="nodeMap[id]?.prototypeId === 'text-ai' ? canvasTarget : undefined"
               :output="isBlueprint ? null : outputOf(nodeMap[id])"
               :upload="isBlueprint ? null : upload.stateOf(id)"
@@ -314,6 +315,7 @@
           :video-input-groups="videoInputGroups"
           :text-inputs="editorTextInputs"
           :is-running="editorPanel ? isNodeRunning(editorPanel.node.id) : false"
+          :error-msg="editorPanel ? statusByNode[editorPanel.node.id]?.errorMsg : undefined"
           :kind="target.kind"
           :viewport="viewport"
           :other-nodes="otherCanvasNodes"
@@ -461,10 +463,10 @@
         </div>
       </div>
 
-      <!-- 文本历史版本对话框（AI 文本生成节点：config.outputHistory 纯文本快照，无服务端请求）
+      <!-- 文本历史版本对话框（AI 文本生成 / 文本生成节点：config.outputHistory 纯文本快照，无服务端请求）
            蓝图模式不提供历史查看 -->
       <AiTextHistoryDialog
-        v-if="!isBlueprint && historyNode?.prototypeId === 'text-ai'"
+        v-if="!isBlueprint && isTextHistoryNode"
         v-model="historyDialog.show"
         :project="props.project"
         :node="historyNode"
@@ -937,6 +939,32 @@ function syncImageCropOutputMirror(nodeId: string, outputPath: string): void {
   store.updateNodeQuiet(nodeId, { outputExt: ext })
 }
 
+/**
+ * 历史对话框的目标节点是否为**文本历史节点**（AI 文本生成 / 文本生成）。
+ *
+ * 两类节点的历史都是节点 config 内的纯文本快照（AiTextHistoryDialog），
+ * 而非服务端资产历史（CanvasAssertHistoryDialog），故按原型分派对话框。
+ */
+const isTextHistoryNode = computed(() => {
+  const proto = historyNode.value?.prototypeId
+  return proto === 'text-ai' || proto === 'text-generate'
+})
+
+/**
+ * 节点是否把运行/失败状态**自绘在节点主体内**（而非依赖画布默认状态遮罩）。
+ *
+ * 两类文本节点：`text-ai`（LLM 直连，流式）与 `text-generate`（工作流转文本）。
+ * 两者原型都声明空状态遮罩（`statusOverlay: () => null`），故父级要把
+ * isRunning / errorMsg 下发到节点主体，由主体自行展示「生成中…」与失败原因。
+ *
+ * @param nodeId 节点 id
+ * @returns 是否为主体自绘状态节点
+ */
+function isInlineStatusNode(nodeId: string): boolean {
+  const proto = nodeMap.value[nodeId]?.prototypeId
+  return proto === 'text-ai' || proto === 'text-generate'
+}
+
 /** 生成完成回调：产物已由服务端落盘，刷新该节点展示（先乐观更新，再取真实 mtime） */
 function handleNodeResult(nodeId: string, outputPath: string): void {
   syncAudioTrimOutputMirror(nodeId, outputPath)
@@ -978,7 +1006,7 @@ function getOutputMtime(nodeId: string): number | null | undefined {
 
 /**
  * 节点卡片主体媒体输入（按原型分发，避免模板内重复求值）：
- * - `text-ai`（AI文本生成）：本节点自身的媒体输入；
+ * - `text-ai`（AI文本生成）/ `text-generate`（文本生成）：本节点自身的媒体输入；
  * - `input-preview`（输入预览）：**上游来源节点**的媒体输入（穿透一层，见 previewInputsOf）；
  * - 其余原型：undefined（主体组件不接收 inputs）。
  *
@@ -987,7 +1015,7 @@ function getOutputMtime(nodeId: string): number | null | undefined {
  */
 function cardInputsOf(nodeId: string): LlmMediaInputItem[] | CanvasInputInfo[] | undefined {
   const proto = nodeMap.value[nodeId]?.prototypeId
-  if (proto === 'text-ai') return llmMediaInputsOf(nodeId)
+  if (proto === 'text-ai' || proto === 'text-generate') return llmMediaInputsOf(nodeId)
   if (proto === 'input-preview') return previewInputsOf(nodeId)?.media
   // 输入转发：节点主体展示「本节点接入的媒体输入」，并支持组内拖拽排序与悬浮断开
   if (proto === 'forward-input') return llmMediaInputsOf(nodeId)
@@ -1014,7 +1042,7 @@ function forwardOutputTypeOf(nodeId: string): PortType | undefined {
 
 /**
  * 节点卡片主体文本输入（按原型分发）：
- * - `text-ai`：本节点自身连接的「文本」节点内容；
+ * - `text-ai` / `text-generate`：本节点自身连接的文本来源内容（外部提示词）；
  * - `input-preview`：**上游来源节点**连接的文本输入内容（穿透一层）；
  * - 其余原型：undefined。
  *
@@ -1023,7 +1051,7 @@ function forwardOutputTypeOf(nodeId: string): PortType | undefined {
  */
 function cardTextInputsOf(nodeId: string): string[] | undefined {
   const proto = nodeMap.value[nodeId]?.prototypeId
-  if (proto === 'text-ai') return textInputsOf(nodeId)
+  if (proto === 'text-ai' || proto === 'text-generate') return textInputsOf(nodeId)
   if (proto === 'input-preview') return previewInputsOf(nodeId)?.texts
   // 输入转发：本节点接入的文本输入（原样透传给下游作为外部提示词）
   if (proto === 'forward-input') return textInputsOf(nodeId)
@@ -1302,8 +1330,47 @@ const nodeOps = useCanvasNodeOps({
   getSelectedNode: () => selection.editorPanel.value?.node ?? null,
   getScope: () => scope.value,
   onNodeResult: handleNodeResult,
+  onTextResult: adoptTextRunResult,
   getOutputMtime,
 })
+
+// ── 文本生成节点（工作流 text-generation）的服务端落盘采纳 ──────────────────────
+
+/**
+ * 已采纳的文本生成结果版本（nodeId → rev）。
+ *
+ * 与 AI 文本节点的 `adoptedLlmRevByNode` 同一用途：在线轮询与画布恢复续跑轮询
+ * 都可能拿到同一终态，按 rev 幂等去重，避免重复入撤销栈。
+ */
+const adoptedTextRevByNode = new Map<string, number>()
+
+/**
+ * 采纳文本生成任务终态的服务端落盘补丁（版本对齐 + 幂等）。
+ *
+ * 与 AI 文本节点终态（`adoptLlmResult`）同一套语义：服务端是画布文件的单写者，
+ * 前端只在「本地画布版本仍等于服务端写入前版本（prevRev）」时采纳，避免把用户在
+ * 生成期间对画布做的其他修改覆盖掉；采纳后 `savedRev` 对齐服务端新版本，**不触发写盘**。
+ *
+ * 服务端未写画布（画布/节点已不存在）或响应缺版本号时不采纳：文本已在任务结果中，
+ * 页面刷新后以服务端画布文件为准（此处保持节点状态为成功，避免误报失败）。
+ *
+ * @param nodeId 节点 id
+ * @param patch 服务端实际写入的 config 补丁（output / outputHistory）
+ * @param rev 服务端写入后的画布版本号（缺省 = 未写画布）
+ * @param prevRev 服务端写入前的画布版本号（与本地 savedRev 比对）
+ */
+function adoptTextRunResult(
+  nodeId: string,
+  patch: Record<string, unknown>,
+  rev?: number,
+  prevRev?: number,
+): void {
+  if (typeof rev !== 'number') return
+  if (typeof prevRev !== 'number' || prevRev !== store.savedRev.value) return
+  if (adoptedTextRevByNode.get(nodeId) === rev) return
+  adoptedTextRevByNode.set(nodeId, rev)
+  store.adoptExternalChange(nodeId, patch, rev)
+}
 
 // ── LLM 活跃会话（AI 文本节点；服务端会话列表驱动恢复 + 后端终态落盘 adopt）─────────
 

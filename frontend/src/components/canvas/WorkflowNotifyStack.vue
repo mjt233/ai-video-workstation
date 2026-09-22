@@ -82,6 +82,13 @@
           :src="item.mediaUrl"
           controls
         />
+        <!-- 文本生成产物（无文件）：文本在画布节点与任务详情中可见，此处只给指引文案 -->
+        <div
+          v-else-if="item.textTask"
+          class="workflow-notify__text"
+        >
+          文本产物已完成，可在画布节点或「任务管理器 → 历史 → 任务详情」查看
+        </div>
         <div
           v-else
           class="workflow-notify__fallback"
@@ -176,6 +183,8 @@ function fileNameOf(item: WorkflowNotifyItem): string {
 
 /**
  * 无媒体元素可渲染时的占位文案。
+ *
+ * 文本生成产物已在模板中单独渲染（{@link textSummary}），不会走到这里。
  *
  * @param item 气泡条目
  * @returns 占位文案
@@ -310,6 +319,17 @@ function openPreview(item: WorkflowNotifyItem): void {
   font-size: 11px;
   color: rgba(0, 0, 0, 0.55);
   word-break: break-all;
+}
+
+/* 文本生成产物（无文件）：浅底说明条（指引用户到画布节点/任务详情看全文） */
+.workflow-notify__text {
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(0, 0, 0, 0.7);
+  background: rgba(var(--v-theme-primary), 0.06);
+  border: 1px solid rgba(var(--v-theme-primary), 0.24);
 }
 
 .workflow-notify__error {

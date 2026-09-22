@@ -31,7 +31,7 @@ import type { WorkflowUserParamDeclaration } from '../../workflows/types.js';
 /** 自定义服务商 Provider 插件 id */
 const PROVIDER_ID = 'custom';
 
-/** 支持统一尺寸配置的工作流类型（生图 / 生视频；TTS 无尺寸概念） */
+/** 支持统一尺寸配置的工作流类型（生图 / 生视频；TTS 与文本生成无尺寸概念） */
 const SIZE_TYPES: CustomWorkflowType[] = ['text-to-image', 'image-edit', 'image-to-video'];
 
 /**
@@ -85,6 +85,14 @@ function parseStringArray(raw: string | undefined, label: string): string[] {
 
 /**
  * 按工作流类型组装自定义调用的 ctx.params（业务变量 + 类型化字段）。
+ *
+ * 各类型的补充字段：
+ * - text-to-image：prompt（读 promptPath）+ width/height + sizeConfig + seed
+ * - image-edit：prompt + imagePaths + width/height + sizeConfig + seed
+ * - tts-voice-design：prompt + text + seed
+ * - tts-voice-clone：text + refText + refAudioPath + seed
+ * - image-to-video：video 自包含参数（prompt/mode/duration/resolution/director/references）+ sizeConfig + seed
+ * - text-generation：prompt + imagePaths + mediaPaths + seed（**无尺寸字段**）
  *
  * @param type 工作流类型
  * @param ctx 引擎运行上下文
@@ -173,6 +181,16 @@ async function buildCustomParams(
       };
     }
     return { ...base, seed };
+  }
+
+  if (type === 'text-generation') {
+    // 文本生成：提示词 + 可选多模态素材路径（图片与其他媒体分开，便于脚本按类型组包）；
+    // 无尺寸概念，故不携带 sizeConfig
+    const prompt = (vars.prompt ?? '').trim();
+    if (!prompt) throw new Error('text-generation 需要 vars.prompt（提示词）');
+    const imagePaths = parseStringArray(vars.imagePaths, 'imagePaths');
+    const mediaPaths = parseStringArray(vars.mediaPaths, 'mediaPaths');
+    return { ...base, prompt, imagePaths, mediaPaths, seed };
   }
 
   throw new Error('不支持的工作流类型: ' + type);

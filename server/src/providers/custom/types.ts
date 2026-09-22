@@ -13,6 +13,7 @@ export const CUSTOM_WORKFLOW_TYPES = [
   'tts-voice-design',
   'tts-voice-clone',
   'image-to-video',
+  'text-generation',
 ] as const;
 
 /** 系统支持的工作流类型标识 */

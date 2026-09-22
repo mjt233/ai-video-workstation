@@ -94,6 +94,30 @@ export function buildTtsClonePayload(args: {
   return { workflowId: args.workflowId, params, files: { audio_0: args.refAudio } };
 }
 
+/**
+ * 文本生成提交载荷（`text-generation` 类型工作流）。
+ *
+ * 只传提示词与可选种子（外加 expose_field 透传的用户参数）：文本生成工作流不需要
+ * 尺寸/时长等结构性字段。**产物是文本文件**（由 Bridge 的 output-files 返回，
+ * 引擎识别扩展名/Content-Type 后解码为文本，不写 assert/ 媒体产物）。
+ *
+ * @param args.workflowId Bridge 工作流 id
+ * @param args.prompt 提示词
+ * @param args.seed 随机种子（可选）
+ * @param args.extraParams 透传的用户参数（可选）
+ * @returns Bridge 提交载荷
+ */
+export function buildTextGenerationPayload(args: {
+  workflowId: string;
+  prompt: string;
+  seed?: number;
+  extraParams?: Record<string, unknown>;
+}): BridgeExecutePayload {
+  const params: Record<string, unknown> = { ...(args.extraParams ?? {}), prompt: args.prompt };
+  if (args.seed != null) params.seed = args.seed;
+  return { workflowId: args.workflowId, params };
+}
+
 // ── 图片编辑构建器 ───────────────────────────────────────────────────
 
 export interface ImageEditSizeParams {

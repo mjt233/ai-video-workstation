@@ -52,6 +52,11 @@ export interface WorkflowCallResult {
  * 失败语义：`failed: true` 表示任务已结束但本次生成失败（隐含已完成，
  * 此时无需再返回 `isFinish: true`，轮询立即终止并标记任务失败）；
  * 非失败场景仍需返回布尔 `isFinish`。
+ *
+ * 产物二选一（可同时返回，此时 `text` 优先）：
+ * - 媒体产物：返回 `outputs`（http url 数组，仅取第一个下载/写盘）；
+ * - 文本产物：**工作流类型含 `text-generation` 时**直接把文本内容放进 `text`，
+ *   无需先上传成文件再给 URL；其余类型返回 `text` 会被忽略并告警。
  */
 export interface WorkflowResult {
   /** 工作流是否已执行完成（failed: true 时隐含已完成，可省略） */
@@ -64,6 +69,11 @@ export interface WorkflowResult {
   progress?: number | null;
   /** 工作流执行结果产物（http url 数组） */
   outputs?: string[];
+  /**
+   * 文本生成类型的产物：**直接返回文本内容**（不落 assert/ 媒体文件）。
+   * 与 `outputs` 同时存在时以本字段为准；非文本生成类型忽略并告警。
+   */
+  text?: string;
 }
 
 /**
@@ -462,7 +472,9 @@ export function buildWorkflowCallContext(deps: WorkflowCallContextDeps): Workflo
  *
  * - `failed: true` 视为已完成（isFinish 可省略并强制置为 true）；
  * - 非失败场景 isFinish 缺失/非布尔时报错；
- * - `failed` / `errorMessage` 存在但类型非法时报错。
+ * - `failed` / `errorMessage` 存在但类型非法时报错；
+ * - `text` 为文本产物（仅 `text-generation` 类型取用）：非字符串报错，
+ *   空串/纯空白视为未返回（取用侧据此给出「未返回内容」的失败原因）。
  *
  * @param raw 用户代码返回值
  * @param label 标签（错误提示）
@@ -505,7 +517,15 @@ export function normalizeWorkflowResult(raw: unknown, label: string): WorkflowRe
     }
     outputs = rec.outputs as string[];
   }
-  return { isFinish: failed || (rec.isFinish as boolean), failed, errorMessage, progress, outputs };
+  // 文本产物：只接受字符串（非字符串视为未返回，交由取用侧判定失败原因）；
+  // 空串/纯空白同样视为未返回——无内容的文本不能作为产物。
+  let text: string | undefined;
+  if (typeof rec.text === 'string' && rec.text.trim() !== '') {
+    text = rec.text;
+  } else if (rec.text !== undefined && rec.text !== null && typeof rec.text !== 'string') {
+    throw new Error(label + '返回的 text 必须是字符串');
+  }
+  return { isFinish: failed || (rec.isFinish as boolean), failed, errorMessage, progress, outputs, text };
 }
 
 /**

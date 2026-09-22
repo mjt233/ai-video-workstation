@@ -41,6 +41,22 @@ export const CALL_CODE_TEMPLATE = [
   '}',
 ].join('\n')
 
+/** 【调用发起】文本生成类型模板（工作流类型含「文本生成」时使用） */
+export const TEXT_CALL_CODE_TEMPLATE = [
+  '// ctx.session 类型为 Record<string, any>，ctx 在实例化时就默认赋值',
+  '// ctx 在整个工作流发起调用、结果轮询与提取中都是同一个实例',
+  '// 通用代码中导出的函数在这里可直接全局调用，且具有 monaco 编辑器代码提示',
+  'export default async function(ctx: WorkflowCallContext) {',
+  '  // 文本生成工作流的输入参数：prompt（提示词），可选图片路径 imagePaths / 其他媒体 mediaPaths',
+  "  const conf = getBaseCallConfig(ctx, ctx.userConfig.model ?? 'gpt-4o-mini')",
+  '',
+  '  conf.data.messages = [{ role: "user", content: ctx.params.prompt }]',
+  '',
+  '  // 需要返回一个 http 调用配置',
+  '  return conf',
+  '}',
+].join('\n')
+
 /** 【结果提取】默认模板 */
 export const EXTRACT_CODE_TEMPLATE = [
   '// callResult 为【调用发起】的 http 请求响应对象',
@@ -75,6 +91,34 @@ export const EXTRACT_CODE_TEMPLATE = [
   '      // 工作流执行结果产物，http url 数组（仅取第一个写入产物）',
   '      outputs: res.data.data.map((e: any) => e.url)',
   '    }',
+  '  }',
+  '}',
+].join('\n')
+
+/**
+ * 【结果提取】文本生成类型模板（工作流类型含「文本生成」时使用）。
+ *
+ * 文本生成的产物是文本本身，两种返回方式任选其一：
+ * - 直接返回 `text`（接口已把文本放在响应里时最省事）；
+ * - 返回 `outputs`（文本文件/文本接口的 http url，服务端拉取后解码为文本）。
+ */
+export const TEXT_EXTRACT_CODE_TEMPLATE = [
+  '// callResult 为【调用发起】的 http 请求响应对象',
+  'export default async function(ctx: WorkflowCallContext, callResult: WorkflowCallResult): Promise<WorkflowResult> {',
+  '  // 文本生成工作流的产物是文本：可以直接返回 text，无需先上传成文件',
+  '  const content = callResult.data?.choices?.[0]?.message?.content',
+  '  if (typeof content !== "string") {',
+  '    return {',
+  '      failed: true,',
+  '      // 失败原因文案，会透传给任务失败信息',
+  '      errorMessage: "接口未返回文本内容"',
+  '    }',
+  '  }',
+  '',
+  '  return {',
+  '    isFinish: true,',
+  '    // 直接返回文本内容（也可改为 outputs: [文本接口的 url]）',
+  '    text: content',
   '  }',
   '}',
 ].join('\n')
@@ -259,6 +303,29 @@ const PARAM_INTERFACES: Record<string, string> = {
     '  [key: string]: any',
     '}',
   ].join('\n'),
+  'text-generation': [
+    'declare interface TextGenerationParams {',
+    '  /** 提示词 */',
+    '  prompt: string',
+    '  /** 输入图片相对路径列表（服务端已解析为数组；无输入时为空数组） */',
+    '  imagePaths: string[]',
+    '  /** 其他媒体（音频/视频）相对路径列表（服务端已解析为数组；无输入时为空数组） */',
+    '  mediaPaths: string[]',
+    '  /** 随机种子（字符串） */',
+    '  seed?: string',
+    '  [key: string]: any',
+    '}',
+  ].join('\n'),
+}
+
+/** 工作流类型 id → 该类型对应的 ctx.params 接口名（与 PARAM_INTERFACES 的键一一对应） */
+const PARAM_INTERFACE_NAMES: Record<string, string> = {
+  'text-to-image': 'TextToImageParams',
+  'image-edit': 'ImageEditParams',
+  'tts-voice-design': 'TtsVoiceDesignParams',
+  'tts-voice-clone': 'TtsVoiceCloneParams',
+  'image-to-video': 'ImageToVideoParams',
+  'text-generation': 'TextGenerationParams',
 }
 
 /** 核心类型库（WorkflowCallRequestConfig / WorkflowCallResult / WorkflowResult） */
@@ -296,6 +363,8 @@ const CORE_LIB = [
   '  progress?: number | null',
   '  /** 工作流执行结果产物（http url 数组，仅取第一个写入产物） */',
   '  outputs?: string[]',
+  '  /** 文本生成类型的产物：直接返回文本内容（与 outputs 二选一，同时存在时以 text 为准） */',
+  '  text?: string',
   '}',
 ].join('\n')
 
@@ -409,7 +478,7 @@ export function buildContextLib(
   const picked = (types ?? []).filter((t) => PARAM_INTERFACES[t])
   const paramLibs = picked.map((t) => PARAM_INTERFACES[t]).join('\n\n')
   const paramsType = picked.length > 0
-    ? picked.map((t) => t === 'text-to-image' ? 'TextToImageParams' : t === 'image-edit' ? 'ImageEditParams' : t === 'tts-voice-design' ? 'TtsVoiceDesignParams' : t === 'tts-voice-clone' ? 'TtsVoiceCloneParams' : 'ImageToVideoParams').join(' & ')
+    ? picked.map((t) => PARAM_INTERFACE_NAMES[t]).join(' & ')
     : 'Record<string, any>'
   return [
     CORE_LIB,

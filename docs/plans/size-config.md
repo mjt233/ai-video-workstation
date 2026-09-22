@@ -78,11 +78,13 @@ interface WorkflowImplementation {
 
 ### OpenAI兼容
 
-已规划（2026-08 实施）：
-
 比例：16:9,4:3,1:1,3:4,9:16,auto
-尺寸：auto
+尺寸：auto, 1K, 2K
 支持指定尺寸（宽高直传 `"WxH"`，缺失回退 projectConfig）
+
+**新增约束（2026-09）**：GPT Image 系列要求输出 `width`/`height` **均为 16 的倍数**
+（另：宽高比需在 1:3~3:1、单边 ≤3840），因此提交前由 `alignSizeToMultiple` 自动匹配，
+详见下方「修复记录（2026-09）：OpenAI 兼容尺寸自动匹配 16 的倍数」。
 
 ### ComfyUI Easy Bridge
 
@@ -218,3 +220,54 @@ MiniMax / 自定义服务商都已接入 `sizeConfig`，唯独漏了 Bridge 这�
 （如 16:9 + 1K = 1820×1024，1820 不是 8 的倍数）。潜空间类工作流（Krea2 的
 `EmptyLatentImage`）会把它对齐到 8 的倍数产出（实测 1816×1024）——Bridge 与 ComfyUI
 收到的参数值均为 1820，对齐发生在 ComfyUI 内部，属预期行为。
+
+## 修复记录（2026-09）：OpenAI 兼容尺寸自动匹配 16 的倍数 + 分辨率 1K/2K
+
+**问题**：OpenAI 兼容（GPT Image 系列）要求 `size` 的宽高**均为 16 的倍数**
+（官方文档：*"Width and height must be multiples of 16, the aspect ratio must be between 1:3 and 3:1,
+and neither edge may exceed 3840 pixels"*），而档位表按「比例 × 分辨率档」换算的结果不保证整除
+（16:9 + 1K = 1820×1024、4:3 + 1K = 1365×1024、9:16 + 1K = 1024×1820），对端会直接报错；
+且该服务商的「分辨率」按钮组当时只开放了「自动」，用户无法选择 1K / 2K。
+
+**对齐规则（`alignSizeToMultiple`）**：在宽度目标 ±1.5×倍数 范围内枚举网格点，每取一个候选宽度
+就按**原始宽高比**反推高度目标、再取其上下两个网格点，得到 3~4 组「宽高均整除」候选后按
+
+```
+评分 = |面积 − 目标面积| / 目标面积 + 0.5 × |宽高比 − 目标宽高比| / 目标宽高比
+```
+
+取最优（**面积误差优先、宽高比误差次之**；同分取偏移更小者，再同分取面积较大者）。
+相对误差归一化后横竖屏、大小尺寸共用一套判据，不需要按分辨率分档设阈值。
+
+**关键取值**（实测，档位基准的短边恒保持不动——1K→1024、2K→1440 本身即 16 的倍数）：
+
+| 比例 | 1K 换算值 → 对齐值 | 2K 换算值 → 对齐值 |
+| --- | --- | --- |
+| 16:9 | 1820×1024 → **1824×1024** | 2560×1440（不变） |
+| 9:16 | 1024×1820 → **1024×1824** | 1440×2560（不变） |
+| 4:3 | 1365×1024 → **1360×1024** | 1920×1440（不变） |
+| 3:4 | 1024×1365 → **1024×1360** | 1440×1920（不变） |
+| 21:9 | 2389×1024 → **2384×1024** | 3360×1440（不变） |
+| 1:1 / 3:2 / 2:3 | 1024×1024 / 1536×1024 / 1024×1536（不变） | 全部不变 |
+
+面积误差 ≤0.4%、宽高比误差 ≤0.4%；项目尺寸回退 1080×1920 → **1088×1920**（两侧面积误差、
+偏移距离都相同，按规则取较大面积）。
+
+**生效范围**：**只对 OpenAI 兼容服务商生效**——`size.ts` 的 `alignSizeToMultiple` 由
+`openai-compatible-sync.ts` 的 `resolveOpenAISize` 显式调用（尺寸来源仍由统一的
+`resolveOutputSize` 决定，对齐只是其后的兜底步骤），Seedream / ComfyUI Bridge / MiniMax /
+自定义服务商的取值与档位表完全不变。
+
+**前后端一致**：工作流通过 `capabilities.size.constraint.multipleOf = 16` 声明该约束，
+前端 `WorkflowSizePicker` 用同规则镜像 `alignSizeToMultiple`（`frontend/src/utils/workflowSize.ts`）
+换算预设宽高，因此**界面显示的宽高就是实际提交的 `size`**；未声明 `constraint` 的工作流
+（其他服务商）取值一字不变。两侧常量（`ALIGN_RATIO_WEIGHT` / `ALIGN_WIDTH_SEARCH_FACTOR`）
+必须同步修改。
+
+**未做的自动钳制**：官方另两条限制（宽高比 1:3~3:1、单边 ≤3840 像素）不自动钳制，
+超出时由对端返回错误、经任务失败原因透出——档位表在本次开放的 1K / 2K 范围内不会触及这两条。
+
+**验证**：`server/src/workflows/size.test.ts`（覆盖 1K/2K 全比例、误差上界、短边保持、
+自定义宽高、非法输入）、`server/src/workflows/openai-compatible-sync.test.ts`（submit 载荷的
+`size` 取值）、`frontend/src/utils/workflowSize.test.ts`（镜像一致性）；
+本次未对真实服务商发起调用（用户明确要求不操作真实调用）。

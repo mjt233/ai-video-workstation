@@ -14,6 +14,7 @@ import { resolveOutputSize, resolveSpecifiedGate } from './size.js';import {
   buildFirstLastFramePayload,
   buildImageEditPayload,
   buildReferencePayload,
+  buildTextGenerationPayload,
   buildTextToImagePayload,
   buildTtsPayload,
   buildTtsClonePayload,
@@ -40,6 +41,15 @@ const TEXT_TO_IMAGE_STRUCTURAL_KEYS = new Set(['seed', 'enhance_prompt', 'enable
 const IMAGE_EDIT_STRUCTURAL_KEYS = new Set(['seed', 'enable_specified_size', 'width', 'height']);
 /** tts 提交按结构字段处理的用户参数键（从透传排除） */
 const TTS_STRUCTURAL_KEYS = new Set(['seed']);
+/**
+ * text-generation 提交按结构字段处理的用户参数键（从透传排除）。
+ *
+ * `prompt` / `text` 由提交函数按 vars 结构化组装（避免用户参数把它们覆盖成空值），
+ * `imagePaths` / `mediaPaths` 是画布节点的输入素材路径（v1 不向 Bridge 上传，见 textGenerationSubmit）。
+ */
+const TEXT_GENERATION_STRUCTURAL_KEYS = new Set([
+  'seed', 'prompt', 'text', 'imagePaths', 'mediaPaths', 'purpose',
+]);
 /**
  * image-to-video 提交按结构字段处理的用户参数键（从透传排除）。
  *
@@ -219,6 +229,37 @@ function ttsCloneSubmit(workflowId: string): WorkflowDefinition['submit'] {
 }
 
 /**
+ * 文本生成提交实现（`text-generation` 类型）。
+ *
+ * 提示词取 vars.prompt；可选 vars.text（待处理原文，如改写/摘要场景）经 Bridge 的
+ * `text` 参数原样透传（宿主的 TextGenerationVars 不含该字段，故按可选字段宽松读取，
+ * 兼容画布节点直接提交与自定义调用方）。
+ *
+ * **产物是文本文件**：Bridge 的 output-files 返回文本文件（.txt/.md/.json 或
+ * text/* 响应）时由 provider 客户端识别为文本产物，引擎据此写回画布节点、不落 assert/。
+ * 画布节点连接的图片等素材（vars.imagePaths / vars.mediaPaths）**v1 不向 Bridge 上传**：
+ * Bridge 的文本工作流参数约定尚未固定，先以纯文本链路打通；需要多模态输入时
+ * 在 Bridge 侧声明图片参数后另行扩展（不做静默丢弃以外的隐式行为）。
+ *
+ * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀），透传给 Bridge execute
+ * @returns 动态工作流 submit 函数
+ */
+function textGenerationSubmit(workflowId: string): WorkflowDefinition['submit'] {
+  return async (ctx: WorkflowRunContext<WorkflowVarsBase>) => {
+    const vars = ctx.vars as Record<string, string | undefined>;
+    const prompt = (vars.prompt ?? '').trim();
+    if (!prompt) throw new Error('text-generation 需要 vars.prompt（提示词）');
+    const seedRaw = vars.seed != null && vars.seed !== '' ? Number(vars.seed) : undefined;
+    const seed = seedRaw != null && Number.isFinite(seedRaw) ? seedRaw : undefined;
+    const extraParams = passthroughParams(ctx, TEXT_GENERATION_STRUCTURAL_KEYS);
+    return executeWithProvider(
+      ctx,
+      buildTextGenerationPayload({ workflowId, prompt, seed, extraParams }),
+    );
+  };
+}
+
+/**
  * 图片编辑提交实现。
  *
  * vars.imagePaths 为 JSON 字符串数组（相对 design/{project}/ 的 assert/ 路径）；
@@ -354,7 +395,7 @@ function videoSubmit(workflowId: string, caps: WorkflowCapabilities): WorkflowDe
  * @param workflowId Bridge 工作流 id（原始 id，不含 ceb- 前缀）
  * @param type 推导的工作流类型（BridgeDerivedType）
  * @param caps 推导的工作流能力（仅 image-to-video 使用）
- * @returns 对应类型的 submit 函数（type 恒为四类之一，无需默认分支）
+ * @returns 对应类型的 submit 函数（type 恒为六类之一，无需默认分支）
  */
 export function buildSubmit(
   workflowId: string,
@@ -367,6 +408,7 @@ export function buildSubmit(
     case 'tts-voice-design': return ttsSubmit(workflowId);
     case 'tts-voice-clone': return ttsCloneSubmit(workflowId);
     case 'image-to-video': return videoSubmit(workflowId, caps);
+    case 'text-generation': return textGenerationSubmit(workflowId);
   }
 }
 

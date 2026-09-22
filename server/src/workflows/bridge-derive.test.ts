@@ -20,6 +20,13 @@ describe('deriveWorkflowType', () => {
   it('tts-voice-clone 父标签 → tts-voice-clone', () => {
     expect(deriveWorkflowType([group('tts-voice-clone')])).toBe('tts-voice-clone');
   });
+  it('text-generation → 文本生成（产物是文本文件）', () => {
+    expect(deriveWorkflowType([group('text-generation')])).toBe('text-generation');
+  });
+  it('同时带媒体类型标签时媒体类型优先（text-generation 优先级最低）', () => {
+    expect(deriveWorkflowType([group('text-generation'), group('text-to-image')])).toBe('text-to-image');
+    expect(deriveWorkflowType([group('text-generation'), group('image-to-video')])).toBe('image-to-video');
+  });
   it('未知类型 → null', () => {
     expect(deriveWorkflowType([group('text-to-video')])).toBeNull();
   });

@@ -110,6 +110,7 @@ export function createIdleGeneration(): ReturnType<typeof useCanvasGeneration> {
       // 蓝图模式无输入路径收集：有意忽略
     },
     generate: noopAsync,
+    generateText: noopAsync,
     extractFrame: noopAsync,
     concatVideo: noopAsync,
     trimVideo: noopAsync,
@@ -543,6 +544,73 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
   }
 
   /**
+   * 提交「文本生成」节点任务（工作流类型 text-generation）。
+   *
+   * 与媒体生成节点的差别（都是同一条工作流链路，仅产物形态不同）：
+   * - **不提交 outputPath**（产物是文本，不写 assert/ 文件，服务端按类型放宽校验）；
+   * - vars 传 prompt + imagePaths/mediaPaths（JSON 数组字符串；媒体输入作多模态素材）；
+   * - 终态时读取任务 `result`（text + patch/prevRev/rev）并交给 `onTextResult` 采纳：
+   *   服务端已把文本写进画布节点 config（单写者），前端仅做视图同步。
+   *
+   * @param node 文本生成节点数据
+   * @param params 提交参数（提示词 + 已解析的媒体输入路径）
+   * @param onTextResult 终态采纳回调（nodeId, 补丁, 写入后 rev, 写入前 rev）；
+   *   服务端未写画布（画布/节点已删除）或响应缺版本号时，末尾两个参数为 undefined
+   */
+  async function generateText(
+    node: CanvasNodeData,
+    params: { prompt: string; imagePaths: string[]; mediaPaths: string[] },
+    onTextResult?: (
+      nodeId: string,
+      patch: Record<string, unknown>,
+      rev?: number,
+      prevRev?: number,
+    ) => void,
+  ): Promise<void> {
+    const nodeId = node.id
+    if (statusByNode.value[nodeId]?.status === 'running') return
+    const impl = String(node.config.workflowImpl ?? '')
+    if (!impl) {
+      statusByNode.value[nodeId] = { status: 'error', errorMsg: '请先在节点配置中选择工作流实现' }
+      return
+    }
+    const canvasScope = canvasTarget()
+    const userParams = (node.config.workflowParams as Record<string, WorkflowUserParamValue> | undefined) ?? {}
+    statusByNode.value[nodeId] = { status: 'running', lastLog: '正在提交…' }
+    try {
+      const { taskId } = await runWorkflow({
+        project,
+        workflowId: 'text-generation',
+        impl,
+        params: {
+          vars: {
+            prompt: params.prompt,
+            imagePaths: JSON.stringify(params.imagePaths),
+            mediaPaths: JSON.stringify(params.mediaPaths),
+            purpose: 'canvas-text',
+          },
+          userParams,
+          nodeId,
+          ...(canvasScope ? { canvas: canvasScope } : {}),
+        },
+      })
+      taskIdByNode.value[nodeId] = taskId
+      // 文本任务无产物文件：outputPath 传空串（不触发产物刷新，仅同步服务端已写入的 config）
+      poll(taskId, nodeId, '', undefined, (task) => {
+        const result = task.result
+        if (!result || !('text' in result) || typeof result.text !== 'string') return
+        const patch = (result.patch ?? { output: result.text }) as Record<string, unknown>
+        onTextResult?.(nodeId, patch, result.rev, result.prevRev)
+      })
+    } catch (e) {
+      statusByNode.value[nodeId] = {
+        status: 'error',
+        errorMsg: e instanceof Error ? e.message : String(e),
+      }
+    }
+  }
+
+  /**
    * 轮询任务状态（纯体验层：只更新 statusByNode 展示，成功后通知结果）。
    *
    * 结果落盘不依赖本轮询（服务端独立完成）；即使轮询全部中断，重新进入画布时
@@ -551,14 +619,16 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
    *
    * @param taskId 任务 id
    * @param nodeId 节点 id
-   * @param outputPath 产物相对路径（服务端实际写入路径）
+   * @param outputPath 产物相对路径（服务端实际写入路径；**文本生成类无产物文件**，传空串）
    * @param onResult 完成（含失败）回调（nodeId, outputPath），可省略
+   * @param onTask 终态任务的完整响应回调（可选；文本生成类据此读取 `result.text`/补丁采纳服务端写入）
    */
   function poll(
     taskId: string,
     nodeId: string,
     outputPath: string,
     onResult?: (nodeId: string, outputPath: string) => void,
+    onTask?: (task: TaskResponse) => void,
   ): void {
     if (pollTimers[nodeId]) clearInterval(pollTimers[nodeId])
     const tick = async (): Promise<void> => {
@@ -587,7 +657,10 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
           clearInterval(pollTimers[nodeId])
           delete pollTimers[nodeId]
           delete taskIdByNode.value[nodeId]
-          if (done) (onResult ?? onResultCb)?.(nodeId, outputPath)
+          if (done) {
+            (onResult ?? onResultCb)?.(nodeId, outputPath)
+            onTask?.(task)
+          }
         }
       } catch {
         // 轮询失败忽略，下轮重试
@@ -995,7 +1068,9 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
       taskIdByNode.value[nodeId] = taskId
       statusByNode.value[nodeId] = { status: 'running', lastLog: '任务进行中…', taskId }
       if (entry.kind === 'workflow') {
-        // 工作流任务：续跑本地轮询（SQLite 为权威，含阶段日志与终态）
+        // 工作流任务：续跑本地轮询（SQLite 为权威，含阶段日志与终态）；
+        // 文本生成任务无产物文件（outputPath 为空串），终态由 AssetCanvas 的
+        // onTextTaskFinished 按节点原型采纳服务端已写入的 config
         poll(taskId, nodeId, outputPath)
         continue
       }
@@ -1048,5 +1123,5 @@ export function useCanvasGeneration(project: string, target: GenTarget, options:
     await restore(knownNodeIds)
   }
 
-  return { statusByNode, setInputPaths, generate, extractFrame, concatVideo, trimVideo, trimAudio, interrupt, clearStatus, computeOutputPath, getScope, reset, dispose, restore, switchTarget, beginClientRun, updateClientRun, endClientRun, setLlmError, interruptLlm }
+  return { statusByNode, setInputPaths, generate, generateText, extractFrame, concatVideo, trimVideo, trimAudio, interrupt, clearStatus, computeOutputPath, getScope, reset, dispose, restore, switchTarget, beginClientRun, updateClientRun, endClientRun, setLlmError, interruptLlm }
 }

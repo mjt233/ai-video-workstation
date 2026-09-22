@@ -117,6 +117,7 @@ import { computed, ref, watch } from 'vue'
 import type { WorkflowSizeConfig } from '../api/workflow'
 import {
   AUTO_SIZE_LABEL,
+  applySizeConstraint,
   clampSizeConfigState,
   formatSizeConfigText,
   normalizeSizeCapabilities,
@@ -259,12 +260,16 @@ function selectSize(v: unknown) {
 /**
  * 按「比例 × 尺寸」预设自动设置宽高（仅支持自定义宽高的工作流且两档均已知时）。
  * 任一项为自适应/未注册档时保持现有宽高不变（由用户自定义或留空）。
+ *
+ * 工作流声明了整除约束（如 OpenAI 兼容要求宽高均为 16 的倍数）时，这里填入的是**对齐后**
+ * 的宽高——与服务端 `alignSizeToMultiple` 同规则，保证界面显示的数值就是实际提交的 `size`。
  */
 function applyPresetToSize() {
   if (caps.value.supportCustomSize) {
     const preset = resolvePresetSize(state.value.ratio, state.value.size)
     if (preset) {
-      state.value = { ...state.value, width: preset.width, height: preset.height }
+      const aligned = applySizeConstraint(preset, caps.value)
+      state.value = { ...state.value, width: aligned.width, height: aligned.height }
     }
   }
   emitChange()

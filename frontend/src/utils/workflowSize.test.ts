@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  alignSizeToMultiple,
+  applySizeConstraint,
   clampSizeConfigState,
   computePresetSize,
   findSizeParamKeys,
@@ -242,6 +244,74 @@ describe('normalizeSizeCapabilities', () => {
       supportCustomSize: true,
     })
     expect(normalizeSizeCapabilities({ supportCustomSize: false }).supportCustomSize).toBe(false)
+  })
+
+  it('整除约束 constraint 原样透传（未声明时不带该字段）', () => {
+    expect(normalizeSizeCapabilities({ size: ['auto', '1K'], constraint: { multipleOf: 16 } })).toEqual({
+      ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
+      size: ['auto', '1K'],
+      supportCustomSize: true,
+      constraint: { multipleOf: 16 },
+    })
+    // 未声明约束 → 不产生空 constraint，避免下游误判
+    expect('constraint' in normalizeSizeCapabilities({ size: ['1K'] })).toBe(false)
+  })
+})
+
+describe('alignSizeToMultiple / applySizeConstraint（服务端 alignSizeToMultiple 的前端镜像）', () => {
+  /** 宽高是否均为 16 的倍数 */
+  const divisible = (s: { width: number; height: number }) => s.width % 16 === 0 && s.height % 16 === 0
+
+  it('1K 档位换算结果对齐（16:9 → 1824×1024；9:16 → 1024×1824）', () => {
+    expect(alignSizeToMultiple(computePresetSize('16:9', '1K'))).toEqual({ width: 1824, height: 1024 })
+    expect(alignSizeToMultiple(computePresetSize('9:16', '1K'))).toEqual({ width: 1024, height: 1824 })
+    expect(alignSizeToMultiple(computePresetSize('4:3', '1K'))).toEqual({ width: 1360, height: 1024 })
+    expect(alignSizeToMultiple(computePresetSize('3:4', '1K'))).toEqual({ width: 1024, height: 1360 })
+  })
+
+  it('本就整除的档位取值原样保留（2K 全比例、1K 的 1:1 / 3:2 / 2:3）', () => {
+    for (const ratio of ['16:9', '9:16', '4:3', '3:4', '1:1', '3:2', '2:3', '21:9'] as const) {
+      const preset = computePresetSize(ratio, '2K')
+      expect(alignSizeToMultiple(preset)).toEqual(preset)
+    }
+    expect(alignSizeToMultiple(computePresetSize('1:1', '1K'))).toEqual({ width: 1024, height: 1024 })
+    expect(alignSizeToMultiple(computePresetSize('3:2', '1K'))).toEqual({ width: 1536, height: 1024 })
+  })
+
+  it('自定义宽高与项目尺寸同样对齐（1080×1920 → 1088×1920；720×1280 不变）', () => {
+    expect(alignSizeToMultiple({ width: 1080, height: 1920 })).toEqual({ width: 1088, height: 1920 })
+    expect(alignSizeToMultiple({ width: 720, height: 1280 })).toEqual({ width: 720, height: 1280 })
+  })
+
+  it('1K / 2K 全比例：结果均为 16 的倍数、面积与比例误差 ≤0.5%、档位基准短边不变', () => {
+    for (const key of ['1K', '2K'] as const) {
+      const base = SIZE_RESOLUTIONS.find((r) => r.key === key)!.base
+      for (const ratio of SIZE_RATIOS) {
+        const target = computePresetSize(ratio.key, key)
+        const aligned = alignSizeToMultiple(target)
+        expect(divisible(aligned)).toBe(true)
+        const areaError = Math.abs(aligned.width * aligned.height - target.width * target.height)
+          / (target.width * target.height)
+        expect(areaError).toBeLessThan(0.005)
+        expect(Math.abs(aligned.width / aligned.height - target.width / target.height) / (target.width / target.height)).toBeLessThan(0.005)
+        expect(Math.min(aligned.width, aligned.height)).toBe(base)
+      }
+    }
+  })
+
+  it('非法输入原样返回（非正数、倍数非正）', () => {
+    expect(alignSizeToMultiple({ width: 0, height: 1920 })).toEqual({ width: 0, height: 1920 })
+    expect(alignSizeToMultiple({ width: 1080, height: 1920 }, 0)).toEqual({ width: 1080, height: 1920 })
+    expect(alignSizeToMultiple({ width: 1080, height: 1920 }, 1)).toEqual({ width: 1080, height: 1920 })
+  })
+
+  it('applySizeConstraint：声明 multipleOf 时对齐，未声明时原样返回', () => {
+    const caps = normalizeSizeCapabilities({ size: ['auto', '1K'], constraint: { multipleOf: 16 } })
+    expect(applySizeConstraint(computePresetSize('16:9', '1K'), caps)).toEqual({ width: 1824, height: 1024 })
+    // 其他服务商（无约束）取值不变——与后端「只对声明约束的服务商对齐」一致
+    const plain = normalizeSizeCapabilities({ size: ['1K', '2K'] })
+    expect(applySizeConstraint(computePresetSize('16:9', '1K'), plain)).toEqual({ width: 1820, height: 1024 })
+    expect(applySizeConstraint({ width: 1080, height: 1920 })).toEqual({ width: 1080, height: 1920 })
   })
 })
 

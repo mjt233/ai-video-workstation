@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  TEXT_CALL_CODE_TEMPLATE,
+  TEXT_EXTRACT_CODE_TEMPLATE,
   buildCommonGlobalsLib,
   buildContextLib,
   buildSizeConfigLib,
@@ -39,7 +41,24 @@ describe('buildContextLib', () => {
 
   it('workflowType 类型约束为系统支持的工作流类型联合', () => {
     const lib = buildContextLib([])
-    expect(lib).toContain("type CustomWorkflowTypeId = 'text-to-image' | 'image-edit' | 'tts-voice-design' | 'tts-voice-clone' | 'image-to-video'")
+    expect(lib).toContain("type CustomWorkflowTypeId = 'text-to-image' | 'image-edit' | 'tts-voice-design' | 'tts-voice-clone' | 'image-to-video' | 'text-generation'")
+  })
+
+  it('文本生成类型：params 提示 prompt/imagePaths/mediaPaths，且 WorkflowResult 支持 text 直返', () => {
+    const lib = buildContextLib(['text-generation'])
+    expect(lib).toContain('declare interface TextGenerationParams')
+    expect(lib).toContain('type CustomParams = TextGenerationParams')
+    expect(lib).toContain('prompt: string')
+    expect(lib).toContain('imagePaths: string[]')
+    expect(lib).toContain('mediaPaths: string[]')
+    // 文本产物通道（服务端按 text 优先取用）
+    expect(lib).toContain('/** 文本生成类型的产物：直接返回文本内容（与 outputs 二选一，同时存在时以 text 为准） */')
+    expect(lib).toContain('text?: string')
+  })
+
+  it('文本生成 + 生图类型可组合（params 交叉类型）', () => {
+    const lib = buildContextLib(['text-generation', 'text-to-image'])
+    expect(lib).toContain('type CustomParams = TextGenerationParams & TextToImageParams')
   })
 
   it('用户配置字段生成 ctx.userConfig 类型提示（按类型映射）', () => {
@@ -243,6 +262,23 @@ describe('insertCodeTemplate', () => {
     const result = insertCodeTemplate('const a = 1', 'export default async function() {}')
     expect(result).toContain('const a = 1')
     expect(result).toContain('export default async function() {}')
+  })
+})
+
+describe('文本生成类型模板', () => {
+  it('调用发起模板读取提示词（ctx.params.prompt）', () => {
+    expect(TEXT_CALL_CODE_TEMPLATE).toContain('ctx.params.prompt')
+    expect(TEXT_CALL_CODE_TEMPLATE).toContain('export default async function(ctx: WorkflowCallContext)')
+  })
+
+  it('结果提取模板演示直接返回 text（而非先上传成文件）', () => {
+    expect(TEXT_EXTRACT_CODE_TEMPLATE).toContain('text: content')
+    expect(TEXT_EXTRACT_CODE_TEMPLATE).toContain('export default async function(ctx: WorkflowCallContext, callResult: WorkflowCallResult): Promise<WorkflowResult>')
+  })
+
+  it('模板可作为合法入口插入（空编辑器直接填充）', () => {
+    expect(insertCodeTemplate('', TEXT_CALL_CODE_TEMPLATE)).toBe(TEXT_CALL_CODE_TEMPLATE)
+    expect(insertCodeTemplate('', TEXT_EXTRACT_CODE_TEMPLATE)).toBe(TEXT_EXTRACT_CODE_TEMPLATE)
   })
 })
 

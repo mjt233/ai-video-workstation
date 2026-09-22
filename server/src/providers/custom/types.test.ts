@@ -1,11 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUSTOM_WORKFLOW_TYPES,
   DEFAULT_CUSTOM_WORKFLOW_SIZE_CONFIG,
+  isCustomWorkflowType,
   parseCustomWorkflowEntry,
   parseCustomWorkflowSizeConfig,
   parseCustomWorkflows,
   parseUserConfigFields,
 } from './types.js';
+
+describe('CUSTOM_WORKFLOW_TYPES', () => {
+  it('包含文本生成类型（与 workflows/types.ts 的 WorkflowTypeId 一致）', () => {
+    expect(CUSTOM_WORKFLOW_TYPES).toContain('text-generation');
+    expect(isCustomWorkflowType('text-generation')).toBe(true);
+    expect(isCustomWorkflowType('text-to-video')).toBe(false);
+  });
+
+  it('文本生成条目可正常解析（types 非空、其余字段补默认）', () => {
+    const entries = parseCustomWorkflows([{ name: 'wf-text', types: ['text-generation'] }]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].types).toEqual(['text-generation']);
+    expect(entries[0].sizeConfig).toBeNull();
+  });
+
+  it('未知类型仍按「至少选择一个系统支持的类型」报错', () => {
+    expect(() => parseCustomWorkflows([{ name: 'x', types: ['text-to-video'] }]))
+      .toThrow(/至少选择一个系统支持的工作流类型/);
+  });
+});
 
 describe('parseUserConfigFields', () => {
   it('缺失 / 空值回退空数组', () => {

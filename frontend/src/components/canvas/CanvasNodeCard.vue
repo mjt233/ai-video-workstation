@@ -62,6 +62,7 @@
         :source-input-count="sourceInputCount"
         :output-type="outputType"
         :is-running="isRunning"
+        :error-msg="errorMsg"
         :active-task-id="status?.taskId"
         :running-log="status?.lastLog"
         :canvas-target="canvasTarget"
@@ -313,8 +314,10 @@ const props = defineProps<{
   sourceInputCount?: number
   /** 输入转发节点：解析出的实际输出类型（节点主体类型徽标；未接输入时为原型占位声明） */
   outputType?: PortType
-  /** AI 文本生成节点：是否在运行（父级按 statusByNode 下发；恢复态据此禁用控件、显示 Thinking 条） */
+  /** AI 文本生成 / 文本生成节点：是否在运行（父级按 statusByNode 下发；恢复态据此禁用控件、显示生成中条） */
   isRunning?: boolean
+  /** AI 文本生成 / 文本生成节点：运行失败原因（父级按 statusByNode 下发；节点主体自绘失败文案） */
+  errorMsg?: string
   /** AI 文本生成节点：画布定位（生成请求携带；服务端会话落盘定位） */
   canvasTarget?: CanvasCardTarget
   /** 是否处于名称内联编辑 */

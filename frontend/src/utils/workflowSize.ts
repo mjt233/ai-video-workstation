@@ -252,18 +252,24 @@ export interface WorkflowSizeCapabilities {
   size: string[]
   /** 是否允许指定任意宽高 */
   supportCustomSize: boolean
+  /** 输出宽高的整除约束（未声明 = 无约束） */
+  constraint?: {
+    /** 宽高必须为该值的整数倍（如 16） */
+    multipleOf?: number
+  }
 }
 
 /**
  * 归一化工作流 capabilities.size 声明：缺失的 key 补默认值。
  *
  * 数组为空（声明了但未提供条目）同样回退默认全量，避免渲染出空按钮组。
+ * `constraint` 原样透传（合法 `multipleOf` 见 `alignSizeToMultiple` 的入参校验）。
  *
  * @param raw 工作流声明的原始尺寸能力（可为 undefined）
  * @returns 归一化后的尺寸能力（恒含有效清单与 supportCustomSize 布尔值）
  */
 export function normalizeSizeCapabilities(
-  raw?: { ratio?: string[]; size?: string[]; supportCustomSize?: boolean },
+  raw?: { ratio?: string[]; size?: string[]; supportCustomSize?: boolean; constraint?: { multipleOf?: number } },
 ): WorkflowSizeCapabilities {
   return {
     ratio:
@@ -275,7 +281,92 @@ export function normalizeSizeCapabilities(
         ? [...raw!.size]
         : [...DEFAULT_SIZE_CAPABILITIES.size],
     supportCustomSize: raw?.supportCustomSize !== false,
+    ...(raw?.constraint ? { constraint: { ...raw.constraint } } : {}),
   }
+}
+
+/**
+ * 宽高比误差在综合评分中的权重（相对面积误差为 1）。
+ *
+ * **必须与服务端 `server/src/workflows/size.ts` 的 `ALIGN_RATIO_WEIGHT` 保持一致**，
+ * 否则前端显示的宽高与后端实际提交值会不一致。
+ */
+const ALIGN_RATIO_WEIGHT = 0.5
+
+/**
+ * 候选宽度的搜索半径（相对对齐倍数的系数）。
+ *
+ * **必须与服务端 `server/src/workflows/size.ts` 的 `ALIGN_WIDTH_SEARCH_FACTOR` 保持一致**。
+ */
+const ALIGN_WIDTH_SEARCH_FACTOR = 1.5
+
+/**
+ * 把目标宽高自动匹配到「宽高均为 `multiple` 整数倍」的最近尺寸。
+ *
+ * 服务端 `server/src/workflows/size.ts` 的 `alignSizeToMultiple` 的**逐行同规则镜像**：
+ * 服务商（OpenAI 兼容的 GPT Image 系列）要求宽高均为 16 的倍数，而档位换算结果不保证整除
+ * （16:9 + 1K = 1820×1024）。前端也必须算出同一组数值，否则尺寸组件显示的宽高与后端
+ * 实际提交的 `size` 会不一致（用户看到的 1820×1024 实际提交 1824×1024）。
+ *
+ * 算法：在宽度目标 ±1.5×`multiple` 范围内枚举网格点，按原始宽高比反推高度目标并取其上下
+ * 两个网格点，得到 3~4 组候选后按
+ * `|面积误差|/目标面积 + 0.5 × |宽高比误差|/目标宽高比` 取最优；同分时取偏移更小者，
+ * 再同分取面积较大者。详见服务端 JSDoc 与 `size.test.ts` 的实测取值表。
+ *
+ * @param size 目标宽高（像素）
+ * @param multiple 对齐倍数（默认 16）
+ * @returns 宽高均为 `multiple` 整数倍的尺寸；目标非有限数/非正数时原样返回
+ */
+export function alignSizeToMultiple(size: SizeValue, multiple = 16): SizeValue {
+  const { width, height } = size
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return { ...size }
+  const k = Math.round(multiple)
+  if (!Number.isFinite(k) || k <= 0 || k === 1) return { ...size }
+
+  const targetArea = width * height
+  const targetRatio = width / height
+  const searchRadius = ALIGN_WIDTH_SEARCH_FACTOR * k
+
+  let best:
+    | { score: number; area: number; width: number; height: number; offset: number }
+    | null = null
+  for (let dw = -searchRadius; dw <= searchRadius; dw += 1) {
+    const w = Math.round((width + dw) / k) * k
+    if (w <= 0) continue
+    // 按原始宽高比反推高度目标（竖屏同样成立：w=1024、1920/1080 比例 → 1820.4）
+    const idealHeight = (w * height) / width
+    for (const rawHeight of [idealHeight, Math.floor(idealHeight / k) * k, Math.ceil(idealHeight / k) * k]) {
+      const h = Math.round(rawHeight)
+      if (h <= 0 || h % k !== 0) continue
+      const area = w * h
+      const score =
+        Math.abs(area - targetArea) / targetArea
+        + ALIGN_RATIO_WEIGHT * (Math.abs(w / h - targetRatio) / targetRatio)
+      const offset = Math.abs(w - width) + Math.abs(h - height)
+      if (
+        !best
+        || score < best.score
+        || (score === best.score && offset < best.offset)
+        || (score === best.score && offset === best.offset && area > best.area)
+      ) {
+        best = { score, area, width: w, height: h, offset }
+      }
+    }
+  }
+  return best ? { width: best.width, height: best.height } : { ...size }
+}
+
+/**
+ * 按工作流声明的整除约束对齐宽高（未声明约束时原样返回）。
+ *
+ * @param size 目标宽高（像素）
+ * @param caps 归一化后的工作流尺寸能力（可为空 = 无约束）
+ * @returns 对齐后的宽高；无 `constraint.multipleOf` 时与服务端 `resolveOutputSize` 的原始值一致
+ */
+export function applySizeConstraint(size: SizeValue, caps?: WorkflowSizeCapabilities): SizeValue {
+  const multiple = caps?.constraint?.multipleOf
+  if (typeof multiple !== 'number' || !Number.isFinite(multiple) || multiple <= 1) return { ...size }
+  return alignSizeToMultiple(size, multiple)
 }
 
 /**

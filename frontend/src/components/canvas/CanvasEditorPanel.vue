@@ -39,6 +39,7 @@
           :audios-inputs="videoInputGroups.audios"
           :text-inputs="textInputs"
           :is-running="isRunning"
+          :error-msg="errorMsg"
           :kind="kind"
           @update:config="(patch: Record<string, unknown>) => emit('update:config', patch)"
           @generate="(nodeId: string) => emit('generate', nodeId)"
@@ -115,6 +116,8 @@ const props = defineProps<{
   textInputs?: string[]
   /** 节点生成中标记 */
   isRunning: boolean
+  /** 运行失败原因（主体自绘状态的节点用：文本生成节点在配置面板内以红字展示失败原因） */
+  errorMsg?: string
   /** 画布类型（生成图片编辑器用它控制「设为分镜场景图」按钮显隐） */
   kind: CanvasKind
   /** Vue Flow 视口（位置联动） */

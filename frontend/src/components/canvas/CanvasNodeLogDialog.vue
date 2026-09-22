@@ -59,6 +59,37 @@
           >
             {{ summary.errorMsg }}
           </v-alert>
+
+          <!-- 文本生成产物（text-generation：无产物文件）：任务详情是唯一能看到全文的地方 -->
+          <div
+            v-if="resultText"
+            class="node-log-dialog__text mt-2"
+          >
+            <div class="d-flex align-center mb-1">
+              <v-icon
+                icon="mdi-text-box-outline"
+                size="16"
+                class="mr-1"
+              />
+              <span class="text-body-small font-weight-medium">文本产物</span>
+              <v-spacer />
+              <v-btn
+                size="x-small"
+                variant="text"
+                color="primary"
+                prepend-icon="mdi-content-copy"
+                @click="copyResultText"
+              >
+                复制
+              </v-btn>
+            </div>
+            <textarea
+              class="node-log-dialog__text-area"
+              :value="resultText"
+              readonly
+              spellcheck="false"
+            />
+          </div>
         </div>
 
         <TaskLogViewer
@@ -101,6 +132,27 @@ const emit = defineEmits<{
 const summary = ref<TaskResponse | null>(null)
 /** 级别筛选（关闭对话框时复位） */
 const levelFilter = ref<TaskLogLevelFilter>('all')
+
+/**
+ * 文本产物内容（文本生成任务才有）。
+ *
+ * 任务结果有两种形态：媒体类 `{ path }`、文本生成类 `{ text, patch?, rev? }`。
+ * 文本任务没有产物文件，**本对话框是唯一能看到全文的地方**（任务管理器历史行只显示摘要），
+ * 故按非空字符串读取并渲染为只读文本区。
+ */
+const resultText = computed(() => {
+  const result = summary.value?.result
+  if (!result || typeof result !== 'object') return ''
+  const text = (result as { text?: unknown }).text
+  return typeof text === 'string' && text.trim() !== '' ? text : ''
+})
+
+/** 复制文本产物到剪贴板（失败仅打日志：剪贴板权限在非安全上下文下可能不可用） */
+function copyResultText(): void {
+  void navigator.clipboard?.writeText(resultText.value).catch((e: unknown) => {
+    console.error(`[canvas] 复制文本产物失败: ${e instanceof Error ? e.message : String(e)}`)
+  })
+}
 
 /** 日志状态（taskId 为空时不请求） */
 const taskLogs = useTaskLogs(toRef(props, 'taskId'))
@@ -172,5 +224,21 @@ watch(() => props.modelValue, (open) => void onOpenChange(open), { immediate: tr
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 文本产物区（文本生成任务）：只读文本区 + 复制按钮 */
+.node-log-dialog__text-area {
+  width: 100%;
+  min-height: 120px;
+  max-height: 240px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.02);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

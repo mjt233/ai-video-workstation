@@ -130,6 +130,49 @@ describe('createComfyuiBridgeClient', () => {
     expect(await client.getOutput('task-1')).toBeNull();
   });
 
+  it('getOutput 文本产物（.txt）：下载解码为文本产物（不写 assert/ 媒体文件）', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'abc' }) } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ files: [{ url: '/api/tasks/task-1/outputs/result.txt' }] }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new TextEncoder().encode('\uFEFF生成的文本内容').buffer,
+      } as unknown as Response);
+
+    const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+    const out = await client.getOutput('task-1');
+
+    expect(out).toEqual({ type: 'text', text: '生成的文本内容', filename: 'result.txt' });
+    // 文本产物下载请求带认证 header
+    expect(fetchMock.mock.calls[2][0]).toBe('http://b/api/tasks/task-1/outputs/result.txt');
+    expect((fetchMock.mock.calls[2][1] as { headers: Record<string, string> }).headers.Authorization).toBe('Bearer abc');
+  });
+
+  it('getOutput 文本产物（.md）同样识别；空内容报错', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'abc' }) } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ files: [{ url: '/api/tasks/task-1/outputs/result.md' }] }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new TextEncoder().encode('# 标题').buffer } as unknown as Response);
+
+    const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
+    expect(await client.getOutput('task-1')).toEqual({ type: 'text', text: '# 标题', filename: 'result.md' });
+
+    // 另一个任务（token 已缓存 → 不再登录）：空内容的文本产物报错
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ files: [{ url: '/api/tasks/task-2/outputs/result.json' }] }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new TextEncoder().encode('   ').buffer } as unknown as Response);
+    await expect(client.getOutput('task-2')).rejects.toThrow(/内容为空/);
+  });
+
   it('cancel 调用 /api/tasks/:id/cancel', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ task_id: 'task-1', status: 'failed' }) } as unknown as Response);
 

@@ -46,6 +46,14 @@ export interface WorkflowNotifyItem {
   mediaKind: MediaKind
   /** 产物预览 URL（带缓存键；无产物时为空串） */
   mediaUrl: string
+  /**
+   * 是否文本生成任务（`text-generation`：产物是文本、无文件）。
+   *
+   * 终态广播载荷里拿不到文本内容（注册表 payload 只有 workflowId/impl/outputPath），
+   * 卡片不为此额外请求接口：文本已在**画布节点**与**任务详情**可见，
+   * 气泡只给出一行指引文案（见 `WorkflowNotifyStack`）。
+   */
+  textTask: boolean
   /** 终态：completed → success；failed → failed */
   status: 'success' | 'failed'
   /** 失败原因（仅 failed；广播未携带原因时为兜底文案） */
@@ -145,6 +153,8 @@ export function pushWorkflowFinished(task: TaskInfo): void {
   const outputPath = task.status === 'completed' && typeof task.payload?.outputPath === 'string'
     ? task.payload.outputPath
     : ''
+  // 文本生成任务：产物是文本、无 outputPath（引擎登记注册表时不会写该字段）
+  const textTask = task.status === 'completed' && task.payload?.workflowId === 'text-generation'
   const item: WorkflowNotifyItem = {
     taskId: task.id,
     title: task.label,
@@ -153,6 +163,7 @@ export function pushWorkflowFinished(task: TaskInfo): void {
     outputPath,
     mediaKind: outputPath ? mediaKindOfPath(outputPath) : 'none',
     mediaUrl: outputPath && project ? buildPreviewUrl(project, outputPath, Date.now()) : '',
+    textTask,
     status: task.status === 'completed' ? 'success' : 'failed',
     errorMsg: task.status === 'failed' ? (task.error || FAILED_FALLBACK_MSG) : '',
     createdAt: Date.now(),

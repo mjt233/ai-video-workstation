@@ -120,6 +120,11 @@ export interface WorkflowImplementation {
       size?: string[]
       /** 是否允许指定任意宽高（默认 true） */
       supportCustomSize?: boolean
+      /** 输出宽高的整除约束（未声明 = 无约束） */
+      constraint?: {
+        /** 宽高必须为该值的整数倍（如 16，OpenAI 兼容服务商的 GPT Image 系列要求） */
+        multipleOf?: number
+      }
     }
   }
 }
@@ -147,6 +152,18 @@ export interface TaskParams {
   canvas?: CanvasTarget
 }
 
+/** 文本生成任务的产物（工作流文本产物；服务端单写者落盘时的补丁与画布版本） */
+export interface TextGenerationTaskResult {
+  /** 生成的文本内容 */
+  text: string
+  /** 服务端写入画布节点的 config 补丁（output + outputHistory）；跳过写盘时缺省 */
+  patch?: { output?: string; outputHistory?: unknown[] }
+  /** 写入前版本号（前端 savedRev 与之相等时才采纳补丁） */
+  prevRev?: number
+  /** 写入后版本号（采纳后对齐 savedRev） */
+  rev?: number
+}
+
 export interface TaskResponse {
   taskId: string
   /** 项目名（任务管理器「历史」行按产物路径拼预览 URL：`/api/fs/{project}/...`） */
@@ -154,7 +171,8 @@ export interface TaskResponse {
   workflowId: string
   impl: string
   status: string
-  result: { path: string } | null
+  /** 任务产物：媒体类为 `{ path }`（写盘路径）；文本生成类为 `{ text, patch?, prevRev?, rev? }` */
+  result: { path: string } | TextGenerationTaskResult | null
   errorMsg?: string
   createdAt: string
   updatedAt: string
@@ -210,7 +228,11 @@ export interface WorkflowRunParams {
   params: {
     vars: Record<string, string>
     promptPaths?: string[]
-    outputPath: string
+    /**
+     * 产物相对路径（assert/ 下的固定产物文件）。
+     * **文本生成（text-generation）不需要**：产物是文本、不落文件，服务端按类型放宽为可选。
+     */
+    outputPath?: string
     /** 用户手动传入的工作流参数（按所选实现的声明 key） */
     userParams?: Record<string, WorkflowUserParamValue>
     /** 视频自包含提交参数（画布【生成视频】节点提交） */

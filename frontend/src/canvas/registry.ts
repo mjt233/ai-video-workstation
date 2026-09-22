@@ -13,6 +13,7 @@ import TrimVideoNode from '../components/canvas/nodes/TrimVideoNode.vue'
 import AudioTrimNode from '../components/canvas/nodes/AudioTrimNode.vue'
 import ImageCropNode from '../components/canvas/nodes/ImageCropNode.vue'
 import TtsGenerateNode from '../components/canvas/nodes/TtsGenerateNode.vue'
+import TextGenerateNode from '../components/canvas/nodes/TextGenerateNode.vue'
 import AiTextGenerateNode from '../components/canvas/nodes/AiTextGenerateNode.vue'
 import InputPreviewNode from '../components/canvas/nodes/InputPreviewNode.vue'
 import ForwardInputNode from '../components/canvas/nodes/ForwardInputNode.vue'
@@ -27,6 +28,7 @@ import TrimVideoEditor from '../components/canvas/editors/TrimVideoEditor.vue'
 import AudioTrimEditor from '../components/canvas/editors/AudioTrimEditor.vue'
 import ImageCropEditor from '../components/canvas/editors/ImageCropEditor.vue'
 import TtsGenerateEditor from '../components/canvas/editors/TtsGenerateEditor.vue'
+import TextGenerateEditor from '../components/canvas/editors/TextGenerateEditor.vue'
 
 /**
  * 节点分类：添加节点菜单按此分组为多列展示。
@@ -259,6 +261,36 @@ export const NODE_PROTOTYPES: NodePrototype[] = [
       promptPresetId: '',
       input: '',
       output: '',
+    },
+  },
+  {
+    id: 'text-generate',
+    name: '文本生成',
+    icon: 'mdi-text-box-edit-outline',
+    category: 'generate',
+    // 单一输入连接点：媒体（图片/音频/视频）作多模态素材，文本（「文本」/「AI文本生成」/本节点类
+    // 节点的输出）作外部提示词——与生成图片/生成视频节点的「按来源类型归类」语义一致。
+    inputPorts: [{ id: 'in', type: ['media', 'text'], label: '输入' }],
+    outputPorts: [{ id: 'out', type: 'text', label: '文本' }],
+    resizeable: true,
+    canGenerate: true,
+    hasHistory: true,
+    bodyComponent: TextGenerateNode,
+    editorComponent: TextGenerateEditor,
+    // 空状态遮罩：节点主体自绘「生成中 / 失败」状态（与 AI 文本生成节点同形态）
+    statusOverlay: () => null,
+    // 有文本历史版本（右键「历史」/ 配置面板「历史」打开 AiTextHistoryDialog —— config.outputHistory
+    // 纯文本快照历史；与产物节点的 CanvasAssertHistoryDialog 不同，AssetCanvas 按原型分支渲染）
+    // 默认尺寸大于通用兜底（240×160）：含输入预览 + 提示词 + 结果区
+    defaultSize: { width: 360, height: 240 },
+    defaultConfig: {
+      workflowId: 'text-generation',
+      workflowImpl: undefined,
+      workflowParams: {},
+      prompt: '',
+      inputOrder: [],
+      output: '',
+      outputHistory: [],
     },
   },
   {

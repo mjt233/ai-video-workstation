@@ -12,6 +12,9 @@
  *    规则；两侧档位值必须保持一致（新增/调整档位需同步修改两处）。
  * 2. **解析器**（`resolveOutputSize` / `resolveSpecifiedGate`）——按统一优先级给出
  *    生效宽高，并提供旧版 `enable_specified_size` 门控的兼容判定。
+ * 3. **对齐器**（`alignSizeToMultiple`）——把生效宽高匹配到服务商要求的整除网格
+ *    （OpenAI 兼容的 GPT Image 系列要求宽高均为 16 的倍数）。**可选步骤**：只有确实
+ *    声明该约束的服务商才调用，其余实现不得无条件套用，否则会改变既有取值。
  *
  * ## 尺寸优先级（全系统统一）
  * 1. `sizeConfig.width` + `sizeConfig.height`（统一尺寸组件选择的原始宽高，新交互）；
@@ -85,6 +88,91 @@ export function resolvePresetSize(ratio: string, size: string): { width: number;
   if (!r || !res) return null;
   if (r.ratio < 1) return { width: res.base, height: Math.round(res.base / r.ratio) };
   return { width: Math.round(res.base * r.ratio), height: res.base };
+}
+
+/**
+ * 宽高比误差在综合评分中的权重（相对面积误差为 1）。
+ * 面积是业务确认的首要目标（「按目标总像素匹配」），比例作为次要约束防止输出被压扁拉长。
+ */
+const ALIGN_RATIO_WEIGHT = 0.5;
+
+/**
+ * 候选宽度的搜索半径（相对对齐倍数的系数）：`±系数 × multiple`。
+ * 1.5 倍步长足以覆盖「两维各自就近取整」的全部有解情形（每维误差恒 ≤ `multiple/2`，
+ * 面积相对误差 ≤1%），同时把候选集限制在 3~4 组、结果可预期。
+ */
+const ALIGN_WIDTH_SEARCH_FACTOR = 1.5;
+
+/**
+ * 把目标宽高自动匹配到「宽高均为 `multiple` 整数倍」的最近尺寸。
+ *
+ * 服务商约束示例：OpenAI 兼容（GPT Image 系列）要求 `width`/`height` 均为 16 的倍数，
+ * 而档位表按「比例 × 分辨率档」换算的结果不保证整除（如 16:9 + 1K = 1820×1024、
+ * 4:3 + 1K = 1365×1024、9:16 + 1K = 1024×1820），因此提交前必须兜底对齐。
+ *
+ * 算法：在宽度目标的 ±{@link ALIGN_WIDTH_SEARCH_FACTOR}×`multiple` 范围内枚举网格点，
+ * 每取一个候选宽度就按**原始宽高比**反推高度目标、再取其上下两个网格点，得到 3~4 组
+ * 「宽高均整除」候选，逐个打分后取最优（确定性，无随机、无迭代）：
+ *
+ * `评分 = |面积 − 目标面积| / 目标面积 + 0.5 × |宽高比 − 目标宽高比| / 目标宽高比`
+ *
+ * 即**面积误差优先、宽高比误差次之**（权重见 {@link ALIGN_RATIO_WEIGHT}）；完全同分时取
+ * 偏移距离更小者，仍相同则取面积较大者。相对误差归一化后，横竖屏、大小尺寸共用同一套
+ * 判据（不需要按分辨率分档设阈值）。
+ *
+ * **对齐恒有解**（正常尺寸）：两维各自就近取整的候选必定被枚举到且评分最优，
+ * 因此 1K / 2K 档位下面积误差 ≤0.4%、宽高比误差 ≤0.4%（实测，且档位基准的短边恒保持
+ * 不动——1K→1024、2K→1440 本身即 16 的倍数，只有不整除的一侧会被调整）。
+ * 仅在目标尺寸远小于对齐粒度（如 56×56 以下的极小图）时才可能偏离较大，属业务上不存在的输入。
+ *
+ * 实测关键取值：16:9+1K → 1824×1024；9:16+1K → 1024×1824；4:3+1K → 1360×1024；
+ * 3:4+1K → 1024×1360；21:9+1K → 2384×1024；1080×1920 → 1088×1920（两侧等分时取较大面积）；
+ * 4:3+2K、9:16+2K、16:9+2K、1:1+1K/2K、3:2+1K 等本就整除者原样保留。
+ *
+ * 前端 `frontend/src/utils/workflowSize.ts` 有同规则镜像，两侧必须同步修改。
+ *
+ * @param size 目标宽高（像素）
+ * @param multiple 对齐倍数（默认 16）
+ * @returns 宽高均为 `multiple` 整数倍的尺寸；目标非有限数/非正数时原样返回
+ */
+export function alignSizeToMultiple(
+  size: { width: number; height: number },
+  multiple = 16,
+): { width: number; height: number } {
+  const { width, height } = size;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return { ...size };
+  const k = Math.round(multiple);
+  if (!Number.isFinite(k) || k <= 0 || k === 1) return { ...size };
+
+  const targetArea = width * height;
+  const targetRatio = width / height;
+  const searchRadius = ALIGN_WIDTH_SEARCH_FACTOR * k;
+
+  let best: { score: number; area: number; width: number; height: number; offset: number } | null = null;
+  for (let dw = -searchRadius; dw <= searchRadius; dw += 1) {
+    const w = Math.round((width + dw) / k) * k;
+    if (w <= 0) continue;
+    // 按原始宽高比反推高度目标（竖屏同样成立：w=1024、1920/1080 比例 → 1820.4）
+    const idealHeight = (w * height) / width;
+    for (const rawHeight of [idealHeight, Math.floor(idealHeight / k) * k, Math.ceil(idealHeight / k) * k]) {
+      const h = Math.round(rawHeight);
+      if (h <= 0 || h % k !== 0) continue;
+      const area = w * h;
+      const score =
+        Math.abs(area - targetArea) / targetArea
+        + ALIGN_RATIO_WEIGHT * (Math.abs(w / h - targetRatio) / targetRatio);
+      const offset = Math.abs(w - width) + Math.abs(h - height);
+      if (
+        !best
+        || score < best.score
+        || (score === best.score && offset < best.offset)
+        || (score === best.score && offset === best.offset && area > best.area)
+      ) {
+        best = { score, area, width: w, height: h, offset };
+      }
+    }
+  }
+  return best ? { width: best.width, height: best.height } : { ...size };
 }
 
 /**

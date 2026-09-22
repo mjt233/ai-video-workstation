@@ -352,4 +352,76 @@ describe('syncCustomInstance', () => {
     await syncCustomInstance(makeInstance([]));
     expect(getImpl('text-to-image', 'custom-x-' + INSTANCE_ID)).toBeUndefined();
   });
+
+  it('文本生成类型：注册实现但不声明尺寸能力（文本无尺寸概念）', async () => {
+    await syncCustomInstance(makeInstance([
+      entry('wf-text', ['text-generation'], {
+        sizeConfig: { ratio: ['16:9'], size: ['2K'], supportCustomSize: false },
+      }),
+    ]));
+    const impl = getImpl('text-generation', 'custom-wf-text-' + INSTANCE_ID);
+    expect(impl).toBeDefined();
+    expect(impl?.provider).toBe('custom');
+    // 即便条目配了尺寸，文本类型也不声明尺寸能力（不把尺寸组件渲染到文本节点上）
+    expect(impl?.capabilities?.size).toBeUndefined();
+    expect(impl?.capabilities?.cancelable).toBe(true);
+  });
+
+  it('文本生成 submit：ctx.params 组装为 prompt + imagePaths/mediaPaths + seed（无 sizeConfig）', async () => {
+    await syncCustomInstance(makeInstance([entry('wf-text-params', ['text-generation'])]));
+    const impl = getImpl('text-generation', 'custom-wf-text-params-' + INSTANCE_ID);
+    expect(impl).toBeDefined();
+    const execute = vi.fn(async (_p: {
+      workflowId: string;
+      workflowType?: string;
+      params?: Record<string, unknown>;
+    }) => ({ taskId: 'task-text' }));
+    const ctx = {
+      vars: {
+        prompt: '把这几张图写成一段旁白',
+        imagePaths: JSON.stringify(['assert/scene/1/1/canvas/n1/output.jpg']),
+        mediaPaths: JSON.stringify(['assert/scene/1/1/audio/merged.flac']),
+        seed: '42',
+        purpose: 'canvas-text',
+      },
+      projectConfig: { width: 1080, height: 1920, fps: 24 },
+      // 即便引擎注入 sizeConfig，文本类型也不携带（无尺寸概念）
+      sizeConfig: { ratio: '16:9', size: '2K', width: 1024, height: 576 },
+      readFile: async () => '',
+      readAssertFile: async () => new File([], 'x.png'),
+      provider: { execute },
+    } as never;
+
+    await impl!.submit(ctx);
+
+    const arg = execute.mock.calls[0]![0];
+    expect(arg.workflowId).toBe('wf-text-params');
+    expect(arg.workflowType).toBe('text-generation');
+    expect(arg.params?.prompt).toBe('把这几张图写成一段旁白');
+    expect(arg.params?.imagePaths).toEqual(['assert/scene/1/1/canvas/n1/output.jpg']);
+    expect(arg.params?.mediaPaths).toEqual(['assert/scene/1/1/audio/merged.flac']);
+    expect(arg.params?.seed).toBe('42');
+    expect(arg.params?.purpose).toBe('canvas-text');
+    expect(arg.params?.sizeConfig).toBeUndefined();
+  });
+
+  it('文本生成 submit：缺 prompt 时报错；imagePaths 非法时报错', async () => {
+    await syncCustomInstance(makeInstance([entry('wf-text-bad', ['text-generation'])]));
+    const impl = getImpl('text-generation', 'custom-wf-text-bad-' + INSTANCE_ID);
+    const makeCtx = (vars: Record<string, string>) => ({
+      vars,
+      projectConfig: {},
+      readFile: async () => '',
+      readAssertFile: async () => new File([], 'x.png'),
+      provider: { execute: async () => ({ taskId: 't' }) },
+    }) as never;
+
+    await expect(impl!.submit(makeCtx({ prompt: '   ' }))).rejects.toThrow(/需要 vars\.prompt/);
+    await expect(
+      impl!.submit(makeCtx({ prompt: '写', imagePaths: 'not-json' })),
+    ).rejects.toThrow(/imagePaths/);
+    await expect(
+      impl!.submit(makeCtx({ prompt: '写', imagePaths: '[]', mediaPaths: 'not-json' })),
+    ).rejects.toThrow(/mediaPaths/);
+  });
 });

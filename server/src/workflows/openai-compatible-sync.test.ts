@@ -56,26 +56,50 @@ describe('openai-compatible 尺寸解析（经统一解析器 resolveOutputSize�
     expect(params.size).toBe('2560x1440');
   });
 
-  it('sizeConfig 仅带比例/尺寸档 → 按档位表换算（16:9 + 1K → 1820x1024）', async () => {
+  it('sizeConfig 仅带比例/尺寸档 → 按档位表换算并对齐 16 的倍数（16:9 + 1K → 1824x1024）', async () => {
     const params = await submitTextToImage({ sizeConfig: { ratio: '16:9', size: '1K' } });
-    expect(params.size).toBe('1820x1024');
+    expect(params.size).toBe('1824x1024');
   });
 
-  it('无 sizeConfig 时回退项目尺寸', async () => {
+  it('sizeConfig 仅带比例/尺寸档 → 2K 档位本就整除时原样提交（4:3 + 2K → 1920x1440）', async () => {
+    const params = await submitTextToImage({ sizeConfig: { ratio: '4:3', size: '2K' } });
+    expect(params.size).toBe('1920x1440');
+  });
+
+  it('sizeConfig 显式宽高不整除时同样对齐（1365×1024 → 1360x1024）', async () => {
+    const params = await submitTextToImage({
+      sizeConfig: { ratio: '4:3', size: '1K', width: 1365, height: 1024 },
+    });
+    expect(params.size).toBe('1360x1024');
+  });
+
+  it('无 sizeConfig 时回退项目尺寸，并按 16 的倍数对齐（1080×1920 → 1088x1920）', async () => {
+    const params = await submitTextToImage({ projectConfig: { width: 1080, height: 1920 } });
+    expect(params.size).toBe('1088x1920');
+  });
+
+  it('无 sizeConfig 且项目尺寸本就整除时原样提交（720×1280）', async () => {
     const params = await submitTextToImage({ projectConfig: { width: 720, height: 1280 } });
     expect(params.size).toBe('720x1280');
   });
 
-  it('旧版门控 enable_specified_size=true 时 vars 宽高生效', async () => {
+  it('旧版门控 enable_specified_size=true 时 vars 宽高生效（本就整除，原样提交）', async () => {
     const params = await submitTextToImage({
       vars: { enable_specified_size: 'true', width: '512', height: '768' },
     });
     expect(params.size).toBe('512x768');
   });
 
-  it('门控缺失时忽略 vars 宽高（OpenAI 兼容旧语义：必须显式开启）', async () => {
+  it('旧版 vars 宽高不整除时也被对齐（1080×1920 → 1088x1920）', async () => {
+    const params = await submitTextToImage({
+      vars: { enable_specified_size: 'true', width: '1080', height: '1920' },
+    });
+    expect(params.size).toBe('1088x1920');
+  });
+
+  it('门控缺失时忽略 vars 宽高（OpenAI 兼容旧语义：必须显式开启），回退项目尺寸并对齐', async () => {
     const params = await submitTextToImage({ vars: { width: '512', height: '768' } });
-    expect(params.size).toBe('1080x1920');
+    expect(params.size).toBe('1088x1920');
   });
 });
 
@@ -102,11 +126,12 @@ describe('syncOpenAICompatibleInstance', () => {
     expect(t2i?.name).toBe('gpt-image-1 文生图');
     expect(t2i?.providerName).toBe('中转A');
     expect(t2i?.workflowKey).toBe('text-to-image:gpt-image-1');
-    // 尺寸能力声明：支持自定义任意宽高，直传 "WxH"
+    // 尺寸能力声明：自动 / 1K / 2K，支持自定义任意宽高且宽高须为 16 的倍数
     expect(t2i?.capabilities?.size).toEqual({
       ratio: ['16:9', '4:3', '1:1', '3:4', '9:16', 'auto'],
-      size: ['auto'],
+      size: ['auto', '1K', '2K'],
       supportCustomSize: true,
+      constraint: { multipleOf: 16 },
     });
     expect(getImpl('image-edit', 'oai-gpt-image-1-inst-oai')).toBeDefined();
     expect(getImpl('image-edit', 'oai-edit-only-inst-oai')).toBeDefined();
@@ -176,7 +201,7 @@ describe('syncOpenAICompatibleInstance', () => {
     });
   });
 
-  it('文生图 sizeConfig 仅带比例/尺寸档（无宽高）时回退 projectConfig 尺寸', async () => {
+  it('文生图 sizeConfig 仅带比例/尺寸档（无宽高）时回退 projectConfig 尺寸（并按 16 倍数对齐）', async () => {
     await syncOpenAICompatibleInstance({
       id: 'inst-oai',
       type: 'openai-compatible',
@@ -196,7 +221,7 @@ describe('syncOpenAICompatibleInstance', () => {
     await impl.submit(ctx);
     expect(executeMock).toHaveBeenCalledWith({
       workflowId: 'gpt-image-1',
-      params: { prompt: '一只猫', size: '1080x1920' },
+      params: { prompt: '一只猫', size: '1088x1920' },
     });
   });
 

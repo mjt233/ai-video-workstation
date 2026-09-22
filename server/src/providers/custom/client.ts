@@ -30,7 +30,6 @@ import {
   type WorkflowCallResult,
   type WorkflowResult,
 } from './runtime.js';
-
 /** 服务商级「异步轮询超时（秒）」默认值 */
 export const DEFAULT_CUSTOM_TIMEOUT_SECONDS = 1800;
 
@@ -39,6 +38,109 @@ export const DEFAULT_CUSTOM_POLL_INTERVAL_SECONDS = 2;
 
 /** 结果提取连续报错日志节流间隔（毫秒）：避免每轮轮询都刷屏 */
 const EXTRACT_ERROR_LOG_INTERVAL_MS = 60000;
+
+/**
+ * 文本产物最大字节数（2MB）。
+ *
+ * 拉取产物 URL 解码为文本时的安全阀：文本接口不会返回大文件，超过此值多是
+ * 脚本把图片/视频 URL 当成了文本产物，直接失败比把二进制塞进画布 JSON 安全。
+ */
+const MAX_TEXT_OUTPUT_BYTES = 2 * 1024 * 1024;
+
+/**
+ * 从产物 URL 拉取文本内容（文本生成类型的产物通道）。
+ *
+ * 校验：HTTP 2xx；`Content-Type` 为 text/* 或 JSON/XML；内容不超过
+ * {@link MAX_TEXT_OUTPUT_BYTES}；UTF-8 解码后剥离 BOM。任一不满足均抛中文错误，
+ * 由引擎透传给任务失败原因（避免静默写入二进制垃圾）。
+ *
+ * @param entry 工作流条目（错误提示用）
+ * @param url 产物 URL
+ * @returns 文本内容（非空）
+ * @throws Error 下载失败 / 内容非文本 / 超出大小上限 / 内容为空
+ */
+async function fetchTextOutput(entry: CustomWorkflowEntry, url: string): Promise<string> {
+  const label = '工作流「' + entry.name + '」';
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    throw new Error(label + '的文本产物下载失败: ' + (e instanceof Error ? e.message : String(e)));
+  }
+  if (!res.ok) {
+    throw new Error(label + '的文本产物下载失败: HTTP ' + res.status + ' ' + res.statusText);
+  }
+  const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
+  const isTextLike = contentType.startsWith('text/')
+    || contentType.includes('json')
+    || contentType.includes('xml');
+  if (!isTextLike) {
+    throw new Error(
+      label + '返回的产物不是文本内容（Content-Type: ' + (contentType || '未知')
+      + '）；文本生成工作流请让【结果提取】返回文本接口的 URL，或直接返回 text 字段',
+    );
+  }
+  const declaredLength = Number(res.headers.get('content-length') ?? '');
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_TEXT_OUTPUT_BYTES) {
+    throw new Error(
+      label + '返回的文本产物超过 ' + Math.round(MAX_TEXT_OUTPUT_BYTES / 1024 / 1024) + 'MB 上限',
+    );
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.byteLength > MAX_TEXT_OUTPUT_BYTES) {
+    throw new Error(
+      label + '返回的文本产物超过 ' + Math.round(MAX_TEXT_OUTPUT_BYTES / 1024 / 1024) + 'MB 上限',
+    );
+  }
+  // 剥离 UTF-8 BOM：否则首字符会带上不可见 BOM，污染写回画布的文本与历史版本
+  const text = buf.toString('utf8').replace(/^\uFEFF/, '');
+  if (!text.trim()) {
+    throw new Error(label + '返回的文本产物内容为空');
+  }
+  return text;
+}
+
+/**
+ * 解析文本生成类型的产物（getOutput 用）。
+ *
+ * 取值优先级：
+ * 1. 【结果提取】直接返回的 `text`（无需先上传成文件）；
+ * 2. `outputs[0]` 指向的文本 URL（下载后解码为文本）。
+ *
+ * 两者都缺失时返回 null（引擎据此报「无输出」）；若非文本内容/超限/空内容，
+ * 抛中文错误透传给任务失败原因。
+ *
+ * @param state 任务状态
+ * @param extract 终态提取结果（可为 null）
+ * @returns 文本产物；无任何产物时返回 null
+ */
+async function resolveTextOutput(
+  state: CustomTaskState,
+  extract: WorkflowResult | null,
+): Promise<WorkflowOutput | null> {
+  const label = '工作流「' + state.entry.name + '」';
+  if (extract?.text !== undefined) {
+    const text = extract.text.replace(/^\uFEFF/, '');
+    if (!text.trim()) throw new Error(label + '返回的 text 为空内容');
+    if (extract.outputs?.length) {
+      console.warn(
+        '[custom-provider] ' + label + '同时返回了 text 与 outputs，已优先使用 text（'
+        + extract.outputs.length + ' 个产物 URL 被忽略）',
+      );
+    }
+    return { type: 'text', text };
+  }
+  const outputs = extract?.outputs ?? [];
+  if (outputs.length === 0) return null;
+  const first = outputs[0];
+  if (typeof first !== 'string' || !first.trim()) return null;
+  if (outputs.length > 1) {
+    console.warn(
+      '[custom-provider] ' + label + '返回 ' + outputs.length + ' 个产物，仅取第一个: ' + first,
+    );
+  }
+  return { type: 'text', text: await fetchTextOutput(state.entry, first) };
+}
 
 /** 协程终态（null = 仍在运行） */
 interface CustomTaskTerminal {
@@ -455,8 +557,22 @@ export function createCustomProviderClient(config: ResolvedProviderConfig): Cust
       if (state.terminal?.status === 'failed') {
         throw new Error(state.terminal.errorMessage ?? '自定义工作流生成失败（未提供失败原因）');
       }
-      const outputs = state.extract?.outputs ?? [];
-      if (outputs.length === 0) return null;
+      const extract = state.extract;
+      // 文本生成类型：文本内容优先（脚本直接返回 text），否则拉取产物 URL 解码为文本
+      if (state.entry.types.includes('text-generation')) {
+        return await resolveTextOutput(state, extract);
+      }
+      const outputs = extract?.outputs ?? [];
+      if (outputs.length === 0) {
+        // 文本产物只在文本生成类型下取用；此处给出明确原因，避免落到「无产物」的笼统兜底
+        if (extract?.text) {
+          throw new Error(
+            '工作流「' + state.entry.name + '」返回了 text 文本产物，但其类型未勾选「文本生成」；'
+            + '请在服务商配置中为该工作流勾选「文本生成」类型，或改为返回 outputs（产物 URL）',
+          );
+        }
+        return null;
+      }
       const first = outputs[0];
       if (typeof first !== 'string' || !first.trim()) return null;
       if (outputs.length > 1) {

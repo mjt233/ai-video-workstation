@@ -7,6 +7,7 @@
  * - tts-voice-design（音色设计）
  * - tts-voice-clone（音色克隆）
  * - image-to-video（图生视频）
+ * - text-generation（文本生成）
  *
  * 各类型声明专用 interface；调用方通过 vars 字段区分具体资产用途。
  */
@@ -220,6 +221,36 @@ export interface ImageToVideoVars extends WorkflowVarsBase {
    * 例：`assert/scene/1/1/audio/merged.flac`
    */
   audioPath?: string;
+}
+
+// ── 文本生成 text-generation ────────────────────────────────────────
+
+/**
+ * 文本生成工作流变量。
+ *
+ * 用于「输入提示词（可选多模态素材）→ 输出文本」的场景（资产画布「文本生成」节点、
+ * 自定义服务商文本工作流）。**产物是文本而非媒体文件**：不写 assert/ 目录、不需要
+ * outputPath，结果由引擎写回画布节点 config.output（连同 outputHistory 文本历史）。
+ */
+export interface TextGenerationVars extends WorkflowVarsBase {
+  /** 提示词（画布节点：连线文本输入非空时优先，否则取节点配置的提示词） */
+  prompt: string;
+  /**
+   * 输入图片相对路径列表（JSON 数组字符串）。
+   * 例：`["assert/scene/1/1/canvas/n1/output.jpg"]`；无输入图时为 `[]`。
+   */
+  imagePaths: string;
+  /**
+   * 其他媒体（音频/视频）相对路径列表（JSON 数组字符串）。
+   * 与 imagePaths 分开是为了让脚本能区分「必须按图片发送」与「其他素材」；
+   * 无输入时为 `[]`。
+   */
+  mediaPaths: string;
+  /**
+   * 可选：资产用途标签，仅用于日志/展示，不参与生成。
+   * 例：`canvas-text`
+   */
+  purpose?: string;
 }
 
 // ── 兼容别名（旧代码迁移期可选） ────────────────────────────────────

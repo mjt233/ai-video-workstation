@@ -63,6 +63,24 @@ describe('pushWorkflowFinished 卡片构建', () => {
     expect(workflowNotifications.value[0].mediaKind).toBe('video')
   })
 
+  it('文本生成任务（无产物文件）：textTask 标记 + 无预览 URL，不误报「产物路径未知」', () => {
+    pushWorkflowFinished(finishedTask({
+      label: '文本工作流A',
+      payload: { workflowId: 'text-generation', impl: 'custom-wf-text-inst' },
+    }))
+    const item = workflowNotifications.value[0]
+    expect(item.status).toBe('success')
+    expect(item.textTask).toBe(true)
+    expect(item.outputPath).toBe('')
+    expect(item.mediaKind).toBe('none')
+    expect(item.mediaUrl).toBe('')
+  })
+
+  it('媒体任务不带 textTask 标记', () => {
+    pushWorkflowFinished(finishedTask())
+    expect(workflowNotifications.value[0].textTask).toBe(false)
+  })
+
   it('失败任务：无预览 URL，原因为广播携带的 error', () => {
     pushWorkflowFinished(finishedTask({ status: 'failed', error: '远端任务超时', payload: {} }))
     const item = workflowNotifications.value[0]

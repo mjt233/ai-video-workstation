@@ -14,13 +14,14 @@ export interface WorkflowTypeMeta {
   color: string
 }
 
-/** 工作流类型 → 中文标签与类型 v-chip 颜色（text-to-image / image-edit / tts-* / image-to-video） */
+/** 工作流类型 → 中文标签与类型 v-chip 颜色（text-to-image / image-edit / tts-* / image-to-video / text-generation） */
 export const WORKFLOW_TYPE_META: Record<string, WorkflowTypeMeta> = {
   'text-to-image': { label: '文生图', color: 'primary' },
   'image-edit': { label: '图片编辑', color: 'secondary' },
   'image-to-video': { label: '图生视频', color: 'info' },
   'tts-voice-design': { label: 'TTS音色设计', color: 'success' },
   'tts-voice-clone': { label: 'TTS音色克隆', color: 'warning' },
+  'text-generation': { label: '文本生成', color: 'teal' },
 }
 
 /**
@@ -50,6 +51,7 @@ export const FALLBACK_WORKFLOW_TYPES: string[] = [
   'tts-voice-design',
   'tts-voice-clone',
   'image-to-video',
+  'text-generation',
 ]
 
 /**

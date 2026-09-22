@@ -9,15 +9,27 @@ import type {
 } from './types.js';
 
 /** 动态注册可映射的工作流类型（与 types.js 的 WorkflowTypeId 一致的子集） */
-export type BridgeDerivedType = 'text-to-image' | 'image-edit' | 'tts-voice-design' | 'tts-voice-clone' | 'image-to-video';
+export type BridgeDerivedType =
+  | 'text-to-image'
+  | 'image-edit'
+  | 'tts-voice-design'
+  | 'tts-voice-clone'
+  | 'image-to-video'
+  | 'text-generation';
 
-/** 预设类型标签 → 系统工作流类型（优先级即数组顺序，靠前命中优先） */
+/**
+ * 预设类型标签 → 系统工作流类型（优先级即数组顺序，靠前命中优先）。
+ *
+ * text-generation 放在最后：文本生成工作流可能同时打上其他标签（如自定义分类标签），
+ * 让更具体的媒体类型优先命中，避免误判成文本。
+ */
 const TYPE_TAGS: Array<{ tag: string; type: BridgeDerivedType }> = [
   { tag: 'text-to-image', type: 'text-to-image' },
   { tag: 'image-edit', type: 'image-edit' },
   { tag: 'tts-voice-design', type: 'tts-voice-design' },
   { tag: 'tts-voice-clone', type: 'tts-voice-clone' },
   { tag: 'image-to-video', type: 'image-to-video' },
+  { tag: 'text-generation', type: 'text-generation' },
 ];
 
 /**
@@ -50,6 +62,7 @@ export function collectTagIds(tags: BridgeTagGroup[]): string[] {
  *
  * 按 TYPE_TAGS 优先级顺序，在工作流打上的全部标签（父 + 子）中查找匹配；
  * 未知类型（如 text-to-video）返回 null，由调用方跳过并告警。
+ * 文本生成工作流打 `text-generation` 标签（优先级最低，不抢占媒体类型）。
  *
  * @param tags Bridge 工作流详情返回的标签分组数组
  * @returns 匹配的系统工作流类型；无匹配返回 null

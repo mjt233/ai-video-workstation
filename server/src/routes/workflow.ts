@@ -361,7 +361,7 @@ export function buildRunTaskParams(
   params: {
     vars?: Record<string, string>;
     promptPaths?: string[];
-    outputPath: string;
+    outputPath?: string;
     video?: VideoWorkflowSubmitParams;
     sizeConfig?: WorkflowSizeConfig;
     nodeId?: string;
@@ -373,7 +373,8 @@ export function buildRunTaskParams(
   return {
     vars: { ...(params.vars ?? {}), ...userVars },
     promptPaths: params.promptPaths ?? [],
-    outputPath: params.outputPath,
+    // 文本生成等无文件产物的类型可不传 outputPath（缺省空串，引擎按产物类型判定）
+    outputPath: params.outputPath ?? '',
     ...(params.video ? { video: params.video } : {}),
     ...(params.sizeConfig ? { sizeConfig: params.sizeConfig } : {}),
     ...(comfyuiProviderId ? { comfyuiProviderId } : {}),
@@ -390,7 +391,7 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     params: {
       vars?: Record<string, string>;
       promptPaths?: string[];
-      outputPath: string;
+      outputPath?: string;
       /** 用户手动传入的工作流参数（key → 值，仅保留所选实现声明的 key） */
       userParams?: Record<string, unknown>;
       /** 视频自包含提交参数（wire 形态，画布【生成视频】节点提交） */
@@ -404,8 +405,8 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     };
   };
 
-  if (!project || !workflowId || !params?.outputPath) {
-    res.status(400).json({ error: 'Missing required fields: project, workflowId, params.outputPath' });
+  if (!project || !workflowId || !params) {
+    res.status(400).json({ error: 'Missing required fields: project, workflowId, params' });
     return;
   }
 
@@ -416,6 +417,15 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     return;
   }
   const implDef = validated.implDef;
+  // 只有「文本生成」类型可以不传 outputPath（产物是文本，不写 assert/ 文件）；
+  // 其余类型仍必填，避免误传导致任务在引擎里才失败
+  if (!params.outputPath && workflowId !== 'text-generation') {
+    res.status(400).json({
+      error: 'Missing required fields: project, workflowId, params.outputPath',
+      message: '文件产物类工作流必须提供 params.outputPath',
+    });
+    return;
+  }
   // 用户手动传入的参数：仅保留所选实现声明的 key，按类型规范化后合并进 vars
   const userVars = normalizeUserParams(implDef.params, params.userParams);
   // ComfyUI 提供商选择（Bridge 执行保留键 providerId）：仅 comfyui-bridge 工作流生效，

@@ -122,11 +122,16 @@ export interface ProviderClient {
  * 工作流输出规格（由 provider 的 getOutput 返回）。
  *
  * 从 workflows/types.ts 移入本文件（传输职责归 provider）；workflows/types.ts 再导出。
+ *
+ * 前三类是**文件产物**（引擎下载/解码后写入 `assert/{outputPath}`）；
+ * 第四类 `text` 是**文本产物**（`text-generation` 工作流类型专用：不写 assert/、
+ * 不要求 outputPath，结果写回画布节点 config.output 并进任务 result）。
  */
 export type WorkflowOutput =
   | { type: 'download'; url: string; filename: string }
   | { type: 'fetch'; request: { url: string; method: string; headers?: Record<string, string> }; filename: string }
-  | { type: 'body'; contentType: string; data: string; filename: string };
+  | { type: 'body'; contentType: string; data: string; filename: string }
+  | { type: 'text'; text: string; filename?: string };
 
 /** 服务商实例（多实例模型的核心抽象） */
 export interface ProviderInstance {

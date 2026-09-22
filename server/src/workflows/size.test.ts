@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alignSizeToMultiple,
   enableSpecifiedSize,
   hasExplicitSize,
   resolveOutputSize,
@@ -71,6 +72,87 @@ describe('resolvePresetSize', () => {
     expect(resolvePresetSize('16:9', 'auto')).toBeNull();
     expect(resolvePresetSize('16:9', '9K')).toBeNull();
     expect(resolvePresetSize('adaptive', '768P')).toBeNull();
+  });
+});
+
+describe('alignSizeToMultiple（OpenAI 兼容的 16 倍数自动匹配）', () => {
+  /** 宽高是否均为 16 的倍数 */
+  const divisible = (s: { width: number; height: number }) => s.width % 16 === 0 && s.height % 16 === 0;
+
+  it('1K 档位换算结果对齐到最近的 16 倍数（16:9 → 1820×1024 变 1824×1024）', () => {
+    // 1820 的下取整 1808、上取整 1824：面积误差 0.88% vs 0.22% → 取 1824
+    expect(alignSizeToMultiple(resolvePresetSize('16:9', '1K')!)).toEqual({ width: 1824, height: 1024 });
+    // 4:3 的 1365 两侧等距（1360 / 1376），面积误差 0.39% < 0.79% → 取 1360
+    expect(alignSizeToMultiple(resolvePresetSize('4:3', '1K')!)).toEqual({ width: 1360, height: 1024 });
+    expect(alignSizeToMultiple(resolvePresetSize('9:16', '1K')!)).toEqual({ width: 1024, height: 1824 });
+    expect(alignSizeToMultiple(resolvePresetSize('3:4', '1K')!)).toEqual({ width: 1024, height: 1360 });
+  });
+
+  it('2K 档位：本就整除的保持不动（16:9 → 2560×1440、9:16 → 1440×2560）', () => {
+    expect(alignSizeToMultiple(resolvePresetSize('16:9', '2K')!)).toEqual({ width: 2560, height: 1440 });
+    expect(alignSizeToMultiple(resolvePresetSize('9:16', '2K')!)).toEqual({ width: 1440, height: 2560 });
+    expect(alignSizeToMultiple(resolvePresetSize('4:3', '2K')!)).toEqual({ width: 1920, height: 1440 });
+    expect(alignSizeToMultiple(resolvePresetSize('3:4', '2K')!)).toEqual({ width: 1440, height: 1920 });
+    expect(alignSizeToMultiple(resolvePresetSize('3:2', '2K')!)).toEqual({ width: 2160, height: 1440 });
+    expect(alignSizeToMultiple(resolvePresetSize('2:3', '2K')!)).toEqual({ width: 1440, height: 2160 });
+    expect(alignSizeToMultiple(resolvePresetSize('21:9', '2K')!)).toEqual({ width: 3360, height: 1440 });
+  });
+
+  it('档位基准（短边）恒被保留：1K=1024、2K=1440 均为 16 的倍数，不因对齐而漂移', () => {
+    // 仅对基准本身可被 16 整除的档位成立（360P/480P/720P/768P/1080P/3K 的基准不是 16 的倍数，
+    // 短边必然要挪到网格上，故不在本断言范围）
+    for (const key of ['1K', '2K', '4K', '8K'] as const) {
+      const base = SIZE_RESOLUTIONS.find((r) => r.key === key)!.base;
+      for (const ratio of ['16:9', '9:16', '4:3', '3:4', '1:1', '3:2', '2:3', '21:9']) {
+        const aligned = alignSizeToMultiple(resolvePresetSize(ratio, key)!);
+        expect(Math.min(aligned.width, aligned.height)).toBe(base);
+      }
+    }
+  });
+
+  it('自定义宽高仅对齐不整除的一侧（1080×1920 → 1088×1920、720×1280 不变）', () => {
+    // 1072 与 1088 面积误差相同（各 15400 余），偏移距离也相同 → 按文档「取较大面积」取 1088
+    expect(alignSizeToMultiple({ width: 1080, height: 1920 })).toEqual({ width: 1088, height: 1920 });
+    expect(alignSizeToMultiple({ width: 720, height: 1280 })).toEqual({ width: 720, height: 1280 });
+  });
+
+  it('21:9 × 1K 的 2389 下取整到 2384（面积误差 0.21% 优于 2400 的 0.47%）', () => {
+    expect(alignSizeToMultiple(resolvePresetSize('21:9', '1K')!)).toEqual({ width: 2384, height: 1024 });
+  });
+
+  it('覆盖 1K / 2K 全部比例：结果均为 16 的倍数，面积与比例误差 ≤0.5%，档位基准短边不变', () => {
+    for (const key of ['1K', '2K'] as const) {
+      const base = SIZE_RESOLUTIONS.find((r) => r.key === key)!.base;
+      for (const ratio of SIZE_RATIOS) {
+        const target = resolvePresetSize(ratio.key, key)!;
+        const aligned = alignSizeToMultiple(target);
+        expect(divisible(aligned)).toBe(true);
+        const areaError = Math.abs(aligned.width * aligned.height - target.width * target.height)
+          / (target.width * target.height);
+        expect(areaError).toBeLessThan(0.005);
+        const targetRatio = target.width / target.height;
+        const ratioError = Math.abs(aligned.width / aligned.height - targetRatio) / targetRatio;
+        expect(ratioError).toBeLessThan(0.005);
+        // 1K=1024、2K=1440 均为 16 的倍数 → 短边（档位基准）保持不动
+        expect(Math.min(aligned.width, aligned.height)).toBe(base);
+      }
+    }
+  });
+
+  it('multiple 参数可调（32 与 8 网格上的最近点同样可达）', () => {
+    // 1820 在 32 网格上两侧为 1792 / 1824；1024 已整除 32
+    expect(alignSizeToMultiple({ width: 1820, height: 1024 }, 32)).toEqual({ width: 1824, height: 1024 });
+    expect(alignSizeToMultiple({ width: 1820, height: 1024 }, 8)).toEqual({ width: 1824, height: 1024 });
+    expect(alignSizeToMultiple({ width: 512, height: 768 })).toEqual({ width: 512, height: 768 });
+  });
+
+  it('非法/无效倍数时原样返回（不产出 0 或负数）', () => {
+    expect(alignSizeToMultiple({ width: 0, height: 100 })).toEqual({ width: 0, height: 100 });
+    expect(alignSizeToMultiple({ width: -16, height: 1024 })).toEqual({ width: -16, height: 1024 });
+    expect(alignSizeToMultiple({ width: Number.NaN, height: 1024 })).toEqual({ width: Number.NaN, height: 1024 });
+    expect(alignSizeToMultiple({ width: 1024, height: 0 })).toEqual({ width: 1024, height: 0 });
+    expect(alignSizeToMultiple({ width: 1024, height: 1024 }, 0)).toEqual({ width: 1024, height: 1024 });
+    expect(alignSizeToMultiple({ width: 1024, height: 1024 }, 1)).toEqual({ width: 1024, height: 1024 });
   });
 });
 

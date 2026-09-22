@@ -85,6 +85,56 @@ export interface ComfyuiBridgeClient extends ProviderClient {
   testConnection(): Promise<{ ok: boolean; message: string }>;
 }
 
+/** 文本产物最大字节数（1MB）：Bridge 文本工作流的产出应远小于此值 */
+const MAX_TEXT_ARTIFACT_BYTES = 1024 * 1024;
+
+/**
+ * 判断产物文件名是否为文本文件（文本生成工作流的产物识别）。
+ *
+ * Bridge 只有 output-files 一种产物接口，文本生成工作流把结果写成文本文件；
+ * 按扩展名识别 `.txt` / `.md` / `.json`（JSON 按原文读入，不做字段提取——
+ * 需要提取字段时由工作流自己输出纯文本）。
+ *
+ * @param filename 产物文件名（调用方已剥离查询串）
+ * @returns 是否为文本产物
+ */
+function isTextArtifact(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  return lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.json');
+}
+
+/**
+ * 下载文本产物并解码为 UTF-8 文本。
+ *
+ * @param url 产物绝对 URL
+ * @param token Bridge 访问 token
+ * @param filename 产物文件名（错误提示用）
+ * @returns 文本产物规格
+ * @throws Error 下载失败 / 体积超限（1MB）/ 内容为空
+ */
+async function fetchTextArtifact(
+  url: string,
+  token: string,
+  filename: string,
+): Promise<WorkflowOutput> {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    throw new Error(`Bridge 文本产物下载失败（${filename}）: HTTP ${res.status}`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.byteLength > MAX_TEXT_ARTIFACT_BYTES) {
+    throw new Error(
+      `Bridge 文本产物超过 ${Math.round(MAX_TEXT_ARTIFACT_BYTES / 1024)}KB 上限（${filename}）`,
+    );
+  }
+  // 剥离 UTF-8 BOM：避免不可见字符写入画布节点文本与历史版本
+  const text = buf.toString('utf8').replace(/^\uFEFF/, '');
+  if (!text.trim()) {
+    throw new Error(`Bridge 文本产物内容为空（${filename}）`);
+  }
+  return { type: 'text', text, filename };
+}
+
 /**
  * 创建 ComfyUI Easy Bridge 传输客户端。
  *
@@ -206,6 +256,11 @@ export function createComfyuiBridgeClient(config: ResolvedProviderConfig): Comfy
 
       const url = files[0].url.startsWith('http') ? files[0].url : `${baseUrl}${files[0].url}`;
       const filename = url.split('/').pop()?.split('?')[0] ?? 'output.png';
+      // 文本生成工作流的产物是文本文件：直接取回并解码为文本（不写 assert/ 媒体产物）。
+      // Bridge 没有独立的「文本结果」接口，故按扩展名识别文本产物（.txt/.md/.json）。
+      if (isTextArtifact(filename)) {
+        return await fetchTextArtifact(url, token, filename);
+      }
       return {
         type: 'fetch',
         request: { url, method: 'GET', headers: { Authorization: `Bearer ${token}` } },

@@ -46,7 +46,7 @@
 - **参数行**（各编辑器内 `.generation-params-row` 紧凑横排，空间不足自动换行）：
   - 工作流：生成图片 = 工作流类型 + 工作流实现两个紧凑下拉；生成视频 = 单个工作流下拉（模式放其前）；TTS = 单个工作流实现下拉；
   - `DurationPicker`（`components/DurationPicker.vue`，时长）：**仅生成视频节点显示**；点击触发行弹出菜单——1~15 秒按钮组（点击即选即关）+ 手动输入（支持小数秒，回车/「应用」确认，非法忽略）；统一写回 `config.duration`（三种生成模式同源，未设置时界面回退 5s）；
-  - `WorkflowSizePicker`（输出尺寸）：**仅生成图片/视频节点显示**，点击弹出菜单（比例/分辨率/自定义宽高），图片节点直接绑 `config.sizeConfig`；
+  - `WorkflowSizePicker`（输出尺寸）：**仅生成图片/视频节点显示**，点击弹出菜单（比例/分辨率/自定义宽高），图片节点直接绑 `config.sizeConfig`；**工作流声明 `capabilities.size.constraint.multipleOf` 时（OpenAI 兼容 = 16），选中比例/分辨率后自动填入对齐后的宽高**（与服务端 `alignSizeToMultiple` 同规则），因此界面显示的数值恒等于后端提交的 `size`；未声明约束的工作流（Seedream / Bridge 等）取值不变；
   - `WorkflowParamsTrigger`（`components/WorkflowParamsTrigger.vue`，工作流参数）：点击触发行弹出菜单，菜单内嵌 `WorkflowParamsForm`；触发行显示「工作流参数」+ 已配置非默认参数数量徽标。
 - **拼接视频节点编辑器**（`editors/ConcatVideoEditor.vue`）在输入预览下方增加：**输入规格探测**（`GET /api/canvas/video-info`，逐段展示 分辨率/帧率/编码/有无音轨）、**编码方式**下拉（重编码 / copy）、**输出尺寸**下拉（取最大的一段 / 取最小的一段 / 自定义；`copy` 时禁用并提示「仅重编码可用」）、`自定义` 时的宽高输入框、目标尺寸提示（`max`/`min` 按像素面积推算）与 copy 规格不一致红字提示（不一致时禁用「拼接」按钮）。
 - **参数行两种布局共用同一组件**（`editors/VideoGenerateParamsRow.vue`）：生成视频节点的导演台模式与首尾帧/参考模式使用**同一个**参数行组件，保证「生成模式 + 工作流 + 时长 `DurationPicker` + 输出尺寸 `WorkflowSizePicker` + 工作流参数 `WorkflowParamsTrigger` + 全屏按钮」的位置与交互完全一致，避免两处模板各自演化。两种模式的差异只在参数行**之上**的主体：

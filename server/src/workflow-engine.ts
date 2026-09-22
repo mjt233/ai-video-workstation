@@ -18,6 +18,7 @@ import { getProvider } from './providers/registry.js';
 import { mixAudioTracks } from './assets/audio-mix.js';
 import { getBatchConcurrency } from './routes/workflow.js';
 import { copyExistingAssetToHistory } from './assets/history.js';
+import { persistTextResult } from './canvas/text-result.js';
 import { isCancelRequested } from './workflows/cancel.js';
 import { toNativeUserParams } from './workflows/user-params.js';
 import { workflowExecutor } from './tasks/workflow-executor.js';
@@ -1024,6 +1025,52 @@ export async function runTask(taskId: string): Promise<void> {
       throw new Error('No output files found from provider task');
     }
 
+    // 同步 provider（deferredCancel）取消回调：execute 完成后检查取消标记，
+    // 已请求取消 → 持久化失败（用户中断），不写产物（媒体与文本一视同仁）
+    const freshTask = db.getTask(taskId);
+    if (freshTask && isCancelRequested(JSON.parse(freshTask.params))) {
+      throw new Error('用户中断');
+    }
+
+    // ── 文本产物（text-generation）：不写 assert/、不需要 outputPath ──
+    // 结果写回画布节点 config.output + outputHistory（服务端单写者，CAS + 冲突重试）
+    if (output.type === 'text') {
+      const textNodeId = paramsObj.nodeId;
+      const persist = await persistTextResult({
+        project: task.project,
+        ...(paramsObj.canvas ? { canvas: paramsObj.canvas } : {}),
+        ...(typeof textNodeId === 'string' && textNodeId ? { nodeId: textNodeId } : {}),
+        text: output.text,
+        input: typeof vars.prompt === 'string' ? vars.prompt : '',
+        modelName: wf.name,
+      });
+      if (persist.wrote) {
+        db.addLog(
+          taskId,
+          'info',
+          `文本结果已写入画布节点 ${String(textNodeId)}（画布版本 ${persist.prevRev} → ${persist.rev}）`,
+        );
+      } else {
+        // 跳过写盘不是错误：画布/节点可能已被删除（用户关掉画布或删了节点）
+        db.addLog(
+          taskId,
+          'warn',
+          '文本结果未写入画布（画布或节点不存在，可能已被删除）；文本已随任务结果返回',
+        );
+      }
+      // rev/prevRev 随结果返回：前端据此与 savedRev 比对后采纳补丁（与 LLM 会话终态同一套版本对齐语义）
+      db.updateTaskStatus(taskId, 'completed', {
+        result: {
+          text: output.text,
+          ...(persist.patch ? { patch: persist.patch } : {}),
+          ...(persist.prevRev !== undefined ? { prevRev: persist.prevRev } : {}),
+          ...(persist.rev !== undefined ? { rev: persist.rev } : {}),
+        },
+      });
+      workflowExecutor.finish(taskId, 'completed');
+      return;
+    }
+
     // Step 4: Download/fetch output and write to assert/
     const outputPath = paramsObj.outputPath;
     if (!outputPath) {
@@ -1031,13 +1078,6 @@ export async function runTask(taskId: string): Promise<void> {
     }
     const assertFullPath = resolveProjectAssertPath(task.project, outputPath);
     const assertDir = path.dirname(assertFullPath);
-
-    // 同步 provider（deferredCancel）取消回调：execute 完成后检查取消标记，
-    // 已请求取消 → 持久化失败（用户中断），不归档已有资产、不写产物
-    const freshTask = db.getTask(taskId);
-    if (freshTask && isCancelRequested(JSON.parse(freshTask.params))) {
-      throw new Error('用户中断');
-    }
 
     // 重复生成时，将已有资产归档到历史版本（copy：固定路径产物在生成期间不消失，预览不断链）
     const archived = await copyExistingAssetToHistory(task.project, outputPath);

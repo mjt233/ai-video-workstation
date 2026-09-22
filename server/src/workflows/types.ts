@@ -8,6 +8,7 @@ export type {
   TtsVoiceDesignVars,
   TtsVoiceCloneVars,
   ImageToVideoVars,
+  TextGenerationVars,
   // 兼容旧名
   CharacterAppearanceVars,
   CharacterVoiceVars,
@@ -28,13 +29,15 @@ export type { WorkflowOutput } from '../providers/types.js';
  * - tts-voice-design：音色设计 / TTS
  * - tts-voice-clone：音色克隆 / TTS
  * - image-to-video：图生视频
+ * - text-generation：文本生成（**产物是文本，不落 assert/ 媒体文件**）
  */
 export type WorkflowTypeId =
   | 'text-to-image'
   | 'image-edit'
   | 'tts-voice-design'
   | 'tts-voice-clone'
-  | 'image-to-video';
+  | 'image-to-video'
+  | 'text-generation';
 
 /** Project-level structured config from design/{project}/project.json */
 export interface ProjectConfig {
@@ -257,6 +260,8 @@ export interface WorkflowCapabilities {
    *   含 "auto"（自适应）时组件首位展示「自动」按钮
    * - size：支持的尺寸档清单；未声明时默认 ["360P","720P","1080P","2K","4K","auto"]
    * - supportCustomSize：是否允许指定任意宽高；未声明时默认 true
+   * - constraint：服务商对宽高的整除约束（如 OpenAI 兼容要求均为 16 的倍数）；
+   *   声明后前端按同规则对齐预设宽高，保证界面显示值与后端提交值一致
    */
   size?: {
     /** 支持的比例（如 "16:9"、"auto"） */
@@ -265,6 +270,15 @@ export interface WorkflowCapabilities {
     size?: string[];
     /** 是否支持自定义指定任意高宽（默认 true） */
     supportCustomSize?: boolean;
+    /** 输出宽高的整除约束（未声明 = 无约束） */
+    constraint?: {
+      /**
+       * 宽高必须为该值的整数倍（如 16）。
+       * 工作流 submit 侧由 `workflows/size.ts` 的 `alignSizeToMultiple` 兜底对齐；
+       * 前端 `WorkflowSizePicker` 用同一算法换算预设宽高，两侧取值必须一致。
+       */
+      multipleOf?: number;
+    };
   };
   /** 是否支持传入外部音频（如导演台混音产物） */
   audio?: boolean;

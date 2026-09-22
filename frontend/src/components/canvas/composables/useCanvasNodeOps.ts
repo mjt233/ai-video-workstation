@@ -7,6 +7,7 @@
 import { computed } from 'vue'
 import { buildVideoSubmitParams } from '../../../canvas/videoSubmit'
 import { collectInputPaths, collectInputs, collectPreviewSourceInputs, collectTextContents, type CanvasInputInfo } from '../../../canvas/generate'
+import { splitTextGenerationInputs } from '../../../canvas/textGenerate'
 import { getNodeOutputType } from '../../../canvas/connection'
 import type { CanvasNodeData, PortType } from '../../../canvas/types'
 import type { CanvasScope } from '../../../canvas/paths'
@@ -71,6 +72,17 @@ export interface UseCanvasNodeOpsOptions {
   getScope: () => CanvasScope
   /** 生成完成回调（nodeId, outputPath）：由 AssetCanvas 刷新节点产物展示（固定路径+mtime） */
   onNodeResult?: (nodeId: string, outputPath: string) => void
+  /**
+   * 文本生成（text-generate）终态采纳回调（nodeId, 补丁, 写入后 rev, 写入前 rev）：
+   * 由 AssetCanvas 注入（服务端单写者已把文本写进画布，这里只做版本对齐的视图同步）。
+   * rev/prevRev 缺失表示服务端未写画布（画布或节点已不存在）。
+   */
+  onTextResult?: (
+    nodeId: string,
+    patch: Record<string, unknown>,
+    rev?: number,
+    prevRev?: number,
+  ) => void
   /** 查询节点产物 mtime（上游更新角标用：输入节点产物比本节点新 → 提示） */
   getOutputMtime?: (nodeId: string) => number | null | undefined
 }
@@ -82,7 +94,7 @@ export interface UseCanvasNodeOpsOptions {
  * @returns 生成调度与输入查询 API
  */
 export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
-  const { store, gen, nodeMap, showSnackbar, getSelectedNode, getScope, onNodeResult, getOutputMtime } = options
+  const { store, gen, nodeMap, showSnackbar, getSelectedNode, getScope, onNodeResult, onTextResult, getOutputMtime } = options
 
   /** 生成完成/失败后通知 AssetCanvas 刷新节点产物展示 */
   function applyResult(nodeId: string, outputPath: string): void {
@@ -180,6 +192,33 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
       const paths = collectInputPaths(nodeId, store.connections.value, store.nodes.value, node.config, undefined, getScope())
       gen.setInputPaths(nodeId, paths)
       await gen.generate(node, undefined, applyResult)
+      return
+    }
+    if (node.prototypeId === 'text-generate') {
+      // 文本生成：产物是文本（服务端写回 config.output + outputHistory），不落 assert/ 文件
+      const implMsg = missingWorkflowImplMessage(node)
+      if (implMsg) {
+        showSnackbar(implMsg, 'error')
+        return
+      }
+      // 连线文本输入作为提示词（多个时禁止生成，与生成图片/视频节点同一规则）
+      const texts = textInputsOf(nodeId)
+      if (texts.length > 1) {
+        showSnackbar(`存在多个文本连线输入（${texts.length} 个），生成已禁用，请仅保留一个`, 'error')
+        return
+      }
+      // 媒体输入按来源类型拆分：图片 → vars.imagePaths，视频/音频 → vars.mediaPaths
+      const { imagePaths, mediaPaths } = splitTextGenerationInputs(llmMediaInputsOf(nodeId))
+      const prompt = texts.length > 0 ? texts[0] : String(node.config.prompt ?? '')
+      if (!prompt.trim()) {
+        showSnackbar('请先填写提示词或连接文本输入', 'error')
+        return
+      }
+      await gen.generateText(
+        node,
+        { prompt, imagePaths, mediaPaths },
+        (id, patch, rev, prevRev) => onTextResult?.(id, patch, rev, prevRev),
+      )
       return
     }
     if (node.prototypeId !== 'image-generate') return
@@ -376,11 +415,20 @@ export function useCanvasNodeOps(options: UseCanvasNodeOpsOptions) {
     return all.filter((i) => getNodeOutputType(i.nodeId, store.nodes.value, store.connections.value) === type)
   }
 
-  /** 视频生成/拼接节点三组输入（非这两类节点为空数组；按 config.inputOrder 排序） */
+  /**
+   * 配置面板节点按来源类型分组的三组媒体输入。
+   *
+   * 需要分组预览的节点类型：
+   * - `video-generate` / `video-concat`：素材类型由来源节点类型自动归类；
+   * - `text-generate`（文本生成）：媒体输入作多模态素材（图片进 vars.imagePaths、
+   *   视频/音频进 vars.mediaPaths），与生成视频节点同一套分组/排序/断开交互。
+   *
+   * 其余类型返回三组空数组（编辑器不展示分组预览）。
+   */
   const videoInputGroups = computed(() => {
     const panelNode = getSelectedNode()
     const proto = panelNode?.prototypeId
-    if (!panelNode || (proto !== 'video-generate' && proto !== 'video-concat')) {
+    if (!panelNode || (proto !== 'video-generate' && proto !== 'video-concat' && proto !== 'text-generate')) {
       return { images: [] as CanvasInputInfo[], videos: [] as CanvasInputInfo[], audios: [] as CanvasInputInfo[] }
     }
     const id = panelNode.id

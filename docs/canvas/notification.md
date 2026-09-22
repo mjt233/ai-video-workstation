@@ -24,7 +24,7 @@
 
 | 判据 | 规则 |
 |------|------|
-| 任务类型 | **仅 `type === 'workflow'`**（生成图片 / 生成视频 / TTS 声音生成）；ffmpeg / LLM 任务不弹 |
+| 任务类型 | **仅 `type === 'workflow'`**（生成图片 / 生成视频 / TTS 声音生成 / 文本生成）；ffmpeg / LLM 任务不弹 |
 | 终态 | 仅 `completed`（成功卡）与 `failed`（失败卡） |
 | 用户主动中断 | 不弹（引擎把中断收敛为 `failed` + 原因「用户中断」，画布节点已有「已中断」反馈） |
 | 去重 | 同 `taskId` 已存在卡片则忽略（注册表 `finish()` 每个任务只 emit 一次终态，守卫只覆盖异常重复推送） |
@@ -55,6 +55,7 @@
 | `mediaKind` | `mediaKindOfPath(outputPath)`（`canvas/preview.ts`） | `image` / `video` / `audio` / `none`，**只按扩展名判定** |
 | `mediaUrl` | `buildPreviewUrl(project, outputPath, Date.now())` | 产物是固定文件名 `output.{ext}`，必须以入栈时刻作缓存键，否则浏览器复用上一次的缓存图 |
 | `errorMsg` | `task.error`（失败任务） | 服务端 `workflowExecutor.finish(taskId, status, error)` 随终态广播下发；缺失时回退「执行失败（详见任务管理器 → 历史）」 |
+| `textTask` | `task.payload.workflowId === 'text-generation'` | 文本生成任务（产物是文本、无文件）：卡片不拼媒体 URL、不显示「产物路径未知」，改为一句话指引（文本在画布节点与任务详情可见）。**有意不为此额外请求接口**：终态广播载荷不含产物内容（注册表 payload 只有 workflowId/impl/outputPath） |
 
 ## 三、卡片交互（`WorkflowNotifyStack.vue`）
 
@@ -63,7 +64,7 @@
 | 图片 | 缩略图（`object-fit: contain`，固定 132px 高） | 打开 `CanvasMediaPreviewDialog` 放大预览（含文件名/下载/关闭） |
 | 视频 | `<video preload="metadata" muted>` 取首帧（URL 附 `#t=0.1`） | 同上，对话框内 `<video controls autoplay>` |
 | 音频 | `<audio controls>` 内联试听 | 不放大（TTS 结果直接听） |
-| `none` / 加载失败 | 占位文案：`产物：{文件名}` / `产物加载失败` / `已完成（产物路径未知）` | — |
+| 文本产物（无文件） | 浅底说明条：「文本产物已完成，可在画布节点或「任务管理器 → 历史 → 任务详情」查看」 | — || `none` / 加载失败 | 占位文案：`产物：{文件名}` / `产物加载失败` / `已完成（产物路径未知）` | — |
 | 失败任务 | 红字原因 + **「查看日志」** | 打开任务管理器抽屉并切到「历史」页签（**不做任务级定位/自动展开**，实施成本与竞态更高） |
 
 ## 四、与任务管理器（抽屉）的分工
@@ -72,7 +73,7 @@
 |------|------|------------------------------|
 | 主动提醒 | ✅ 无需操作即出现 | ❌ 需手动打开（顶栏图标） |
 | 自动消失 | ✅ 固定 30s | ❌ 常驻，直到用户关闭 |
-| 产物预览/放大 | ✅ 图片/视频/音频 | ✅ 历史行内缩略图 + 同一放大对话框 |
+| 产物预览/放大 | ✅ 图片/视频/音频（文本任务为指引文案） | ✅ 历史行内缩略图 + 同一放大对话框（文本任务为文本图标，点击打开任务详情看全文） |
 | 历史回看（跨刷新） | ❌ 纯内存 | ✅ SQLite（`ORDER BY created_at DESC`，第一条即最近完成） |
 | 失败原因/日志 | 仅原因 | ✅ 原因 + 日志（行右侧按钮打开「任务详情」对话框） |
 

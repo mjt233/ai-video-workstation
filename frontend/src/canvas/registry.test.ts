@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { getPrototype, NODE_PROTOTYPES } from './registry'
 
 describe('NODE_PROTOTYPES', () => {
-  it('包含十五个内置节点', () => {
+  it('包含十六个内置节点', () => {
     expect(NODE_PROTOTYPES.map((p) => p.id).sort()).toEqual([
       'audio-loader',
       'audio-trim',
@@ -13,6 +13,7 @@ describe('NODE_PROTOTYPES', () => {
       'input-preview',
       'text',
       'text-ai',
+      'text-generate',
       'tts-generate',
       'video-concat',
       'video-frame-extract',
@@ -74,9 +75,42 @@ describe('NODE_PROTOTYPES', () => {
     expect(getPrototype('input-preview')!.defaultSize).toEqual({ width: 320, height: 300 })
     expect(getPrototype('forward-input')!.defaultSize).toEqual({ width: 320, height: 260 })
     for (const p of NODE_PROTOTYPES) {
-      if (p.id === 'text-ai' || p.id === 'input-preview' || p.id === 'forward-input') continue
+      if (
+        p.id === 'text-ai'
+        || p.id === 'input-preview'
+        || p.id === 'forward-input'
+        || p.id === 'text-generate'
+      ) continue
       expect(p.defaultSize, `${p.id} 不应声明 defaultSize`).toBeUndefined()
     }
+  })
+
+  it('文本生成节点：单一输入端口（media+text），输出 text，走工作流且无产物文件', () => {
+    const p = getPrototype('text-generate')!
+    expect(p.name).toBe('文本生成')
+    expect(p.category).toBe('generate')
+    expect(p.inputPorts).toHaveLength(1)
+    expect(p.inputPorts[0].id).toBe('in')
+    expect(p.inputPorts[0].type).toEqual(['media', 'text'])
+    expect(p.outputPorts[0].type).toBe('text')
+    // 有生成与历史入口（历史为 config.outputHistory 文本快照，不是资产历史目录）
+    expect(p.canGenerate).toBe(true)
+    expect(p.hasHistory).toBe(true)
+    // 无产物文件：不声明 outputExt / getOutputAssetPath（"当前结果"为 config.output）
+    expect(p.outputExt).toBeUndefined()
+    expect(p.getOutputAssetPath).toBeUndefined()
+    expect(p.defaultSize).toEqual({ width: 360, height: 240 })
+    // 状态自绘在节点主体内（空遮罩组件）
+    expect(p.statusOverlay).toBeTypeOf('function')
+    expect(p.defaultConfig).toMatchObject({
+      workflowId: 'text-generation',
+      workflowImpl: undefined,
+      workflowParams: {},
+      prompt: '',
+      inputOrder: [],
+      output: '',
+      outputHistory: [],
+    })
   })
 
   it('仅输入转发节点声明 passThrough（其余节点输出均为自身产物/值）', () => {

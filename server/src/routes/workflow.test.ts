@@ -289,6 +289,20 @@ describe('buildRunTaskParams（入库 params 组装）', () => {
     expect(params.video).toEqual(video);
     expect(params.sizeConfig).toEqual({ ratio: '16:9', size: '2K' });
   });
+
+  it('文本生成任务缺 outputPath 时入库为空串（引擎按产物类型判定，不要求产物路径）', () => {
+    const params = buildRunTaskParams(
+      {
+        vars: { prompt: '写一段旁白', imagePaths: '[]', mediaPaths: '[]', purpose: 'canvas-text' },
+        nodeId: 'node-text',
+        canvas: { kind: 'scene', episode: '1', shot: '1' },
+      },
+      {},
+    );
+    expect(params.outputPath).toBe('');
+    expect(params.nodeId).toBe('node-text');
+    expect(params.canvas).toEqual({ kind: 'scene', episode: '1', shot: '1' });
+  });
 });
 
 describe('extractComfyuiProviderId', () => {
