@@ -87,16 +87,19 @@
 | # | 位置 | 改什么 |
 |---|------|--------|
 | 1 | `server/src/workflows/types.ts` 的 `WorkflowTypeId` | 加类型 id（**唯一权威**） |
-| 2 | `server/src/workflows/vars.ts` | 加该类型的 vars interface（脚本侧 `ctx.params` 字段） |
-| 3 | `server/src/providers/custom/types.ts` 的 `CUSTOM_WORKFLOW_TYPES` | 加类型 id（自定义服务商下拉可选） |
-| 4 | `frontend/src/utils/workflow-types.ts` | 加中文标签 / 颜色（`WORKFLOW_TYPE_META`）与兜底清单（`FALLBACK_WORKFLOW_TYPES`） |
-| 5 | `frontend/src/utils/custom-provider.ts` | 脚本类型提示：`PARAM_INTERFACES` + `PARAM_INTERFACE_NAMES` + 插入模板 |
-| 6 | `server/src/workflows/bridge-derive.ts` | Bridge 标签 → 类型的推导（如需，注意优先级：媒体类型优先、`text-generation` 最低） |
+| 2 | 同文件的 `SUPPORTED_WORKFLOW_TYPES` | 加同一项（**类型下拉的数据源**，顺序即下拉顺序） |
+| 3 | `server/src/workflows/vars.ts` | 加该类型的 vars interface（脚本侧 `ctx.params` 字段） |
+| 4 | `server/src/providers/custom/types.ts` 的 `CUSTOM_WORKFLOW_TYPES` | 加类型 id（自定义服务商保存校验的白名单） |
+| 5 | `frontend/src/utils/workflow-types.ts` | 加中文标签 / 颜色（`WORKFLOW_TYPE_META`）与兜底清单（`FALLBACK_WORKFLOW_TYPES`） |
+| 6 | `frontend/src/utils/custom-provider.ts` | 脚本类型提示：`PARAM_INTERFACES` + `PARAM_INTERFACE_NAMES` + 插入模板 |
+| 7 | `server/src/workflows/bridge-derive.ts` | Bridge 标签 → 类型的推导（如需，注意优先级：媒体类型优先、`text-generation` 最低） |
 
 补充约定：
 
-- **前端类型标签从接口拉取**（`GET /api/workflow-types`，服务端注册表键集合），`FALLBACK_WORKFLOW_TYPES` 只是拉取失败时的兜底——两处必须一致，`frontend/src/utils/workflow-types.test.ts` 会断言 `WORKFLOW_TYPE_META` 与兜底清单的键集合相同。
-- 声明 `capabilities`（视频模式 / 尺寸 / 是否可中断）见 `WorkflowCapabilities`，前端据此展示导演台、统一尺寸组件等能力入口。
+- **类型下拉的数据源是「内置清单 ∪ 注册表键」**（`GET /api/workflow-types` → `registry.normalizeWorkflowTypeList(SUPPORTED_WORKFLOW_TYPES, getAllWorkflowTypes())`）：内置清单保证「系统支持的类型恒可选」，注册表补上未来动态新增的类型。
+  **不能只返回注册表键**——注册表只知道已注册实现的类型，首次配置某个类型时它还没被注册，下拉里就没有它（先有鸡还是先有蛋，实测踩过：文本生成配不出来）。
+- `FALLBACK_WORKFLOW_TYPES` 只是**接口拉取失败**时的兜底，必须与 `SUPPORTED_WORKFLOW_TYPES` 一致；`frontend/src/utils/workflow-types.test.ts` 会断言 `WORKFLOW_TYPE_META` 与兜底清单的键集合相同，`server/src/workflows/registry.test.ts` 覆盖并集规则（未注册也出现 / 去重 / 动态类型追加在末尾）。
+- 声明 `capabilities`（视频模式 / 尺寸 / 是否可中断）见 `WorkflowCapabilities`，前端据此展示导演台、统一尺寸组件等能力入口；自定义服务商侧「输出尺寸配置」区块只对 `text-to-image` / `image-edit` / `image-to-video` 显示。
 - **中断**：所有 Bridge 与自定义服务工作流恒声明 `cancelable: true`；同步执行类另声明 `deferredCancel: true`（取消先写 `cancelRequested` 标记，引擎写产物前检查 → **中断后绝不落产物**）。详见 [task-manager.md](./task-manager.md) 与 [plans/custom-provider.md](./plans/custom-provider.md)。
 
 ---
@@ -105,9 +108,9 @@
 
 | 文件 | 职责 |
 |------|------|
-| `server/src/workflows/types.ts` | `WorkflowTypeId` / `WorkflowDefinition` / `WorkflowCapabilities` / `WorkflowSizeConfig` |
+| `server/src/workflows/types.ts` | `WorkflowTypeId` / `SUPPORTED_WORKFLOW_TYPES` / `WorkflowDefinition` / `WorkflowCapabilities` / `WorkflowSizeConfig` |
 | `server/src/workflows/vars.ts` | 各类型的业务变量 interface（`ctx.params`） |
-| `server/src/workflows/registry.ts` | `(type, impl)` 注册表 |
+| `server/src/workflows/registry.ts` | `(type, impl)` 注册表；`normalizeWorkflowTypeList`（`/api/workflow-types` 的类型清单并集规则） |
 | `server/src/workflow-engine.ts` | 媒体落盘 / 文本写回的产物分支 |
 | `server/src/routes/workflow.ts` | `POST /api/workflow/run` 入参校验（`outputPath` 必填规则在此放宽） |
 | `server/src/canvas/text-result.ts`、`text-history.ts` | 文本产物写回画布（CAS + 路径锁 + 历史规则） |

@@ -90,6 +90,33 @@ export function getAllWorkflowTypes(): string[] {
 }
 
 /**
+ * 归一化「系统支持的工作流类型」清单：内置支持清单 ∪ 已注册键。
+ *
+ * 为什么要并集（而不是直接用注册表键）：注册表只知道**已注册实现**的类型，
+ * 首次配置某个类型时它还没被注册，界面上就选不到该类型（先有鸡还是先有蛋）。
+ * 内置清单保证「所有系统支持的类型恒可选」，注册表补上未来动态新增的类型。
+ * 输出顺序：先按内置清单顺序（排序稳定），未在清单中的动态类型追加在末尾。
+ *
+ * @param supported 内置支持清单（`SUPPORTED_WORKFLOW_TYPES`）
+ * @param registered 注册表当前的类型键（`getAllWorkflowTypes()`）
+ * @returns 去重后的类型清单（内置清单顺序优先）
+ */
+export function normalizeWorkflowTypeList(
+  supported: readonly string[],
+  registered: readonly string[],
+): string[] {
+  // 显式循环（不用 `filter` + `Set.delete` 的布尔返回值写法：该写法依赖
+  // 「delete 未命中返回 false 时元素被过滤掉」的隐含语义，可读性差且实测易踩坑）
+  const known = new Set(supported);
+  const out: string[] = [...supported];
+  for (const type of registered) {
+    // 注册表里不在内置清单中的动态类型：追加在末尾，保证不丢
+    if (!known.has(type)) out.push(type);
+  }
+  return out;
+}
+
+/**
  * 注销一个工作流实现（动态重同步时清理陈旧注册）。
  *
  * @param type 工作流类型

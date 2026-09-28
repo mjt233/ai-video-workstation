@@ -39,6 +39,23 @@ export type WorkflowTypeId =
   | 'image-to-video'
   | 'text-generation';
 
+/**
+ * 系统支持的工作流类型清单（**权威顺序**，与 {@link WorkflowTypeId} 一一对应）。
+ *
+ * 注册表（`workflows/registry.ts`）只知道**已注册实现**的类型键——首次配置
+ * 某个类型时它还没被注册，界面上就选不到该类型（先有鸡还是先有蛋）。
+ * 因此类型下拉的数据源取「本清单 ∪ 注册表键」（见 `GET /api/workflow-types`），
+ * 新增类型时只需在此处与 {@link WorkflowTypeId} 同步加一项。
+ */
+export const SUPPORTED_WORKFLOW_TYPES: readonly WorkflowTypeId[] = [
+  'text-to-image',
+  'image-edit',
+  'tts-voice-design',
+  'tts-voice-clone',
+  'image-to-video',
+  'text-generation',
+];
+
 /** Project-level structured config from design/{project}/project.json */
 export interface ProjectConfig {
   /** 画面宽度（像素），如 1080 */

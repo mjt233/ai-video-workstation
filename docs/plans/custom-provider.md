@@ -50,7 +50,7 @@ export function getBaseCallConfig(ctx: WorkflowCallContext, model: string) {
 功能如下：
 
 1. 填写工作流名称
-2. 选择工作流类型，v-select下拉多选，可选择系统支持的所有工作流类型
+2. 选择工作流类型，v-select下拉多选，可选择系统支持的所有工作流类型（选项来自 `GET /api/workflow-types` = **内置支持清单 ∪ 注册表已注册键**——因此**尚未注册任何实现的类型也会出现在下拉里**，首次配置某类型时不会「选不到 → 永远配不上」；清单与新增类型同步要求见 [../workflows.md](../workflows.md) 第 4 节）
 3. 选择是否异步请求
 4. 配置自定义接口调用与结果提取的TypeScript代码（所有工作流都可中断，「取消调用」代码可选；详见「任务中断」）
 

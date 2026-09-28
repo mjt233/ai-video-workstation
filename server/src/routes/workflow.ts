@@ -3,7 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import * as db from '../db.js';
 import type { TaskRecord } from '../db.js';
 import { getAllWorkflows } from '../workflow-engine.js';
-import { getAllWorkflowTypes, getImpl, unregisterByInstance } from '../workflows/registry.js';
+import { getAllWorkflowTypes, getImpl, normalizeWorkflowTypeList, unregisterByInstance } from '../workflows/registry.js';
+import { SUPPORTED_WORKFLOW_TYPES } from '../workflows/types.js';
 import { normalizeUserParams } from '../workflows/user-params.js';
 import { discoverTasks, type DiscoveredTask } from '../workflows/discovery.js';
 import { stripCancelRequested } from '../workflows/cancel.js';
@@ -338,11 +339,15 @@ workflowRouter.get('/workflows', (_req: Request, res: Response) => {
   res.json({ workflows: getAllWorkflows() });
 });
 
-// GET /api/workflow-types — 系统支持的工作流类型列表（注册表真实键集合）。
-// 供自定义服务商工作流表单的「工作流类型」下拉选项使用；类型键以注册表为准，
-// 未来后端新增类型自动出现在列表中。
+// GET /api/workflow-types — 系统支持的工作流类型列表。
+//
+// 数据源为「内置支持清单 ∪ 注册表真实键集合」（按内置清单顺序稳定输出）：
+// 只返回注册表键会让**首次配置**某类型时选不到它（还没注册 → 下拉里没有 →
+// 永远注册不上，先有鸡还是先有蛋）；只返回清单又会漏掉未来动态新增的类型。
+// 供自定义服务商工作流表单的「工作流类型」下拉与前端兜底清单使用。
 workflowRouter.get('/workflow-types', (_req: Request, res: Response) => {
-  res.json({ types: getAllWorkflowTypes() });
+  const types = normalizeWorkflowTypeList(SUPPORTED_WORKFLOW_TYPES, getAllWorkflowTypes());
+  return void res.json({ types });
 });
 
 /**
@@ -417,9 +422,11 @@ workflowRouter.post('/workflow/run', (req: Request, res: Response) => {
     return;
   }
   const implDef = validated.implDef;
-  // 只有「文本生成」类型可以不传 outputPath（产物是文本，不写 assert/ 文件）；
-  // 其余类型仍必填，避免误传导致任务在引擎里才失败
-  if (!params.outputPath && workflowId !== 'text-generation') {
+  // 只有「文本生成」（text-generation）可以不传 outputPath（产物是文本，不写 assert/ 文件）；
+  // 其余类型仍必填，避免误传导致任务在引擎里才失败。
+  // 判据用**实现声明的类型**（implDef.type，与引擎的 task.workflow_id 同源），
+  // 不让请求体里的 workflowId 决定产物形态
+  if (!params.outputPath && implDef.type !== 'text-generation') {
     res.status(400).json({
       error: 'Missing required fields: project, workflowId, params.outputPath',
       message: '文件产物类工作流必须提供 params.outputPath',

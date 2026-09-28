@@ -1099,7 +1099,7 @@ export async function runTask(taskId: string): Promise<void> {
         method: output.request.method,
         headers: output.request.headers,
       });
-      if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
+      if (!res.ok) throw new Error(`Fetch failed: ${output.request.url} \n${res.status} ${res.statusText}`);
       const buffer = Buffer.from(await res.arrayBuffer());
       await fs.writeFile(assertFullPath, buffer);
     } else if (output.type === 'body') {
