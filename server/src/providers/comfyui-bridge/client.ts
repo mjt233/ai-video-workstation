@@ -140,7 +140,7 @@ async function fetchTextArtifact(
  *
  * - baseUrl / password 来自已解析配置（文件值 > COMFYUI_BRIDGE_URL/COMFYUI_BRIDGE_PASSWORD > 默认值）；
  * - token 缓存按客户端实例持有：配置变更后引擎重新 createClient，即用新配置（含新 token）；
- * - 提交无需认证；poll / getOutput 首次调用时自动登录获取 token。
+ * - 提交无需认证；poll / getOutput / cancel / listWorkflows 等查询类接口首次调用时自动登录获取 token。
  *
  * @param config 已解析的 provider 配置（含 baseUrl / password）
  * @returns ComfyuiBridgeClient
@@ -269,7 +269,12 @@ export function createComfyuiBridgeClient(config: ResolvedProviderConfig): Comfy
     },
 
     async cancel(taskId) {
-      const res = await fetch(`${baseUrl}/api/tasks/${taskId}/cancel`, { method: 'POST' });
+      // Bridge 的取消接口同样要求鉴权（未带 token 会 401 → 中断静默失败：任务照常跑完并落产物）
+      const token = await ensureToken();
+      const res = await fetch(`${baseUrl}/api/tasks/${taskId}/cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`Bridge cancel failed (${res.status}): ${text}`);

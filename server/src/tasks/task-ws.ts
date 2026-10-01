@@ -199,11 +199,21 @@ class TaskWsHub {
       return;
     }
     if (msg.type === 'cancel') {
-      const result = taskRegistry.cancel(taskId);
-      if (!result.ok) {
-        // 任务不存在/已终态/不可中断：向客户端确认（客户端视为已结束，无需报错）
-        this.taskEvent(taskId, { type: 'not-found', taskId });
-      }
+      // 中断结果异步返回（注册表会等待句柄）：失败时向该客户端确认，避免「点了没反应」
+      void taskRegistry
+        .cancel(taskId)
+        .then((result) => {
+          if (!result.ok) {
+            // 任务不存在/已终态/不可中断：向客户端确认（客户端视为已结束，无需报错）
+            this.taskEvent(taskId, { type: 'not-found', taskId });
+          }
+        })
+        .catch((e: unknown) => {
+          // 注册表 cancel 自身不抛错（内部已收敛为 ok=false），此处仅兜底防御
+          console.error(
+            `[task-ws] 中断任务异常（${taskId}）: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        });
       return;
     }
   }

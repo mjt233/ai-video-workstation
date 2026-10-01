@@ -23,14 +23,20 @@ taskRouter.get('/tasks', (req: Request, res: Response) => {
 });
 
 // POST /api/tasks/:taskId/cancel — 统一中断（幂等：任务不存在/已终态返回 404）
-taskRouter.post('/tasks/:taskId/cancel', (req: Request, res: Response) => {
+taskRouter.post('/tasks/:taskId/cancel', async (req: Request, res: Response) => {
   const taskId = String(req.params.taskId ?? '');
   if (!taskId) {
     res.status(400).json({ error: 'taskId 必填', code: 'INVALID' });
     return;
   }
-  const result = taskRegistry.cancel(taskId);
+  const result = await taskRegistry.cancel(taskId);
   if (!result.ok) {
+    // 两种失败语义分开：`failed` = 取消请求本身出错（鉴权/网络/DB 写入，可重试）→ 500；
+    // 否则是语义拒绝（不存在/已结束/不可中断）→ 404。前端统一展示 `error` 文案。
+    if (result.failed) {
+      res.status(500).json({ error: result.reason, code: 'CANCEL_FAILED' });
+      return;
+    }
     res.status(404).json({ error: result.reason, code: 'NOT_CANCELABLE' });
     return;
   }

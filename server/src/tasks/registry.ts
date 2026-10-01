@@ -298,13 +298,17 @@ class TaskRegistry {
   /**
    * 请求中断任务：委托任务句柄（不关心具体执行机制）。
    *
-   * 句柄的 cancel 为异步时**不阻塞调用方**（中断结果由执行器经 finish 收敛）。
-   * 不可中断的任务返回 false 并携带原因，供路由层返回 400。
+   * **等待句柄结果**：句柄 `cancel()` 解析完成即视为「已受理」（终态仍由执行器经 `finish` 收敛，
+   * 如 ffmpeg 的子进程 kill 后由 error 事件收敛、工作流的延迟取消标记等）；句柄抛错则说明
+   * **连取消请求都没能建立**（如 Bridge 鉴权失败、DB 写标记失败），此时返回 `ok:false` + 原因，
+   * 由路由层回给前端提示——不能吞掉：曾经 fire-and-forget 导致「点了中断毫无反应、任务照常
+   * 跑完并落产物」，用户完全看不到失败。
    *
    * @param id 任务 id
-   * @returns ok=true 已受理；否则 ok=false + reason（不存在/已终态/不可中断）
+   * @returns ok=true 已受理；否则 ok=false + reason（不存在/已终态/不可中断/取消失败），
+   *   其中 `failed=true` 表示「取消请求本身出错」（可重试），缺省表示语义拒绝（不可中断）
    */
-  cancel(id: string): { ok: true } | { ok: false; reason: string } {
+  async cancel(id: string): Promise<{ ok: true } | { ok: false; reason: string; failed?: boolean }> {
     const t = this.tasks.get(id);
     if (!t) return { ok: false, reason: '任务不存在或已结束' };
     if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
@@ -313,16 +317,11 @@ class TaskRegistry {
     if (!t.cancelable) return { ok: false, reason: t.cancelBlockReason ?? '该任务不支持中断' };
     if (!t.handle) return { ok: false, reason: '该任务暂不支持中断' };
     try {
-      void Promise.resolve(t.handle.cancel()).catch((e: unknown) => {
-        console.error(
-          `[task-registry] 中断任务失败（${t.type}/${t.id}）: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      });
+      await t.handle.cancel();
     } catch (e) {
-      console.error(
-        `[task-registry] 中断任务异常（${t.type}/${t.id}）: ${e instanceof Error ? e.message : String(e)}`,
-      );
-      return { ok: false, reason: '中断请求失败' };
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[task-registry] 中断任务失败（${t.type}/${t.id}）: ${msg}`);
+      return { ok: false, reason: `中断请求失败：${msg}`, failed: true };
     }
     return { ok: true };
   }
