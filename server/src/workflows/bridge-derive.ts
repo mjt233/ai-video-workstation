@@ -18,19 +18,47 @@ export type BridgeDerivedType =
   | 'text-generation';
 
 /**
- * 预设类型标签 → 系统工作流类型（优先级即数组顺序，靠前命中优先）。
+ * 媒体类类型标签 → 系统工作流类型（**多注册范围**：命中几个就注册几个）。
  *
- * text-generation 放在最后：文本生成工作流可能同时打上其他标签（如自定义分类标签），
- * 让更具体的媒体类型优先命中，避免误判成文本。
+ * 数组顺序即注册顺序与前端展示顺序（与 `SUPPORTED_WORKFLOW_TYPES` 的权威顺序一致）。
+ * 同一个 Bridge 工作流同时打上多个媒体类型标签时（如既打 `text-to-image` 又打
+ * `image-edit`），系统会把它注册到每一个命中的类型下，各类型按各自的字段约定提交。
  */
-const TYPE_TAGS: Array<{ tag: string; type: BridgeDerivedType }> = [
+const MEDIA_TYPE_TAGS: Array<{ tag: string; type: BridgeDerivedType }> = [
   { tag: 'text-to-image', type: 'text-to-image' },
   { tag: 'image-edit', type: 'image-edit' },
   { tag: 'tts-voice-design', type: 'tts-voice-design' },
   { tag: 'tts-voice-clone', type: 'tts-voice-clone' },
   { tag: 'image-to-video', type: 'image-to-video' },
-  { tag: 'text-generation', type: 'text-generation' },
 ];
+
+/**
+ * 文本生成类型标签（与媒体类型**互斥**）。
+ *
+ * 文本生成的产物是文本文件、不落 `assert/`，与媒体链路完全不同，故不参与多注册：
+ * 仅当工作流没有命中任何媒体类型标签时才作为 text-generation 注册。
+ */
+const TEXT_GENERATION_TAG = 'text-generation';
+
+/**
+ * 全部类型标签 → 系统工作流类型（顺序即优先级，靠前命中优先）。
+ *
+ * 供 {@link deriveWorkflowType}（取首个 = 主类型）与曝光全部可推导类型
+ * （{@link ALL_BRIDGE_DERIVED_TYPES}，bridge-sync 清理陈旧注册用）使用。
+ */
+const TYPE_TAGS: Array<{ tag: string; type: BridgeDerivedType }> = [
+  ...MEDIA_TYPE_TAGS,
+  { tag: TEXT_GENERATION_TAG, type: 'text-generation' },
+];
+
+/**
+ * 动态注册可能落在的全部系统工作流类型（顺序与 {@link TYPE_TAGS} 一致）。
+ *
+ * bridge-sync 在每个工作流上先按本清单逐个注销旧注册再重新注册，这样标签
+ * **减少**（如从「文生图 + 图片编辑」改回只有「文生图」）时，旧类型的注册
+ * 也会被清掉，不会留下幽灵实现。
+ */
+export const ALL_BRIDGE_DERIVED_TYPES: readonly BridgeDerivedType[] = TYPE_TAGS.map((t) => t.type);
 
 /**
  * Bridge 图片/视频类工作流的统一尺寸能力声明（文生图 / 图片编辑 / 图生视频）。
@@ -58,21 +86,40 @@ export function collectTagIds(tags: BridgeTagGroup[]): string[] {
 }
 
 /**
- * 从工作流标签推导系统工作流类型。
+ * 从工作流标签推导**全部**应注册的系统工作流类型（多类型注册的权威实现）。
  *
- * 按 TYPE_TAGS 优先级顺序，在工作流打上的全部标签（父 + 子）中查找匹配；
- * 未知类型（如 text-to-video）返回 null，由调用方跳过并告警。
- * 文本生成工作流打 `text-generation` 标签（优先级最低，不抢占媒体类型）。
+ * 规则：
+ * - 按 {@link MEDIA_TYPE_TAGS} 顺序收集全部命中的**媒体类型**（一个工作流可同时是
+ *   文生图与图片编辑等，全部都要注册，各类型按各自的字段约定提交）；
+ * - **媒体类型优先且与文本生成互斥**：只要命中任一媒体类型，就不再注册 text-generation
+ *   （文本产物不落 `assert/`，与媒体链路完全不同，同时注册会被误用）；
+ * - 未命中任何媒体类型时，命中 `text-generation` 标签才返回该类型；
+ * - 无任何命中（含未知类型标签如 `text-to-video`）返回空数组，由调用方跳过并告警。
  *
  * @param tags Bridge 工作流详情返回的标签分组数组
- * @returns 匹配的系统工作流类型；无匹配返回 null
+ * @returns 命中的系统工作流类型数组（按优先级顺序；无匹配返回空数组）
+ */
+export function deriveWorkflowTypes(tags: BridgeTagGroup[]): BridgeDerivedType[] {
+  const ids = new Set(collectTagIds(tags));
+  const types: BridgeDerivedType[] = [];
+  for (const { tag, type } of MEDIA_TYPE_TAGS) {
+    if (ids.has(tag)) types.push(type);
+  }
+  if (types.length > 0) return types;
+  return ids.has(TEXT_GENERATION_TAG) ? ['text-generation'] : [];
+}
+
+/**
+ * 从工作流标签推导**主**系统工作流类型（多类型标签时为优先级最高的那个）。
+ *
+ * 等价于 {@link deriveWorkflowTypes} 的首项；保留本函数供只需单一类型标识的
+ * 调用方（服务商实时工作流列表的类型 chip）使用。
+ *
+ * @param tags Bridge 工作流详情返回的标签分组数组
+ * @returns 主系统工作流类型；无匹配返回 null
  */
 export function deriveWorkflowType(tags: BridgeTagGroup[]): BridgeDerivedType | null {
-  const ids = new Set(collectTagIds(tags));
-  for (const { tag, type } of TYPE_TAGS) {
-    if (ids.has(tag)) return type;
-  }
-  return null;
+  return deriveWorkflowTypes(tags)[0] ?? null;
 }
 
 /**
@@ -104,7 +151,8 @@ function tagMetadata(tags: BridgeTagGroup[], id: string): Record<string, unknown
  * - cancelable 恒 true（Bridge 支持中断）。
  *
  * @param tags Bridge 工作流详情返回的标签分组数组
- * @param type 由 deriveWorkflowType 推导出的系统工作流类型
+ * @param type 由 deriveWorkflowTypes 推导出的某一系统工作流类型（多类型注册时逐类型调用，
+ *   尺寸能力与视频模式均按该类型推导）
  * @returns 能力声明对象
  */
 export function deriveCapabilities(tags: BridgeTagGroup[], type: string): WorkflowCapabilities {

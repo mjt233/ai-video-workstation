@@ -70,7 +70,10 @@ export interface ProviderInstanceInfo {
 export interface ProviderWorkflowEntry {
   key: string
   name: string
+  /** 主工作流类型（多类型注册时为优先级最高的那个；兼容旧响应） */
   type?: string
+  /** 工作流注册到的全部类型（多类型注册；缺省时按 [type] 兜底） */
+  types?: string[]
   description?: string
 }
 

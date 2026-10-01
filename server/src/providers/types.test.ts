@@ -56,4 +56,18 @@ describe('Provider 类型定义（多实例扩展）', () => {
     expect(entry.type).toBeUndefined();
     expect(entry.description).toBeUndefined();
   });
+
+  it('ProviderWorkflowEntry 支持多类型注册（types 完整清单 + type 为首个主类型）', () => {
+    const entry: ProviderWorkflowEntry = {
+      key: 'ceb-multi',
+      name: '双类型工作流',
+      type: 'text-to-image',
+      types: ['text-to-image', 'image-edit'],
+    };
+    expect(entry.type).toBe('text-to-image');
+    expect(entry.types).toEqual(['text-to-image', 'image-edit']);
+    // types 为可选字段：单类型条目可只填 type
+    const single: ProviderWorkflowEntry = { key: 'ceb-single', name: '单类型', type: 'image-edit' };
+    expect(single.types).toBeUndefined();
+  });
 });

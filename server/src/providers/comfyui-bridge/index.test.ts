@@ -33,6 +33,7 @@ describe('comfyui-bridge 插件定义', () => {
         ok: true,
         json: async () => ([
           { id: 'text_to_image', name: '文生图', description: '文生图工作流', declaredParams: '[]', tags: [{ id: 'text-to-image', tags: [] }] },
+          { id: 'multi', name: '双类型', description: undefined, declaredParams: '[]', tags: [{ id: 'text-to-image', tags: [] }, { id: 'image-edit', tags: [] }] },
           { id: 'tts-1', name: '', description: undefined, declaredParams: '[]', tags: [] },
         ]),
       });
@@ -42,9 +43,11 @@ describe('comfyui-bridge 插件定义', () => {
     expect(def).toBeDefined();
     const entries = await def!.listWorkflows({ baseUrl: 'http://bridge', password: 'pwd' });
 
-    // 带 text-to-image 标签的工作流推导出类型（供前端类型 v-chip 使用），未知标签不带 type
+    // 带类型标签的工作流推导出类型（供前端类型 v-chip 使用）：单类型只带 type，
+    // 多类型带完整 types（type 为首个主类型兼容旧消费端），未知标签两者都不带
     expect(entries).toEqual([
-      { key: 'ceb-text_to_image', name: '文生图', type: 'text-to-image', description: '文生图工作流' },
+      { key: 'ceb-text_to_image', name: '文生图', type: 'text-to-image', types: ['text-to-image'], description: '文生图工作流' },
+      { key: 'ceb-multi', name: '双类型', type: 'text-to-image', types: ['text-to-image', 'image-edit'], description: undefined },
       { key: 'ceb-tts-1', name: 'tts-1', description: undefined },
     ]);
     vi.unstubAllGlobals();

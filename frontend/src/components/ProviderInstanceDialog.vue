@@ -236,13 +236,14 @@
             class="d-flex align-center py-1"
           >
             <v-chip
-              v-if="wf.type"
-              :color="workflowTypeColor(wf.type)"
+              v-for="t in workflowEntryTypes(wf)"
+              :key="t"
+              :color="workflowTypeColor(t)"
               size="x-small"
               variant="tonal"
               class="mr-2"
             >
-              {{ workflowTypeLabel(wf.type) }}
+              {{ workflowTypeLabel(t) }}
             </v-chip>
             <span class="text-body-2">{{ wf.name }}</span>
           </div>
@@ -289,7 +290,7 @@ import {
   type ProviderWorkflowEntry,
 } from '../api/providers'
 import { resolveProviderFieldComponent } from './provider-fields'
-import { workflowTypeColor, workflowTypeLabel } from '../utils/workflow-types'
+import { workflowEntryTypes, workflowTypeColor, workflowTypeLabel } from '../utils/workflow-types'
 import { confirm } from '../utils/confirm'
 
 const props = defineProps<{

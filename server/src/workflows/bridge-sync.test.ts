@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getCandidatesByProvider, getImpl, getImplementations, unregister, register } from './registry.js';
+import { getCandidatesByProvider, getImpl, getImplementations, unregister, register, unregisterByInstance } from './registry.js';
 import { syncBridgeInstance, buildSubmit } from './bridge-sync.js';
+import { ALL_BRIDGE_DERIVED_TYPES } from './bridge-derive.js';
 import type { BridgeWorkflowDetail, BridgeWorkflowSummary } from '../providers/comfyui-bridge/client.js';
 import type { ProviderInstance } from '../providers/types.js';
 import type { WorkflowCapabilities, WorkflowDefinition } from './types.js';
@@ -50,8 +51,10 @@ beforeEach(() => {
   // vi.clearAllMocks 不清除 mockConfig 的字段变更，显式复位 autoRegisterTag
   mockConfig.autoRegisterTag = 'auto';
   vi.clearAllMocks();
-  // 清空动态注册（测试隔离）：可执行 + 候选
-  for (const t of ['text-to-image', 'image-edit', 'tts-voice-design', 'image-to-video']) {
+  // 清空动态注册（测试隔离）：可执行 + 候选。
+  // 类型清单取 ALL_BRIDGE_DERIVED_TYPES（含 tts-voice-clone / text-generation）：
+  // 多类型注册后旧清单会漏清，导致跨用例串测。
+  for (const t of ALL_BRIDGE_DERIVED_TYPES) {
     for (const w of getImplementations(t)) unregister(t, w.impl);
   }
   for (const w of getCandidatesByProvider('comfyui-bridge')) unregister(w.type, w.impl);
@@ -131,6 +134,120 @@ describe('syncBridgeInstance', () => {
     (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('tv', 'text-to-video')]);
     await syncBridgeInstance(mkInstance());
     expect(getImpl('text-to-video', 'ceb-inst-1-tv')).toBeUndefined();
+  });
+
+  it('多类型标签：命中的每个类型各注册一份（同 impl / 同 workflowKey，submit 按类型分派）', async () => {
+    const multiTags = [
+      { id: 'text-to-image', metadata: {}, tags: [] },
+      { id: 'image-edit', metadata: {}, tags: [] },
+    ];
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('multi', 'text-to-image')]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail({ id: 'multi', name: '双类型', tags: multiTags }));
+    await syncBridgeInstance(mkInstance());
+
+    const t2i = getImpl('text-to-image', 'ceb-inst-1-multi');
+    const edit = getImpl('image-edit', 'ceb-inst-1-multi');
+    expect(t2i).toBeDefined();
+    expect(edit).toBeDefined();
+    // 两个类型共用同一 impl（画布节点切换类型后已存 impl 仍有效）与同一清理键 workflowKey
+    expect(t2i!.impl).toBe('ceb-inst-1-multi');
+    expect(edit!.impl).toBe('ceb-inst-1-multi');
+    expect(edit!.workflowKey).toBe('ceb-multi');
+    expect(edit!.providerInstanceId).toBe('inst-1');
+    // 能力各自按类型推导（两者都声明统一尺寸能力）
+    expect(t2i!.capabilities?.size).toBeDefined();
+    expect(edit!.capabilities?.size).toBeDefined();
+
+    // 文生图提交：读 promptPath，不携带文件
+    const executeT2i = vi.fn(async () => ({ taskId: 't' }));
+    await t2i!.submit({
+      vars: { promptPath: 'p.md' },
+      projectConfig: { width: 1080, height: 1920 },
+      readFile: async () => '一只猫',
+      provider: { execute: executeT2i },
+    } as never);
+    expect(executeT2i).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: 'multi',
+      params: expect.objectContaining({ prompt: '一只猫' }),
+    }));
+
+    // 图片编辑提交：读 imagePaths 并以 image_0 上传
+    const executeEdit = vi.fn(async () => ({ taskId: 't' }));
+    await edit!.submit({
+      vars: { prompt: '改成夜景', imagePaths: '["assert/a.png"]' },
+      projectConfig: { width: 1080, height: 1920 },
+      readAssertFile: async () => new File([], 'a.png'),
+      provider: { execute: executeEdit },
+      userParams: {},
+    } as never);
+    expect(executeEdit).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: 'multi',
+      files: expect.objectContaining({ image_0: expect.anything() }),
+    }));
+  });
+
+  it('多类型注册幂等：重复同步时每个类型各保留 1 条', async () => {
+    const multiTags = [
+      { id: 'text-to-image', metadata: {}, tags: [] },
+      { id: 'image-edit', metadata: {}, tags: [] },
+    ];
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('multi', 'text-to-image')]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail({ id: 'multi', tags: multiTags }));
+    await syncBridgeInstance(mkInstance());
+    await syncBridgeInstance(mkInstance());
+    expect(getImplementations('text-to-image').filter((w) => w.impl === 'ceb-inst-1-multi')).toHaveLength(1);
+    expect(getImplementations('image-edit').filter((w) => w.impl === 'ceb-inst-1-multi')).toHaveLength(1);
+  });
+
+  it('标签缩减后重同步：旧类型的注册被清理（不留幽灵实现）', async () => {
+    const multiTags = [
+      { id: 'text-to-image', metadata: {}, tags: [] },
+      { id: 'image-edit', metadata: {}, tags: [] },
+    ];
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('multi', 'text-to-image')]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail({ id: 'multi', tags: multiTags }));
+    await syncBridgeInstance(mkInstance());
+    expect(getImpl('image-edit', 'ceb-inst-1-multi')).toBeDefined();
+
+    // 第二次：远程工作流只剩 text-to-image 标签 → image-edit 下的注册必须消失
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail({ id: 'multi' }));
+    await syncBridgeInstance(mkInstance());
+    expect(getImpl('text-to-image', 'ceb-inst-1-multi')).toBeDefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-multi')).toBeUndefined();
+  });
+
+  it('text-generation 与媒体类型互斥：双标签只注册媒体类型', async () => {
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('multi', 'text-to-image')]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail({
+      id: 'multi',
+      tags: [
+        { id: 'text-generation', metadata: {}, tags: [] },
+        { id: 'text-to-image', metadata: {}, tags: [] },
+      ],
+    }));
+    await syncBridgeInstance(mkInstance());
+    expect(getImpl('text-to-image', 'ceb-inst-1-multi')).toBeDefined();
+    expect(getImpl('text-generation', 'ceb-inst-1-multi')).toBeUndefined();
+  });
+
+  it('unregisterByInstance：workflowKey 命中时全部类型的注册都保留，否则全部清掉', async () => {
+    const multiTags = [
+      { id: 'text-to-image', metadata: {}, tags: [] },
+      { id: 'image-edit', metadata: {}, tags: [] },
+    ];
+    (mockClient.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([summary('multi', 'text-to-image')]);
+    (mockClient.getWorkflowDetail as ReturnType<typeof vi.fn>).mockResolvedValue(detail({ id: 'multi', tags: multiTags }));
+    await syncBridgeInstance(mkInstance());
+
+    // keepKeys 命中 ceb-{bridgeId}（与类型无关）→ 两个类型的注册都保留
+    unregisterByInstance('inst-1', new Set(['ceb-multi']));
+    expect(getImpl('text-to-image', 'ceb-inst-1-multi')).toBeDefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-multi')).toBeDefined();
+
+    // keepKeys 为空 → 两个类型的注册都被清掉
+    unregisterByInstance('inst-1', new Set());
+    expect(getImpl('text-to-image', 'ceb-inst-1-multi')).toBeUndefined();
+    expect(getImpl('image-edit', 'ceb-inst-1-multi')).toBeUndefined();
   });
 
   it('重同步幂等：同一工作流不会重复注册', async () => {

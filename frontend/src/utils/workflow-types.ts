@@ -55,6 +55,21 @@ export const FALLBACK_WORKFLOW_TYPES: string[] = [
 ]
 
 /**
+ * 取工作流条目应展示的全部类型（多类型注册时并排渲染多个 chip）。
+ *
+ * 优先使用 `types`（多类型注册的完整清单，如 Bridge 同时打文生图 + 图片编辑标签）；
+ * 旧响应或单类型条目回退为 `[type]`；两者都缺失（类型推导失败）时返回空数组，
+ * 调用方据此不渲染任何 chip。入参按结构类型声明（不依赖 API 层类型定义）。
+ *
+ * @param entry 工作流条目（含可选 type / types，如 ProviderWorkflowEntry）
+ * @returns 类型 id 数组（保持输入顺序；可能为空数组）
+ */
+export function workflowEntryTypes(entry: { type?: string; types?: string[] }): string[] {
+  if (entry.types && entry.types.length > 0) return entry.types
+  return entry.type ? [entry.type] : []
+}
+
+/**
  * 把工作流类型值规范为类型 id。
  *
  * 兼容旧数据：Vuetify 纯字符串 items + 函数 item-title 曾把中文标签写回

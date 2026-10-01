@@ -7,9 +7,16 @@ import type {
   BridgeWorkflowSummary,
   ComfyuiBridgeClient,
 } from '../providers/comfyui-bridge/client.js';
-import { registerOrReplace, unregisterByInstance } from './registry.js';
-import { deriveCapabilities, deriveParams, deriveWorkflowType, type BridgeDerivedType } from './bridge-derive.js';
-import { resolveOutputSize, resolveSpecifiedGate } from './size.js';import {
+import { register, unregister, unregisterByInstance } from './registry.js';
+import {
+  ALL_BRIDGE_DERIVED_TYPES,
+  deriveCapabilities,
+  deriveParams,
+  deriveWorkflowTypes,
+  type BridgeDerivedType,
+} from './bridge-derive.js';
+import { resolveOutputSize, resolveSpecifiedGate } from './size.js';
+import {
   buildDirectorPayload,
   buildFirstLastFramePayload,
   buildImageEditPayload,
@@ -32,7 +39,12 @@ import type {
 /** ComfyUI Bridge Provider 插件 id */
 const PROVIDER_ID = 'comfyui-bridge';
 
-/** 动态注册实现标识前缀：impl = ceb-{instanceId}-{bridgeId}，workflowKey = ceb-{bridgeId} */
+/**
+ * 动态注册实现标识前缀：impl = ceb-{instanceId}-{bridgeId}，workflowKey = ceb-{bridgeId}。
+ *
+ * 同一工作流命中多个类型时**共用同一个 impl**（impl 不含类型信息），
+ * 类型由注册表键 `(type, impl)` 的组合体现。
+ */
 const IMPL_PREFIX = 'ceb-';
 
 /** text-to-image 提交按结构字段处理的用户参数键（从透传排除） */
@@ -413,59 +425,77 @@ export function buildSubmit(
 }
 
 /**
- * 从详情构建并注册一个动态工作流定义（替换语义，按实例）。
+ * 从详情构建并注册该工作流命中的**全部**类型定义（每个类型一份，替换语义）。
  *
- * 类型推导失败（未知类型）时告警并返回 null，由调用方跳过；对同 (type, impl)
- * 先注销旧定义再注册（registerOrReplace），保证重同步刷新
- * name/params/capabilities 且不会重复注册。
+ * **多类型注册**：Bridge 工作流可同时打多个媒体类型标签（如 `text-to-image` +
+ * `image-edit`），系统按 `deriveWorkflowTypes` 的结果在**每个类型下各注册一份**实现：
+ * 各类型用各自的 submit（文生图读 promptPath、图片编辑读 imagePaths）与各自推导的能力
+ * 声明，用户在每个类型的实现下拉里都能选到它，不再「只注册优先级最高的那一个」。
+ *
+ * 类型推导失败（未知类型）时告警并返回 null，由调用方跳过。
+ *
+ * 清理策略：注册前先把本实现的旧注册从**全部** Bridge 可推导类型下注销（跨类型清理），
+ * 覆盖「标签减少」场景（上次注册了 image-edit、这次只剩 text-to-image 时旧类型不留幽灵）；
+ * 同一类型内仍是「先注销再注册」，保证重同步刷新 name/params/capabilities 且不重复注册。
  *
  * 系统注册键 impl = ceb-{instanceId}-{bridgeId}（ceb- 前缀防止与其它提供商工作流 id
- * 冲突，实例 id 保证多实例下全局唯一）；workflowKey = ceb-{bridgeId} 为不含实例的
- * 基键，供 unregisterByInstance 清理。
+ * 冲突，实例 id 保证多实例下全局唯一；**多个类型共用同一个 impl**，画布节点在两个类型间
+ * 切换后已保存的 workflowImpl 仍然有效）；workflowKey = ceb-{bridgeId} 为不含实例的
+ * 基键，供 unregisterByInstance 清理——它与类型无关，故一个键即可覆盖该工作流的全部注册。
  *
  * @param detail Bridge 工作流详情（含解析后的 params/declaredParams 与 tags）
  * @param tagId 自动注册标签 id（expose_field 元数据来源；可为空串）
  * @param instance 服务商实例（决定 impl 前缀与 providerInstanceId/providerName）
- * @returns 注册键（{type}:{impl}）；未知类型返回 null
+ * @returns 注册键数组（`{type}:{impl}`，顺序同类型优先级）；未知类型返回 null
  */
 function buildAndRegister(
   detail: BridgeWorkflowDetail,
   tagId: string,
   instance: ProviderInstance,
-): string | null {
-  const type = deriveWorkflowType(detail.tags);
-  if (!type) {
+): string[] | null {
+  const types = deriveWorkflowTypes(detail.tags);
+  if (types.length === 0) {
     console.warn(`[bridge-sync] 跳过未知类型工作流: ${detail.id}（tags=${JSON.stringify(detail.tags)}）`);
     return null;
   }
   const bridgeId = detail.id;
   // 工作流基键（不含实例 id）：ceb-{bridgeId}，作为系统的 workflowKey 与清理依据
   const workflowKey = `${IMPL_PREFIX}${bridgeId}`;
-  // 系统注册键：impl = ceb-{instanceId}-{bridgeId}（实例 id 保证多实例下全局唯一）
+  // 系统注册键：impl = ceb-{instanceId}-{bridgeId}（实例 id 保证多实例下全局唯一；多类型共用）
   const impl = `${IMPL_PREFIX}${instance.id}-${bridgeId}`;
-  const caps = deriveCapabilities(detail.tags, type);
   const expose = exposeFieldOf(detail.tags, tagId);
   // expose_field 字段信息：params 优先（工作流固定参数字段），declaredParams 兜底；
   // 工作流定义含 seed 时 deriveParams 会额外暴露（默认空，空值由引擎注入）；
   // providerId 为 Bridge 执行接口保留键（本次执行提供商），不作为用户参数暴露，
-  // 防止 expose_field 声明同名字段时与系统「ComfyUI 提供商」选择语义冲突
+  // 防止 expose_field 声明同名字段时与系统「ComfyUI 提供商」选择语义冲突。
+  // 用户参数声明与类型无关：多类型注册时只推导一次，保证各类型下表单完全一致
   const params = deriveParams(expose, detail.params, detail.declaredParams)
     .filter((d) => d.key !== 'providerId');
-  const def: WorkflowDefinition = {
-    type, impl, name: detail.name || detail.id,
-    description: detail.description || undefined,
-    provider: PROVIDER_ID,
-    providerInstanceId: instance.id,
-    providerName: instance.name,
-    workflowKey,
-    params,
-    capabilities: caps,
-    // 提交载荷使用 Bridge 原始工作流 id（不含 ceb- 前缀）；前缀仅存在于系统注册键 impl
-    submit: buildSubmit(bridgeId, type, caps),
-  };
-  // 替换语义：先注销旧定义再注册，保证重同步刷新 name/params/capabilities 且不重复
-  registerOrReplace(def);
-  return `${type}:${impl}`;
+  // 跨类型清理旧注册：标签减少（多类型 → 少类型）时旧类型的实现必须一起注销
+  for (const t of ALL_BRIDGE_DERIVED_TYPES) unregister(t, impl);
+  const keys: string[] = [];
+  for (const type of types) {
+    // 能力按类型各自推导：尺寸能力（t2i / image-edit / image-to-video）与视频模式（仅 i2v）
+    const caps = deriveCapabilities(detail.tags, type);
+    const def: WorkflowDefinition = {
+      type, impl, name: detail.name || detail.id,
+      description: detail.description || undefined,
+      provider: PROVIDER_ID,
+      providerInstanceId: instance.id,
+      providerName: instance.name,
+      workflowKey,
+      params,
+      capabilities: caps,
+      // 提交载荷使用 Bridge 原始工作流 id（不含 ceb- 前缀）；前缀仅存在于系统注册键 impl
+      submit: buildSubmit(bridgeId, type, caps),
+    };
+    register(def);
+    keys.push(`${type}:${impl}`);
+  }
+  if (keys.length > 1) {
+    console.log(`[bridge-sync] 工作流 ${bridgeId} 命中 ${keys.length} 个类型，已全部注册: ${types.join(', ')}`);
+  }
+  return keys;
 }
 
 /**
@@ -476,7 +506,7 @@ function buildAndRegister(
  * 1. 用 resolveInstanceConfig(instance) 解析实例配置，getProvider(instance.type) 创建 client；
  * 2. 取 autoRegisterTag；非空按标签筛选列表，空则拉取全部；
  * 3. 对列表内每个工作流：拉详情 → buildAndRegister 注册（impl=ceb-{instanceId}-{bridgeId}，
- *    默认全量可用，不做启用过滤）；
+ *    命中几个类型就在几个类型下各注册一份，默认全量可用，不做启用过滤）；
  * 4. 以本次列表的 ceb- 键集合为 keepKeys 调用 unregisterByInstance 清理陈旧注册
  *    （该实例下远程列表已消失的工作流被注销）；
  * 5. 列表拉取失败（Bridge 不可达 / 鉴权失败）：记 error，保留既有注册不清空；

@@ -153,6 +153,14 @@ export interface ProviderWorkflowEntry {
   name: string;
   /** 工作流类型（text-to-image / image-edit / image-to-video / tts-*）；Bridge 可在同步时推导 */
   type?: string;
+  /**
+   * 工作流注册到的全部类型（多类型注册时用）。
+   *
+   * 同一工作流可同时命中多个类型（Bridge 多标签、自定义服务商 `types: []`），
+   * 此时 `type` 为首个（主类型，向后兼容旧消费端），本字段给出完整清单供前端并排展示。
+   * 单类型工作流可只填 `type`，消费端按 `types ?? [type]` 兜底。
+   */
+  types?: string[];
   /** 可选描述 */
   description?: string;
 }

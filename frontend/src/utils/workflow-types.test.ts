@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   FALLBACK_WORKFLOW_TYPES,
   normalizeWorkflowType,
+  workflowEntryTypes,
   workflowTypeColor,
   workflowTypeLabel,
   WORKFLOW_TYPE_META,
@@ -47,5 +48,17 @@ describe('workflow-type 工具', () => {
     ])
     // 兜底类型清单与元信息表保持一致（下拉拉取失败时仍能展示中文标签）
     expect(Object.keys(WORKFLOW_TYPE_META).sort()).toEqual([...FALLBACK_WORKFLOW_TYPES].sort())
+  })
+
+  it('workflowEntryTypes：多类型条目返回完整清单（并排多 chip）', () => {
+    expect(workflowEntryTypes({ type: 'text-to-image', types: ['text-to-image', 'image-edit'] }))
+      .toEqual(['text-to-image', 'image-edit'])
+  })
+
+  it('workflowEntryTypes：单类型 / 旧响应回退 [type]，无类型返回空数组', () => {
+    expect(workflowEntryTypes({ type: 'image-edit' })).toEqual(['image-edit'])
+    // 空数组视为未声明，回退 type（服务端恒不返回空数组，这里做防御）
+    expect(workflowEntryTypes({ type: 'image-edit', types: [] })).toEqual(['image-edit'])
+    expect(workflowEntryTypes({})).toEqual([])
   })
 })

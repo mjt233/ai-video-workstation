@@ -25,6 +25,8 @@
 **类型（type）≠ 实现（impl）**：一个类型下可注册多个实现，注册表以 `(type, impl)` 为键。
 例：`image-to-video` 下有 `ltx`、`minimax-h3-r2v` 等实现；每个实现由某个服务商实例注册（`WorkflowBaseDefinition` 的 `type` / `impl` / `provider` / `providerInstanceId` / `workflowKey`）。
 
+**同一个实现也可注册在多个类型下**：ComfyUI Easy Bridge 工作流同时打多个媒体类型标签（如 `text-to-image` + `image-edit`）时，会在命中的**每个类型下各注册一份**，且**共用同一个 impl**（`ceb-{instanceId}-{bridgeId}`）；`workflowKey`（`ceb-{bridgeId}`）与类型无关，故 `unregisterByInstance` 用一个键即可清理该工作流的全部类型注册。自定义服务商的单条目多类型（`types: []`）同理。服务商配置页对这类工作流并排显示多个类型 chip（`ProviderWorkflowEntry.types`，`type` 为首个主类型）。标签→类型的推导与互斥规则见 [bridge-config-doc.md](./bridge-config-doc.md) 步骤2。
+
 历史遗留：`character-appearance` / `character-voice` / `stage-image` / `scene-tts` / `scene-stage-image` / `video-generate` 是**按资产类型命名的旧工作流 id**（仍用于分镜/角色的批量生成与输出路径约定，见 [asset-layout.md](./asset-layout.md) 第 6 节），与上表的「执行类型」是两套命名，不要混用。
 
 ---
@@ -92,7 +94,7 @@
 | 4 | `server/src/providers/custom/types.ts` 的 `CUSTOM_WORKFLOW_TYPES` | 加类型 id（自定义服务商保存校验的白名单） |
 | 5 | `frontend/src/utils/workflow-types.ts` | 加中文标签 / 颜色（`WORKFLOW_TYPE_META`）与兜底清单（`FALLBACK_WORKFLOW_TYPES`） |
 | 6 | `frontend/src/utils/custom-provider.ts` | 脚本类型提示：`PARAM_INTERFACES` + `PARAM_INTERFACE_NAMES` + 插入模板 |
-| 7 | `server/src/workflows/bridge-derive.ts` | Bridge 标签 → 类型的推导（如需，注意优先级：媒体类型优先、`text-generation` 最低） |
+| 7 | `server/src/workflows/bridge-derive.ts` | Bridge 标签 → 类型的推导（如需；媒体类型可**多注册**，`text-generation` 与媒体类型互斥） |
 
 补充约定：
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveWorkflowType, deriveCapabilities, deriveParams } from './bridge-derive.js';
+import { deriveWorkflowType, deriveWorkflowTypes, deriveCapabilities, deriveParams } from './bridge-derive.js';
 import type { BridgeDeclaredParam, BridgeTagGroup } from '../providers/comfyui-bridge/client.js';
 
 const group = (id: string, children: BridgeTagGroup[] = [], metadata: Record<string, unknown> = {}): BridgeTagGroup => ({ id, metadata, tags: children });
@@ -32,6 +32,42 @@ describe('deriveWorkflowType', () => {
   });
   it('空标签 → null', () => {
     expect(deriveWorkflowType([])).toBeNull();
+  });
+});
+
+describe('deriveWorkflowTypes（多类型注册）', () => {
+  it('同时打文生图与图片编辑标签 → 两个类型都返回（顺序按类型优先级，与标签顺序无关）', () => {
+    expect(deriveWorkflowTypes([group('image-edit'), group('text-to-image')]))
+      .toEqual(['text-to-image', 'image-edit']);
+  });
+  it('多个媒体类型标签 → 全部返回且按优先级排序', () => {
+    expect(deriveWorkflowTypes([group('image-to-video'), group('tts-voice-design'), group('text-to-image')]))
+      .toEqual(['text-to-image', 'tts-voice-design', 'image-to-video']);
+  });
+  it('重复标签只返回一次', () => {
+    expect(deriveWorkflowTypes([group('text-to-image'), group('text-to-image')]))
+      .toEqual(['text-to-image']);
+  });
+  it('父标签的子标签同样命中（子标签打类型标签）', () => {
+    expect(deriveWorkflowTypes([group('auto', [group('text-to-image'), group('image-edit')])]))
+      .toEqual(['text-to-image', 'image-edit']);
+  });
+  it('媒体类型与 text-generation 互斥：命中媒体类型时不含 text-generation', () => {
+    expect(deriveWorkflowTypes([group('text-generation'), group('image-edit')]))
+      .toEqual(['image-edit']);
+    expect(deriveWorkflowTypes([group('text-to-image'), group('image-to-video')]))
+      .toEqual(['text-to-image', 'image-to-video']);
+  });
+  it('仅 text-generation 标签 → 文本生成（媒体类型未命中）', () => {
+    expect(deriveWorkflowTypes([group('text-generation')])).toEqual(['text-generation']);
+  });
+  it('未知类型 / 空标签 → 空数组', () => {
+    expect(deriveWorkflowTypes([group('text-to-video')])).toEqual([]);
+    expect(deriveWorkflowTypes([])).toEqual([]);
+  });
+  it('deriveWorkflowType 恒取首项（主类型）', () => {
+    const tags = [group('image-edit'), group('text-to-image')];
+    expect(deriveWorkflowType(tags)).toBe(deriveWorkflowTypes(tags)[0]);
   });
 });
 
