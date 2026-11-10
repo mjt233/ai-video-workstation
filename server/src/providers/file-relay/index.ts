@@ -4,17 +4,21 @@
  * 「文件中转」把项目内本地文件上传到公网可访问的存储并换取 URL，供需要公网地址的
  * 媒体输入使用（目前唯一使用方是 AI 文本生成节点的视频输入：`video_url` 只接受公网 URL）。
  *
- * 本服务商：
- * - 固定一个提供商类型「自定义脚本」（id `file-relay-script`），脚本契约见 runtime.ts；
+ * 本服务商分类包含两个提供商类型：
+ * - 「自定义脚本」（id `file-relay-script`）：用户编写脚本，脚本契约见 runtime.ts；
+ * - 「咸鱼云网盘」（id `xianyu-disk`，见 xianyu-disk.ts）：内置咸鱼云快速分享上传脚本，只需填网盘地址。
+ *
+ * 两者共同约定：
  * - 不注册任何工作流：`listWorkflows` 恒为空，`createClient` 返回防御性 unsupported 客户端；
- * - 保存前用 `validateFileRelayConfig` 编译脚本（语法 + export default 函数）；
- * - 连接测试用内置约 1KB 测试文件**真实执行**一次脚本并校验返回 http(s) URL。
+ * - 保存前做配置校验（自定义脚本编译脚本；咸鱼云校验网盘地址）；
+ * - 连接测试用内置小测试文件**真实执行**一次上传并校验返回 http(s) URL。
  *
  * 多实例：运行时取第一个 `enabled !== false` 的实例（见 service.ts）。
  */
 import { registerProvider } from '../registry.js';
 import type { ProviderClient, ProviderDefinition, ResolvedProviderConfig } from '../types.js';
 import { compileCustomCodeModule } from '../custom/runtime.js';
+import './xianyu-disk.js';
 import {
   DEFAULT_FILE_RELAY_TIMEOUT_SECONDS,
   createInMemoryFileRelayFile,

@@ -29,6 +29,7 @@ import type { ProviderConfigValue, ProviderDefinition } from '../providers/types
 import { syncInstance } from '../providers/instance-sync.js';
 import { CUSTOM_PROVIDER_ID, validateCustomProviderConfig } from '../providers/custom/index.js';
 import { FILE_RELAY_SCRIPT_PROVIDER_ID, validateFileRelayConfig } from '../providers/file-relay/index.js';
+import { XIANYU_DISK_PROVIDER_ID, validateXianyuDiskConfig } from '../providers/file-relay/xianyu-disk.js';
 import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities, WorkflowDefinition, WorkflowSizeConfig } from '../workflows/types.js';
 
@@ -165,6 +166,14 @@ workflowRouter.post('/providers/instances', async (req: Request, res: Response) 
       return;
     }
   }
+  // 咸鱼云网盘文件中转：保存前校验网盘地址（必填且为合法 http(s) 地址）
+  if (type === XIANYU_DISK_PROVIDER_ID) {
+    const errors = validateXianyuDiskConfig(config);
+    if (errors.length > 0) {
+      res.status(400).json({ error: '咸鱼云网盘配置校验失败：\n' + errors.join('\n') });
+      return;
+    }
+  }
   try {
     const instance = await createInstance({ type, name, config });
     await syncInstance(instance);
@@ -198,6 +207,14 @@ workflowRouter.put('/providers/instances/:id', async (req: Request, res: Respons
       const errors = validateFileRelayConfig(merged);
       if (errors.length > 0) {
         res.status(400).json({ error: '文件中转配置校验失败：\n' + errors.join('\n') });
+        return;
+      }
+    } else if (existing && existing.type === XIANYU_DISK_PROVIDER_ID) {
+      // 咸鱼云网盘：更新可能只提交部分配置（如只改名称），与已保存值合并后校验网盘地址
+      const merged = { ...existing.config, ...(config as Record<string, unknown>) };
+      const errors = validateXianyuDiskConfig(merged);
+      if (errors.length > 0) {
+        res.status(400).json({ error: '咸鱼云网盘配置校验失败：\n' + errors.join('\n') });
         return;
       }
     }

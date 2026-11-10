@@ -198,6 +198,15 @@
           class="mt-2"
           text="测试连接会真实上传一个测试文件到中转服务以验证脚本。"
         />
+        <!-- 咸鱼云网盘：内置快速分享脚本，使用前需在网盘开启「快速分享」 -->
+        <v-alert
+          v-if="isXianyuDiskType"
+          type="info"
+          variant="tonal"
+          density="compact"
+          class="mt-2"
+          text="使用前请先在咸鱼云网盘开启「快速分享」功能；网盘地址请填写公网可访问的标准端口地址（视频输入要求 80/443）。"
+        />
 
         <!-- 工作流预览：获取按钮 + 类型标识（只读；该服务商全部工作流默认可用）。
              仅媒体生成分类注册工作流；LLM / 文件中转服务商不注册工作流，不显示该区域。 -->
@@ -331,6 +340,12 @@ const isLlmType = computed(() => currentCategory.value === 'llm')
 
 /** 是否为文件中转服务商（驱动「测试连接会真实上传测试文件」提示） */
 const isFileRelayType = computed(() => currentCategory.value === 'file-relay')
+
+/** 咸鱼云网盘提供商类型 id（内置快速分享脚本，仅需网盘地址） */
+const XIANYU_DISK_TYPE_ID = 'xianyu-disk'
+
+/** 是否为咸鱼云网盘（驱动「需开启快速分享」提示） */
+const isXianyuDiskType = computed(() => form.value.type === XIANYU_DISK_TYPE_ID)
 
 /** 是否为媒体生成服务商（仅该分类注册工作流，显示工作流预览区） */
 const isMediaType = computed(() => currentCategory.value === 'media')
