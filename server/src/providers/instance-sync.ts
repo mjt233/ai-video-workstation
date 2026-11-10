@@ -38,9 +38,16 @@ export async function syncStaticInstance(instance: ProviderInstance): Promise<vo
 /**
  * 同步单个实例（按类型分发：Bridge / OpenAI 兼容 / 自定义走动态同步，其余走静态同步）。
  *
+ * 文件中转（category=file-relay）不提供工作流，直接跳过同步。
+ *
  * @param instance 服务商实例
  */
 export async function syncInstance(instance: ProviderInstance): Promise<void> {
+  const providerDef = getProvider(instance.type);
+  if (providerDef?.category === 'file-relay') {
+    // 文件中转服务商不注册任何工作流：跳过同步（按分类判断，未来同分类新增类型同样跳过）
+    return;
+  }
   if (instance.type === 'comfyui-bridge') {
     const { syncBridgeInstance } = await import('../workflows/bridge-sync.js');
     await syncBridgeInstance(instance);

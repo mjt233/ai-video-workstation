@@ -1,6 +1,6 @@
 <template>
   <div class="provider-panel">
-    <!-- 分类页签行：媒体生成 / 大语言模型 + 当前分类的「新增服务商」按钮 -->
+    <!-- 分类页签行：媒体生成 / 大语言模型 / 文件中转 + 当前分类的「新增服务商」按钮 -->
     <div class="provider-panel__header">
       <v-tabs
         v-model="activeTab"
@@ -52,9 +52,7 @@
           v-if="filteredInstances.length === 0"
           class="text-body-2 text-medium-emphasis text-center pa-6"
         >
-          {{ activeTab === 'media'
-            ? '尚未添加媒体生成服务商，点击右上角「新增服务商」开始配置。'
-            : '尚未添加大语言模型服务商，点击右上角「新增服务商」开始配置。' }}
+          {{ emptyText }}
         </div>
         <div class="d-flex flex-wrap">
           <v-card
@@ -109,6 +107,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   deleteProviderInstance,
   getProviders,
+  type ProviderCategory,
   type ProviderInstanceInfo,
   type ProviderTypeInfo,
 } from '../../api/providers'
@@ -117,13 +116,14 @@ import { refreshLlmProviders } from '../../composables/useLlmProviders'
 import ProviderInstanceDialog from '../ProviderInstanceDialog.vue'
 
 /** 分类页签定义（分类 + 显示名 + 图标） */
-const TABS: { key: 'media' | 'llm'; label: string; icon: string }[] = [
+const TABS: { key: ProviderCategory; label: string; icon: string }[] = [
   { key: 'media', label: '媒体生成', icon: 'mdi-movie-open-outline' },
   { key: 'llm', label: '大语言模型', icon: 'mdi-robot-outline' },
+  { key: 'file-relay', label: '文件中转', icon: 'mdi-cloud-upload-outline' },
 ]
 
 /** 当前激活分类 */
-const activeTab = ref<'media' | 'llm'>('media')
+const activeTab = ref<ProviderCategory>('media')
 
 const types = ref<ProviderTypeInfo[]>([])
 const instances = ref<ProviderInstanceInfo[]>([])
@@ -135,12 +135,24 @@ const dialogOpen = ref(false)
 const editing = ref<ProviderInstanceInfo | null>(null)
 
 /** 实例归属分类（类型未加载时按 media 兜底） */
-function categoryOf(inst: ProviderInstanceInfo): 'media' | 'llm' {
+function categoryOf(inst: ProviderInstanceInfo): ProviderCategory {
   return types.value.find((t) => t.id === inst.type)?.category ?? 'media'
 }
 
 /** 当前分类的实例列表 */
 const filteredInstances = computed(() => instances.value.filter((i) => categoryOf(i) === activeTab.value))
+
+/** 当前分类的空态文案 */
+const emptyText = computed(() => {
+  switch (activeTab.value) {
+    case 'llm':
+      return '尚未添加大语言模型服务商，点击右上角「新增服务商」开始配置。'
+    case 'file-relay':
+      return '尚未添加文件中转服务商，点击右上角「新增服务商」开始配置。文件中转用于把本地文件上传到公网并获取 URL。'
+    default:
+      return '尚未添加媒体生成服务商，点击右上角「新增服务商」开始配置。'
+  }
+})
 
 /** 加载服务商类型与实例列表 */
 async function load() {

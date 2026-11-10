@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('./OpenAICompatibleModelsEditor.vue', () => ({ default: { name: 'OpenAICompatibleModelsEditor' } }))
 vi.mock('./CustomCodeEditorField.vue', () => ({ default: { name: 'CustomCodeEditorField' } }))
 vi.mock('./CustomWorkflowsEditorField.vue', () => ({ default: { name: 'CustomWorkflowsEditorField' } }))
+vi.mock('./FileRelayCodeEditorField.vue', () => ({ default: { name: 'FileRelayCodeEditorField' } }))
 vi.mock('./LlmModelsEditor.vue', () => ({ default: { name: 'LlmModelsEditor' } }))
 vi.mock('./UnknownProviderField.vue', () => ({ default: { name: 'UnknownProviderField' } }))
 
@@ -20,15 +21,19 @@ describe('provider-fields 映射表', () => {
       .toBe(PROVIDER_FIELD_COMPONENTS.OpenAICompatibleModelsEditor)
   })
 
-  it('登记自定义服务商代码/工作流编辑组件与 LLM 模型编辑组件', () => {
+  it('登记自定义服务商代码/工作流编辑组件、LLM 模型编辑组件与文件中转代码编辑组件', () => {
     expect(PROVIDER_FIELD_COMPONENTS.CustomCodeEditorField).toEqual({ name: 'CustomCodeEditorField' })
     expect(PROVIDER_FIELD_COMPONENTS.CustomWorkflowsEditorField).toEqual({ name: 'CustomWorkflowsEditorField' })
     expect(PROVIDER_FIELD_COMPONENTS.LlmModelsEditor).toEqual({ name: 'LlmModelsEditor' })
+    expect(PROVIDER_FIELD_COMPONENTS.FileRelayCodeEditorField).toEqual({ name: 'FileRelayCodeEditorField' })
     expect(isRegisteredProviderFieldComponent('LlmModelsEditor')).toBe(true)
+    expect(isRegisteredProviderFieldComponent('FileRelayCodeEditorField')).toBe(true)
     expect(resolveProviderFieldComponent('CustomCodeEditorField'))
       .toBe(PROVIDER_FIELD_COMPONENTS.CustomCodeEditorField)
     expect(resolveProviderFieldComponent('CustomWorkflowsEditorField'))
       .toBe(PROVIDER_FIELD_COMPONENTS.CustomWorkflowsEditorField)
+    expect(resolveProviderFieldComponent('FileRelayCodeEditorField'))
+      .toBe(PROVIDER_FIELD_COMPONENTS.FileRelayCodeEditorField)
   })
 
   it('未登记或空名回退占位组件', () => {

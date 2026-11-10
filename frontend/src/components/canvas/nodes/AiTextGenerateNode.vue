@@ -494,8 +494,26 @@ const multiTextInputMsg = computed(
   () => `存在多个文本连线输入（${textInputCount.value} 个），生成已禁用，请仅保留一个`,
 )
 
-/** 底部提示：多个文本连线输入的告警优先，其次为常规 hint（如预设被删除的提示） */
-const bottomHint = computed(() => (textInputCount.value > 1 ? multiTextInputMsg.value : hint.value))
+/**
+ * 本次生成将使用的文本（连接文本输入时以外部文本为准；用户输入框中残留的手动输入不再参与判定）。
+ * 供生成按钮可用性、底部提示共用，保证「按钮置灰」与「点击报错」口径一致。
+ */
+const effectiveInputText = computed(() =>
+  (textInputCount.value > 0 ? (props.textInputs?.[0] ?? '') : inputText.value).trim(),
+)
+
+/**
+ * 底部提示优先级：多个文本连线输入告警 > 「有媒体输入但文本为空」的引导 > 常规 hint
+ * （如预设被删除的提示）。
+ */
+const bottomHint = computed(() => {
+  if (textInputCount.value > 1) return multiTextInputMsg.value
+  // 媒体仅作为多模态输入，仍需文本提示词才能生成（计划 4.6 最小交互）
+  if (mediaCount.value > 0 && effectiveInputText.value.length === 0) {
+    return '请输入文本后再生成（媒体输入需配合文本提示）'
+  }
+  return hint.value
+})
 
 /**
  * 是否禁用用户输入文本域：仅生成中禁用。
@@ -534,15 +552,17 @@ const userInputPlaceholder = computed(() => {
   return '输入内容…（可连接文本/图片/音频/视频输入）'
 })
 
-/** 是否满足生成条件（模型已选 + 输入非空；选择预设时必须提供用户输入；多个文本输入禁止生成） */
+/**
+ * 是否满足生成条件（模型已选 + 文本非空；多个文本输入禁止生成）。
+ *
+ * 媒体输入只作为多模态输入随文本一起发送，不能替代文本提示词：
+ * 仅有媒体、无文本时按钮置灰（与 onGenerate 的「请输入内容」校验口径一致）。
+ * 选择预设提示词时必须提供用户输入（替换/追加到预设提示词）的规则已被「必须有文本」覆盖。
+ */
 const canGenerate = computed(() => {
   if (!providerInstanceId.value || !modelId.value) return false
   if (textInputCount.value > 1) return false
-  // 连接文本输入时以外部文本为准（用户输入框中残留的手动输入不再参与判定）
-  const text = (textInputCount.value > 0 ? (props.textInputs?.[0] ?? '') : inputText.value).trim()
-  // 选择预设提示词：必须提供用户输入（替换/追加到预设提示词中），与未选预设时的媒体兜底不同
-  if (activePreset.value) return text.length > 0
-  return text.length > 0 || (props.inputs?.length ?? 0) > 0
+  return effectiveInputText.value.length > 0
 })
 
 /** 初始化同步配置（外部回写时跟随） */
@@ -693,7 +713,13 @@ async function onGenerate(): Promise<void> {
     emit('stream-state', { running: true, log: 'Thinking…', taskId })
     unsubscribeTask = llmSocket.subscribe(taskId, onTaskEvent)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    // 优先透出服务端 400 的中文错误（如「未配置文件中转服务商：请先在 …」），
+    // 无响应体文案时回退 axios/通用错误消息（保持不吞异常：下方 console.error 照常记录）
+    const ax = e as { response?: { data?: { error?: unknown } } }
+    const serverError = ax?.response?.data?.error
+    const msg = typeof serverError === 'string' && serverError.trim()
+      ? serverError
+      : (e instanceof Error ? e.message : String(e))
     generating.value = false
     errorMsg.value = msg
     console.error('[llm] 创建会话失败:', e)

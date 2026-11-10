@@ -29,7 +29,7 @@ App 启动 ──连接 WS(/llm-ws 全局单例)──▶   session-ws 枢纽（
 - **`server/src/llm/session-manager.ts`**（新增）：内存活跃区 `Map<taskId, LlmSession>`（**无完成区/TTL**——终态结果已持久化到文件系统）。`LlmSession` 含 `taskId/nodeId/providerInstanceId/modelId/label/project/canvas/inputSent/snapshot/status/phase/thinking/text/warnings/error/startedAt/completedAt/cancelled/abortController` 与终态写入凭据 `persistRev/persistPatch`。API：`begin`（同节点单飞 NODE_BUSY + 全局上限 SESSION_LIMIT）/`get`/`pushEvent`/`cancel`（幂等）/`finish`（终态落盘后移除）/`listActive`/`on`（begin/update/finish 事件，wsHub 订阅）。`finish` 取消优先（cancel 标记后即使流正常结束也按 cancelled 收敛）；落盘失败时 completed 降级为 failed（广播「结果写入画布失败」+ console 日志，不静默），cancelled/failed 保持原状态。
 - **`server/src/llm/result-persist.ts`**（新增）：终态结果落盘（**后端独占，历史单写者**）——读画布定义文件（不存在/节点已删除 → 跳过仅移除会话）→ completed：`config.output = 正文` + 追加历史（规则镜像前端 `aiTextHistory.ts`：id/createdAt 生成、`input = inputSent`、快照元信息、上限 50 裁剪最旧）；cancelled/failed：`config.output = 累计正文`（若有），**不追加历史**（无累计文本跳过）→ `saveCanvasDef`（CAS + `withPathLock` 进程内串行）+ VERSION_CONFLICT 重读重试（≤3 次）；**思考内容绝不写入 `config.output`**（仅内部展示）。
 - **`server/src/llm/session-ws.ts`**（新增，`ws` + `@types/ws` 依赖）：`wsHub.attach(server)` 挂载 `/llm-ws`；**连接建立即推 `sessions` 全量活跃列表**（`taskId/nodeId/label/modelName/phase/status/startedAt/project/canvas`）；begin/update（阶段切换/警告/错误）/finish 时全量广播；`subscribe`（存在 → snapshot 快照补齐；不存在 → not-found）/`unsubscribe`（任务继续）/`cancel`（命令下发）；socket close 清理该连接全部订阅。
-- **`server/src/routes/llm.ts`** 改造：`POST /api/llm/chat` 请求体扩展 `nodeId/label/canvas/snapshot`（逐字段校验；项目/实例/模型/媒体能力过滤逻辑不变）→ `sessionManager.begin` → 后台执行 `createLlmStream`（会话 `abortController`）→ 立即返回 `{ taskId, status: 'running' }`；后台执行器逐事件 `pushEvent` + `wsHub.taskEvent`；流结束 → `finish(completed)`；取消判定（`abortController.signal.aborted` 或 `cancelled`）→ `finish(cancelled)`（**AbortError 不归类 failed**）；其余异常 → `finish(failed, error)`。删除全部 SSE 代码；新增 `POST /api/llm/chat/tasks/:taskId/cancel`（HTTP 兜底，幂等，不存在 404）。
+- **`server/src/routes/llm.ts`** 改造：`POST /api/llm/chat` 请求体扩展 `nodeId/label/canvas/snapshot`（逐字段校验）→ **媒体两阶段处理**（阶段 1 响应前 `planMediaInputs`：协议规则 ∩ 模型 `inputModalities` 判定能力/格式/大小/数量，产出 warnings；需要公网 URL 的媒体（视频）但未配置文件中转 → 400 不建会话。阶段 2 后台 `materializeMediaInputs`：内联项读 base64、URL 项调 `relayProjectFile` 上传，同一文件去重；中转失败 → 会话 failed「文件中转失败：…」，取消优先 → cancelled）→ `sessionManager.begin` → 后台执行 `createLlmStream`（会话 `abortController`）→ 立即返回 `{ taskId, status: 'running' }`；后台执行器逐事件 `pushEvent` + `wsHub.taskEvent`；流结束 → `finish(completed)`；取消判定（`abortController.signal.aborted` 或 `cancelled`）→ `finish(cancelled)`（**AbortError 不归类 failed**）；其余异常 → `finish(failed, error)`。删除全部 SSE 代码；新增 `POST /api/llm/chat/tasks/:taskId/cancel`（HTTP 兜底，幂等，不存在 404）。
 - **`server/src/index.ts`**：`app.listen` → `http.createServer(app)` + `wsHub.attach(server)` + `server.listen`。
 
 ## 前端
@@ -45,6 +45,18 @@ App 启动 ──连接 WS(/llm-ws 全局单例)──▶   session-ws 枢纽（
 - **`frontend/src/components/canvas/AssetCanvas.vue`**：`canvasTarget` 透传；`update:output-view` → `store.viewOnlyUpdate`；`stream-state` → `beginClientRun`/`adoptExternalChange`/`endClientRun`/`setLlmError`；**恢复编排** `restoreLlmSessions()`（画布加载/切换/WS 重连时按「项目 + scope」过滤 `llmSocket.sessions` → running 且 nodeId 在 nodeMap → `beginClientRun` + 恢复订阅（`subscribeRestoreTask`，与在线路径共用 `applyLlmEvent`：快照补齐 → text 节流 `viewOnlyUpdate` → 终态 `adoptExternalChange` + `endClientRun`）；`reconcileLlmRestore()` 重连对账（已订阅任务不在活跃列表 → `endClientRun`，无幽灵 Loading）；卸载 `resetLlmRestore()`。
 - **`frontend/src/App.vue` + `frontend/src/components/LlmSessionsDialog.vue`**：Header 右上角图标 + `v-badge` 活跃数徽标（数据来自 `llmSocket.sessions`）+ 面板（阶段/耗时/中断/空态/完成计数提示）；App 挂载 `llmSocket.connect()`。
 - **`frontend/vite.config.ts`**：代理增加 `'/llm-ws': { target: 'ws://localhost:3001', ws: true }`（生产同源无需代理）。
+
+## 媒体输入链路（音频/视频）
+
+AI 文本节点的媒体输入（图片/音频/视频）在会话创建前后分两阶段处理，核心实现见 `server/src/llm/media.ts`：
+
+1. **能力判定**：`getProtocolMediaRule(protocol, type)` 给出协议传输规则（内联 base64 或公网 URL、允许 MIME、大小/数量上限），模型元信息 `config.models[].meta.inputModalities` 作为主闸门（未配置元信息时不按模型过滤）——**能力 = 协议规则 ∩ 模型元信息**。
+2. **阶段 1（响应前，`planMediaInputs`）**：逐项校验类型/格式/大小/数量，不读取大文件、不上传；被忽略项生成 warnings（协议/模型不支持、格式不符、超限等，不阻断生成）。存在需要公网 URL 的媒体（当前仅 `openai-chat` 视频）但**未配置文件中转实例** → 直接 400（错误文案复用 `FILE_RELAY_NOT_CONFIGURED_MESSAGE`），不创建会话。
+3. **阶段 2（后台，`materializeMediaInputs`）**：内联项读取 base64（同一路径只读一次）；公网 URL 项调用 `server/src/providers/file-relay/service.ts` 的 `relayProjectFile` 上传换取 URL（同一文件只上传一次，失败抛 `LlmMediaError`「文件中转失败：…」→ 会话 failed；取消优先 → cancelled）。
+4. **传输分派（`server/src/llm/runtime.ts`）**：不含公网 URL 媒体的请求仍走 Vercel AI SDK（图片 `image_url` / wav·mp3 音频 `input_audio` / Gemini `inlineData`）；**含公网 URL 媒体（`openai-chat` 视频）走原生 SSE 客户端** `server/src/llm/openai-chat-stream.ts`（AI SDK 不支持 `video/*` file part），内容块顺序 `video_url → image_url → input_audio → text`，`reasoning_content` → thinking、`content` → text、`[DONE]` → done，HTTP 非 2xx 解析 `{error:{code,message}}`，Abort → AbortError（路由收敛 cancelled）。
+5. **错误语义**：不支持/格式不符/超限 → warning + 忽略该媒体；未配置中转 → 400；中转失败 → failed；用户中断 → cancelled。中转返回的 URL 使用非标准端口（非 80/443）时追加 warning（实测智谱视频抓取器会拒绝非标准端口并报 `[1210] 视频输入格式/解析错误`，图片输入不受影响），详见 [../providers/file-relay.md](../providers/file-relay.md)。
+
+文件中转服务商（分类 `file-relay`、类型「自定义脚本」）的配置与脚本契约见 [../providers/file-relay.md](../providers/file-relay.md)。
 
 ## 数据流要点
 

@@ -189,10 +189,19 @@
         >
           测试连接优先使用免费的模型列表接口验证；若不可用将回退为最小对话请求，可能产生少量费用。
         </div>
+        <!-- 文件中转服务商：测试连接会真实上传一个测试文件（提示用户知悉会产生一次真实上传） -->
+        <v-alert
+          v-if="isFileRelayType"
+          type="info"
+          variant="tonal"
+          density="compact"
+          class="mt-2"
+          text="测试连接会真实上传一个测试文件到中转服务以验证脚本。"
+        />
 
         <!-- 工作流预览：获取按钮 + 类型标识（只读；该服务商全部工作流默认可用）。
-             LLM 服务商不注册工作流，不显示该区域。 -->
-        <template v-if="form.type && !isLlmType">
+             仅媒体生成分类注册工作流；LLM / 文件中转服务商不注册工作流，不显示该区域。 -->
+        <template v-if="form.type && isMediaType">
           <v-divider class="my-3" />
           <div class="d-flex align-center mb-2">
             <div class="text-body-medium font-weight-medium">
@@ -285,6 +294,7 @@ import {
   updateProviderInstance,
   type ProviderConfigField,
   type ProviderConfigValue,
+  type ProviderCategory,
   type ProviderInstanceInfo,
   type ProviderTypeInfo,
   type ProviderWorkflowEntry,
@@ -300,7 +310,7 @@ const props = defineProps<{
   /** 编辑目标实例；null = 新增模式 */
   instance: ProviderInstanceInfo | null
   /** 当前页签分类（新增时类型下拉仅显示该分类） */
-  category?: 'media' | 'llm'
+  category?: ProviderCategory
 }>()
 
 const emit = defineEmits<{
@@ -311,8 +321,19 @@ const emit = defineEmits<{
 /** 是否为编辑模式 */
 const isEdit = computed(() => !!props.instance)
 
+/** 当前选中服务商类型的分类（类型未找到时按 media 兜底，兼容缺失 category 的旧响应） */
+const currentCategory = computed<ProviderCategory>(
+  () => props.types.find((x) => x.id === form.value.type)?.category ?? 'media',
+)
+
 /** 是否为 LLM 服务商（驱动「服务商名称」label 与测试连接费用确认） */
-const isLlmType = computed(() => props.types.find((x) => x.id === form.value.type)?.category === 'llm')
+const isLlmType = computed(() => currentCategory.value === 'llm')
+
+/** 是否为文件中转服务商（驱动「测试连接会真实上传测试文件」提示） */
+const isFileRelayType = computed(() => currentCategory.value === 'file-relay')
+
+/** 是否为媒体生成服务商（仅该分类注册工作流，显示工作流预览区） */
+const isMediaType = computed(() => currentCategory.value === 'media')
 
 /** 新增时可选的类型：仅当前页签分类 */
 const categoryTypes = computed(() =>
@@ -353,6 +374,36 @@ const CUSTOM_PROVIDER_TYPE_ID = 'custom'
 const importInput = ref<HTMLInputElement | null>(null)
 /** 导入成功提示 */
 const importNotice = ref('')
+
+/** 标量代码编辑器类 component 字段名（无默认值时兜底空串，其余 component 字段为结构化数组） */
+const SCALAR_CODE_EDITOR_COMPONENTS = new Set(['CustomCodeEditorField', 'FileRelayCodeEditorField'])
+
+/**
+ * component 字段无已保存值且无 defaultValue 时的兜底值：
+ * 代码编辑器类字段为字符串空串，其余结构化组件（模型列表 / 工作流列表）为空数组。
+ *
+ * @param f schema 字段
+ * @returns 表单初始值
+ */
+function componentFieldFallback(f: ProviderConfigField): ProviderConfigValue {
+  return f.component && SCALAR_CODE_EDITOR_COMPONENTS.has(f.component) ? '' : []
+}
+
+/**
+ * 从捕获的异常中提取给用户展示的错误文案。
+ *
+ * 优先取后端响应体的中文错误（axios 错误 `response.data.error`，如保存校验失败的
+ * 「文件中转配置校验失败：…」）；无响应体文案时回退 `Error.message`（axios 通用英文文案）。
+ *
+ * @param e 捕获到的异常（未知类型；axios 错误按结构化类型断言读取响应体）
+ * @returns 非空错误文案（后端文案原样返回，其中的换行由展示组件保留）
+ */
+function apiErrorMessage(e: unknown): string {
+  const ax = e as { response?: { data?: { error?: unknown } } }
+  const serverError = ax?.response?.data?.error
+  if (typeof serverError === 'string' && serverError.trim()) return serverError
+  return e instanceof Error ? e.message : String(e)
+}
 
 /**
  * 深拷贝 component 字段默认值 / 已保存值，避免多个实例共享同一引用。
@@ -407,7 +458,7 @@ function buildForm(type: string, config: Record<string, ProviderConfigValue>): R
     } else if (f.defaultValue !== undefined) {
       formConfig[f.key] = cloneConfigValue(f.defaultValue)
     } else if (f.type === 'component') {
-      formConfig[f.key] = []
+      formConfig[f.key] = componentFieldFallback(f)
     } else {
       formConfig[f.key] = f.type === 'boolean' ? false : ''
     }
@@ -429,7 +480,8 @@ watch(
         name: props.instance.name,
         config: buildForm(props.instance.type, props.instance.config),
       }
-      void loadWorkflows()
+      // 仅媒体生成分类注册工作流；LLM / 文件中转服务商不显示工作流预览区，无需拉取
+      if (isMediaType.value) void loadWorkflows()
     } else {
       // 新增模式：重置
       form.value = { type: '', name: '', config: {} }
@@ -462,7 +514,7 @@ async function loadWorkflows() {
   try {
     workflowEntries.value = await fetchProviderWorkflows(type, { ...form.value.config }, props.instance?.id)
   } catch (e) {
-    workflowsError.value = e instanceof Error ? e.message : String(e)
+    workflowsError.value = apiErrorMessage(e)
   } finally {
     workflowsLoading.value = false
   }
@@ -493,7 +545,7 @@ async function onTest() {
   try {
     testResult.value = await testProviderConnection(form.value.type, { ...form.value.config }, props.instance?.id)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = apiErrorMessage(e)
   } finally {
     testing.value = false
   }
@@ -519,7 +571,7 @@ async function onSave() {
     emit('saved')
     emit('update:modelValue', false)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = apiErrorMessage(e)
   } finally {
     saving.value = false
   }

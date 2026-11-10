@@ -49,6 +49,7 @@
 | **统一异步任务架构**（工作流 / LLM 会话 / ffmpeg 三类任务，画布视角） | [docs/canvas/task-architecture.md](./docs/canvas/task-architecture.md) | 新增任务类型、改任务广播或 Loading 恢复 |
 | **工作流完成通知气泡与任务管理器抽屉** | [docs/canvas/notification.md](./docs/canvas/notification.md)、[docs/task-manager/ui.md](./docs/task-manager/ui.md) | 改任务提醒、抽屉、日志查看器 |
 | **自定义工作流服务商**（脚本化接入任意 HTTP 接口） | [docs/plans/custom-provider.md](./docs/plans/custom-provider.md) | 改自定义服务商与脚本运行时 |
+| **文件中转**（自定义脚本把本地文件上传到公网存储换取 URL；AI 文本节点视频输入用） | [docs/providers/file-relay.md](./docs/providers/file-relay.md) | 配置/修改文件中转脚本、排查视频输入公网 URL 问题 |
 | ComfyUI Bridge 对接 | [docs/bridge-config-doc.md](./docs/bridge-config-doc.md)、[docs/bridge-workflow-fields.md](./docs/bridge-workflow-fields.md) | 配置/对接 Bridge |
 | 全部文档清单与「按任务快速定位」 | [docs/README.md](./docs/README.md) | 不确定该读哪篇时 |
 

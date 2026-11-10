@@ -59,10 +59,13 @@ export interface ProviderDefinition {
   /** 可选描述 */
   description?: string;
   /**
-   * 分类：media=媒体生成（图像/音频/视频工作流服务商，缺省值）；
-   * llm=大语言模型服务商（配置页「大语言模型」页签展示+新增）。
+   * 分类：
+   * - `media`：媒体生成（图像/音频/视频工作流服务商，缺省值）；
+   * - `llm`：大语言模型服务商（配置页「大语言模型」页签展示+新增）；
+   * - `file-relay`：文件中转服务商（配置页「文件中转」页签展示+新增；不注册工作流，
+   *   供需要公网 URL 的媒体输入调用，如 AI 文本节点的视频输入）。
    */
-  category?: 'media' | 'llm';
+  category?: 'media' | 'llm' | 'file-relay';
   /** 配置字段声明（设置界面据此渲染表单） */
   configSchema: ProviderConfigField[];
   /** 按已解析配置创建传输客户端（每次调用返回独立实例，token 缓存等按实例持有） */

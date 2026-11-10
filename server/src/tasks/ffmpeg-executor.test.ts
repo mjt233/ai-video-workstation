@@ -166,15 +166,15 @@ describe('ffmpegExecutor', () => {
     expect(mockUnlink).not.toHaveBeenCalled();
   });
 
-  it('cancel 未知任务返回 false；create 注入的句柄可经注册表中断', () => {
+  it('cancel 未知任务返回 false；create 注入的句柄可经注册表中断', async () => {
     expect(ffmpegExecutor.cancel('missing')).toBe(false);
 
     const cmd = mockCommand();
     mockFfmpeg.mockReturnValue(cmd.chain);
     const task = ffmpegExecutor.create({ label: 'A' }, { outputAbs: '/x/out.mp4', build: () => cmd.chain as never });
     void ffmpegExecutor.run(task.id, { outputAbs: '/x/out.mp4', build: () => cmd.chain as never });
-    // 注册表统一入口 → 任务句柄 → 执行器 cancel
-    expect(taskRegistry.cancel(task.id)).toEqual({ ok: true });
+    // 注册表统一入口 → 任务句柄 → 执行器 cancel（cancel 为异步方法，需 await 句柄受理）
+    expect(await taskRegistry.cancel(task.id)).toEqual({ ok: true });
     expect(cmd.kill).toHaveBeenCalled();
   });
 });

@@ -173,14 +173,20 @@ describe('createComfyuiBridgeClient', () => {
     await expect(client.getOutput('task-2')).rejects.toThrow(/内容为空/);
   });
 
-  it('cancel 调用 /api/tasks/:id/cancel', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ task_id: 'task-1', status: 'failed' }) } as unknown as Response);
+  it('cancel 先登录再调用 /api/tasks/:id/cancel', async () => {
+    // 取消接口要求鉴权：首次调用先登录拿 token，再带 Bearer 调取消接口
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'abc' }) } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'failed' }) } as unknown as Response);
 
     const client = createComfyuiBridgeClient({ baseUrl: 'http://b', password: 'pw' });
     await client.cancel('task-1');
 
-    expect(fetchMock.mock.calls[0][0]).toBe('http://b/api/tasks/task-1/cancel');
-    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://b/api/auth/login');
+    expect(fetchMock.mock.calls[1][0]).toBe('http://b/api/tasks/task-1/cancel');
+    const init = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ Authorization: 'Bearer abc' });
   });
 
   it('execute 非 2xx 时抛错（含 status 与响应文本）', async () => {

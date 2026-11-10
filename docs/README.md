@@ -17,6 +17,7 @@
 | ⭐ [task-manager.md](./task-manager.md) | **任务管理总览**（异步长任务的登记/执行/中断/日志/历史）+ 分主题索引 | 涉及任务类型/执行器、进度、日志、任务接口、任务管理器 UI、画布 Loading 恢复时 |
 | [bridge-config-doc.md](./bridge-config-doc.md) | **ComfyUI Easy Bridge 对接配置**：标签注册、工作流类型标记 | 配置 Bridge 侧时 |
 | [bridge-workflow-fields.md](./bridge-workflow-fields.md) | **Bridge 工作流字段约定**：各类型提交给 Bridge 的字段与文件 key | 对接 Bridge 工作流字段时 |
+| [providers/file-relay.md](./providers/file-relay.md) | **文件中转**：自定义 TypeScript 脚本把本地文件上传到公网存储换取 URL（AI 文本节点视频输入使用） | 配置/修改文件中转脚本、排查视频输入公网 URL 问题时 |
 
 ### 任务管理子文档（[task-manager.md](./task-manager.md) 的拆分）
 
@@ -69,6 +70,7 @@
 | [plans/video-director.md](./plans/video-director.md) | 视频导演台（时间轴素材、关键帧、混音） |
 | [plans/feat-workflow-enhance.md](./plans/feat-workflow-enhance.md) | 工作流增强（参考模式、拼接视频、WorkflowSizePicker 等） |
 | [plans/ai-text-loading-llm-session.md](./plans/ai-text-loading-llm-session.md) | AI 文本节点 Loading 与 LLM 会话方案演进 |
+| [plans/2026-11-10-ai-text-media-input.md](./plans/2026-11-10-ai-text-media-input.md) | AI 文本节点音频/视频输入（原生多模态 + 文件中转公网 URL） |
 | [plans/init.md](./plans/init.md) | 项目初始规划 |
 | [plans/2026-09-08-asset-cleanup.md](./plans/2026-09-08-asset-cleanup.md) | 存储清理与全局回收站 |
 | [plans/2026-09-09-unified-async-task-manager.md](./plans/2026-09-09-unified-async-task-manager.md) | 统一异步任务管理器 |

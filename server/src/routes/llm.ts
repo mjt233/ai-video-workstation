@@ -4,19 +4,29 @@
  * - POST /api/llm/models/fetch：按协议调用 /models 免费接口取模型列表，
  *   并附加 OpenRouter 元数据（best-effort，失败只打日志不报错）；
  * - POST /api/llm/chat：创建 LLM 活跃会话（内存注册表登记，立即返回
- *   { taskId, status: 'running' }），后台执行 createLlmStream 流式转发
+ *   { taskId, status: 'running' }），后台执行媒体阶段 2（读取内联 base64 /
+ *   文件中转上传视频）与 createLlmStream 流式转发
  *   （thinking/text/warning/error/done → WS 广播 + 会话状态累加）；
  *   客户端断开不再中止上游（刷新/切换画布后任务继续，恢复由服务端会话列表驱动）；
  * - POST /api/llm/chat/tasks/:taskId/cancel：HTTP 兜底取消（WS 断连时停止仍可用）。
+ *
+ * 媒体两阶段：响应前只做能力/格式/大小/中转配置预检（不读取大文件、不上传），
+ * 需要公网 URL 但未配置文件中转 → 直接 400（不创建会话）；真正的读取/上传在后台
+ * runLlmTask 内进行，失败会把会话收敛为 failed 并把中文错误透传到节点红字。
  */
 import { Router, type Request, type Response } from 'express';
 import fs from 'fs/promises';
-import path from 'path';
 import { getInstance, resolveInstanceConfig, MASKED_SECRET } from '../providers/config-store.js';
+import { findEnabledFileRelayConfig, relayProjectFile, FILE_RELAY_NOT_CONFIGURED_MESSAGE } from '../providers/file-relay/service.js';
 import { createLlmClient } from '../llm/client.js';
-import { createLlmStream, detectMimeType, type LlmMediaInput } from '../llm/runtime.js';
+import { createLlmStream, type LlmMediaInput } from '../llm/runtime.js';
+import {
+  materializeMediaInputs,
+  planMediaInputs,
+  type PlannedMediaInput,
+} from '../llm/media.js';
 import { fetchProviderModels } from '../llm/model-catalog.js';
-import { isLlmProtocol, type LlmMediaType, type LlmProtocol } from '../llm/protocol.js';
+import { isLlmProtocol, type LlmProtocol } from '../llm/protocol.js';
 import { resolveProjectPath } from '../assets/paths.js';
 import type { CanvasDefTarget } from '../assets/canvas-def.js';
 import { sessionManager, LlmSessionError, type LlmSession, type LlmSessionSnapshot } from '../llm/session-manager.js';
@@ -24,9 +34,6 @@ import { wsHub } from '../tasks/task-ws.js';
 import { llmExecutor } from '../tasks/llm-executor.js';
 
 export const llmRouter = Router();
-
-/** 单文件媒体输入上限（20MB；防止 base64 撑爆内存/请求体） */
-const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 
 /** 流式事件载荷（与 createLlmStream 事件一致；经 WS 广播给订阅者） */
 type LlmStreamEventWire =
@@ -54,7 +61,9 @@ interface RunLlmTaskParams {
   client: ReturnType<typeof createLlmClient>;
   modelId: string;
   input: string;
-  mediaInputs: LlmMediaInput[];
+  project: string;
+  /** 阶段 1 发送计划（阶段 2 读取 base64 / 文件中转上传） */
+  mediaPlan: PlannedMediaInput[];
   reasoningEffort?: string;
   warnings: string[];
 }
@@ -147,19 +156,23 @@ llmRouter.post('/llm/chat', async (req: Request, res: Response) => {
     return;
   }
   const client = createLlmClient(protocol, { baseUrl: config.baseUrl, apiKey });
-  // 模型元信息（能力过滤用；未配置元信息则跳过过滤）
-  const models = Array.isArray(config.models) ? config.models : [];
-  const modelCfg = models.find(
-    (m): m is { modelId: string; meta?: { inputModalities?: unknown } } =>
-      !!m && typeof m === 'object' && (m as { modelId?: unknown }).modelId === modelId,
-  );
-  const metaModalities: Set<string> = new Set();
-  const rawModalities = modelCfg?.meta?.inputModalities;
-  if (Array.isArray(rawModalities)) {
-    for (const v of rawModalities) if (typeof v === 'string') metaModalities.add(v);
+  // 模型元信息（能力主闸门用；未配置元信息则不按模型过滤）
+  const metaModalities = collectInputModalities(config.models, modelId);
+  // 阶段 1（响应前）：能力/格式/大小/数量预检 → 发送计划 + warnings（不读取大文件、不上传）
+  const plan = await planMediaInputs(body.media, protocol, metaModalities, {
+    resolvePath: (relPath) => resolveProjectPath(project, relPath),
+    statSize: async (absPath) => (await fs.stat(absPath)).size,
+    logError: (message) => console.error(`[llm] ${message}`),
+  });
+  // 需要公网 URL 的媒体（视频）但未配置文件中转实例 → 400，不创建会话
+  // （文案复用 providers/file-relay 的未配置常量，避免两处维护）
+  if (plan.items.some((item) => item.transport === 'public-url')) {
+    const relayConfig = await findEnabledFileRelayConfig();
+    if (!relayConfig) {
+      res.status(400).json({ error: FILE_RELAY_NOT_CONFIGURED_MESSAGE });
+      return;
+    }
   }
-  // 读取并过滤媒体输入（不支持的协议/模型 → 警告并忽略，不阻断生成）
-  const { mediaInputs, warnings } = await resolveMediaInputs(project, body.media, client, metaModalities);
 
   // 登记活跃会话（同节点单飞 + 全局上限）
   let session: LlmSession;
@@ -199,14 +212,15 @@ llmRouter.post('/llm/chat', async (req: Request, res: Response) => {
     res.status(429).json({ error: msg, code: 'TASK_LIMIT' });
     return;
   }
-  // 后台异步执行：逐事件 pushEvent + WS 广播；流结束/异常/取消 → finish 收敛
+  // 后台异步执行：阶段 2 媒体物化 → 逐事件 pushEvent + WS 广播；流结束/异常/取消 → finish 收敛
   void runLlmTask(session.taskId, {
     client,
     modelId,
     input: typeof body.input === 'string' ? body.input : '',
-    mediaInputs,
+    project,
+    mediaPlan: plan.items,
     reasoningEffort: typeof body.reasoningEffort === 'string' && body.reasoningEffort ? body.reasoningEffort : undefined,
-    warnings,
+    warnings: plan.warnings,
   });
   res.json({ taskId: session.taskId, status: 'running' });
 });
@@ -224,34 +238,61 @@ llmRouter.post('/llm/chat/tasks/:taskId/cancel', (req: Request, res: Response) =
 
 /**
  * 后台执行一次 LLM 会话流：
+ * - 阶段 2：媒体物化（内联读取 base64 / 视频经文件中转获得公网 URL；同文件去重）；
+ *   中转失败 → finish(failed,「文件中转失败：<原因>」)；取消优先于失败 → finish(cancelled)；
  * - 逐事件 pushEvent（会话状态累加）+ wsHub.taskEvent（广播给订阅者）；
  * - 上游正常结束 → finish(completed)；取消标记/AbortError → finish(cancelled)
  *   （AbortError 不得归类为 failed）；其余异常 → finish(failed, error)。
  *
  * @param taskId 会话 id
- * @param params 执行参数（客户端/模型/输入/媒体/警告）
+ * @param params 执行参数（客户端/模型/输入/项目/媒体计划/警告）
  */
 async function runLlmTask(taskId: string, params: RunLlmTaskParams): Promise<void> {
   const session = sessionManager.get(taskId);
   if (!session) return;
-  // 媒体过滤警告先行广播（与 SSE 时代行为一致：客户端先看到 warning 再收正文）
-  for (const w of params.warnings) {
-    const event: LlmStreamEventWire = { type: 'warning', message: w };
+  /** 向会话与订阅者广播一条流式事件 */
+  const push = (event: LlmStreamEventWire): void => {
     sessionManager.pushEvent(taskId, event);
     wsHub.taskEvent(taskId, event);
+  };
+  // 媒体过滤警告先行广播（与 SSE 时代行为一致：客户端先看到 warning 再收正文）
+  for (const w of params.warnings) push({ type: 'warning', message: w });
+  // 阶段 2：媒体物化（内联 base64 / 文件中转上传）；失败/取消都会在此收敛，不进入流式阶段
+  let mediaInputs: LlmMediaInput[];
+  try {
+    mediaInputs = await materializeMediaInputs(
+      params.mediaPlan,
+      {
+        readBase64: async (relPath) => (await fs.readFile(resolveProjectPath(params.project, relPath))).toString('base64'),
+        relay: (relPath, opts) => relayProjectFile(params.project, relPath, opts),
+        onWarning: (message) => push({ type: 'warning', message }),
+        logError: (message) => console.error(`[llm] ${message}`),
+      },
+      { signal: session.abortController.signal },
+    );
+  } catch (e) {
+    const current = sessionManager.get(taskId);
+    if (isAbortError(e) || current?.cancelled || session.abortController.signal.aborted) {
+      // 用户主动中断（停止按钮/中断）：按 cancelled 收敛，不报错
+      await sessionManager.finish(taskId, { status: 'cancelled' });
+      return;
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[llm] 媒体准备失败: ${msg}`);
+    await sessionManager.finish(taskId, { status: 'failed', error: msg });
+    return;
   }
   try {
     for await (const event of createLlmStream({
       client: params.client,
       modelId: params.modelId,
       input: params.input,
-      media: params.mediaInputs,
+      media: mediaInputs,
       reasoningEffort: params.reasoningEffort,
       abortSignal: session.abortController.signal,
     })) {
       if (event.type === 'error') {
-        sessionManager.pushEvent(taskId, event);
-        wsHub.taskEvent(taskId, event);
+        push(event);
         await sessionManager.finish(taskId, { status: 'failed', error: event.message });
         return;
       }
@@ -259,8 +300,7 @@ async function runLlmTask(taskId: string, params: RunLlmTaskParams): Promise<voi
         await sessionManager.finish(taskId, { status: 'completed' });
         return;
       }
-      sessionManager.pushEvent(taskId, event);
-      wsHub.taskEvent(taskId, event);
+      push(event);
     }
     // 流自然耗尽（若迭代器提前结束但未产出 done，按正常完成收敛）
     await sessionManager.finish(taskId, { status: 'completed' });
@@ -288,6 +328,27 @@ function isAbortError(e: unknown): boolean {
   const err = e as { name?: unknown; message?: unknown };
   if (err.name === 'AbortError') return true;
   return typeof err.message === 'string' && /abort/i.test(err.message);
+}
+
+/**
+ * 从服务商实例配置的模型列表中提取所选模型声明的输入模态（`meta.inputModalities`）。
+ *
+ * @param models 实例配置的模型列表（未知结构，逐项校验）
+ * @param modelId 当前模型 id
+ * @returns 输入模态集合；未配置元信息时为空集合（= 不按模型过滤）
+ */
+function collectInputModalities(models: unknown, modelId: string): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(models)) return out;
+  const modelCfg = models.find(
+    (m): m is { modelId: string; meta?: { inputModalities?: unknown } } =>
+      !!m && typeof m === 'object' && (m as { modelId?: unknown }).modelId === modelId,
+  );
+  const rawModalities = modelCfg?.meta?.inputModalities;
+  if (Array.isArray(rawModalities)) {
+    for (const v of rawModalities) if (typeof v === 'string') out.add(v);
+  }
+  return out;
 }
 
 /**
@@ -331,81 +392,4 @@ function normalizeSnapshot(raw: unknown): LlmSessionSnapshot {
   }
   if (typeof o.userInput === 'string' && o.userInput) snapshot.userInput = o.userInput;
   return snapshot;
-}
-
-/**
- * 读取并过滤媒体输入（协议/模型能力不支持 → 警告并忽略，不阻断生成）。
- *
- * @param project 项目名
- * @param rawMedia 原始媒体列表
- * @param client LLM 客户端（协议能力判断）
- * @param metaModalities 模型元信息声明支持的输入模态（空 = 不按模型过滤）
- * @returns 过滤后的媒体输入与警告列表
- */
-async function resolveMediaInputs(
-  project: string,
-  rawMedia: unknown,
-  client: ReturnType<typeof createLlmClient>,
-  metaModalities: Set<string>,
-): Promise<{ mediaInputs: LlmMediaInput[]; warnings: string[] }> {
-  const mediaInputs: LlmMediaInput[] = [];
-  const warnings: string[] = [];
-  const raw = Array.isArray(rawMedia) ? rawMedia : [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const type = (item as { type?: unknown }).type;
-    const filePath = (item as { path?: unknown }).path;
-    if (type !== 'image' && type !== 'audio' && type !== 'video') continue;
-    if (typeof filePath !== 'string' || !filePath) continue;
-    const mediaType = type as LlmMediaType;
-    if (!client.supportsInput(mediaType)) {
-      warnings.push(`当前协议不支持${mediaTypeLabel(mediaType)}输入，已忽略：${path.basename(filePath)}`);
-      continue;
-    }
-    if (metaModalities.size > 0 && !metaModalities.has(mediaType)) {
-      warnings.push(`当前模型不支持${mediaTypeLabel(mediaType)}输入，已忽略：${path.basename(filePath)}`);
-      continue;
-    }
-    let full: string;
-    let stat: { size: number };
-    try {
-      full = resolveProjectPath(project, filePath);
-      stat = await fs.stat(full);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`[llm] 读取媒体输入失败（已忽略）: ${filePath} ${msg}`);
-      warnings.push(`媒体文件读取失败，已忽略：${path.basename(filePath)}`);
-      continue;
-    }
-    if (stat.size > MAX_MEDIA_BYTES) {
-      warnings.push(`媒体文件超过 20MB 上限，已忽略：${path.basename(filePath)}`);
-      continue;
-    }
-    try {
-      const buf = await fs.readFile(full);
-      mediaInputs.push({
-        type: mediaType,
-        mimeType: detectMimeType(filePath),
-        base64: buf.toString('base64'),
-        filename: path.basename(filePath),
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`[llm] 读取媒体输入失败（已忽略）: ${filePath} ${msg}`);
-      warnings.push(`媒体文件读取失败，已忽略：${path.basename(filePath)}`);
-    }
-  }
-  return { mediaInputs, warnings };
-}
-
-/** 媒体类型中文标签（警告文案用） */
-function mediaTypeLabel(type: LlmMediaType): string {
-  switch (type) {
-    case 'image':
-      return '图片';
-    case 'audio':
-      return '音频';
-    case 'video':
-      return '视频';
-  }
 }

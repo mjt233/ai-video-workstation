@@ -28,6 +28,7 @@ import { getAllProviders, getProvider } from '../providers/registry.js';
 import type { ProviderConfigValue, ProviderDefinition } from '../providers/types.js';
 import { syncInstance } from '../providers/instance-sync.js';
 import { CUSTOM_PROVIDER_ID, validateCustomProviderConfig } from '../providers/custom/index.js';
+import { FILE_RELAY_SCRIPT_PROVIDER_ID, validateFileRelayConfig } from '../providers/file-relay/index.js';
 import type { ComfyuiBridgeClient } from '../providers/comfyui-bridge/client.js';
 import type { VideoWorkflowSubmitParams, WorkflowCapabilities, WorkflowDefinition, WorkflowSizeConfig } from '../workflows/types.js';
 
@@ -156,6 +157,14 @@ workflowRouter.post('/providers/instances', async (req: Request, res: Response) 
       return;
     }
   }
+  // 文件中转服务商：保存前校验上传脚本可编译（语法 + export default 函数）
+  if (type === FILE_RELAY_SCRIPT_PROVIDER_ID) {
+    const errors = validateFileRelayConfig(config);
+    if (errors.length > 0) {
+      res.status(400).json({ error: '文件中转配置校验失败：\n' + errors.join('\n') });
+      return;
+    }
+  }
   try {
     const instance = await createInstance({ type, name, config });
     await syncInstance(instance);
@@ -180,6 +189,15 @@ workflowRouter.put('/providers/instances/:id', async (req: Request, res: Respons
       const errors = validateCustomProviderConfig(config);
       if (errors.length > 0) {
         res.status(400).json({ error: '自定义服务商配置校验失败：\n' + errors.join('\n') });
+        return;
+      }
+    } else if (existing && existing.type === FILE_RELAY_SCRIPT_PROVIDER_ID) {
+      // 更新可能只提交部分配置：与已保存值合并后校验上传脚本，
+      // 避免「只改名称/其它字段」时误报「上传脚本不能为空」
+      const merged = { ...existing.config, ...(config as Record<string, unknown>) };
+      const errors = validateFileRelayConfig(merged);
+      if (errors.length > 0) {
+        res.status(400).json({ error: '文件中转配置校验失败：\n' + errors.join('\n') });
         return;
       }
     }

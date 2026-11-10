@@ -48,13 +48,22 @@ export interface ProviderInfo {
   config: Record<string, ProviderConfigValue>
 }
 
+/**
+ * 服务商分类（设置界面按分类分页签展示与新增）。
+ *
+ * - `media`：媒体生成（图像/音频/视频工作流服务商，缺省分类）；
+ * - `llm`：大语言模型服务商；
+ * - `file-relay`：文件中转（把项目内本地文件上传到公网并返回 URL，供 LLM 媒体输入使用）。
+ */
+export type ProviderCategory = 'media' | 'llm' | 'file-relay'
+
 /** 服务商类型信息（GET /api/providers 返回的 types 元素） */
 export interface ProviderTypeInfo {
   id: string
   name: string
   description?: string
-  /** 分类：media=媒体生成（图像/音频/视频工作流服务商）；llm=大语言模型服务商 */
-  category: 'media' | 'llm'
+  /** 分类：media=媒体生成；llm=大语言模型；file-relay=文件中转 */
+  category: ProviderCategory
   configSchema: ProviderConfigField[]
 }
 

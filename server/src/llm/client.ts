@@ -2,14 +2,21 @@
  * LLM 客户端：按协议构建 Vercel AI SDK 语言模型实例的统一封装。
  *
  * 这是「协议差异 → 统一接口」的收口点：后续新增协议只需在此扩展；
- * 调用方（runtime / 测试连接）只依赖 LlmClient 的 model() / reasoningOptions() / supportsInput()。
+ * 调用方（runtime / routes/llm.ts / 测试连接）依赖 LlmClient 的
+ * model() / reasoningOptions() / mediaRule() 与 baseUrl/apiKey。
  */
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createXai } from '@ai-sdk/xai';
 import { createGoogle } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
-import { resolveBaseUrl, type LlmMediaType, type LlmProtocol } from './protocol.js';
+import {
+  normalizeReasoningEffort,
+  resolveBaseUrl,
+  type LlmMediaType,
+  type LlmProtocol,
+} from './protocol.js';
+import { getProtocolMediaRule, type LlmMediaRule } from './media.js';
 
 /** LLM 客户端设置（协议 + 凭据） */
 export interface LlmClientSettings {
@@ -31,6 +38,10 @@ export type LlmProviderOptionValue = string | number | boolean | null | LlmProvi
 export interface LlmClient {
   /** 协议类型 */
   protocol: LlmProtocol;
+  /** 已归一化的 BaseURL（原生 SSE 客户端直接拼接 `/chat/completions`） */
+  baseUrl: string;
+  /** API Key（原生 SSE 客户端鉴权用；不打印/不落日志） */
+  apiKey: string;
   /**
    * 按模型 id 构建 AI SDK 语言模型实例（每次调用返回独立实例，无共享状态）。
    * @param modelId 模型 id（如 glm-5.3-flash / gpt-4o）
@@ -44,18 +55,11 @@ export interface LlmClient {
    */
   reasoningOptions(effort: string | undefined): LlmProviderOptions | undefined;
   /**
-   * 该协议是否支持某类媒体输入（保守估计；不支持的部分将被过滤并提示用户）。
-   * @param type 媒体类型
-   * @returns 支持返回 true
+   * 该协议对某类媒体输入的传输规则（能力矩阵；忽略模型元信息，模型闸门由调用方合并）。
+   * @param type 媒体类型（image / audio / video）
+   * @returns 传输规则；该协议不支持该类型时 undefined
    */
-  supportsInput(type: LlmMediaType): boolean;
-}
-
-/** 归一化思考强度（小写 trims；非法值返回 undefined） */
-function normalizeEffort(effort: string | undefined): string | undefined {
-  const e = (effort ?? '').trim().toLowerCase();
-  if (!e || !['low', 'medium', 'high', 'minimal', 'xhigh'].includes(e)) return undefined;
-  return e;
+  mediaRule(type: LlmMediaType): LlmMediaRule | undefined;
 }
 
 /**
@@ -68,45 +72,51 @@ function normalizeEffort(effort: string | undefined): string | undefined {
 export function createLlmClient(protocol: LlmProtocol, settings: LlmClientSettings): LlmClient {
   const baseURL = resolveBaseUrl(protocol, settings.baseUrl);
   const apiKey = settings.apiKey;
+  /** 能力矩阵查询（各协议统一实现；协议差异集中在 media.ts 的规则表） */
+  const mediaRule = (type: LlmMediaType): LlmMediaRule | undefined => getProtocolMediaRule(protocol, type);
   switch (protocol) {
     case 'openai-chat': {
       const provider = createOpenAI({ baseURL, apiKey });
       return {
         protocol,
+        baseUrl: baseURL,
+        apiKey,
         model: (modelId) => provider.chat(modelId),
         reasoningOptions: (effort) => {
-          const e = normalizeEffort(effort);
+          const e = normalizeReasoningEffort(effort);
           return e ? { openai: { reasoningEffort: e } } : undefined;
         },
-        // OpenAI Chat Completions 图片输入走多模态 image_url；音频/视频不支持内联输入
-        supportsInput: (type) => type === 'image',
+        mediaRule,
       };
     }
     case 'openai-responses': {
       const provider = createOpenAI({ baseURL, apiKey });
       return {
         protocol,
+        baseUrl: baseURL,
+        apiKey,
         model: (modelId) => provider.responses(modelId),
         reasoningOptions: (effort) => {
-          const e = normalizeEffort(effort);
+          const e = normalizeReasoningEffort(effort);
           return e ? { openai: { reasoningEffort: e } } : undefined;
         },
-        supportsInput: (type) => type === 'image',
+        mediaRule,
       };
     }
     case 'anthropic': {
       const provider = createAnthropic({ baseURL, apiKey });
       return {
         protocol,
+        baseUrl: baseURL,
+        apiKey,
         model: (modelId) => provider(modelId),
         reasoningOptions: (effort) => {
-          const e = normalizeEffort(effort);
+          const e = normalizeReasoningEffort(effort);
           // Anthropic 思考为 budget tokens 方案：低/中/高映射 2048/4096/8192
           const budgets: Record<string, number> = { low: 2048, medium: 4096, high: 8192 };
           return e ? { anthropic: { thinking: { type: 'enabled', budgetTokens: budgets[e] ?? 4096 } } } : undefined;
         },
-        // Anthropic Messages API 图片输入为 base64；音频/视频不支持
-        supportsInput: (type) => type === 'image',
+        mediaRule,
       };
     }
     case 'grok': {
@@ -115,26 +125,29 @@ export function createLlmClient(protocol: LlmProtocol, settings: LlmClientSettin
         protocol,
         // Grok 走 xAI Chat Completions 风格接口
         model: (modelId) => provider.chat(modelId),
+        baseUrl: baseURL,
+        apiKey,
         reasoningOptions: (effort) => {
-          const e = normalizeEffort(effort);
+          const e = normalizeReasoningEffort(effort);
           return e ? { xai: { reasoningEffort: e } } : undefined;
         },
-        supportsInput: (type) => type === 'image',
+        mediaRule,
       };
     }
     case 'gemini': {
       const provider = createGoogle({ baseURL, apiKey });
       return {
         protocol,
+        baseUrl: baseURL,
+        apiKey,
         model: (modelId) => provider(modelId),
         reasoningOptions: (effort) => {
-          const e = normalizeEffort(effort);
+          const e = normalizeReasoningEffort(effort);
           // Gemini 思考预算为 token 数：低/中/高映射 1024/2048/4096
           const budgets: Record<string, number> = { low: 1024, medium: 2048, high: 4096 };
           return e ? { google: { thinkingConfig: { thinkingBudget: budgets[e] ?? 2048 } } } : undefined;
         },
-        // Gemini 原生支持内联图片/音频/视频数据
-        supportsInput: () => true,
+        mediaRule,
       };
     }
   }

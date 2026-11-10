@@ -108,3 +108,35 @@ export function formatContextWindow(value: string | number | null | undefined): 
 export function isValidContextWindow(raw: string): boolean {
   return parseContextWindow(raw) !== null;
 }
+
+/** 已知思考强度挡位（归一化白名单；与各协议 providerOptions 映射共用） */
+const KNOWN_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'minimal', 'xhigh']);
+
+/**
+ * 归一化思考强度：去空白 + 转小写，非法/空值返回 undefined。
+ *
+ * 供 AI SDK providerOptions 映射与原生 SSE 客户端的 `reasoning_effort` 透传共用，
+ * 保证两种传输路径对非法挡位的忽略行为一致。
+ *
+ * @param effort 原始挡位（如 'Low ' / 'high' / ''）
+ * @returns 归一化挡位；空/非法返回 undefined
+ */
+export function normalizeReasoningEffort(effort: string | undefined): string | undefined {
+  const e = (effort ?? '').trim().toLowerCase();
+  return KNOWN_REASONING_EFFORTS.has(e) ? e : undefined;
+}
+
+/**
+ * 构造中断类错误（`name = 'AbortError'`）。
+ *
+ * 路由层（`routes/llm.ts` 的 `isAbortError`）据此把用户主动中断收敛为
+ * cancelled（而非 failed）；原生 SSE 客户端在 AbortSignal 触发时抛出本错误。
+ *
+ * @param message 错误信息（默认「请求已中断」）
+ * @returns AbortError 形态的 Error
+ */
+export function createAbortError(message = '请求已中断'): Error {
+  const err = new Error(message);
+  err.name = 'AbortError';
+  return err;
+}

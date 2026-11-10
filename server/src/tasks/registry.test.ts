@@ -145,11 +145,12 @@ describe('taskRegistry.cancel', () => {
   it('调用任务句柄的 cancel', async () => {
     const cancel = vi.fn();
     const t = taskRegistry.register({ type: 'ffmpeg', label: 'A', handle: { cancel } });
-    expect(taskRegistry.cancel(t.id)).toEqual({ ok: true });
+    // cancel 为异步方法（等待句柄结果后才返回「已受理」）
+    expect(await taskRegistry.cancel(t.id)).toEqual({ ok: true });
     expect(cancel).toHaveBeenCalledTimes(1);
   });
 
-  it('不可中断任务返回原因且不调用句柄', () => {
+  it('不可中断任务返回原因且不调用句柄', async () => {
     const cancel = vi.fn();
     const t = taskRegistry.register({
       type: 'workflow',
@@ -158,20 +159,20 @@ describe('taskRegistry.cancel', () => {
       cancelable: false,
       cancelBlockReason: '该工作流不支持中断',
     });
-    expect(taskRegistry.cancel(t.id)).toEqual({ ok: false, reason: '该工作流不支持中断' });
+    expect(await taskRegistry.cancel(t.id)).toEqual({ ok: false, reason: '该工作流不支持中断' });
     expect(cancel).not.toHaveBeenCalled();
   });
 
-  it('无句柄 / 不存在 / 已终态均返回 ok=false', () => {
+  it('无句柄 / 不存在 / 已终态均返回 ok=false', async () => {
     const noHandle = taskRegistry.register({ type: 'workflow', label: 'A' });
-    expect(taskRegistry.cancel(noHandle.id).ok).toBe(false);
-    expect(taskRegistry.cancel('missing').ok).toBe(false);
+    expect((await taskRegistry.cancel(noHandle.id)).ok).toBe(false);
+    expect((await taskRegistry.cancel('missing')).ok).toBe(false);
     const done = taskRegistry.register({ type: 'ffmpeg', label: 'B', handle: { cancel: vi.fn() } });
     taskRegistry.finish(done.id, { status: 'completed' });
-    expect(taskRegistry.cancel(done.id).ok).toBe(false);
+    expect((await taskRegistry.cancel(done.id)).ok).toBe(false);
   });
 
-  it('句柄异步抛错只打日志，不向调用方抛出', async () => {
+  it('句柄异步抛错：打日志并返回 ok=false（failed=true），不向调用方抛出', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const t = taskRegistry.register({
       type: 'ffmpeg',
@@ -180,8 +181,12 @@ describe('taskRegistry.cancel', () => {
         cancel: () => Promise.reject(new Error('kill 失败')),
       },
     });
-    expect(taskRegistry.cancel(t.id)).toEqual({ ok: true });
-    await new Promise((r) => setTimeout(r, 0));
+    // 句柄抛错说明取消请求未建立：不向上抛异常，而是返回可重试的失败结果
+    expect(await taskRegistry.cancel(t.id)).toEqual({
+      ok: false,
+      reason: '中断请求失败：kill 失败',
+      failed: true,
+    });
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });

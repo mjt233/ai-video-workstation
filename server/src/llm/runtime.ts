@@ -4,19 +4,44 @@
  * 这是后续扩展「完整 Agent」的预留边界：会话管理、tool call、MCP、Skills、子 Agent
  * 都应在本模块内替换/扩展（如改用 ToolLoopAgent + memory + tools），对外保持
  * createLlmStream 的流式事件接口不变（thinking / text / warning / error / done）。
+ *
+ * 传输路径：
+ * - 不含公网 URL 媒体（图片/音频/视频内联）→ Vercel AI SDK（现状，回归面最小）；
+ * - 含公网 URL 媒体（当前仅 openai-chat 视频）→ 原生 SSE 客户端
+ *   （`openai-chat-stream.ts`，AI SDK 不支持 video file part）。
  */
 import { streamText } from 'ai';
 import type { LlmClient } from './client.js';
 import type { LlmMediaType } from './protocol.js';
+import { streamOpenAiChatCompletions } from './openai-chat-stream.js';
 
-/** 媒体输入（已由调用方按能力过滤、读取为 base64） */
+/** 内联媒体来源：base64 编码的原始字节（图片/音频/内联视频） */
+export interface LlmInlineMediaSource {
+  /** 传输方式判别字段 */
+  kind: 'inline';
+  /** base64 编码的原始字节 */
+  base64: string;
+}
+
+/** 公网 URL 媒体来源：由「文件中转」服务商上传后获得（当前仅 openai-chat 视频） */
+export interface LlmUrlMediaSource {
+  /** 传输方式判别字段 */
+  kind: 'url';
+  /** http(s) 公网 URL */
+  url: string;
+}
+
+/** 媒体传输来源（阶段 2 物化结果：内联 base64 或公网 URL） */
+export type LlmMediaSource = LlmInlineMediaSource | LlmUrlMediaSource;
+
+/** 媒体输入（已由调用方按能力过滤并完成阶段 2 物化） */
 export interface LlmMediaInput {
   /** 媒体类型 */
   type: LlmMediaType;
-  /** IANA MIME（如 image/png、video/mp4、audio/flac） */
+  /** IANA MIME（如 image/png、video/mp4、audio/wav） */
   mimeType: string;
-  /** base64 编码的原始字节 */
-  base64: string;
+  /** 传输来源（内联 base64 / 公网 URL） */
+  source: LlmMediaSource;
   /** 文件名（展示用） */
   filename: string;
 }
@@ -31,13 +56,13 @@ export type LlmStreamEvent =
 
 /** createLlmStream 参数 */
 export interface LlmStreamParams {
-  /** LLM 客户端（协议 + 凭据） */
+  /** LLM 客户端（协议 + 凭据；原生 SSE 客户端直接使用其 baseUrl/apiKey） */
   client: LlmClient;
   /** 模型 id */
   modelId: string;
   /** 用户输入文本 */
   input: string;
-  /** 媒体输入（已过滤） */
+  /** 媒体输入（已过滤 + 已物化） */
   media: LlmMediaInput[];
   /** 思考强度挡位（模型不支持时省略） */
   reasoningEffort?: string;
@@ -54,19 +79,38 @@ type UserPart =
  * 启动一次 LLM 流式生成，按序产出流式事件。
  *
  * - 推理模型的思考增量 → thinking 事件；正文增量 → text 事件；
- * - 流式结束产出 done；模型/网络异常产出 error（用户主动中断则不产出，由调用方处理）。
+ * - 流式结束产出 done；模型/网络异常产出 error（用户主动中断则不产出，由调用方处理）；
+ * - 媒体含公网 URL（openai-chat 视频）时改走原生 SSE 客户端，其余场景保持 AI SDK。
  *
  * @param params 流式参数
  * @returns 异步事件序列（供 SSE 路由逐条转发）
  */
 export async function* createLlmStream(params: LlmStreamParams): AsyncGenerator<LlmStreamEvent> {
   const { client, modelId, input, media, reasoningEffort, abortSignal } = params;
+  // 含公网 URL 媒体（openai-chat 视频）：AI SDK 不支持 video file part，改走原生 SSE 客户端
+  if (media.some((m) => m.source.kind === 'url')) {
+    if (client.protocol !== 'openai-chat') {
+      throw new Error(`协议 ${client.protocol} 不支持公网 URL 媒体传输`);
+    }
+    yield* streamOpenAiChatCompletions({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      modelId,
+      input,
+      media,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(abortSignal ? { abortSignal } : {}),
+    });
+    return;
+  }
   const model = client.model(modelId);
   const providerOptions = client.reasoningOptions(reasoningEffort);
   const parts: UserPart[] = [];
   if (input.trim()) parts.push({ type: 'text', text: input });
   for (const m of media) {
-    parts.push({ type: 'file', data: { type: 'data', data: m.base64 }, mediaType: m.mimeType, filename: m.filename });
+    // 防御：公网 URL 媒体已在上方分派，此处只应出现内联媒体
+    if (m.source.kind !== 'inline') continue;
+    parts.push({ type: 'file', data: { type: 'data', data: m.source.base64 }, mediaType: m.mimeType, filename: m.filename });
   }
   const result = streamText({
     model,
@@ -90,6 +134,9 @@ export async function* createLlmStream(params: LlmStreamParams): AsyncGenerator<
 
 /**
  * 推断媒体文件的 MIME 类型（按扩展名，忽略大小写）。
+ *
+ * 注意：**不得删除/改名**——`providers/file-relay/service.ts` 只读引用本函数推断中转文件 MIME。
+ *
  * @param filename 文件名
  * @returns MIME；无法识别时返回 application/octet-stream
  */
